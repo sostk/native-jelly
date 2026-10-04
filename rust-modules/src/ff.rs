@@ -344,6 +344,9 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavformat-plx.so.63",
         "libavformat-plx.63.dylib",
+        // The Linux desktop simulator's x86_64 build (`ci/stage-host-ffmpeg.sh`). A subdirectory,
+        // because the ELF names above are the ARM libraries' names in this same app directory.
+        "linux-host/libavformat-plx.so.63",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
     // it. Under `#[link]` the final link resolved every name against every library at once and
@@ -401,6 +404,7 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavcodec-plx.so.63",
         "libavcodec-plx.63.dylib",
+        "linux-host/libavcodec-plx.so.63",
     ] {
     fn avcodec_version() -> c_uint;
     fn av_packet_alloc() -> *mut AVPacket;
@@ -447,6 +451,7 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libavutil-plx.so.61",
         "libavutil-plx.61.dylib",
+        "linux-host/libavutil-plx.so.61",
     ] {
     fn avutil_version() -> c_uint;
     fn av_malloc(size: usize) -> *mut c_void;
@@ -476,6 +481,7 @@ plx_base::dynlib! {
         // it could not open, and only one of these two can ever exist in an app directory.
         "libswscale-plx.so.10",
         "libswscale-plx.10.dylib",
+        "linux-host/libswscale-plx.so.10",
     ] {
     fn sws_getContext(
         src_w: c_int, src_h: c_int, src_fmt: c_int,

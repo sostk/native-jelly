@@ -34,6 +34,8 @@ mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
+#[cfg(feature = "hostsim")]
+pub(crate) mod sim_audio; // the simulator's sound, through a system ffmpeg (see its doc)
 pub(crate) mod threads;
 pub(crate) mod video_geometry;
 

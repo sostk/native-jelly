@@ -2053,13 +2053,28 @@ screenshots: screenshots-sim demo-library
 	  $(if $(SHOT_HERO_VARIANTS),--hero-variants,)
 	python3 tools/demo_library.py site-credits
 
-# Optimized Linux UI/Plex simulator with no host FFmpeg prerequisite. It runs natively on Linux;
-# Windows/WSLg uses the same binary through `tools/sim.ps1`. Play intentionally reaches the host
-# seam's existing "no video path" result.
-sim-linux: $(LIBASS_HOST_STAGED)
+# Optimized Linux UI simulator. It runs natively on Linux; Windows/WSLg uses the same binary
+# through `tools/sim.ps1`. The host FFmpeg (demux only, the television's component list) is staged
+# into pkg/linux-host/ — its own directory, because the ARM libraries in pkg/ carry the same names.
+FFMPEG_LINUX_HOST_STAGED = pkg/linux-host/libavutil-plx.so.61 pkg/linux-host/libavcodec-plx.so.63 \
+                           pkg/linux-host/libavformat-plx.so.63 pkg/linux-host/libswscale-plx.so.10
+
+$(FFMPEG_LINUX_HOST_STAGED) &: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg-linux.sh
+	./ci/stage-host-ffmpeg-linux.sh
+
+sim-linux: $(LIBASS_HOST_STAGED) $(FFMPEG_LINUX_HOST_STAGED) pkg/.ffabi-host-ok
 	$(TELEMETRY_ENV) \
 	  cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir "$$SIM_LINUX_TDIR_ENV" \
 	  --features hostsim --bin plxnative-sim
+
+# `make sim-linux-run SIM_PMS=<host> [SIM_PORT=<port>]` — the Linux simulator WITH PLAYBACK. Arms the
+# clock sink (`player/ffi_host.rs`) and the two system-ffmpeg children that decode under it: the
+# picture (`player/sim_video.rs`) and the sound (`player/sim_audio.rs`). Needs `ffmpeg` on PATH
+# (or PLXNATIVE_SIM_FFMPEG). Nothing measured here is a television measurement.
+sim-linux-run: sim-linux
+	@$(SIM_PRE)
+	@touch $(SIM_DIR)/plxnative-clocksink $(SIM_DIR)/plxnative-simvideo $(SIM_DIR)/plxnative-simaudio
+	$(SIM_ENV) "$$SIM_LINUX_TDIR_ENV/release/plxnative-sim" $(SIM_PMS) $(SIM_PORT)
 
 # Compatibility spelling used by the Windows launcher and existing documentation.
 sim-wsl: sim-linux

@@ -175,6 +175,11 @@ fi
 if [ -n "$HOST" ]; then
   # No --arch/--cpu/--target-os: configure detects this Mac, which is the point.
   set -- --prefix=/plx
+  # An x86_64 Linux desktop without nasm: configure refuses outright otherwise, and the demuxers,
+  # parsers and subtitle decoders this list builds have no asm worth keeping.
+  if [ "$(uname -m)" = x86_64 ] && ! command -v nasm >/dev/null 2>&1; then
+    set -- "$@" --disable-x86asm
+  fi
 else
   set -- --prefix=/plx \
     --enable-cross-compile --cross-prefix="$CROSS" --host-cc=cc --cc=./plx-arm-cc.py \
