@@ -828,8 +828,22 @@ impl CurlSource {
         let mut mode = key.as_deref().map_or(keypin::Mode::Strict, keypin::begin);
         // The strict failure's log phrase, kept in case libcurl cannot be put in key mode after it.
         let mut held: Option<String> = None;
+        // Cloudflare answers the FIRST Range request of every URL it has not seen with a 200 and
+        // the whole body, then honours Range from the second on. Jellyfin mints a new URL per play
+        // (PlaySessionId, token), so a server behind it fails every first open/seek without this.
+        // A server that really ignores Range answers the retry with a 200 too and is refused; a
+        // 206 naming the wrong (or no) offset is not that and is refused at once.
+        let mut range_retried = false;
         loop {
-            match self.start_attempt(at, range_end, deadline, checkpoint, &mode, key.as_deref())? {
+            let attempt = match self.start_attempt(at, range_end, deadline, checkpoint, &mode, key.as_deref()) {
+                Err(OpenErr::RangeIgnored) if !range_retried && self.xfer.status == 200 => {
+                    range_retried = true;
+                    crate::player::log("curlio: retrying the Range request once");
+                    continue;
+                }
+                other => other?,
+            };
+            match attempt {
                 Attempt::Done => return Ok(()),
                 Attempt::Retry(next, why) => {
                     held = Some(why);
@@ -2013,6 +2027,9 @@ mod tests {
         OmitContentRange,
         /// Fail the first seek request with 503, then honour a later retry.
         FailFirstSeek,
+        /// Answer the first seek's Range with a 200 and the whole body, then honour Range —
+        /// Cloudflare's behaviour for a URL its edge has not seen before.
+        IgnoreFirstRange,
         /// Answer requests before the numbered one normally; from it on, read the request and
         /// never answer — a server slow to produce headers, held until the test ends.
         WithholdFrom(usize),
@@ -2220,10 +2237,10 @@ mod tests {
                 continue;
             }
             let ranged = start > 0
-                && matches!(
+                && (matches!(
                     mode,
                     RangeMode::Honour | RangeMode::OmitContentRange | RangeMode::FailFirstSeek
-                );
+                ) || (mode == RangeMode::IgnoreFirstRange && request_no != 2));
             let hdr = if ranged && mode == RangeMode::OmitContentRange {
                 format!(
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\n\r\n",
@@ -2413,6 +2430,26 @@ mod tests {
                 CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 4).err(),
                 Some(OpenErr::RangeIgnored),
                 "and an OPEN at a non-zero offset must refuse for the same reason"
+            );
+        });
+    }
+
+    /// Cloudflare answers the first Range for a URL it has not seen with 200 + the whole body and
+    /// honours the next. Every Jellyfin play is a fresh URL, so refusing on that first answer
+    /// failed every seek and resume through it; one retry is what tells the two servers apart.
+    #[test]
+    fn a_range_ignored_once_is_retried_and_served_from_the_right_offset() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::IgnoreFirstRange, |port, _, requests| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            assert!(src.seek(4), "the retry's 206 must carry the seek");
+            assert!(!src.poisoned);
+            assert_eq!(read_all(&mut src), b"EFGH");
+            assert_eq!(
+                requests.load(Ordering::Acquire),
+                3,
+                "open, the 200 the seek refused, the retried 206"
             );
         });
     }
