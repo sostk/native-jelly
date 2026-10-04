@@ -552,7 +552,7 @@ pub(crate) unsafe fn construct(
     // the first thing a desktop shows, so the two builds spell it differently: the device keeps
     // the process-shaped name every log, `pidof` recipe and skill already uses.
     #[cfg(feature = "hostsim")]
-    let title = c"PlxNative";
+    let title = c"Native Jelly";
     #[cfg(not(feature = "hostsim"))]
     let title = c"plxnative";
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, SDL_WINDOW_FLAGS);

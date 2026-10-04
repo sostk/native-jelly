@@ -33,7 +33,7 @@
 //! once from `/dev/urandom` and persisted by [`session`](super::session).
 
 /// The product name. Unique, and not `Plex …` anything.
-pub(crate) const PRODUCT: &str = "PlxNative";
+pub(crate) const PRODUCT: &str = "Native Jelly";
 
 /// The app version, derived from `Cargo.toml` rather than written as a literal — `pkg/appinfo.json`
 /// (which is the single source for the ipk's version) and this must not be able to disagree, and
@@ -102,8 +102,8 @@ pub(crate) const VENDOR: &str = "LG";
 pub(crate) fn device_name() -> &'static str {
     static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     NAME.get_or_init(|| match plx_base::paths::flavour() {
-        None => "PlxNative (LG TV)".to_string(),
-        Some(f) => format!("PlxNative {f} (LG TV)"),
+        None => "Native Jelly (LG TV)".to_string(),
+        Some(f) => format!("Native Jelly {f} (LG TV)"),
     })
 }
 
@@ -116,7 +116,8 @@ pub(crate) const PROVIDES: &str = "player";
 /// arguably the worse one, since it is what lands in Plex's own server logs, and it named no
 /// version that has ever existed.
 pub(crate) fn user_agent() -> String {
-    format!("{PRODUCT}/{VERSION} ({DEVICE})")
+    // An RFC 9110 product token admits no space.
+    format!("{}/{VERSION} ({DEVICE})", PRODUCT.replace(' ', ""))
 }
 
 #[cfg(test)]
@@ -248,10 +249,10 @@ mod tests {
     fn only_a_flavoured_install_renames_the_device() {
         let name = super::device_name();
         match plx_base::paths::flavour() {
-            None => assert_eq!(name, "PlxNative (LG TV)"),
+            None => assert_eq!(name, "Native Jelly (LG TV)"),
             Some(f) => assert!(name.contains(f), "{name:?} does not name the {f} install"),
         }
-        assert!(name.starts_with("PlxNative"));
+        assert!(name.starts_with("Native Jelly"));
     }
 
     /// On the host there is no `/var/run/nyx/os_info.json`, so this exercises exactly the

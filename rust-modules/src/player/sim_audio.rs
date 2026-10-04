@@ -123,7 +123,7 @@ fn ffmpeg_path() -> std::ffi::OsString {
 fn output_args() -> Vec<String> {
     match std::env::var("PLXNATIVE_SIM_AUDIO_OUT").ok().as_deref() {
         Some("alsa") => vec!["-f".into(), "alsa".into(), "default".into()],
-        _ => vec!["-f".into(), "pulse".into(), "-buffer_duration".into(), "60".into(), "PlxNative simulator".into()],
+        _ => vec!["-f".into(), "pulse".into(), "-buffer_duration".into(), "60".into(), "Native Jelly simulator".into()],
     }
 }
 
