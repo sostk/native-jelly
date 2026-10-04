@@ -672,6 +672,26 @@ pub fn telemetry_candidates() -> Vec<PathBuf> {
     v
 }
 
+/// Where the Jellyfin sign-in (`jf::store`: the server and its access token) lives, best first —
+/// the session file's tier and naming, for the same reasons: a steerable build keeps its own, and
+/// each flavour is its own device.
+pub fn jellyfin_candidates() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if ENV_STEERABLE {
+        v.push(in_runtime_dir("jellyfin.json"));
+    }
+    let id = app_id();
+    v.extend([
+        PathBuf::from(format!("/media/developer/{id}-jellyfin.json")),
+        PathBuf::from(format!("/media/internal/.{id}-jellyfin.json")),
+        in_app_dir("jellyfin.json"),
+    ]);
+    if !ENV_STEERABLE {
+        v.push(in_runtime_dir("jellyfin.json"));
+    }
+    v
+}
+
 /// Candidate locations of the retired **last place** bookmark (`coldstart`).
 ///
 /// Builds before 2026-09-01 wrote into these persistent locations. The current build only removes

@@ -12,8 +12,10 @@
 //! * [`models`] — the Jellyfin DTOs.
 //! * [`convert`] — DTO → PMS model, artwork paths, markers.
 //! * `api` / `playback` — the operations.
+//! * [`address`] / [`store`] — what a typed server address can mean, and the kept sign-in.
 #![allow(dead_code)]
 
+pub mod address;
 mod api;
 pub mod auth;
 pub mod blurhash;
@@ -22,6 +24,7 @@ pub mod ids;
 pub mod models;
 mod playback;
 pub mod seat;
+pub mod store;
 pub mod ticks;
 pub(crate) mod url;
 

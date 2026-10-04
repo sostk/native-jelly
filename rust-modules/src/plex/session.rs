@@ -5312,6 +5312,10 @@ impl Session {
     /// this, that hides the row on it.
     pub fn account(&self, active: Option<&UserRef>) -> Account {
         let named = |t: &str| Some(t.to_string()).filter(|t| !t.is_empty());
+        // A Jellyfin sign-in keeps nothing in this file; it is the account while it is live.
+        if let Some(name) = crate::jf::store::signed_in_name() {
+            return Account { signed_in: true, can_switch: false, name: named(&name) };
+        }
         // the roster hop searches for a NAMED admin, then any named entry — a `find(admin)` whose
         // hit happens to carry an empty title must not swallow the answer sitting behind it, which
         // is the same shape of bug this whole function exists to fix.

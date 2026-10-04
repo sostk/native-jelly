@@ -169,6 +169,39 @@ pub fn quick_connect_poll(origin: &Origin, client_id: &str, qc: &QuickConnect) -
     finish(&qc.info, a, "").map(Some)
 }
 
+/// Probe each of `candidates` in turn ([`super::address::candidates`]) and answer with the first
+/// that is a Jellyfin server. When none is, the most telling failure wins: a server that is not set
+/// up says more than one that is not Jellyfin, which says more than silence.
+pub fn probe_first(candidates: &[Origin], client_id: &str) -> Result<(Origin, PublicSystemInfo), AuthError> {
+    let rank = |e: &AuthError| match e {
+        AuthError::NotSetUp => 3,
+        AuthError::NotJellyfin => 2,
+        AuthError::Unreachable => 0,
+        _ => 1,
+    };
+    let mut worst: Option<AuthError> = None;
+    for origin in candidates {
+        match probe(origin, client_id) {
+            Ok(info) => return Ok((origin.clone(), info)),
+            Err(e) => {
+                if worst.as_ref().is_none_or(|w| rank(&e) > rank(w)) {
+                    worst = Some(e);
+                }
+            }
+        }
+    }
+    Err(worst.unwrap_or(AuthError::Unreachable))
+}
+
+/// [`sign_out`] for a token no registered client holds any more — a sign-out revokes the registry
+/// before this worker gets to send. `device_user` is the basis the token was minted under.
+pub fn sign_out_detached(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> bool {
+    let c = crate::plex::unregistered_client(origin.clone(), token, client_id);
+    Jf::for_sign_in(&c, device_user)
+        .status("/Sessions/Logout", Method::Post, None)
+        .is_some_and(|s| (200..300).contains(&s))
+}
+
 /// `POST /Sessions/Logout` — revoke this device's token on the server. Best effort.
 pub fn sign_out(c: &crate::plex::Client) -> bool {
     match c.jf() {

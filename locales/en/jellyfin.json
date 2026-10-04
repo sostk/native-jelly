@@ -1,0 +1,109 @@
+{
+  "jellyfin.login.title": {
+    "value": "Sign in to Jellyfin",
+    "description": "Jellyfin sign-in screen title"
+  },
+  "jellyfin.login.server_intro": {
+    "value": "Enter the address of your Jellyfin server. It is shown in the Jellyfin dashboard, or ask whoever runs the server.",
+    "description": "Jellyfin sign-in: explanation beside the server address field"
+  },
+  "jellyfin.login.credentials_intro": {
+    "value": "Sign in with your Jellyfin username and password, or approve this television from a device that is already signed in.",
+    "description": "Jellyfin sign-in: explanation beside the username and password fields"
+  },
+  "jellyfin.login.quick_connect_intro": {
+    "value": "On a phone or computer signed in to Jellyfin, open your profile, choose Quick Connect and enter this code.",
+    "description": "Jellyfin sign-in: explanation beside the Quick Connect code"
+  },
+  "jellyfin.login.server_label": {
+    "value": "Server address",
+    "description": "Jellyfin sign-in: label over the server address field"
+  },
+  "jellyfin.login.server_hint": {
+    "value": "192.168.1.20:8096",
+    "description": "Jellyfin sign-in: example shown in the empty server address field (an IP address and port, keep it as is)"
+  },
+  "jellyfin.login.server_row": {
+    "value": "Server",
+    "description": "Jellyfin sign-in: label over the name of the server being signed in to"
+  },
+  "jellyfin.login.username": {
+    "value": "Username",
+    "description": "Jellyfin sign-in: label over the username field"
+  },
+  "jellyfin.login.password": {
+    "value": "Password",
+    "description": "Jellyfin sign-in: label over the password field"
+  },
+  "jellyfin.login.code_label": {
+    "value": "Quick Connect code",
+    "description": "Jellyfin sign-in: label over the Quick Connect code"
+  },
+  "jellyfin.login.connect": {
+    "value": "Connect",
+    "description": "Jellyfin sign-in: button that checks the server address"
+  },
+  "jellyfin.login.sign_in": {
+    "value": "Sign in",
+    "description": "Jellyfin sign-in: button that signs in with username and password"
+  },
+  "jellyfin.login.use_quick_connect": {
+    "value": "Use Quick Connect",
+    "description": "Jellyfin sign-in: button that switches to signing in with a Quick Connect code"
+  },
+  "jellyfin.login.use_password": {
+    "value": "Use password",
+    "description": "Jellyfin sign-in: button that switches back to username and password"
+  },
+  "jellyfin.login.change_server": {
+    "value": "Change server",
+    "description": "Jellyfin sign-in: button that returns to the server address step"
+  },
+  "jellyfin.login.connecting": {
+    "value": "Looking for the server…",
+    "description": "Jellyfin sign-in: shown while the server address is being checked"
+  },
+  "jellyfin.login.signing_in": {
+    "value": "Signing in…",
+    "description": "Jellyfin sign-in: shown while username and password are being checked"
+  },
+  "jellyfin.login.waiting": {
+    "value": "Waiting for approval…",
+    "description": "Jellyfin sign-in: shown under the Quick Connect code until it is approved"
+  },
+  "jellyfin.login.error_unreachable": {
+    "value": "Nothing answered at that address. Check it, and that the server is running.",
+    "description": "Jellyfin sign-in error: no server answered"
+  },
+  "jellyfin.login.error_not_jellyfin": {
+    "value": "Something answered at that address, but it is not a Jellyfin server.",
+    "description": "Jellyfin sign-in error: the address is not a Jellyfin server"
+  },
+  "jellyfin.login.error_not_set_up": {
+    "value": "This server has not finished its setup. Finish it in a web browser first.",
+    "description": "Jellyfin sign-in error: the server's first-run setup is incomplete"
+  },
+  "jellyfin.login.error_credentials": {
+    "value": "That username or password did not work.",
+    "description": "Jellyfin sign-in error: wrong username or password"
+  },
+  "jellyfin.login.error_quick_connect_off": {
+    "value": "Quick Connect is turned off on this server. Sign in with your password instead.",
+    "description": "Jellyfin sign-in error: Quick Connect is disabled on the server"
+  },
+  "jellyfin.login.error_refused": {
+    "value": "The server refused the request (error {status}).",
+    "description": "Jellyfin sign-in error: the server answered with an unexpected HTTP status",
+    "args": {
+      "status": "i64"
+    }
+  },
+  "jellyfin.login.error_malformed": {
+    "value": "The server sent an answer this app does not understand.",
+    "description": "Jellyfin sign-in error: the server's answer could not be read"
+  },
+  "jellyfin.login.error_address": {
+    "value": "That does not look like a server address.",
+    "description": "Jellyfin sign-in error: the typed server address cannot be parsed"
+  }
+}

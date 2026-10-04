@@ -132,6 +132,8 @@ pkg/linux-host/
 # pkg/ via PLXNATIVE_APP_DIR, so it lands here on a host run; it can hold plex.tv and PMS
 # tokens, and this repository is public.
 pkg/auth.json
+# The Jellyfin sign-in (`jf::store`): a server address and its access token.
+pkg/jellyfin.json
 
 # The Lab Diagnostics session file (docs/lab-diagnostics.md), written by `tools/plxnative-lab
 # start` and staged into a `make LAB=1` package. It holds a live bearer secret and the developer's
