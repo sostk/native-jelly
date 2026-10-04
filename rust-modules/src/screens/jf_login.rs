@@ -115,11 +115,20 @@ pub(crate) struct JfLoginScreen {
 
 impl JfLoginScreen {
     pub(crate) fn new(entry: EntryId, instance: InstanceId) -> Self {
+        // Still signed in means the saved server failed to come up: offer it again.
+        let server = crate::jf::store::current()
+            .and_then(|stored| stored.origin())
+            .map(|origin| {
+                let host = origin.host();
+                if host.contains(':') { format!("[{host}]:{}", origin.port()) } else { format!("{host}:{}", origin.port()) }
+            })
+            .unwrap_or_default();
+        let caret = server.len();
         Self {
             entry,
             instance,
             stage: Stage::Server,
-            server: TextBuffer::new(String::new(), 0),
+            server: TextBuffer::new(server, caret),
             user: TextBuffer::new(String::new(), 0),
             pass: TextBuffer::new(String::new(), 0),
             editing: None,

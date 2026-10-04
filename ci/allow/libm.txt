@@ -1,4 +1,4 @@
-# count: 6
+# count: 7
 # The transcendental surface OUTSIDE machine/src/motion.rs (spec §4.2). Every entry is RENDER or
 # COLOUR arithmetic — nothing here is logical state, hashed or replayed. Shrink, never grow.
 # The test-support entry preserves widgets.rs's existing colour-test exception after its
@@ -9,3 +9,4 @@ rust-modules/src/ui/widgets_test_support.rs	sRGB linearisation moved from widget
 rust-modules/src/ui/testpat.rs	the synthetic test-pattern generator (dev diagnostic)
 rust-modules/src/ui/pill.rs	the capsule outline solve (render geometry)
 rust-modules/src/ui/route_screen.rs	sRGB linearisation for the ground contrast test (render)
+rust-modules/src/jf/blurhash.rs	BlurHash DCT decode to the four ambient corner colours (colour)

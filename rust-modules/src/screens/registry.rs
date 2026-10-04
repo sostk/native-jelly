@@ -1799,14 +1799,16 @@ where
             // every remaining `app::input`/`app::run` call site drop its own `enter()`-equivalent
             // reset (see `input::enter_profiles_from_onboard`'s doc for the same argument made
             // about `screens::onboard` in 5b).
-            // A plex.tv flow already under way (a dev QR sign-in, its picker) or an unanswered
-            // persistence warning keeps the Session owner's screen; every other sign-in is Jellyfin's.
+            // A plex.tv flow already under way (a dev QR sign-in, its picker, a dev server's
+            // failure) or an unanswered persistence warning keeps the Session owner's screen. A
+            // saved Jellyfin server that failed at boot, and every other sign-in, is Jellyfin's.
             AppArg::Login => {
                 use crate::auth::Phase;
                 let read = H::auth(cx);
                 let plex_flow = read.0.persistence_warning.is_some()
                     || matches!(read.0.phase,
-                        Phase::Creating | Phase::Waiting | Phase::Discovering | Phase::Profiles | Phase::Switching);
+                        Phase::Creating | Phase::Waiting | Phase::Discovering | Phase::Profiles | Phase::Switching)
+                    || (read.0.phase == Phase::Error && crate::jf::store::current().is_none());
                 if plex_flow {
                     Box::new(crate::screens::login::LoginScreen::new(entry, read))
                 } else {
@@ -2110,7 +2112,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // carries it; the previous pin was 0x1a5c_e155_557b_e949.
 // Player sub-menus PR 5: More owns a page stack (`MorePage`, the Quality page) and the overlay shape
 // carries it too; the previous pin was 0x97ff_59c7_9aab_e35e.
-const SCREEN_SHAPES_PIN: u64 = 0x7063_dff7_775b_9075;
+// Jellyfin sign-in: `screens::jf_login::SHAPE` joins the inventory; the previous pin was
+// 0x7063_dff7_775b_9075.
+const SCREEN_SHAPES_PIN: u64 = 0xe44c_06bc_cecb_7c50;
 
 #[cfg(test)]
 mod arg_tests {
