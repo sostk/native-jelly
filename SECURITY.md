@@ -4,13 +4,15 @@
 
 Report privately, **not** as a public issue:
 
-- **GitHub Security Advisories** — <https://github.com/GLinnik21/plx-native/security/advisories/new>
-  (preferred: it is private, it threads, and it produces a CVE if one is warranted)
-- or e-mail **support@plxnative.com** with `PlxNative security` in the subject.
+- **GitHub Security Advisories** — <https://github.com/sostk/native-jelly/security/advisories/new>
+  (it is private, it threads, and it produces a CVE if one is warranted)
 
 This is a one-person unpaid project, so the honest service level is: acknowledged within **7 days**,
-an assessment within **30**. If you have not heard back in a week, assume the mail was lost and open
-a public issue saying only *"sent a security report on <date>, no reply"* — with no details.
+an assessment within **30**. If you have not heard back in a week, open a public issue saying only
+*"sent a security report on <date>, no reply"* — with no details.
+
+Native Jelly is a fork of [PlxNative](https://github.com/GLinnik21/plx-native). A flaw that is also
+present upstream is worth reporting there too, through that project's own security policy.
 
 Please give me a reasonable window to ship a fix before disclosing. There is no bounty; I will credit
 you in the release note unless you ask me not to.
@@ -28,9 +30,15 @@ looking at:
   on the shipped bytes rather than asserting it. A release binary that still carries any of it is a
   valid report, and a serious one.
 - **The event log.** `plxnative-events.log` is created 0600 and every line goes through
-  `eventlog::scrub::scrub_local` before the write. A line that reaches it carrying a credential, a Plex
-  token, a `plex.direct` hostname, a household name or anything about what is being watched is a
-  valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.
+  `eventlog::scrub::scrub_local` before the write. A line that reaches it carrying a credential, a
+  Jellyfin or Plex token, a server's host name, a user name, a household name or anything about what
+  is being watched is a valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant
+  to hold.
+- **The Jellyfin sign-in file.** `jellyfin.json` holds the server address, the user, and the access
+  token that server issued — never the password. It is written 0600 through the same atomic door as
+  the session file, and is **not** encrypted with the Key Manager. A way to read it from another
+  process, or to make the app write it somewhere world-readable, is in scope. So is any path where
+  the password outlives the sign-in request.
 - **TLS.** Certificate verification is on for every HTTPS request, with one bounded exception: when
   a Plex server's certificate fails only its validity-date check (the television has no
   battery-backed clock) and a public key was remembered for that exact host and port from an
@@ -67,27 +75,27 @@ looking at:
 - Post-compromise access by an attacker who already has root on the television. Root is not an app
   prerequisite; a report whose only precondition is an already-rooted OS describes a platform
   compromise rather than an app sandbox escape.
-- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, or Plex Media Server. Report
-  those to their maintainers.
+- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, Jellyfin server, or Plex Media
+  Server. Report those to their maintainers.
 - Missing hardening that costs nothing to an attacker who is already executing code in the app's
   jail, unless you can show a concrete consequence.
 
 ## What this app does not have
 
 No account of its own, no server, no payment path, and no user-generated content. It signs in to
-**your** Plex account and talks to **your** servers.
+**your** Jellyfin server and talks only to it.
 
-**It does have telemetry, and that hedge used to say it did not.** A release binary carries a Sentry
-DSN and a PostHog project key — both **write-only ingest credentials**, publishable by design, which
-permit sending to a project and grant no read of anything in it. First run asks about crash reports
+**It can have telemetry.** A binary built with `PLX_SENTRY_DSN` / `PLX_POSTHOG_KEY` set carries a
+Sentry DSN and a PostHog project key — both **write-only ingest credentials**, publishable by
+design, which permit sending to a project and grant no read of anything in it. A build without them
+sends no reports at all. First run asks about crash reports
 and product analytics separately. The first answer remains a draft; answering the second records
 both choices, and only a **Share** answer enables that category and permits its POSTs to
 `ingest.de.sentry.io` or `eu.i.posthog.com`. `BACK` navigates without recording a refusal. Later
 changes live under Account → Settings → Privacy & data, where **Done** commits and `BACK` discards.
 The Sentry
-**auth token** is the real secret in this system: it can read and delete the project, it never
-enters the binary, and it exists only as a GitHub Actions secret used by `sentry-cli` in the release
-workflow.
+**auth token** is the real secret in this system: it can read and delete the project, and it must
+never enter the binary — keep it only as a CI secret for `sentry-cli`.
 
 In scope for a report, and worth naming since a "no telemetry endpoint" line told researchers not to
 look here: the consent gate failing open, an identifier existing before product analytics is

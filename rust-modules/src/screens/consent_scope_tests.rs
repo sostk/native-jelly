@@ -216,8 +216,8 @@ fn first_run_separates_crash_and_product_consent() {
     assert!(plx_platform::i18n::msg::settings_consent_product_body().contains("random Analytics ID"));
     for body in [plx_platform::i18n::msg::settings_consent_crash_body(), plx_platform::i18n::msg::settings_consent_product_body()] {
         assert!(
-            body.contains("turn it off or sign out"),
-            "each question must say the identifier ends with the sign-in, not with the television"
+            body.contains("turn it off or delete all local data"),
+            "each question must say what ends the identifier; a Jellyfin sign-out does not"
         );
     }
     assert!(plx_platform::i18n::msg::settings_consent_product_body().contains("exact viewing history"));

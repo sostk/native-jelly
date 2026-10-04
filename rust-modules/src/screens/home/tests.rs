@@ -278,7 +278,7 @@ fn a_failed_home_stands_on_the_page_readout_lines() {
     crate::pms::seed_for_test(&mut state, &adapter, 0, crate::pms::HubState::Failed);
     let snapshot = crate::pms::hubs_snapshot(&state);
     let (caption, kind, action) = status_read(snapshot.view()).unwrap();
-    assert_eq!((caption.to_str().unwrap(), kind), ("Can\u{2019}t reach your Plex server", StatusKind::Failed));
+    assert_eq!((caption.to_str().unwrap(), kind), ("Can\u{2019}t reach your Jellyfin server", StatusKind::Failed));
     assert_eq!(action.unwrap().to_str().unwrap(), "Try again");
     let measure = crate::ui::fixture::FixtureMeasure;
     let no_offer = OfferWatch::default();

@@ -21,10 +21,10 @@ use super::registry::word;
 
 
 
-/// **The one contact address the application prints.**
-/// `every_document_prints_only_the_one_contact_address` scans the documents for stray `@`s;
-/// `screens::consent` imports it.
-pub(crate) const CONTACT_EMAIL: &str = "support@plxnative.com";
+/// **The one contact the application prints**: the project's public issue tracker, with no email
+/// address. `every_document_prints_only_the_one_contact` scans the documents for stray `@`s and
+/// for any other `/issues` link; `screens::consent` imports it.
+pub(crate) const CONTACT_LINK: &str = "github.com/sostk/native-jelly/issues";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
@@ -86,9 +86,6 @@ pub(crate) fn privacy_policy() -> &'static str {
 static PRIVACY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| [
     plx_platform::i18n::msg::settings_legal_privacy_responsible(),
     plx_platform::i18n::msg::settings_legal_privacy_responsible_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_plex(),
-    plx_platform::i18n::msg::settings_legal_privacy_plex_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_plex_link(),
     plx_platform::i18n::msg::settings_legal_privacy_servers(),
     plx_platform::i18n::msg::settings_legal_privacy_servers_body(),
     plx_platform::i18n::msg::settings_legal_privacy_local(),
@@ -542,26 +539,27 @@ mod tests {
         }
     }
 
-    /// **No document may print an address other than [`CONTACT_EMAIL`].** Written against the
-    /// personal address these pages used to carry: a support address that reaches only some of
-    /// the screens is worse than none, because the reader cannot tell which one is current. The
-    /// scan is for `@` rather than for the old address, so the NEXT stray address fails too.
+    /// **No document may print a contact other than [`CONTACT_LINK`].** A support address that reaches
+    /// only some of the screens is worse than none, because the reader cannot tell which one is
+    /// current. The contact is an issue tracker, so any `@` is a stray email address, and any
+    /// other `/issues` link is a stray tracker — the NEXT stray contact fails too, not just the
+    /// upstream `support@plxnative.com` these pages used to carry.
     #[test]
-    fn every_document_prints_only_the_one_contact_address() {
+    fn every_document_prints_only_the_one_contact() {
         for page in Page::ALL {
-            let local_len = CONTACT_EMAIL.find('@').expect("CONTACT_EMAIL has a local part");
-            for (i, _) in page.body().match_indices('@') {
-                let tail = i
-                    .checked_sub(local_len)
-                    .map(|start| &page.body()[start..])
-                    .unwrap_or("");
+            let body = page.body();
+            assert!(!body.contains('@'), "{:?} prints an email address", page.title());
+            for (i, _) in body.match_indices("/issues") {
+                let start = (i + "/issues".len()).checked_sub(CONTACT_LINK.len());
                 assert!(
-                    tail.starts_with(CONTACT_EMAIL),
-                    "{:?} prints an address that is not CONTACT_EMAIL",
+                    start.and_then(|s| body.get(s..)).is_some_and(|tail| tail.starts_with(CONTACT_LINK)),
+                    "{:?} prints an issue tracker that is not CONTACT_LINK",
                     page.title()
                 );
             }
         }
+        assert!(Page::Contact.body().contains(CONTACT_LINK));
+        assert!(Page::Privacy.body().contains(CONTACT_LINK));
     }
 
     /// **The policy must describe the build it ships in.** These assertions pin CLAIMS, not
@@ -583,6 +581,11 @@ mod tests {
     ///   would have caught a policy that still said so.
     /// * The sign-in is stored OUTSIDE the app directory on purpose (`paths.rs`), so it survives a
     ///   reinstall. "Uninstall removes everything" would have been false.
+    /// * A Jellyfin sign-in keeps an access token and never the password (`jf::store::Stored`).
+    /// * Signing out of Jellyfin (`app/jf_login.rs::sign_out`) erases that sign-in and nothing
+    ///   else: it does not run the session erase that `auth::forget_account` performs, so the
+    ///   reporting answers and both identifiers survive it. The policy used to promise
+    ///   "signing out removes them with it"; make sign-out erase them before restoring that claim.
     ///
     /// Reword the document freely; when you do, move the assertion with it deliberately rather
     /// than deleting it.
@@ -618,12 +621,11 @@ mod tests {
         // The two identifier names the Settings rows use are the names the policy uses.
         assert!(p.contains("Settings shows it as your Crash report ID"));
         assert!(p.contains("Settings shows that identifier as your Analytics ID"));
-        // …and the policy says what `auth::forget_account` does to them.
-        assert!(p.contains("signing out removes them with it"));
-        // Every profile switched to on this television keeps its own offline access: a server
-        // token and, for a PIN-protected profile, a one-way check of the PIN — never the PIN.
-        assert!(p.contains("server access token"), "the policy never mentions per-profile offline access");
-        assert!(p.contains("PIN"), "the policy never mentions the PIN check");
+        // …and the policy says what a Jellyfin sign-out leaves behind.
+        assert!(p.contains("Signing out does not currently remove anything else"));
+        assert!(!p.contains("signing out removes them with it"));
+        assert!(p.contains("access token"), "the policy never mentions the stored access token");
+        assert!(p.contains("It never stores your password"));
     }
 
     #[test]
@@ -668,12 +670,22 @@ mod tests {
     }
 
     #[test]
-    fn plex_boundary_is_explicit() {
-        assert!(PRIVACY.contains(
-            "Plex processes information received by those services under Plex’s own Privacy Policy"
-        ));
-        assert!(PRIVACY.contains("https://www.plex.tv/about/privacy-legal/"));
+    fn server_boundary_is_explicit() {
+        assert!(PRIVACY.contains("go directly to the Jellyfin server whose address you enter"));
+        assert!(PRIVACY.contains("Native Jelly’s developer does not receive any of it"));
+        assert!(!PRIVACY.contains("plex.tv"), "a Jellyfin sign-in never reaches Plex services");
+        assert!(TRADEMARKS.contains("Jellyfin project"));
+        assert!(TRADEMARKS.contains("based on PlxNative by Gleb Linnik"));
         assert!(!TRADEMARKS.contains("used under licence"));
+    }
+
+    /// The upstream author keeps the credit the GPL requires; the project identity is Native Jelly's.
+    #[test]
+    fn about_credits_the_fork_and_its_upstream() {
+        assert!(ABOUT.contains("Developed by sostk"));
+        assert!(ABOUT.contains("Based on PlxNative by Gleb Linnik"));
+        assert!(ABOUT.contains("github.com/sostk/native-jelly"));
+        assert!(!ABOUT.contains("github.com/GLinnik21"));
     }
 
     /// **New for phase 5b.** Ported from `ui::legal`'s `legal_has_six_current_documents`,

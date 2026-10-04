@@ -200,7 +200,7 @@
     "description": "browse home continue"
   },
   "browse.home.failed": {
-    "value": "Can’t reach your Plex server",
+    "value": "Can’t reach your Jellyfin server",
     "description": "browse home failed"
   },
   "browse.home.empty": {
@@ -1625,19 +1625,19 @@
     "description": "Plex account preferences: stale error"
   },
   "browse.preferences.refused": {
-    "value": "Plex did not authorize this account request. Sign in again and retry.",
+    "value": "The server did not authorize this account request. Sign in again and retry.",
     "description": "Plex account preferences: refused error"
   },
   "browse.preferences.timed_out": {
-    "value": "Plex took too long to respond. Please retry.",
+    "value": "The server took too long to respond. Please retry.",
     "description": "Plex account preferences: timed out error"
   },
   "browse.preferences.unavailable": {
-    "value": "Could not reach Plex. Check your connection and retry.",
+    "value": "Could not reach the server. Check your connection and retry.",
     "description": "Plex account preferences: unavailable error"
   },
   "browse.preferences.invalid_response": {
-    "value": "Plex returned an unexpected response. Please retry.",
+    "value": "The server returned an unexpected response. Please retry.",
     "description": "Plex account preferences: invalid response error"
   },
   "browse.preferences.invalid_preference": {

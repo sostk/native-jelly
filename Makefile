@@ -1043,7 +1043,7 @@ DEPLOY_FILES = $(filter-out pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(L
 # something a submission can be graded against. `rust-modules/base/src/fontcov.rs`'s host gate asserts
 # what it must cover; `text.rs`'s module doc is the chain.
 
-# TRADEMARKS.md ships too: it carries the brand reservation and the Plex/LG non-affiliation
+# TRADEMARKS.md ships too: it carries the brand reservation and the Jellyfin/Plex/LG non-affiliation
 # statement, which used to be appended to LICENSE. It was moved out because GitHub's `licensee`
 # matches LICENSE against known texts by SIMILARITY, and the appended thirty lines pushed the file
 # under the threshold — so the repository advertised "Other" rather than MIT, misrepresenting the
