@@ -8,7 +8,7 @@
   "appDescription": "Unofficial native Jellyfin client - not affiliated with Jellyfin",
   "icon": "icon.png",
   "largeIcon": "largeIcon.png",
-  "iconColor": "#060606",
+  "iconColor": "#090810",
   "splashBackground": "splash.png",
   "nativeLifeCycleInterfaceVersion": 2,
   "handlesRelaunch": false,
