@@ -28,6 +28,7 @@ pub(crate) mod library;
 pub(crate) mod search;
 pub(crate) mod family;
 pub(crate) mod legal;
+pub(crate) mod jf_login;
 pub(crate) mod login;
 pub(crate) mod onboard;
 pub(crate) mod clock_readout;

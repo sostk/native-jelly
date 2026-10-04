@@ -128,6 +128,7 @@ pub(crate) mod events;
 pub(crate) mod lifecycle;
 pub(crate) mod playback;
 mod preferences;
+mod jf_login;
 pub(crate) mod input;
 pub(crate) mod bridge;
 pub(crate) mod chrome;

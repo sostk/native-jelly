@@ -303,6 +303,10 @@ pub(crate) struct Bridge {
     session: crate::auth::SessionMachine,
     session_adapter: super::adapters::session::SessionAdapter,
     session_ready: Option<(u64, crate::auth::owner::ProfileScope, crate::plex::session::ServerRef, String, crate::auth::owner::ReadyInstall)>,
+    /// A Jellyfin sign-in the login screen just adopted (`app::jf_login::adopt`), waiting for the
+    /// same landing a Session handoff takes. It never passes through the Session owner, which
+    /// speaks plex.tv only.
+    jf_ready: Option<crate::auth::ReadyCreds>,
     consent_adapter: super::adapters::consent::ConsentAdapter,
     stores: crate::stores::Stores,
     mounter: AppMounter,
@@ -532,6 +536,7 @@ impl Bridge {
             session: crate::auth::SessionMachine::from_init(init),
             session_adapter,
             session_ready: None,
+            jf_ready: None,
             consent_adapter,
             stores,
             mounter: AppMounter::default(),
@@ -598,6 +603,10 @@ impl Bridge {
         if !self.session.ready_is_current(epoch, scope) { return None; }
         Some(crate::auth::ReadyCreds { origin: server.origin(), address: server.address.clone(),
             token, install, tier: server.tier, pin: server.resolve_pin() })
+    }
+
+    pub(crate) fn hand_off_jf(&mut self, creds: crate::auth::ReadyCreds) {
+        self.jf_ready = Some(creds);
     }
 
     pub(crate) fn take_content_reqs(&mut self) -> Vec<(MachineId, ContentReq, ReturnState<u32, PageMemory>)> {
@@ -1552,6 +1561,7 @@ impl Bridge {
             AppFx::Search(req) => self.search_reqs.push((from, req, self.effect_return.clone())),
             AppFx::Player(req) => self.player_reqs.push(req),
             AppFx::ItemMenu(req) => self.item_menu_reqs.push(req),
+            AppFx::JfAuth(command) => super::jf_login::execute(self, command),
         }
     }
 
@@ -2524,7 +2534,7 @@ pub(crate) fn nav_root_if_unsettled(d: &mut Dispatcher<AppHost>, arg: AppArg) {
 /// below read `d.top_arg()` themselves before deciding whether to call this at all — asserting
 /// "outside the phase this asks nothing" needs no help from the function it is testing.
 pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut Bridge) {
-    if let Some(c) = bridge.take_session_ready() {
+    if let Some(c) = bridge.take_session_ready().or_else(|| bridge.jf_ready.take()) {
         // A sign-out followed by a fresh sign-in can replace the session without restarting the
         // process. Re-read only at this one credentials handoff so the old account's in-memory
         // preference cannot leak into the new session.
@@ -3041,6 +3051,15 @@ pub(crate) fn search_owns_input(d: &Dispatcher<AppHost>) -> bool {
     !d.surface_up()
         && d.top_screen().and_then(|screen| screen.as_any())
             .is_some_and(|screen| screen.is::<crate::screens::search::SearchScreen>())
+}
+
+/// The top page edits text of its own: committed text goes to it as owned input rather than into
+/// the legacy queue.
+pub(crate) fn text_field_owns_input(d: &Dispatcher<AppHost>) -> bool {
+    search_owns_input(d)
+        || (!d.surface_up()
+            && d.top_screen().and_then(|screen| screen.as_any())
+                .is_some_and(|screen| screen.is::<crate::screens::jf_login::JfLoginScreen>()))
 }
 
 pub(crate) fn owns_input(d: &Dispatcher<AppHost>) -> bool {

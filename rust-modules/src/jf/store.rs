@@ -3,8 +3,9 @@
 //! door as the session file, read once at boot and replaced on every sign-in.
 //!
 //! The process also holds the live copy ([`current`]), because the account chip and the sign-out
-//! path ask "who is signed in" every frame and must not read a file to answer it. Only [`load`],
-//! [`save`] and [`forget`] change it, so a test that never calls them sees nobody signed in.
+//! path ask "who is signed in" every frame and must not read a file to answer it. Only [`load`]
+//! and [`set_live`] change it, so a test that never calls them sees nobody signed in. The file
+//! half ([`persist`], [`erase`]) is IO and belongs on the storage worker.
 use super::auth::SignedIn;
 use super::seat::Seat;
 use crate::plex::Origin;
@@ -73,7 +74,8 @@ impl Stored {
 
 static CURRENT: Mutex<Option<Stored>> = Mutex::new(None);
 
-fn set_current(s: Option<Stored>) {
+/// Make `s` the sign-in this process runs on (`None`: signed out). Memory only.
+pub fn set_live(s: Option<Stored>) {
     *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = s;
 }
 
@@ -94,14 +96,13 @@ fn candidates() -> Vec<PathBuf> {
 /// Read the stored sign-in (the first candidate that holds a usable one) and make it [`current`].
 pub fn load() -> Option<Stored> {
     let s = load_from(&candidates());
-    set_current(s.clone());
+    set_live(s.clone());
     s
 }
 
-/// Write `s` to the first candidate that takes it and make it [`current`]. `false` when none did:
-/// the sign-in still holds for this run, it just will not survive a restart.
-pub fn save(s: &Stored) -> bool {
-    set_current(Some(s.clone()));
+/// Write `s` to the first candidate that takes it. `false` when none did: the sign-in still holds
+/// for this run, it just will not survive a restart.
+pub fn persist(s: &Stored) -> bool {
     let ok = save_to(&candidates(), s);
     if !ok {
         plx_base::eventlog::log("jf: the sign-in could not be saved — it lasts until the app closes");
@@ -109,9 +110,8 @@ pub fn save(s: &Stored) -> bool {
     ok
 }
 
-/// Remove every copy and clear [`current`].
-pub fn forget() {
-    set_current(None);
+/// Remove every stored copy.
+pub fn erase() {
     forget_at(&candidates());
 }
 
@@ -138,11 +138,6 @@ fn forget_at(paths: &[PathBuf]) {
     for p in paths {
         let _ = std::fs::remove_file(p);
     }
-}
-
-#[cfg(test)]
-pub(crate) fn set_current_for_test(s: Option<Stored>) {
-    set_current(s);
 }
 
 #[cfg(test)]

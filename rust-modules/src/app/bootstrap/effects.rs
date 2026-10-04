@@ -195,6 +195,7 @@ pub(crate) fn app(effect: &AppFx) -> Result<Value, &'static str> {
         AppFx::Session(command) => json!({"session":wire(command)?}),
         AppFx::SessionEffect(effect) => json!({"session_effect":wire(effect)?}),
         AppFx::Preferences(_) => return Err("unsupported controlled preferences effect"),
+        AppFx::JfAuth(_) => return Err("unsupported controlled Jellyfin sign-in effect"),
         AppFx::Store(id, command) => json!({"store":id.ord().0,"command":store(command)?}),
         AppFx::StoreWork(work) => json!({"work":work_value(work)?}),
         AppFx::Content(req) => json!({"content":content_request(req)?}),

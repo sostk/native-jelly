@@ -64,6 +64,36 @@ pub(crate) enum AppFx {
     Player(PlayerReq),
     /// The item context menu's committed row (phase 10) — see [`ItemMenuReq`].
     ItemMenu(ItemMenuReq),
+    /// The Jellyfin sign-in screen's network steps and its handoff — see [`JfAuthCmd`].
+    JfAuth(JfAuthCmd),
+}
+
+/// **What the Jellyfin sign-in screen asks for.** Every network step runs on a worker
+/// (`app::jf_login`) and answers on its `reply`, which the screen polls each tick; `Adopt` is the
+/// main-thread handoff that makes a sign-in the running account. Carries a password, so the
+/// controlled recorder refuses it like [`PreferenceCmd`].
+pub(crate) enum JfAuthCmd {
+    Probe { candidates: Vec<crate::plex::Origin>, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    Password {
+        origin: crate::plex::Origin,
+        username: String,
+        password: String,
+        reply: std::sync::mpsc::Sender<JfAuthReply>,
+    },
+    QuickConnectStart { origin: crate::plex::Origin, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    QuickConnectPoll {
+        origin: crate::plex::Origin,
+        qc: crate::jf::auth::QuickConnect,
+        reply: std::sync::mpsc::Sender<JfAuthReply>,
+    },
+    Adopt { origin: crate::plex::Origin, signed_in: crate::jf::auth::SignedIn },
+}
+
+pub(crate) enum JfAuthReply {
+    Probed(Result<(crate::plex::Origin, crate::jf::models::PublicSystemInfo), crate::jf::auth::AuthError>),
+    SignedIn(Result<crate::jf::auth::SignedIn, crate::jf::auth::AuthError>),
+    QuickConnect(Result<crate::jf::auth::QuickConnect, crate::jf::auth::AuthError>),
+    Polled(Result<Option<crate::jf::auth::SignedIn>, crate::jf::auth::AuthError>),
 }
 
 /// A private live receipt. Requests contain account credentials and are intentionally unsupported
@@ -1769,7 +1799,20 @@ where
             // every remaining `app::input`/`app::run` call site drop its own `enter()`-equivalent
             // reset (see `input::enter_profiles_from_onboard`'s doc for the same argument made
             // about `screens::onboard` in 5b).
-            AppArg::Login => Box::new(crate::screens::login::LoginScreen::new(entry, H::auth(cx))),
+            // A plex.tv flow already under way (a dev QR sign-in, its picker) or an unanswered
+            // persistence warning keeps the Session owner's screen; every other sign-in is Jellyfin's.
+            AppArg::Login => {
+                use crate::auth::Phase;
+                let read = H::auth(cx);
+                let plex_flow = read.0.persistence_warning.is_some()
+                    || matches!(read.0.phase,
+                        Phase::Creating | Phase::Waiting | Phase::Discovering | Phase::Profiles | Phase::Switching);
+                if plex_flow {
+                    Box::new(crate::screens::login::LoginScreen::new(entry, read))
+                } else {
+                    Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
+                }
+            }
             AppArg::Profiles => {
                 let screen = crate::screens::profiles::ProfilesScreen::new(entry, H::auth(cx));
                 fx.push(plx_machine::machine::Fx::App(AppFx::Session(
@@ -1965,6 +2008,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     "LocalizationSettingsV4{Root:{language:system|en|es|be},Language:{selected:system|en|es|be,focus:u32,busy:bool,failed:bool},Contribute:QrLink,LoginReportAlert:{send:bool,scroll_target_bits:u32},ConsentDisclosure:{scroll_target_bits:u32,scroll_owner:answer_band},ConsentDeleteDisclosure:{scroll_target_bits:u32},BandPart:MeasuredRowOrColumn}",
     crate::screens::preferences::SHAPE,
     crate::screens::preferences::PICKER_SHAPE,
+    crate::screens::jf_login::SHAPE,
 ];
 
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.

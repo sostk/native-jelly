@@ -636,8 +636,8 @@ unsafe fn ingress_token(app: &mut App, fr: &mut Frame, token: &str) -> bool {
     }
     // Keys and clicks use SDL's existing synthesis while coexistence lasts. Consume those
     // before a following direct text token, rather than moving all text ahead of all keys.
-    if super::bridge::search_owns_input(&app.pages) { drain_sdl(app, fr); }
-    if super::bridge::search_owns_input(&app.pages) {
+    if super::bridge::text_field_owns_input(&app.pages) { drain_sdl(app, fr); }
+    if super::bridge::text_field_owns_input(&app.pages) {
         if let Some(text) = token.strip_prefix("txt:") {
             ingest_text(app, &text.replace('+', " "), crate::textinput::available(),
                 plx_machine::machine::Source::RemoteFifo);
@@ -1405,7 +1405,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // nobody drains. Gating here would also be a second, weaker copy of a rule
         // that lives in one place — and it would flip a frame away from the field's
         // own edit state, because the route changes at the fade floor.
-        if super::bridge::search_owns_input(&app.pages) {
+        if super::bridge::text_field_owns_input(&app.pages) {
             let text = crate::textinput::decode(&app.ev);
             ingest_text(app, &text, crate::textinput::available(), plx_machine::machine::Source::Sdl);
         } else {
@@ -1950,12 +1950,15 @@ fn loop_requests(app: &mut App) {
                 // `switching_profile_leaves_the_container_holding_nothing_of_the_previous_profile`.
                 super::bridge::switch_profile(&mut app.pages);
             }
+            // The sign-in page is Jellyfin's own screen (`screens::jf_login`), which starts no
+            // plex.tv flow — naming the route is all a sign-in needs.
             crate::screens::registry::LoopReq::AccountSignIn => {
-                super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::StartLogin);
                 super::bridge::nav_root(&mut app.pages, AppArg::Login);
             }
             crate::screens::registry::LoopReq::AccountSignOut => {
-                super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::SignOut);
+                if !super::jf_login::sign_out() {
+                    super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::SignOut);
+                }
                 super::bridge::nav_root(&mut app.pages, AppArg::Login);
             }
             // The host route does NOT move: Settings is a surface presented over the same page,
@@ -2854,14 +2857,14 @@ unsafe fn replay_inject(app: &mut App, fr: &mut Frame, v: &serde_json::Value) {
         }
         return;
     }
-    if super::bridge::search_owns_input(&app.pages) { drain_sdl(app, fr); }
+    if super::bridge::text_field_owns_input(&app.pages) { drain_sdl(app, fr); }
     let kind = v["kind"].as_str().unwrap_or("");
     let i = |k: &str| v[k].as_i64().unwrap_or(0) as i32;
     let u = |k: &str| v[k].as_u64().unwrap_or(0) as u32;
     match kind {
         "text" => {
-            if !super::bridge::search_owns_input(&app.pages) {
-                log("replay: text has no owned Search recipient");
+            if !super::bridge::text_field_owns_input(&app.pages) {
+                log("replay: text has no owned text-field recipient");
             } else if let Some(events) = super::recorder::dec_text(v) {
                 app.inputs.extend(events);
                 plx_machine::idle::invalidate();

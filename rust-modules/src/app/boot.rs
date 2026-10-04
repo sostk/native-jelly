@@ -778,7 +778,23 @@ pub(crate) unsafe fn construct(
     #[cfg(not(test))]
     plx_platform::i18n::initialize(session.language, controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
-    let dev_primary = (!forced_login && !dev_token.is_empty()).then(|| {
+    // A kept Jellyfin sign-in boots exactly as the injected dev primary does — one server, its
+    // token, no plex.tv — under its own seat. The injected token still wins, as it does over a
+    // stored Plex session, so automation never runs as whoever signed in on this television.
+    let jf_stored = (!controlled && !forced_login && dev_token.is_empty())
+        .then(crate::jf::store::load).flatten()
+        .and_then(|s| s.origin().map(|origin| (origin, s)));
+    if let Some((origin, stored)) = &jf_stored {
+        crate::jf::seat::register_with(origin, stored.seat());
+        log(&format!("boot: stored Jellyfin sign-in at {}", origin.log_form()));
+    }
+    let dev_primary = if let Some((origin, stored)) = &jf_stored {
+        Some(crate::plex::session::ServerRef {
+            address: origin.host().to_owned(), port: i64::from(origin.port()),
+            origin_url: origin.base(), token: stored.token.clone(),
+            tier: Some(crate::plex::probe::configured_tier(origin.host())), ..Default::default()
+        })
+    } else { (!forced_login && !dev_token.is_empty()).then(|| {
         let origin = crate::dev::scenarios::pms_origin()
             .unwrap_or_else(|| crate::plex::Origin::http(&host_s, pms_port));
         if crate::dev::scenarios::jf_armed() {
@@ -790,7 +806,7 @@ pub(crate) unsafe fn construct(
             origin_url: origin.base(), token: dev_token.clone(),
             tier: Some(crate::plex::probe::configured_tier(origin.host())), ..Default::default()
         }
-    });
+    }) };
     let session_init = match &initial {
         Some(initial) => initial.session.clone(),
         None => captured_session_for_boot(session.clone(), dev_primary,
@@ -839,7 +855,7 @@ pub(crate) unsafe fn construct(
         #[cfg(feature = "devtriggers")]
         log("boot: /tmp/plxnative-login — starting QR login");
         BootTo::Login
-    } else if !dev_token.is_empty() {
+    } else if !dev_token.is_empty() || jf_stored.is_some() {
         // `Origin::http` names the assumption out loud: the host and port compiled into the
         // C shim are a plaintext address, with no scheme to read off them.
         //
@@ -848,10 +864,12 @@ pub(crate) unsafe fn construct(
         // "nothing has said" — which left every automated run unable to reach Auto's Original
         // bootstrap, since `abr::bootstrap` is only consulted once a tier exists. See
         // `probe::configured_tier` for why address shape is honest enough here.
-        let tier = crate::plex::probe::configured_tier(&host_s);
-        log(&format!(
-            "boot: dev token — link={tier:?} (classified from the configured address)"
-        ));
+        if jf_stored.is_none() {
+            let tier = crate::plex::probe::configured_tier(&host_s);
+            log(&format!(
+                "boot: dev token — link={tier:?} (classified from the configured address)"
+            ));
+        }
         super::bridge::execute_session_command(pages, crate::auth::SessionCmd::ActivateDevBootstrap);
         pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
             rec, false);
@@ -925,10 +943,9 @@ pub(crate) unsafe fn construct(
             }
         }
     } else {
-        super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-        pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
-            rec, false);
-        log("boot: no session — starting QR sign-in");
+        // Nothing kept: the Jellyfin sign-in page (`screens::jf_login`), which asks plex.tv for
+        // nothing — so no Session flow is started under it.
+        log("boot: no session — Jellyfin sign-in");
         BootTo::Login
     }
     };
