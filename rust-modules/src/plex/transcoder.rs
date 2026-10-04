@@ -255,6 +255,9 @@ impl Client {
     /// the built PATH (the sole path-returning method): posters uses it as the LRU key AND the
     /// http_get path. `src_path` is the raw thumb/art path; encoding is centralized in enc().
     pub fn image_transcode_path(&self, src_path: &str, w: i64, h: i64, png: bool) -> String {
+        if self.jf().is_some() {
+            return crate::jf::convert::jf_image_path(src_path, w, h, png).unwrap_or_else(|| src_path.to_string());
+        }
         let mut q = QueryBuilder::new("/photo/:/transcode")
             .int("width", w)
             .int("height", h)
@@ -420,6 +423,9 @@ impl Client {
         subtitle_stream_id: i64,
         forced: bool,
     ) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() {
+            return j.mde_decision(rating_key, session, audio_stream_id, subtitle_stream_id, forced);
+        }
         let q = QueryBuilder::new("/video/:/transcode/universal/decision")
             .str("path", &format!("/library/metadata/{rating_key}"))
             .int("mediaIndex", 0)
@@ -451,6 +457,7 @@ impl Client {
     /// through route::apply_decision_codecs — the payload has to describe what the server
     /// will actually send.
     pub fn transcode_decision(&self, spec: &TranscodeSpec) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.transcode_decision(spec); }
         let path = format!(
             "/video/:/transcode/universal/decision?{}",
             self.transcode_query(spec)
@@ -467,6 +474,16 @@ impl Client {
         spec: &TranscodeSpec,
         deadline: std::time::Instant,
     ) -> JsonDeadlineOutcome {
+        if let Some(j) = self.jf() {
+            let _ = deadline;
+            return match j.transcode_decision(spec) {
+                Some(mc) => JsonDeadlineOutcome::Response {
+                    reply: crate::http::Reply { status: 200, body: Vec::new(), peer_pin: None },
+                    parsed: Some(mc),
+                },
+                None => JsonDeadlineOutcome::Transport,
+            };
+        }
         let path = format!(
             "/video/:/transcode/universal/decision?{}",
             self.transcode_query(spec)
@@ -477,6 +494,7 @@ impl Client {
 
     /// The delivery-matched stream target for `spec` — same params as the registering decision.
     pub fn transcode_start_url(&self, spec: &TranscodeSpec) -> StreamUrl {
+        if let Some(j) = self.jf() { return j.transcode_start_url(spec); }
         let endpoint = match spec.contract.delivery {
             TranscodeDelivery::ProgressiveMkv => "start.mkv",
             TranscodeDelivery::FixedHls { .. } => "start.m3u8",
@@ -506,6 +524,7 @@ impl Client {
         if session.is_empty() {
             return false;
         }
+        if let Some(j) = self.jf() { return j.transcode_stop(session); }
         self.get_ok(&self.transcode_stop_query(session, true))
     }
 
@@ -516,6 +535,7 @@ impl Client {
         if session.is_empty() {
             return false;
         }
+        if let Some(j) = self.jf() { return j.transcode_stop(session); }
         self.get_ok(&self.transcode_stop_query(session, false))
     }
 
@@ -544,6 +564,9 @@ impl Client {
         if session.is_empty() {
             return None;
         }
+        if self.jf().is_some() {
+            return Some(true); // the Stopped report already released everything Jellyfin holds
+        }
         let q =
             QueryBuilder::new("/status/sessions/close").str("X-Plex-Session-Identifier", session);
         match self.post_status(&q.build())? {
@@ -562,6 +585,9 @@ impl Client {
     pub fn transcode_session_present(&self, session: &str) -> Option<bool> {
         if session.is_empty() {
             return None;
+        }
+        if self.jf().is_some() {
+            return Some(false); // Jellyfin 12 exposes no per-job lookup; Stopped ends the job
         }
         let q = QueryBuilder::new("/video/:/transcode/universal/ping").str("session", session);
         match self.get_status(&q.build())? {

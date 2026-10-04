@@ -77,6 +77,8 @@ pub(crate) enum Method {
     Get,
     Put,
     Post,
+    /// Jellyfin's `DELETE /UserPlayedItems/{id}` (mark unplayed). Body-less.
+    Delete,
 }
 
 impl Method {
@@ -86,6 +88,7 @@ impl Method {
             Method::Get => "GET",
             Method::Put => "PUT",
             Method::Post => "POST",
+            Method::Delete => "DELETE",
         }
     }
 }
@@ -183,7 +186,7 @@ pub(crate) fn request(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Api, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Api, pin, &[]).response()
 }
 
 /// A PMS request whose response size is content-dependent. Only the TLS arm differs from
@@ -195,7 +198,22 @@ pub(crate) fn request_bulk(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, &[]).response()
+}
+
+/// [`request_bulk`] with a request BODY — the Jellyfin control plane, whose writes
+/// (`/Users/AuthenticateByName`, `/Items/{id}/PlaybackInfo`, `/Sessions/Playing*`) take JSON
+/// bodies where PMS put everything in the query string. `headers` must name the body's
+/// `Content-Type`; `Content-Length` is added here, once, for both transports.
+pub(crate) fn request_with_body(
+    origin: &Origin,
+    path: &str,
+    method: Method,
+    headers: &[&str],
+    body: &[u8],
+    pin: Option<&ResolvePin>,
+) -> Option<Reply> {
+    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, body).response()
 }
 
 /// A small control-plane request inside an already-running transaction reserve. Plaintext composes
@@ -219,6 +237,7 @@ pub(crate) fn request_until_outcome(
         headers,
         BodyPolicy::Deadline { at: deadline },
         pin,
+        &[],
     )
 }
 
@@ -289,6 +308,7 @@ fn probe(
             learn_pin,
         },
         pin,
+        &[],
     ) {
         RequestOutcome::Response(reply) => Ok(reply),
         RequestOutcome::Transport(failure) => Err(failure),
@@ -305,6 +325,7 @@ fn request_with(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    body: &[u8],
 ) -> RequestOutcome {
     // This is the single dispatch chokepoint for every PMS/plex.tv REST call, plaintext or TLS.
     // A frame-thread caller landing here blocks on SO_RCVTIMEO (up to 15s) with the HUD frozen; the
@@ -321,13 +342,17 @@ fn request_with(
     }
     match origin.scheme() {
         // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
-        Scheme::Http => plaintext(origin, path, method, headers, body_policy),
-        Scheme::Https => tls(origin, path, method, headers, body_policy, pin),
+        Scheme::Http => plaintext(origin, path, method, headers, body_policy, body),
+        Scheme::Https => tls(origin, path, method, headers, body_policy, pin, body),
     }
 }
 
+/// Is there a credential in this request? `X-Plex-Token=` (PMS) and `ApiKey=` (Jellyfin) in the
+/// query, or an `X-Plex-Token` / `Authorization` header. The Jellyfin query parameter is matched
+/// as a whole parameter NAME, so a path segment that merely contains the letters cannot trip it.
 fn carries_credential(path: &str, headers: &[&str]) -> bool {
-    path.to_ascii_lowercase().contains("x-plex-token=")
+    crate::jf::url::has_api_key(path)
+        || path.to_ascii_lowercase().contains("x-plex-token=")
         || headers.iter().any(|header| {
             header.split_once(':').is_some_and(|(name, _)| {
                 name.trim().eq_ignore_ascii_case("x-plex-token")
@@ -401,6 +426,7 @@ fn plaintext(
     method: Method,
     headers: &[&str],
     body_policy: BodyPolicy,
+    request_body: &[u8],
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
     // end — it is spliced straight into the request head. Control-plane is one-shot: send
@@ -419,6 +445,9 @@ fn plaintext(
         for h in headers {
             s.push_str(h);
             s.push_str("\r\n");
+        }
+        if !request_body.is_empty() {
+            s.push_str(&format!("Content-Length: {}\r\n", request_body.len()));
         }
         s
     };
@@ -487,6 +516,15 @@ fn plaintext(
                 }
             }
         }
+        _ if !request_body.is_empty() => plx_net::stream::http_open_with_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            request_body,
+        ),
         _ => plx_net::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
@@ -638,6 +676,7 @@ fn tls(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    request_body: &[u8],
 ) -> RequestOutcome {
     let url = format!("{}{}", origin.base(), path);
     let resolve = pin
@@ -647,7 +686,8 @@ fn tls(
     // A POST carries a body even when that body is empty — the Plex control plane's POSTs put
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
-    let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
+    let body: Option<&[u8]> =
+        (matches!(method, Method::Post) || !request_body.is_empty()).then_some(request_body);
     let (timeouts, max_body, caller_owns_timeout) = match body_policy {
         BodyPolicy::Api => (plx_net::net::API, None, false),
         BodyPolicy::Bulk => (plx_net::net::BULK, None, false),

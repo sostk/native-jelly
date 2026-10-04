@@ -24,6 +24,7 @@ impl Client {
     /// only honest one), so we parse and discard them today; and with several sources on Home the
     /// waste is per source per fetch, not once.
     pub fn home_hubs(&self, count: i64) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.home_hubs(count); }
         self.get_json(
             &QueryBuilder::new("/hubs")
                 .int("count", count)
@@ -55,6 +56,7 @@ impl Client {
     /// set. A refetch legitimately returns a different shelf count and different ids with nothing
     /// changed on the server, which is a fact about this endpoint rather than about any caller.
     pub fn library_hubs(&self, section_key: i64, count: i64) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.library_hubs(section_key, count); }
         self.get_json(
             &QueryBuilder::new(&format!("/hubs/sections/{section_key}"))
                 .int("count", count)
@@ -64,6 +66,7 @@ impl Client {
 
     /// GET /hubs/continueWatching?count=… — the dedicated Continue Watching hub.
     pub fn continue_watching(&self, count: i64) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.continue_watching(count); }
         self.get_json(
             &QueryBuilder::new("/hubs/continueWatching")
                 .int("count", count)
@@ -88,6 +91,7 @@ impl Client {
     ///
     /// PUT is the only verb routed here; GET and POST both 404.
     pub fn remove_from_continue_watching(&self, rating_key: &str) -> bool {
+        if let Some(j) = self.jf() { return j.remove_from_continue_watching(rating_key); }
         let path = QueryBuilder::new("/actions/removeFromContinueWatching")
             .str("ratingKey", rating_key)
             .build();
@@ -96,6 +100,7 @@ impl Client {
 
     /// GET /hubs/promoted?count=… — the home screen's featured rows.
     pub fn promoted(&self, count: i64) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.promoted(); }
         self.get_json(
             &QueryBuilder::new("/hubs/promoted")
                 .int("count", count)
@@ -146,6 +151,7 @@ impl Client {
     ///   response carries ~17 hubs, most with `size: 0`. `search::KINDS` fixes the shelf order for
     ///   exactly this reason: honouring the server's would move a row under a typing user's focus.
     pub fn search(&self, query: &str, limit: i64, section_id: i64) -> Option<MediaContainer> {
+        if let Some(j) = self.jf() { return j.search(query, limit, section_id); }
         self.get_json(&search_path(query, limit, section_id))
     }
 }

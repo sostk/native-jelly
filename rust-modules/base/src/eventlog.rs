@@ -32,17 +32,28 @@ pub mod ring;
 ///
 /// Cheap by construction: the `find` is a no-op scan for the overwhelming majority of lines, and
 /// the log is written a few times a second at most, never per frame.
+///
+/// Jellyfin's one query credential, `ApiKey=` (appended last by `jf::url::with_api_key`, the same
+/// shape), is covered the same way.
 pub fn redact_tokens(m: &str) -> std::borrow::Cow<'_, str> {
-    const KEY: &str = "X-Plex-Token=";
-    if !m.contains(KEY) {
+    const KEYS: [&str; 2] = ["X-Plex-Token=", "ApiKey="];
+    if !KEYS.iter().any(|k| m.contains(k)) {
         return std::borrow::Cow::Borrowed(m);
     }
+    let mut out = m.to_string();
+    for key in KEYS {
+        out = redact_param(&out, key);
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+fn redact_param(m: &str, key: &str) -> String {
     let mut out = String::with_capacity(m.len());
     let mut rest = m;
-    while let Some(at) = rest.find(KEY) {
-        out.push_str(&rest[..at + KEY.len()]);
+    while let Some(at) = rest.find(key) {
+        out.push_str(&rest[..at + key.len()]);
         out.push_str("<redacted>");
-        let after = &rest[at + KEY.len()..];
+        let after = &rest[at + key.len()..];
         // the value ends at the next query separator or any whitespace — whichever comes first
         let end = after
             .find(|c: char| c == '&' || c.is_whitespace())
@@ -50,7 +61,7 @@ pub fn redact_tokens(m: &str) -> std::borrow::Cow<'_, str> {
         rest = &after[end..];
     }
     out.push_str(rest);
-    std::borrow::Cow::Owned(out)
+    out
 }
 
 /// The event log's path. One definition, because three things open this file: `log` below,
@@ -147,6 +158,17 @@ mod redact_tests {
         let out = redact_tokens("GET /x?X-Plex-Token=SECRET&audio=3&sub=1 ok");
         assert!(!out.contains("SECRET"));
         assert!(out.contains("audio=3") && out.contains("sub=1") && out.ends_with(" ok"));
+    }
+
+    /// Jellyfin's query credential, mid-URL and last, is caught by the same backstop.
+    #[test]
+    fn a_jellyfin_api_key_does_not_survive() {
+        let out = redact_tokens(
+            "play -> http://10.0.0.2:8096/videos/x/stream.mkv?MediaSourceId=a&ApiKey=JFSECRET&EnableAudio=1",
+        );
+        assert!(!out.contains("JFSECRET"), "{out}");
+        assert!(out.contains("ApiKey=<redacted>") && out.contains("EnableAudio=1"), "{out}");
+        assert!(!redact_tokens("GET /Users/Me?ApiKey=LAST").contains("LAST"));
     }
 
     /// More than one occurrence on one line (two URLs logged together).

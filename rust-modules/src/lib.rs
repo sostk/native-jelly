@@ -25,6 +25,7 @@ mod ff; // THE demuxer — the FFmpeg 9.0 this app BUNDLES and pins (majors 63/6
 mod focusprobe; // dev: one diffable line naming everything app.rs's key ladder can move, logged when it changes
 mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
 mod http; // the ONE door out of the control plane: dispatch a Plex REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
+mod jf; // Jellyfin behind the plex::Client facade: seat registry, DTOs, DTO→PMS conversion, ops
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media

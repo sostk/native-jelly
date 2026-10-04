@@ -1189,6 +1189,35 @@ pub fn http_open_until_result(
     )
 }
 
+/// [`http_open`] for a request that carries a BODY — a JSON control-plane POST. `extra` must
+/// already name `Content-Length` (and `Content-Type`); the body follows the head on the same send.
+/// The request is one-shot, so its caller sends `Connection: close` exactly as for [`http_open`].
+pub fn http_open_with_body(
+    hs: *mut HttpStream,
+    host: *const c_char,
+    port: c_int,
+    path: *const c_char,
+    extra: *const c_char,
+    method: &str,
+    body: &[u8],
+) -> c_int {
+    legacy_open_result(http_open_with_timeouts_body(
+        hs,
+        host,
+        port,
+        path,
+        extra,
+        method,
+        CONNECT_TIMEOUT_MS,
+        MEDIA_RECV_TIMEOUT_MS,
+        MEDIA_SEND_TIMEOUT_MS,
+        None,
+        false,
+        &mut NoCheckpoint,
+        body,
+    ))
+}
+
 fn legacy_open_result(result: Result<(), HttpOpenError>) -> c_int {
     if result.is_ok() {
         0
@@ -1197,6 +1226,7 @@ fn legacy_open_result(result: Result<(), HttpOpenError>) -> c_int {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn http_open_with_timeouts(
     hs: *mut HttpStream,
     host: *const c_char,
@@ -1210,6 +1240,39 @@ fn http_open_with_timeouts(
     open_deadline: Option<Instant>,
     restore_media_timeouts: bool,
     checkpoint: &mut dyn Checkpoint,
+) -> Result<(), HttpOpenError> {
+    http_open_with_timeouts_body(
+        hs,
+        host,
+        port,
+        path,
+        extra,
+        method,
+        connect_timeout_ms,
+        recv_timeout_ms,
+        send_timeout_ms,
+        open_deadline,
+        restore_media_timeouts,
+        checkpoint,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn http_open_with_timeouts_body(
+    hs: *mut HttpStream,
+    host: *const c_char,
+    port: c_int,
+    path: *const c_char,
+    extra: *const c_char,
+    method: &str,
+    connect_timeout_ms: c_int,
+    recv_timeout_ms: c_int,
+    send_timeout_ms: c_int,
+    open_deadline: Option<Instant>,
+    restore_media_timeouts: bool,
+    checkpoint: &mut dyn Checkpoint,
+    body: &[u8],
 ) -> Result<(), HttpOpenError> {
     if hs.is_null() || host.is_null() || path.is_null() {
         return Err(HttpOpenError::Transport);
@@ -1258,6 +1321,7 @@ fn http_open_with_timeouts(
                 open_deadline,
                 restore_media_timeouts,
                 pacer,
+                body,
             ) {
                 Ok(()) => return Ok(()),
                 Err(HttpOpenError::Aborted) => return Err(HttpOpenError::Aborted),
@@ -1389,6 +1453,7 @@ fn http_open_with_timeouts(
             open_deadline,
             restore_media_timeouts,
             pacer,
+            body,
         )
     }
 }
@@ -1404,6 +1469,7 @@ unsafe fn perform_http_request(
     open_deadline: Option<Instant>,
     restore_media_timeouts: bool,
     pacer: &mut Pacer,
+    body: &[u8],
 ) -> Result<(), HttpOpenError> {
     // build + send the request (default Accept only if caller set none)
     let extra_s: String = if extra.is_null() {
@@ -1423,7 +1489,9 @@ unsafe fn perform_http_request(
     let req = format!(
         "{method} {path_s} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: plxnative/0.1\r\n{accept}{extra_s}\r\n"
     );
-    let bytes = req.as_bytes();
+    let mut wire = req.into_bytes();
+    wire.extend_from_slice(body);
+    let bytes = wire.as_slice();
     let mut off = 0usize;
     while off < bytes.len() {
         let w = send_until(

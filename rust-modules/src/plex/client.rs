@@ -815,11 +815,46 @@ impl Client {
             .map(|e| e.media_container)
     }
 
-    /// THE token choke point. Appends `X-Plex-Token=…` with the right separator.
+    /// THE token choke point. Appends `X-Plex-Token=…` with the right separator — or, for a
+    /// Jellyfin seat, its one accepted query credential `ApiKey=…` (a URL handed to the media
+    /// pipeline cannot carry the `Authorization` header).
     pub(super) fn with_token(&self, path: &str) -> String {
+        let tok = self.current_token();
+        if crate::jf::seat::is_jf(&self.origin) {
+            if crate::jf::url::has_api_key(path) {
+                return path.to_string();
+            }
+            return crate::jf::url::with_api_key(path, &tok);
+        }
         let sep = if path.contains('?') { '&' } else { '?' };
-        let tok = self.token.read().map(|g| g.clone()).unwrap_or_default();
         format!("{path}{sep}X-Plex-Token={tok}")
+    }
+
+    pub(crate) fn current_token(&self) -> String {
+        self.token.read().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    pub(crate) fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    /// The Jellyfin operations for this client, when its origin is a Jellyfin seat.
+    pub(crate) fn jf(&self) -> Option<crate::jf::Jf<'_>> {
+        crate::jf::seat::is_jf(&self.origin).then(|| crate::jf::Jf::new(self))
+    }
+
+    /// One Jellyfin request: same origin, resolve pin, data-io gate and credential policy as
+    /// [`Self::send`], but the credential rides the caller's `Authorization` header rather than
+    /// the query string, and a write may carry a JSON body.
+    pub(crate) fn jf_send(
+        &self,
+        path: &str,
+        method: Method,
+        headers: &[&str],
+        body: Option<&[u8]>,
+    ) -> Option<http::Reply> {
+        if !self.may_send() { return None; }
+        http::request_with_body(&self.origin, path, method, headers, body.unwrap_or(&[]), self.resolve_pin.as_ref())
     }
 }
 

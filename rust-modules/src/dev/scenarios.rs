@@ -212,6 +212,12 @@ pub(crate) fn pms_origin() -> Option<crate::plex::Origin> {
     plx_base::devtrig::read("pms-origin").and_then(|s| crate::plex::Origin::parse(s.trim()))
 }
 
+plx_base::devtrig::latched_flag! {
+    /// `/tmp/plxnative-jf` — the injected primary (`plxnative-token` at `plxnative-pms-origin`, or
+    /// the configured host) is a Jellyfin server and the token a Jellyfin access token. Absent in
+    /// shipping builds.
+    pub(crate) fn jf_armed = "jf";
+}
 plx_base::devtrig::latched_flag! { pub(crate) fn imagecache_stats_armed = "imagecache-stats"; }
 plx_base::devtrig::latched_flag! {
     /// `/tmp/plxnative-imgtrace` — per-image poster timeline and every picture-lost event

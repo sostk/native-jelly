@@ -20,6 +20,7 @@ impl Client {
     /// same success line for all four. The reporting is [`crate::route::scrobble_stop`]'s; this
     /// only has to stop throwing the answer away.
     pub fn timeline(&self, r: &TimelineReport) -> bool {
+        if let Some(j) = self.jf() { return j.timeline(r); }
         let q = QueryBuilder::new("/:/timeline")
             .str("ratingKey", r.rating_key)
             .str("key", &format!("/library/metadata/{}", r.rating_key))
@@ -39,6 +40,7 @@ impl Client {
 
     /// GET /identity → the server's stable machineIdentifier (None on failure/empty).
     pub fn machine_identity(&self) -> Option<String> {
+        if let Some(j) = self.jf() { return j.machine_identity(); }
         let mid = self.get_json("/identity")?.machine_identifier;
         if mid.is_empty() {
             None
@@ -69,6 +71,10 @@ impl Client {
         session: &str,
         continuous: bool,
     ) -> Option<PlayQueueResult> {
+        if let Some(j) = self.jf() {
+            let _ = (machine_id, session);
+            return Some(PlayQueueResult::of(j.create_play_queue(rating_key, continuous)?, self.id(), rating_key));
+        }
         let uri = format!(
             "server://{machine_id}/com.plexapp.plugins.library/library/metadata/{rating_key}"
         );
@@ -463,7 +469,7 @@ pub struct PlayQueueResult {
 impl PlayQueueResult {
     /// The WHOLE response→result mapping, kept out of `create_play_queue` so the host tests grade
     /// the code that ships instead of a copy of it (only the request build is left up there).
-    fn of(
+    pub(crate) fn of(
         mc: super::models::MediaContainer,
         sid: super::ServerId,
         rating_key: &str,

@@ -781,6 +781,10 @@ pub(crate) unsafe fn construct(
     let dev_primary = (!forced_login && !dev_token.is_empty()).then(|| {
         let origin = crate::dev::scenarios::pms_origin()
             .unwrap_or_else(|| crate::plex::Origin::http(&host_s, pms_port));
+        if crate::dev::scenarios::jf_armed() {
+            crate::jf::seat::register(&origin);
+            plx_base::eventlog::log("jf: the injected primary is a Jellyfin server");
+        }
         crate::plex::session::ServerRef {
             address: origin.host().to_owned(), port: i64::from(origin.port()),
             origin_url: origin.base(), token: dev_token.clone(),

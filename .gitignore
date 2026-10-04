@@ -150,6 +150,7 @@ pkg/PlxNative-README.md
 # a build at the tree by hand or the guard is ever weakened. Media is ~2.5 GB per set and is
 # reproducible from the script, so none of it belongs in a public repository's history.
 tests/fixtures/out/
+tests/fixtures/jf/live/
 tests/fixtures/**/*.mkv
 tests/fixtures/**/*.mp4
 tests/fixtures/**/*.sup

@@ -266,6 +266,7 @@ impl Client {
     /// owner's `myPlexSubscription`). The two fields consumed live on the shared `MediaContainer`
     /// (see `models.rs`) so the ordinary envelope parse serves this too.
     fn server_root(&self) -> Option<super::models::MediaContainer> {
+        if let Some(j) = self.jf() { return j.server_root(); }
         self.get_json("/")
     }
 }

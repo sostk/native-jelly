@@ -71,6 +71,7 @@ impl Client {
         start: i64,
         size: i64,
     ) -> CollectionOutcome {
+        if let Some(j) = self.jf() { return j.section_collections(section, start, size); }
         let path = QueryBuilder::new(format!("/library/sections/{section}/collections"))
             .int("X-Plex-Container-Start", start)
             .int("X-Plex-Container-Size", size)
@@ -80,6 +81,7 @@ impl Client {
 
     /// `GET /library/metadata/{ratingKey}` for one collection's metadata.
     pub(crate) fn collection(&self, rating_key: &str) -> CollectionOutcome {
+        if let Some(j) = self.jf() { return j.collection(rating_key); }
         self.collection_get(&format!("/library/metadata/{rating_key}"))
     }
 
@@ -90,6 +92,7 @@ impl Client {
         start: i64,
         size: i64,
     ) -> CollectionOutcome {
+        if let Some(j) = self.jf() { return j.collection_children(rating_key, start, size); }
         let path = QueryBuilder::new(format!("/library/collections/{rating_key}/children"))
             .int("X-Plex-Container-Start", start)
             .int("X-Plex-Container-Size", size)

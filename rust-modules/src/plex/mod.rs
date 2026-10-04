@@ -190,12 +190,24 @@ pub(crate) fn admit_source_until(source: &session::SourceRef, client_id: &str,
         .checked_add(attempt_budget)
         .unwrap_or(overall_deadline)
         .min(overall_deadline);
+    if let Some(j) = client.jf() {
+        return match j.status("/Users/Me", crate::http::Method::Get, None) {
+            Some(status) => classify_endpoint_response(status, true),
+            None => EndpointAdmission::Transport,
+        };
+    }
     match client.get_json_with_headers_until("/library/sections", &[], deadline) {
         JsonDeadlineOutcome::Response { reply, parsed } =>
             classify_endpoint_response(reply.status, parsed.is_some()),
         JsonDeadlineOutcome::Deadline => EndpointAdmission::Timeout,
         JsonDeadlineOutcome::Transport => EndpointAdmission::Transport,
     }
+}
+
+/// A registry-less client for one origin — the Jellyfin sign-in and probe, which talk to a server
+/// before it has a slot.
+pub(crate) fn unregistered_client(origin: Origin, token: &str, client_id: &str) -> Client {
+    Client::new(ServerId::UNSET, "", origin, token, client_id)
 }
 
 pub(crate) fn admit_source(source: &session::SourceRef, client_id: &str) -> EndpointAdmission {
