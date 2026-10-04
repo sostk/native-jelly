@@ -85,11 +85,23 @@ fn note_logo_owner(rk: i64, owner: &str) {
     }
 }
 
-/// `/library/metadata/{rk}/{slot}/{tag}` for `guid`'s image, `""` without a tag.
+/// `/library/metadata/{rk}/{slot}/{guid}-{tag}` for `guid`'s image, `""` without a tag. The
+/// GUID rides in the tag segment because these paths outlive the process (the cold-open Home
+/// cache, the poster store's keys), and `rk` alone resolves only in the process that minted it.
 fn art_path(guid: &str, slot: &str, tag: Option<&str>) -> String {
     match (ids::intern(guid), tag) {
-        (rk, Some(tag)) if rk != 0 && !tag.is_empty() => format!("/library/metadata/{rk}/{slot}/{tag}"),
+        (rk, Some(tag)) if rk != 0 && !tag.is_empty() => {
+            format!("/library/metadata/{rk}/{slot}/{}-{tag}", ids::normalize(guid))
+        }
         _ => String::new(),
+    }
+}
+
+/// `{guid}-{tag}` → (`guid`, `tag`); a bare tag (an app-built path) → (`None`, `tag`).
+fn split_art_tag(seg: &str) -> (Option<&str>, &str) {
+    match seg.split_at_checked(32) {
+        Some((g, rest)) if rest.starts_with('-') && g.bytes().all(|b| b.is_ascii_hexdigit()) => (Some(g), &rest[1..]),
+        _ => (None, seg),
     }
 }
 
@@ -100,16 +112,21 @@ pub fn jf_image_path(src: &str, w: i64, h: i64, png: bool) -> Option<String> {
     let mut parts = rest.splitn(3, '/');
     let rk: i64 = parts.next()?.parse().ok()?;
     let slot = parts.next()?;
-    let tag = parts.next().filter(|t| !t.is_empty());
-    let (image_type, owner) = match slot {
-        "thumb" => ("Primary", ids::guid_of(rk)),
-        "art" => ("Backdrop", ids::guid_of(rk)),
-        "clearLogo" => ("Logo", logo_owner(rk).or_else(|| ids::guid_of(rk))),
-        "thumbLand" => ("Thumb", ids::guid_of(rk)),
-        "banner" => ("Banner", ids::guid_of(rk)),
+    let (carried, tag) = match parts.next().filter(|t| !t.is_empty()).map(split_art_tag) {
+        Some((g, t)) => (g.map(str::to_string), Some(t).filter(|t| !t.is_empty())),
+        None => (None, None),
+    };
+    let image_type = match slot {
+        "thumb" => "Primary",
+        "art" => "Backdrop",
+        "clearLogo" => "Logo",
+        "thumbLand" => "Thumb",
+        "banner" => "Banner",
         _ => return None,
     };
-    let owner = owner?;
+    let owner = if slot == "clearLogo" { logo_owner(rk) } else { None }
+        .or(carried)
+        .or_else(|| ids::guid_of(rk))?;
     let mut q = format!("/Items/{owner}/Images/{image_type}?maxWidth={w}&maxHeight={h}&quality=90");
     if let Some(tag) = tag {
         q.push_str("&tag=");
@@ -587,8 +604,8 @@ mod tests {
         assert_eq!((m.year, m.duration, m.view_offset), (2014, 8_177_216, 43_578));
         assert_eq!(m.library_section_id, 7);
         assert_eq!(m.originally_available_at, "2014-04-10");
-        assert_eq!(m.thumb, format!("/library/metadata/{}/thumb/aaaa", m.rating_key));
-        assert_eq!(m.art, format!("/library/metadata/{}/art/bbbb", m.rating_key));
+        assert_eq!(m.thumb, format!("/library/metadata/{}/thumb/36edf81507b5c8eda566778b2a316c29-aaaa", m.rating_key));
+        assert_eq!(m.art, format!("/library/metadata/{}/art/36edf81507b5c8eda566778b2a316c29-bbbb", m.rating_key));
         assert!(m.ultra_blur_colors.and_then(|u| u.corners()).is_some());
         assert_eq!(m.role.len(), 1);
         assert_eq!(m.role[0].role, "Hero");
@@ -633,6 +650,14 @@ mod tests {
     }
 
     #[test]
+    fn a_persisted_artwork_path_resolves_without_this_process_having_minted_it() {
+        let never_minted = "/library/metadata/1/art/eeeeeeeeeeeee00000000000000000ff-bt";
+        let p = jf_image_path(never_minted, 10, 10, false).unwrap();
+        assert_eq!(p, "/Items/eeeeeeeeeeeee00000000000000000ff/Images/Backdrop?maxWidth=10&maxHeight=10&quality=90&tag=bt");
+        assert_eq!(split_art_tag("plain"), (None, "plain"));
+    }
+
+    #[test]
     fn an_episode_borrows_its_series_poster_and_logo() {
         let ep: BaseItemDto = serde_json::from_str(r#"{"Id":"aaaaaaaaaaaaa000000000000000000b","Type":"Episode","Name":"E",
             "SeriesId":"bbbbbbbbbbbbb000000000000000000c","SeriesName":"S","SeasonId":"ccccccccccccc000000000000000000d",
@@ -643,7 +668,7 @@ mod tests {
         assert_eq!(m.grandparent_title, "S");
         assert_eq!(m.parent_title, "Season 1");
         assert_eq!(m.grandparent_rating_key, ids::intern("bbbbbbbbbbbbb000000000000000000c").to_string());
-        assert!(m.grandparent_thumb.ends_with("/thumb/sp"));
+        assert!(m.grandparent_thumb.ends_with("/thumb/bbbbbbbbbbbbb000000000000000000c-sp"), "{}", m.grandparent_thumb);
         let logo = jf_image_path(&format!("/library/metadata/{}/clearLogo", m.rating_key), 1, 1, true).unwrap();
         assert!(logo.starts_with("/Items/bbbbbbbbbbbbb000000000000000000c/Images/Logo"), "{logo}");
     }

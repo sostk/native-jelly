@@ -305,7 +305,7 @@ impl Jf<'_> {
 
     /// The direct-play verdict (`mde_decision` / `mde_decision_forced`).
     pub fn mde_decision(&self, rk: &str, session: &str, audio_stream_id: i64, subtitle_stream_id: i64, forced: bool) -> Option<MediaContainer> {
-        let guid = ids::guid_of_key(rk)?;
+        let guid = self.guid(rk)?;
         let audio = (audio_stream_id > 0).then(|| ids::stream_index(audio_stream_id));
         let sub = (subtitle_stream_id > 0).then(|| ids::stream_index(subtitle_stream_id));
         let caps = plx_platform::devcaps::caps();
@@ -350,7 +350,7 @@ impl Jf<'_> {
     /// Register a transcode: PlaybackInfo with direct play withdrawn, the TranscodingUrl kept for
     /// [`Self::transcode_start_url`], and the OUTPUT codecs reported per lane.
     pub fn transcode_decision(&self, spec: &TranscodeSpec) -> Option<MediaContainer> {
-        let guid = ids::guid_of_key(spec.rating_key)?;
+        let guid = self.guid(spec.rating_key)?;
         let c = spec.contract;
         let allow_video_copy = c.remux || !c.no_video_copy;
         let ceiling = if c.remux { None } else { Some(c.ceiling.unwrap_or(Ceiling::NATIVE_4K)) };
@@ -436,7 +436,7 @@ impl Jf<'_> {
 
     pub fn timeline(&self, r: &TimelineReport) -> bool {
         let mut s = session(r.session).unwrap_or_else(|| Session {
-            item_guid: ids::guid_of_key(r.rating_key).unwrap_or_default(),
+            item_guid: self.guid(r.rating_key).unwrap_or_default(),
             play_method: "DirectPlay",
             ..Default::default()
         });
@@ -489,7 +489,7 @@ impl Jf<'_> {
     /// The queue a play starts: the item, and — for a continuous episode — the series' episodes
     /// from it onward, as PMS's `continuous=1` window.
     pub fn create_play_queue(&self, rk: &str, continuous: bool) -> Option<MediaContainer> {
-        let guid = ids::guid_of_key(rk)?;
+        let guid = self.guid(rk)?;
         let uid = self.user_id()?;
         let it: BaseItemDto = self.get(&super::api::Q::new(format!("/Items/{guid}")).s("userId", &uid)
             .s("Fields", "MediaSources").build())?;

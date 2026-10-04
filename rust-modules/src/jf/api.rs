@@ -254,8 +254,44 @@ impl<'a> Jf<'a> {
         Some(convert::container(rows, r.total_record_count, r.start_index))
     }
 
-    fn guid(rk: &str) -> Option<String> {
+    /// The GUID behind a key. A key PERSISTED by an earlier run (the cold-open Home cache, a resume
+    /// target, a dev `play` trigger) was never minted in this process, and the mapping is one-way;
+    /// on such a miss one ids-only sweep of the user's items re-mints every key. Throttled per
+    /// origin, so a key that is genuinely gone costs one sweep a minute and not one per lookup.
+    pub(crate) fn guid(&self, rk: &str) -> Option<String> {
+        if let Some(g) = ids::guid_of_key(rk) {
+            return Some(g);
+        }
+        if rk.is_empty() || !rk.bytes().all(|b| b.is_ascii_digit()) || !self.sweep_due() {
+            return None;
+        }
+        let q = Q::new("/Items")
+            .b("Recursive", true)
+            .s("IncludeItemTypes", "Movie,Series,Season,Episode,BoxSet,Video,MusicVideo")
+            .b("EnableImages", false)
+            .b("EnableUserData", false)
+            .b("EnableTotalRecordCount", false)
+            .s("Fields", "");
+        let r = self.items(q)?;
+        for i in &r.items {
+            ids::intern(&i.id);
+        }
         ids::guid_of_key(rk)
+    }
+
+    fn sweep_due(&self) -> bool {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        use std::time::{Duration, Instant};
+        static LAST: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+        let Ok(mut m) = LAST.get_or_init(Default::default).lock() else { return false };
+        let key = self.origin().base().to_ascii_lowercase();
+        let now = Instant::now();
+        if m.get(&key).is_some_and(|t| now.duration_since(*t) < Duration::from_secs(60)) {
+            return false;
+        }
+        m.insert(key, now);
+        true
     }
 
     // ---- server ---------------------------------------------------------------------------
@@ -402,7 +438,7 @@ impl<'a> Jf<'a> {
 
     /// The full item, with its markers (MediaSegments) and — for a show — the next episode.
     pub fn metadata(&self, rk: &str) -> Option<Metadata> {
-        let guid = Self::guid(rk)?;
+        let guid = self.guid(rk)?;
         let uid = self.user_id()?;
         let it: BaseItemDto = self.get(&Q::new(format!("/Items/{guid}")).s("userId", &uid).build())?;
         let mut m = convert::item(&it, 0);
@@ -423,7 +459,7 @@ impl<'a> Jf<'a> {
     }
 
     pub fn extras(&self, rk: &str) -> Option<MediaContainer> {
-        let guid = Self::guid(rk)?;
+        let guid = self.guid(rk)?;
         let uid = self.user_id()?;
         let rows: Vec<BaseItemDto> = self.get(&Q::new(format!("/Items/{guid}/SpecialFeatures")).s("userId", &uid).build())?;
         let mut items: Vec<Metadata> = rows.iter().map(|i| convert::item(i, 0)).collect();
@@ -442,7 +478,7 @@ impl<'a> Jf<'a> {
     }
 
     pub fn metadata_many(&self, rks: &[&str]) -> Option<MediaContainer> {
-        let guids: Vec<String> = rks.iter().filter_map(|rk| Self::guid(rk)).collect();
+        let guids: Vec<String> = rks.iter().filter_map(|rk| self.guid(rk)).collect();
         if guids.is_empty() {
             return Some(MediaContainer::default());
         }
@@ -459,7 +495,7 @@ impl<'a> Jf<'a> {
     }
 
     pub fn children(&self, rk: &str) -> Option<MediaContainer> {
-        let guid = Self::guid(rk)?;
+        let guid = self.guid(rk)?;
         let uid = self.user_id()?;
         let it: BaseItemDto = self.get(&Q::new(format!("/Items/{guid}")).s("userId", &uid).s("Fields", "ChildCount").build())?;
         let q = match it.kind.as_str() {
@@ -472,12 +508,12 @@ impl<'a> Jf<'a> {
     }
 
     pub fn all_leaves(&self, rk: &str) -> Option<MediaContainer> {
-        let guid = Self::guid(rk)?;
+        let guid = self.guid(rk)?;
         self.items_container(Q::new(format!("/Shows/{guid}/Episodes")).s("Fields", PLAYABLE_FIELDS), 0)
     }
 
     pub fn related(&self, rk: &str) -> Option<MediaContainer> {
-        let guid = Self::guid(rk)?;
+        let guid = self.guid(rk)?;
         let r = self.items(Q::new(format!("/Items/{guid}/Similar")).i("Limit", 20).s("Fields", LIST_FIELDS))?;
         let rows: Vec<Metadata> = r.items.iter().map(|i| convert::item(i, 0)).collect();
         let kind = rows.first().map(|m| m.kind.clone()).unwrap_or_else(|| "movie".into());
@@ -489,7 +525,7 @@ impl<'a> Jf<'a> {
 
     pub fn person_media(&self, person_id: &str) -> Option<MediaContainer> {
         let guid = if person_id.bytes().all(|b| b.is_ascii_digit()) {
-            Self::guid(person_id)?
+            self.guid(person_id)?
         } else {
             ids::normalize(person_id)
         };
@@ -522,19 +558,19 @@ impl<'a> Jf<'a> {
     // ---- user data ------------------------------------------------------------------------
 
     pub fn scrobble(&self, rk: &str) -> bool {
-        let (Some(guid), Some(uid)) = (Self::guid(rk), self.user_id()) else { return false };
+        let (Some(guid), Some(uid)) = (self.guid(rk), self.user_id()) else { return false };
         self.ok(&Q::new(format!("/UserPlayedItems/{guid}")).s("userId", &uid).build(), Method::Post, None)
     }
 
     pub fn unscrobble(&self, rk: &str) -> bool {
-        let (Some(guid), Some(uid)) = (Self::guid(rk), self.user_id()) else { return false };
+        let (Some(guid), Some(uid)) = (self.guid(rk), self.user_id()) else { return false };
         self.ok(&Q::new(format!("/UserPlayedItems/{guid}")).s("userId", &uid).build(), Method::Delete, None)
     }
 
     /// Jellyfin has no hide flag: an item leaves Resume when its position is cleared, so this
     /// resets the resume point (docs/jellyfin-port.md records the difference from PMS).
     pub fn remove_from_continue_watching(&self, rk: &str) -> bool {
-        let (Some(guid), Some(uid)) = (Self::guid(rk), self.user_id()) else { return false };
+        let (Some(guid), Some(uid)) = (self.guid(rk), self.user_id()) else { return false };
         self.post_ok(
             &Q::new(format!("/UserItems/{guid}/UserData")).s("userId", &uid).build(),
             Some(&serde_json::json!({ "PlaybackPositionTicks": 0 })),
@@ -676,14 +712,14 @@ impl<'a> Jf<'a> {
     }
 
     pub(crate) fn collection(&self, rk: &str) -> CollectionOutcome {
-        let Some(guid) = Self::guid(rk) else { return CollectionOutcome::Missing };
+        let Some(guid) = self.guid(rk) else { return CollectionOutcome::Missing };
         let Some(uid) = self.user_id() else { return CollectionOutcome::Transport };
         let (st, it) = self.get_status::<BaseItemDto>(&Q::new(format!("/Items/{guid}")).s("userId", &uid).build());
         collection_outcome(st, it.map(|i| convert::container(vec![convert::item(&i, 0)], 1, 0)))
     }
 
     pub(crate) fn collection_children(&self, rk: &str, start: i64, size: i64) -> CollectionOutcome {
-        let Some(guid) = Self::guid(rk) else { return CollectionOutcome::Missing };
+        let Some(guid) = self.guid(rk) else { return CollectionOutcome::Missing };
         let mut q = Q::new("/Items").s("ParentId", &guid).s("Fields", LIST_FIELDS)
             .s("SortBy", "PremiereDate,SortName").b("EnableTotalRecordCount", true).i("StartIndex", start);
         if size > 0 {
