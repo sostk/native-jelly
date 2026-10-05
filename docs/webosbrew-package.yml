@@ -2,29 +2,29 @@
 #
 # THIS FILE DOES NOT BELONG TO THIS REPOSITORY AT RUNTIME. It is kept here so the submission is
 # version-controlled and reviewable alongside the thing it describes. To submit, fork
-# https://github.com/webosbrew/apps-repo and copy this file to `packages/com.beb.plxnative.yml`.
+# https://github.com/webosbrew/apps-repo and copy this file to `packages/com.sostk.nativejelly.yml`.
 #
 # Schema: content/schemas/packages/PackageInfo.json in that repo.
 # Required: title, iconUri, manifestUrl, category, pool, description. Verified 2026-08-04.
 
-title: PlxNative
+title: Native Jelly
 
 # Both icon URLs are raw links to THIS repository's default branch, so they resolve only once the
 # repo is public — and `repogen.lintpkg` rejects a submission whose iconUri does not return 200.
 # 160 for the listing card, 320 for the detail page; tools/mkicons.py cuts both from the master.
-iconUri: https://raw.githubusercontent.com/GLinnik21/plx-native/main/pkg/icon160.png
-detailIconUri: https://raw.githubusercontent.com/GLinnik21/plx-native/main/pkg/icon320.png
+iconUri: https://raw.githubusercontent.com/sostk/native-jelly/main/pkg/icon160.png
+detailIconUri: https://raw.githubusercontent.com/sostk/native-jelly/main/pkg/icon320.png
 
 # `releases/latest/download/...` always resolves to the newest release, which is how the channel
 # picks up an update without this file changing. The release workflow sets neither `draft` nor
 # `prerelease` precisely because either would exclude the release from `latest` and break this URL.
-manifestUrl: https://github.com/GLinnik21/plx-native/releases/latest/download/com.beb.plxnative.manifest.json
+manifestUrl: https://github.com/sostk/native-jelly/releases/latest/download/com.sostk.nativejelly.manifest.json
 
 category: multimedia
 pool: main
 
 # Max 80 characters (schema-enforced).
-shortDescription: A native, Apple-TV-style Plex client for LG webOS TVs — no browser
+shortDescription: A native, Apple-TV-style Jellyfin client for LG webOS TVs — no browser
 
 requirements:
   # Passed VERBATIM to `webosbrew-ipk-verify --fw-releases`, the same tool and flag the release CI
@@ -122,4 +122,4 @@ description: |
 
   Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
 
-  Source, screenshots and issues: https://github.com/GLinnik21/plx-native
+  Source, screenshots and issues: https://github.com/sostk/native-jelly

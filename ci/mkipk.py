@@ -11,7 +11,7 @@ Why Python rather than tar flags: the flags differ irreconcilably between GNU ta
 tarfile gives both hosts the same bytes with no branching.
 
 WHICH INSTALL a package is for comes from `$FLAVOR` (see `ci/flavor.py`): unset or `stable` builds
-the app users install, `debug` builds `com.beb.plxnative.debug`, which sits beside it on the same
+the app users install, `debug` builds `com.sostk.nativejelly.debug`, which sits beside it on the same
 television. Every id in the archive — the control `Package:`, `packageinfo.json`, the staged
 `applications/<id>/` directory and the `.ipk` filename — comes from that one transform, and the
 directory is additionally what the installed binary reads to learn which install it is
@@ -92,7 +92,7 @@ def stage_storage_service(repo: Path, data: Path, app: dict) -> Path:
     shutil.copyfile(executable, target / "plxnative-storage")
     (target / "plxnative-storage").chmod(0o755)
     (target / "services.json").write_text(json.dumps({
-        "id": service_id, "description": "PlxNative private storage",
+        "id": service_id, "description": "Native Jelly private storage",
         "engine": "native", "executable": "plxnative-storage",
         "services": [{"name": service_id, "commands": []}],
     }, indent=4) + "\n")
@@ -131,7 +131,7 @@ def storage_archive_errors(blob: bytes, app_id: str) -> list[str]:
                     continue
                 metadata = json.load(tf.extractfile(member))
                 if name.endswith("services.json"):
-                    if metadata != {"id": service_id, "description": "PlxNative private storage", "engine": "native", "executable": "plxnative-storage", "services": [{"name": service_id, "commands": []}]}:
+                    if metadata != {"id": service_id, "description": "Native Jelly private storage", "engine": "native", "executable": "plxnative-storage", "services": [{"name": service_id, "commands": []}]}:
                         errors.append("service identity/activation-only metadata differs")
                 else:
                     if metadata.get("id") != app_id or metadata.get("requiredPermissions") != STORAGE_PERMISSIONS:

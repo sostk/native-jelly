@@ -28,8 +28,8 @@ Makefile's `TV` and `tools/`' `TV_HOST` both fall back to; `make TV=1.2.3.4 …`
 invocation, and a target that needs a TV with neither set fails saying so. The ssh password
 `alpine` lives in `tools/tv-ssh`, not the Makefile, and is tried only after this machine's ssh key is
 refused. It is webosbrew's *published* dev-mode root password, identical on every rooted TV, so it
-identifies nobody and removing it would break the loop for key-less machines. App id `com.beb.plxnative` — and since 2026-08-21 a second
-install, `com.beb.plxnative.debug`, can sit beside it on the same set (`FLAVOR`, below;
+identifies nobody and removing it would break the loop for key-less machines. App id `com.sostk.nativejelly` — and since 2026-08-21 a second
+install, `com.sostk.nativejelly.debug`, can sit beside it on the same set (`FLAVOR`, below;
 `docs/two-installs.md`).
 
 ## Build / deploy / run
@@ -309,10 +309,10 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew; deploy/run use y
   `docs/macos-app.md` is the design note, and `docs/macos-app-readme.md` is what ships beside the
   zip for the recipient.
 - **`FLAVOR`** selects **WHICH INSTALL** every TV-facing target talks to. Three builds live on one
-  television: `stable` (`com.beb.plxnative` — the app users install, the id in every release,
-  manifest and channel listing), `debug` (`com.beb.plxnative.debug` — the day-to-day developer
+  television: `stable` (`com.sostk.nativejelly` — the app users install, the id in every release,
+  manifest and channel listing), `debug` (`com.sostk.nativejelly.debug` — the day-to-day developer
   build beside it, with its own launcher tile, its own sign-in and its own runtime root), and
-  `nightly` (`com.beb.plxnative.nightly` — a third install beside both, tile "PlxNative Nightly",
+  `nightly` (`com.sostk.nativejelly.nightly` — a third install beside both, tile "PlxNative Nightly",
   own sign-in, own runtime root, but ALWAYS a `RELEASE=1` build — `release-guard` refuses one
   without it, with no `ALLOW_DEV_ON_STABLE`-shaped hatch, because nightly ships no dev-trigger
   surface ever).
@@ -1134,7 +1134,7 @@ every thin back-edge with `file:line` (the work list for breaking it up); `--dot
   access.
 
   ```text
-  identity schema=1 seq=2 app_id=com.beb.plxnative flavour=stable version=0.6.0 uid=6303 euid=6303 gid=5000 egid=5000
+  identity schema=1 seq=2 app_id=com.sostk.nativejelly flavour=stable version=0.6.0 uid=6303 euid=6303 gid=5000 egid=5000
   groups values=29,44,505,509,777,5000 errno=0 truncated=false
   dir label=tmp uid=0 gid=0 mode=1777 readonly=false open_errno=0 stat_errno=0 mount_errno=0 create_errno=0 write_errno=0 close_errno=0 unlink_errno=0
   dir label=runtime uid=6303 gid=5000 mode=0700 readonly=false open_errno=0 stat_errno=0 mount_errno=0 create_errno=0 write_errno=0 close_errno=0 unlink_errno=0
@@ -1738,7 +1738,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   lists the ones worth knowing by name. **The ROOT moved for flavoured installs and ONLY for
   them:** the stable install keeps `/tmp` byte for byte, so every `/tmp/plxnative-*` path written
   out below stays literally true for the app users get, while a flavoured install puts the SAME
-  names under `/tmp/<app id>` (`/tmp/com.beb.plxnative.debug/plxnative-library`). Nothing was
+  names under `/tmp/<app id>` (`/tmp/com.sostk.nativejelly.debug/plxnative-library`). Nothing was
   renamed — not the ~40 triggers, not the `plxnative-remote` FIFO, not the runtime logs, not
   `dev::DIAG`; only the directory they sit in. `make -s print-rundir FLAVOR=<f>` is how a tool asks
   rather than restating the rule, and the root is created **1777, mkdir THEN an explicit chmod**

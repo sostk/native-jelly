@@ -5,7 +5,7 @@ name = "plxnative-storage"
 version = "0.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "PlxNative private storage helper: the LS2 service that holds the client's secrets and state."
+description = "Native Jelly private storage helper: the LS2 service that holds the client's secrets and state."
 repository = "https://github.com/GLinnik21/plx-native"
 publish = false
 

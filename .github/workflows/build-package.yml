@@ -161,7 +161,7 @@ jobs:
           # WHICH INSTALL. `FLAVOR ?= debug` in the Makefile — deliberately, so a developer's
           # muscle-memory `make deploy` cannot overwrite the app users watch with — and CI is the
           # one place that default is wrong. Without this the release job packages
-          # `com.beb.plxnative.debug`, `webosbrew-gen-manifest` writes that id INTO the manifest the
+          # `com.sostk.nativejelly.debug`, `webosbrew-gen-manifest` writes that id INTO the manifest the
           # Homebrew Channel resolves, and the sha256 cross-check below still passes because it
           # compares the wrong artifact against its own manifest. It would finally die four jobs
           # later on a missing `dist/ipk.sha256` (a flavoured package deliberately does not write
@@ -410,8 +410,8 @@ jobs:
             -i "https://raw.githubusercontent.com/${{ github.repository }}/main/pkg/icon160.png" \
             -l "https://github.com/${{ github.repository }}" \
             -r false \
-            -o pkg/com.beb.plxnative.manifest.json
-          cat pkg/com.beb.plxnative.manifest.json
+            -o pkg/com.sostk.nativejelly.manifest.json
+          cat pkg/com.sostk.nativejelly.manifest.json
 
       - name: The manifest hash must match the artifact
         # The sha256 is enforced ON THE DEVICE at install time and by nothing in CI, so a mismatch
@@ -419,7 +419,7 @@ jobs:
         if: inputs.homebrew-manifest
         run: |
           set -euo pipefail
-          want=$(python3 -c "import json;print(json.load(open('pkg/com.beb.plxnative.manifest.json'))['ipkHash']['sha256'])")
+          want=$(python3 -c "import json;print(json.load(open('pkg/com.sostk.nativejelly.manifest.json'))['ipkHash']['sha256'])")
           have=$(sha256sum "${{ steps.name.outputs.ipk }}" | cut -d' ' -f1)
           [ "$want" = "$have" ] || { echo "::error::manifest sha256 $want != artifact $have"; exit 1; }
           echo "ipk sha256 $have" >> "$GITHUB_STEP_SUMMARY"

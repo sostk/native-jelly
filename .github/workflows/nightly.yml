@@ -233,7 +233,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           ipk="plxnative-v${LABEL}.ipk"
-          cp raw/com.beb.plxnative.nightly_*_arm.ipk "dist/$ipk"
+          cp raw/com.sostk.nativejelly.nightly_*_arm.ipk "dist/$ipk"
           ( cd dist && sha256sum "$ipk" > nightly.sha256 )
           # The LGPL corresponding source for the bundled FFmpeg — required here for the same
           # reason as a stable release: this package redistributes FFmpeg, so it owes the source

@@ -256,8 +256,8 @@ mod private_log_tests {
         }
 
         let mut sink = Sink::default();
-        write_log_line(&mut sink, "install: id=com.beb.plxnative.debug").unwrap();
+        write_log_line(&mut sink, "install: id=com.sostk.nativejelly.debug").unwrap();
         assert_eq!(sink.calls, 1);
-        assert_eq!(sink.bytes, b"install: id=com.beb.plxnative.debug\n");
+        assert_eq!(sink.bytes, b"install: id=com.sostk.nativejelly.debug\n");
     }
 }

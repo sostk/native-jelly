@@ -715,7 +715,7 @@ pub(crate) const EVENT_SPECS: &[EventSpec] = &[
 pub(crate) const CONTEXT_SPECS: &[F] = &[
     F {
         key: "app_version",
-        domain: "the PlxNative package version",
+        domain: "the Native Jelly package version",
     },
     F {
         key: "webos_release",

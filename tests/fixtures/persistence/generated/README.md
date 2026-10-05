@@ -14,6 +14,11 @@ were applied to produce them; nothing else in those trees was changed. All value
 | `v0.6.6-json-store/` | `v0.6.6` | the 0.6.0 session and the 0.6.5 decision migrated by 0.6.6's host `session::load` and `telemetry::persistence::load` |
 | `v0.6.6-db8-record.json` | `v0.6.6` | 0.6.6's storage-helper backend (ACL tier, webOS 4) committing `SessionComplete` and `ConsentComplete` for the same data; the DB8 object it put |
 
+One edit was made after generation: the DB8 record's `_kind` was re-pointed from
+`com.beb.plxnative.storage:1` to `com.sostk.nativejelly.storage:1` when the app id changed, so the
+fixture still names the kind this build's helper owns. Everything else in it is as 0.6.6 wrote it.
+`generators.patch` keeps the old id, because it is applied to the upstream tags.
+
 To produce `v0.6.6-db8-record.json` the generator mounts 0.6.6's `storage_service/backend.rs` into
 the library test build, which needs one import path changed (`crate::state` to `super::state`) as
 0.7 does. The patch shows it.
