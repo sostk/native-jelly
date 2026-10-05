@@ -1057,6 +1057,47 @@ pub(crate) fn set_audio_enhancements(enhancements: crate::plex::AudioEnhancement
     })
 }
 
+/// The extension key the Jellyfin sign-in (`jf::store::Stored`) is kept under. Extensions travel
+/// in the PROTECTED half ([`split_canonical`]), so the server token reaches the DB8 helper the
+/// Plex credentials use — the one store an unrooted television is known to keep. Its own file
+/// (`paths::jellyfin_candidates`) lands only in the `/tmp` runtime root on such a set, and that
+/// is gone after the TV powers off.
+const JELLYFIN_EXTENSION: &str = "jellyfin";
+
+pub(crate) fn jellyfin_sign_in(s: &Session) -> Option<&Value> {
+    s.extensions.0.get(JELLYFIN_EXTENSION)
+}
+
+/// Keep (`Some`) or forget (`None`) the Jellyfin sign-in in the record, read-modify-write under
+/// [`IO`] like [`update`]. Keeping one is a fresh sign-in and takes that authority: a routine
+/// write on newer firmware demands Keymanager and fails closed, and a sign-in nobody can read
+/// back next launch is the failure this exists to end. Returns whether the record holds the
+/// answer afterwards — `false` with nothing readable on disk (no `client_id`) or a failed write.
+pub(crate) fn set_jellyfin_sign_in(value: Option<Value>) -> bool {
+    let _io = io();
+    if cache_revoked() { return false; }
+    let read = std::sync::Arc::new(read_live_locked());
+    let cur = session_of(&read);
+    if cache_revoked() { return false; }
+    if cur.client_id.is_empty() || jellyfin_sign_in(&cur) == value.as_ref() {
+        let held = !cur.client_id.is_empty();
+        install_locked(read);
+        return held;
+    }
+    let mut next = (*cur).clone();
+    let authority = match value {
+        Some(value) => {
+            next.extensions.0.insert(JELLYFIN_EXTENSION.into(), value);
+            SaveAuthority::FreshReauthentication
+        }
+        None => {
+            next.extensions.0.remove(JELLYFIN_EXTENSION);
+            SaveAuthority::Routine
+        }
+    };
+    save_locked_with_authority(&next, authority).outcome.persisted()
+}
+
 /// Original-stream routing policy. A forced route may never create a compatible fallback.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

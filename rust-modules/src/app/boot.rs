@@ -782,7 +782,7 @@ pub(crate) unsafe fn construct(
     // token, no plex.tv — under its own seat. The injected token still wins, as it does over a
     // stored Plex session, so automation never runs as whoever signed in on this television.
     let jf_stored = (!controlled && !forced_login && dev_token.is_empty())
-        .then(crate::jf::store::load).flatten()
+        .then(|| crate::jf::store::load(&session)).flatten()
         .and_then(|s| s.origin().map(|origin| (origin, s)));
     if let Some((origin, stored)) = &jf_stored {
         crate::jf::seat::register_with(origin, stored.seat());

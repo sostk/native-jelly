@@ -1,13 +1,16 @@
 //! **The Jellyfin sign-in this install keeps**: which server, and the access token it minted for
-//! this television. One file (`paths::jellyfin_candidates`), written 0600 through the same atomic
-//! door as the session file, read once at boot and replaced on every sign-in.
+//! this television. Kept inside the session record (`session::set_jellyfin_sign_in`), so on a
+//! television it reaches the DB8 helper with the Plex credentials; read once at boot and replaced
+//! on every sign-in. Its own file (`paths::jellyfin_candidates`, 0600, the session file's atomic
+//! door) is the fallback for a record that cannot take it, and the one earlier builds wrote.
 //!
 //! The process also holds the live copy ([`current`]), because the account chip and the sign-out
-//! path ask "who is signed in" every frame and must not read a file to answer it. Only [`load`]
-//! and [`set_live`] change it, so a test that never calls them sees nobody signed in. The file
+//! path ask "who is signed in" every frame and must not read storage to answer it. Only [`load`]
+//! and [`set_live`] change it, so a test that never calls them sees nobody signed in. The storage
 //! half ([`persist`], [`erase`]) is IO and belongs on the storage worker.
 use super::auth::SignedIn;
 use super::seat::Seat;
+use crate::plex::session::Session;
 use crate::plex::Origin;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -93,17 +96,26 @@ fn candidates() -> Vec<PathBuf> {
     plx_base::paths::jellyfin_candidates()
 }
 
-/// Read the stored sign-in (the first candidate that holds a usable one) and make it [`current`].
-pub fn load() -> Option<Stored> {
-    let s = load_from(&candidates());
+/// Read the stored sign-in — the one `session` (the record boot just loaded) carries, else the
+/// first file candidate holding a usable one — and make it [`current`].
+pub fn load(session: &Session) -> Option<Stored> {
+    let s = from_session(session).or_else(|| load_from(&candidates()));
     set_live(s.clone());
     s
 }
 
-/// Write `s` to the first candidate that takes it. `false` when none did: the sign-in still holds
-/// for this run, it just will not survive a restart.
+/// Keep `s` in the session record, else in the first file candidate that takes it. `false` when
+/// neither did: the sign-in still holds for this run, it just will not survive a restart.
 pub fn persist(s: &Stored) -> bool {
-    let ok = save_to(&candidates(), s);
+    let in_record = serde_json::to_value(s).is_ok_and(|v| crate::plex::session::set_jellyfin_sign_in(Some(v)));
+    let ok = if in_record {
+        // A file copy left behind would be one more token at rest, and stale at the next sign-in.
+        forget_at(&candidates());
+        true
+    } else {
+        plx_base::eventlog::log("jf: the session record did not take the sign-in — trying its own file");
+        save_to(&candidates(), s)
+    };
     if !ok {
         plx_base::eventlog::log("jf: the sign-in could not be saved — it lasts until the app closes");
     }
@@ -112,7 +124,13 @@ pub fn persist(s: &Stored) -> bool {
 
 /// Remove every stored copy.
 pub fn erase() {
+    let _ = crate::plex::session::set_jellyfin_sign_in(None);
     forget_at(&candidates());
+}
+
+fn from_session(session: &Session) -> Option<Stored> {
+    let value = crate::plex::session::jellyfin_sign_in(session)?;
+    serde_json::from_value::<Stored>(value.clone()).ok().filter(Stored::usable)
 }
 
 fn load_from(paths: &[PathBuf]) -> Option<Stored> {
@@ -194,6 +212,36 @@ mod tests {
         assert!(save_to(&paths, &fresh));
         assert_eq!(load_from(&paths).unwrap().token, "tok");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_sign_in_kept_in_the_session_record_survives_a_reload_and_goes_with_erase() {
+        use crate::plex::session;
+        let _g = plx_base::testlock::serial();
+        let t = session::TempSession::new("jf-store");
+        let s = Stored::new(&Origin::parse("http://10.0.0.2:8096").unwrap(), &signed_in());
+        assert!(session::set_jellyfin_sign_in(Some(serde_json::to_value(&s).unwrap())));
+        let on_disk: serde_json::Value = serde_json::from_slice(&std::fs::read(t.path()).unwrap()).unwrap();
+        assert_eq!(on_disk["client_id"], "cid-test", "the rest of the record is kept");
+        assert_eq!(on_disk["jellyfin"]["token"], "tok");
+        assert_eq!(from_session(&session::load()), Some(s.clone()));
+        assert!(session::set_jellyfin_sign_in(Some(serde_json::to_value(&s).unwrap())),
+            "the same sign-in again is already held");
+        assert!(session::set_jellyfin_sign_in(None));
+        assert!(from_session(&session::load()).is_none());
+        let on_disk: serde_json::Value = serde_json::from_slice(&std::fs::read(t.path()).unwrap()).unwrap();
+        assert!(on_disk.get("jellyfin").is_none());
+    }
+
+    #[test]
+    fn a_record_with_nothing_readable_does_not_take_a_sign_in() {
+        use crate::plex::session;
+        let _g = plx_base::testlock::serial();
+        let _t = session::TempSession::new("jf-store-empty");
+        session::save(&session::Session::default());
+        let s = Stored::new(&Origin::parse("http://10.0.0.2:8096").unwrap(), &signed_in());
+        assert!(!session::set_jellyfin_sign_in(Some(serde_json::to_value(&s).unwrap())),
+            "without a client_id the record may be a session that failed to read");
     }
 
     #[test]
