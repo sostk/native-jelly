@@ -816,9 +816,10 @@ def check_tracked_resources(expect_title: str) -> list:
         check(bool(desc.strip()) and desc != english,
               f"{loc}/appinfo.json appDescription is present and actually translated")
         # The English sentence is a trademark disclaimer. A translation that transliterated the
-        # mark ("플렉스") would both lose the disclaimer's force and misuse it, and no reader of
+        # mark ("젤리핀") would both lose the disclaimer's force and misuse it, and no reader of
         # this repository is placed to catch that by eye in twelve languages.
-        check("Plex" in desc, f"{loc}/appinfo.json names Plex verbatim (the disclaimer's subject)")
+        check("Jellyfin" in desc,
+              f"{loc}/appinfo.json names Jellyfin verbatim (the disclaimer's subject)")
     return locales
 
 
@@ -1095,8 +1096,12 @@ BUILD = build_configuration(STAMP_TEXT)
 # documented one that stopped shipping still fails. Whether a RELEASE build really dropped them is
 # the separate, narrower check below.
 DEV_ONLY_SONAMES = {"libswscale-plx.so.10"}   # the dev capture stream's scaler; RELEASE=1 drops it
+# ARM objects only: `make sim-linux` stages its x86-64 libass (libass-plx-host.so.0) in pkg/ too,
+# and that one never enters an ipk.
+EM_ARM = 40
 shipped = {p.name for p in (ROOT / "pkg").glob("*.so.*")
-           if p.is_file() and p.read_bytes()[:4] == b"\x7fELF"}
+           if p.is_file() and (head := p.read_bytes()[:20])[:4] == b"\x7fELF"
+           and int.from_bytes(head[18:20], "little") == EM_ARM}
 if shipped:
     named = set(re.findall(r"`(lib[a-z]+-plx\.so\.\d+)`", (ROOT / "THIRD-PARTY-NOTICES.md").read_text()))
     distributed = shipped - DEV_ONLY_SONAMES

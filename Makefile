@@ -857,12 +857,15 @@ STORAGE_TDIR = $(RUST_TDIR)-storage
 # "no app library" line.
 STORAGE_INPUTS := $(shell find rust-modules/storage rust-modules/build_support rust-modules/platform/src/storage_service -type f 2>/dev/null) rust-modules/platform/src/storage/state.rs rust-modules/.cargo/config.toml
 STORAGE_BIN = rust-modules/$(STORAGE_TDIR)/$(RUST_TARGET)/release/plxnative-storage
+# An x86_64-Linux nightly hands its own rust-lld to the NDK gcc (`-fuse-ld=lld`). The link must
+# stay the NDK's GNU ld: check-link-evidence.py reads a GNU map, and the app is linked by it too.
+STORAGE_LINKER_FLAGS = -Z unstable-options -C linker-features=-lld
 pkg/plxnative-storage: LICENSE $(STORAGE_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock ci/install-identities.json Makefile ci/arm-cc.py ci/check-link-evidence.py
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" $(RUST_ENV) \
 	  CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABI_LINKER='$(CC)' \
 	  cargo +$(RUST_NIGHTLY) rustc --release --target $(RUST_TARGET) \
 	    -p plxnative-storage --bin plxnative-storage --target-dir $(STORAGE_TDIR) --no-default-features -- \
-	    -C link-arg=--sysroot=$(SYSROOT) -L native=$(SYSROOT)/usr/lib \
+	    $(STORAGE_LINKER_FLAGS) -C link-arg=--sysroot=$(SYSROOT) -L native=$(SYSROOT)/usr/lib \
 	    -C link-arg=-Wl,-rpath-link,$(SYSROOT)/usr/lib -C link-arg=-Wl,--build-id=sha1
 	cp $(STORAGE_BIN) $@
 	chmod 755 $@
