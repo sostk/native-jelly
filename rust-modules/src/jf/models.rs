@@ -293,7 +293,12 @@ pub struct PlaybackInfoResponse {
     pub error_code: Option<String>,
 }
 
-/// `POST /Sessions/Playing{,/Progress,/Stopped}` body. Serialized, never read.
+/// `POST /Sessions/Playing{,/Progress,/Stopped}` body — `PlaybackStartInfo` on the first report and
+/// `PlaybackProgressInfo` after. Serialized, never read.
+///
+/// Deliberately NOT here: `TranscodingInfo`. Neither DTO carries it — the server builds the
+/// dashboard's transcoding read-out from the ffmpeg job the client's stream request started, and a
+/// client that tried to report one would be stating something it is not the authority on.
 #[derive(Debug, Default, Clone, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PlaybackReport {
@@ -309,6 +314,25 @@ pub struct PlaybackReport {
     pub subtitle_stream_index: Option<i64>,
     /// `DirectPlay | DirectStream | Transcode`.
     pub play_method: String,
+    /// UTC ticks at which this playback began. The server keeps it to attribute the session's
+    /// duration; re-deriving it per report would make every report claim a different start.
+    ///
+    /// Optional, and the three fields below it are too, for one reason: every one of them is an
+    /// enum or an instant the server parses, so an unset field has to be ABSENT rather than sent
+    /// as `0` or `""` — a default-constructed report must not date the session to the year 1 or
+    /// name a repeat mode that does not exist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playback_start_time_ticks: Option<i64>,
+    /// `Default | OneTrack | Shuffle`. This client plays a queue in order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playback_order: Option<&'static str>,
+    /// `RepeatNone | RepeatAll | RepeatOne`. No repeat control is offered yet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat_mode: Option<&'static str>,
+    /// The queue position this playback occupies, when the caller knows it. Omitted rather than
+    /// sent empty, because an empty string is a position the server would try to resolve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playlist_item_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<bool>,
 }
@@ -345,5 +369,29 @@ mod tests {
         let s = serde_json::to_string(&r).unwrap();
         assert!(s.contains("\"ItemId\":\"x\"") && s.contains("\"PositionTicks\":10"), "{s}");
         assert!(!s.contains("AudioStreamIndex") && !s.contains("Failed"), "{s}");
+        // An unset enum or instant is absent, never `""`/`0`: the server parses these, and a
+        // year-1 start or a nameless repeat mode is a body it would reject.
+        for absent in ["PlaybackStartTimeTicks", "PlaybackOrder", "RepeatMode", "PlaylistItemId"] {
+            assert!(!s.contains(absent), "{absent} should be omitted when unset: {s}");
+        }
+    }
+
+    #[test]
+    fn a_populated_report_names_the_queue_position_and_the_dotnet_start_instant() {
+        let r = PlaybackReport {
+            item_id: "x".into(),
+            play_method: "DirectStream".into(),
+            playback_start_time_ticks: Some(637_134_336_000_000_000),
+            playback_order: Some("Default"),
+            repeat_mode: Some("RepeatNone"),
+            playlist_item_id: Some("3".into()),
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(s.contains("\"PlayMethod\":\"DirectStream\""), "{s}");
+        assert!(s.contains("\"PlaybackStartTimeTicks\":637134336000000000"), "{s}");
+        assert!(s.contains("\"PlaybackOrder\":\"Default\""), "{s}");
+        assert!(s.contains("\"RepeatMode\":\"RepeatNone\""), "{s}");
+        assert!(s.contains("\"PlaylistItemId\":\"3\""), "{s}");
     }
 }

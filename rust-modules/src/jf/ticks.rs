@@ -26,6 +26,23 @@ pub fn to_secs(ticks: i64) -> i64 {
     ticks.max(0) / TICKS_PER_SECOND
 }
 
+/// Ticks from .NET's epoch (0001-01-01T00:00:00Z) to the Unix one (1970-01-01T00:00:00Z).
+///
+/// `PlaybackStartTimeTicks` is a `DateTime.UtcNow.Ticks`, which counts from the year 1 — not from
+/// 1970. Sending a bare Unix timestamp in ticks dates every session to the second century and the
+/// server's session duration comes out two millennia wrong.
+const UNIX_EPOCH_TICKS: i64 = 621_355_968_000_000_000;
+
+/// Now, as the `DateTime.UtcNow.Ticks` the session reports carry. Before 1970 (an unset clock) it
+/// clamps to the Unix epoch rather than reporting a negative instant the server cannot parse.
+pub fn now_utc() -> i64 {
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() / 100)
+        .unwrap_or(0);
+    UNIX_EPOCH_TICKS.saturating_add(i64::try_from(since_epoch).unwrap_or(i64::MAX - UNIX_EPOCH_TICKS))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -49,5 +66,15 @@ mod tests {
         assert_eq!(to_ms(-1), 0);
         assert_eq!(from_ms(-5), 0);
         assert_eq!(from_ms(i64::MAX), i64::MAX);
+    }
+
+    #[test]
+    fn utc_now_is_counted_from_the_dotnet_epoch_not_the_unix_one() {
+        // 2020-01-01T00:00:00Z is 637_134_336_000_000_000 .NET ticks; anything near the Unix
+        // epoch's own tick count would be a date in the year 1970 BC as far as the server is
+        // concerned.
+        let now = now_utc();
+        assert!(now > 637_134_336_000_000_000, "ticks {now} predate 2020");
+        assert_eq!(UNIX_EPOCH_TICKS / TICKS_PER_SECOND, 62_135_596_800, "1970 is 62135596800s after year 1");
     }
 }

@@ -1,15 +1,30 @@
-//! Playback against Jellyfin, answered in the shape the route layer already reads.
+//! Playback against Jellyfin: the `POST /Items/{id}/PlaybackInfo` negotiation, the URL it yields,
+//! and the session reports that follow.
 //!
-//! PMS adjudicates a play with `/video/:/transcode/universal/decision`; Jellyfin with
-//! `POST /Items/{id}/PlaybackInfo` and a DeviceProfile. Each decision here asks PlaybackInfo and
-//! synthesizes the PMS verdict container the route grades — `generalDecisionCode`,
-//! `Part.decision` (`directplay`/`transcode`), and the per-stream `decision`/`codec` pair whose
-//! codecs are the transcode OUTPUT (`route::plan::decision_codecs`).
+//! **The protocol this implements is Jellyfin's own.** A client states what it can decode as a
+//! `DeviceProfile`; the server answers per media source with `SupportsDirectPlay`,
+//! `SupportsDirectStream` and `SupportsTranscoding`, plus a `TranscodingUrl` when it would convert
+//! and `TranscodeReasons` saying why. The three outcomes are the documented `PlayMethod` values:
 //!
-//! What PMS keeps server-side under a session id (the registered decision, the selected tracks)
-//! Jellyfin hands back as a `PlaySessionId` and a `TranscodingUrl`, so this module keeps them in a
-//! table keyed by the app's own session string: the start URL, the progress reports and the stop
-//! all read the row the decision wrote.
+//! * `DirectPlay` — the file's own bytes, `GET /Videos/{id}/stream.{ext}?static=true`.
+//! * `DirectStream` — the video is copied; the container and/or audio change. Jellyfin's docs call
+//!   a both-streams-copied variant "Remux" and an audio-only conversion "Direct Stream", but the
+//!   wire enum has one value for both, so anything with the video copied reports as `DirectStream`.
+//! * `Transcode` — the video is re-encoded.
+//!
+//! `PlaySessionId` is the server's handle for the negotiated playback. Everything after the
+//! decision is keyed by it: the start URL, `/Sessions/Playing{,/Progress,/Stopped}`, and — since
+//! 12.0 has no `/Videos/ActiveEncodings` route — ending the encoder. The decision stores that id
+//! (and the source id and track indexes it resolved) in a table keyed by the app's own session
+//! string, so the later calls report the same playback the server registered.
+//!
+//! **Why the return type is a `plex::MediaContainer`.** This module is the Jellyfin half of a
+//! facade whose other half talks to Plex Media Server, and the shared routing layer
+//! (`route::plan::build_stream`) grades one decision shape for both. So each decision below ends
+//! by translating Jellyfin's answer into that shape — a `Part.decision` of `directplay` or
+//! `transcode` and a per-lane `decision`/`codec` pair carrying the OUTPUT codecs. The translation
+//! is confined to [`verdict`] and [`decision_stream`]; everything above them is Jellyfin's
+//! protocol as documented.
 use super::models::*;
 use super::{api::Jf, convert, ids, ticks};
 use crate::plex::{
@@ -20,25 +35,50 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-/// No bound in practice — what direct play and a remux advertise (PMS's `NATIVE_4K` rate is a
-/// cap only on the re-encode branch, and so is this).
+/// The bitrate bound to advertise when the user has asked for no ceiling.
+///
+/// `DeviceProfile.MaxStaticBitrate` defaults to 8 Mbit/s on the server, which would refuse direct
+/// play of any remux — so an unconstrained ask has to state its own, and on the LAN this app is
+/// built for there is no honest bound to state. A ceiling the user DID pick is applied to both
+/// rates (see [`device_profile`]), which is what makes a low rung mean something for the original
+/// file as well as for the re-encode.
 const UNBOUNDED_BPS: i64 = 200_000_000;
-/// PMS's "Direct play OK." / "Neither direct play nor conversion is available." codes.
+/// Decision codes for the shared routing layer's verdict container (see the module doc): playable,
+/// and "neither direct play nor conversion is available".
 const DECISION_OK: i64 = 1000;
 const DECISION_UNPLAYABLE: i64 = 2000;
+
+/// `PlayMethod`, the three values 12.0's API defines. Reported on every session report, and read
+/// back by [`Jf::transcode_stop`] to know whether there is an encoder to end.
+const DIRECT_PLAY: &str = "DirectPlay";
+const DIRECT_STREAM: &str = "DirectStream";
+const TRANSCODE: &str = "Transcode";
+
+/// Which `PlayMethod` a decision landed on, from the two facts that decide it: the server offered
+/// the file as-is, or the video lane is copied into a new container/audio pairing.
+fn play_method(direct_play: bool, video_copied: bool) -> &'static str {
+    match (direct_play, video_copied) {
+        (true, _) => DIRECT_PLAY,
+        (false, true) => DIRECT_STREAM,
+        (false, false) => TRANSCODE,
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 struct Session {
     item_guid: String,
     media_source_id: String,
     play_session_id: String,
-    /// `DirectPlay | Transcode`.
+    /// `DirectPlay | DirectStream | Transcode`.
     play_method: &'static str,
     transcoding_url: String,
     audio_index: Option<i64>,
     subtitle_index: Option<i64>,
     /// `/Sessions/Playing` has been sent; later reports are `/Progress`.
     started: bool,
+    /// `PlaybackStartTimeTicks` — UTC of the first report for this playback, held so every later
+    /// report states the same start rather than re-deriving a drifting one.
+    start_time_ticks: i64,
 }
 
 fn sessions() -> &'static Mutex<HashMap<String, Session>> {
@@ -78,19 +118,27 @@ fn jf_audio(c: &str) -> &str {
     if c == "dca" { "dts" } else { c }
 }
 
-/// Subtitle formats Original renders itself, in Jellyfin's spelling (`pgssub`, `dvdsub`, …).
+/// Subtitle formats the client draws itself out of the container, in Jellyfin's spelling. These go
+/// up as `Method: Embed`, which tells the server to leave the track in the stream.
 const EMBED_SUBS: [&str; 10] =
     ["srt", "subrip", "ass", "ssa", "pgssub", "dvdsub", "dvbsub", "mov_text", "webvtt", "vtt"];
+/// Text formats the client can fetch as a sidecar (`Method: External`), so the server neither
+/// muxes them nor burns them in.
 const EXTERNAL_SUBS: [&str; 5] = ["srt", "subrip", "ass", "ssa", "vtt"];
+/// Bitmap subtitles. They have no text representation, so `External` is not available for them and
+/// the only soft delivery is `Embed`; anything else makes the server burn them into the video.
+const IMAGE_SUBS: [&str; 3] = ["pgssub", "dvdsub", "dvbsub"];
 
 pub(crate) struct ProfileAsk {
     /// Offer direct play (and the Embed/External subtitle methods that go with it).
     pub direct: bool,
     /// Strict Original: the software feed's formats, no device limits, no transcode target.
     pub forced: bool,
-    /// The re-encode bound; `None` advertises the panel's own.
+    /// The bound this playback may not exceed; `None` advertises no bound (see [`UNBOUNDED_BPS`]).
     pub ceiling: Option<Ceiling>,
-    /// Burn the selected subtitle (no Embed/External profile on the transcode).
+    /// Burn the selected subtitle into the video. The caller asks for this deliberately — a burn
+    /// is the server's most expensive option and the one the subtitle profiles below exist to
+    /// avoid, so it is never inferred from "a subtitle is selected".
     pub burn: bool,
 }
 
@@ -109,11 +157,18 @@ pub(crate) fn device_profile(caps: &plx_platform::devcaps::Caps, ask: &ProfileAs
     };
     let target_audio: Vec<&str> = ["ac3", "eac3", "aac", "dts"].into_iter().filter(|c| caps.audio_has(c)).collect();
     let (mut w, mut h) = caps.hevc_max;
-    let mut max_bps = UNBOUNDED_BPS;
+    // Both rates, not just the streaming one. `MaxStreamingBitrate` bounds a re-encode;
+    // `MaxStaticBitrate` is what the server weighs direct play against. Leaving the latter
+    // unbounded under an explicit ceiling let a 40 Mbit/s remux direct-play while the user had
+    // asked for "720p · 3 Mbps" — the ask was honoured for the encode branch and silently ignored
+    // for the branch that actually ships the most bytes.
+    let mut max_streaming_bps = UNBOUNDED_BPS;
+    let mut max_static_bps = UNBOUNDED_BPS;
     if let Some(c) = ask.ceiling {
         w = w.min(c.max_w as u32);
         h = h.min(c.max_h as u32);
-        max_bps = c.max_kbps.saturating_mul(1000);
+        max_streaming_bps = c.max_kbps.saturating_mul(1000);
+        max_static_bps = max_streaming_bps;
     }
     let direct_play = if ask.direct {
         vec![json!({
@@ -159,15 +214,28 @@ pub(crate) fn device_profile(caps: &plx_platform::devcaps::Caps, ask: &ProfileAs
             }
         }
     }
+    // `SubtitleProfiles` is how the server is told which deliveries are available, and it picks
+    // `Encode` (a burn, re-encoding video nobody asked to re-encode) only when nothing else fits.
+    // So an EMPTY list is not "no subtitles" — it is a request to burn whichever track the item
+    // defaults to. Offer the soft methods on every ask that is not an explicit burn, including the
+    // transcode ask: a text track delivered as a sidecar keeps the video lane copyable.
     let mut subs = Vec::new();
-    if ask.direct && !ask.burn {
-        subs.extend(EMBED_SUBS.iter().map(|f| json!({ "Format": f, "Method": "Embed" })));
+    if !ask.burn {
+        if ask.direct {
+            // Direct play feeds the container's own bytes, so an embedded track rides along and
+            // the client's renderer draws it.
+            subs.extend(EMBED_SUBS.iter().map(|f| json!({ "Format": f, "Method": "Embed" })));
+        } else {
+            // On a converted stream only the bitmap formats need muxing in — they have no text
+            // form to fetch, and `Embed` is the only delivery that is not a burn.
+            subs.extend(IMAGE_SUBS.iter().map(|f| json!({ "Format": f, "Method": "Embed" })));
+        }
         subs.extend(EXTERNAL_SUBS.iter().map(|f| json!({ "Format": f, "Method": "External" })));
     }
     json!({
         "Name": crate::plex::identity::PRODUCT,
-        "MaxStreamingBitrate": max_bps,
-        "MaxStaticBitrate": UNBOUNDED_BPS,
+        "MaxStreamingBitrate": max_streaming_bps,
+        "MaxStaticBitrate": max_static_bps,
         "DirectPlayProfiles": direct_play,
         "TranscodingProfiles": transcoding,
         "ContainerProfiles": [],
@@ -273,32 +341,55 @@ fn lane_codec(url: &str, list_key: &str, src: Option<&MediaStream>, copied: bool
     }
 }
 
+/// What one PlaybackInfo negotiation asks for, beside the profile.
+struct InfoAsk {
+    /// `EnableDirectPlay` — offer the file's own bytes.
+    direct_play: bool,
+    /// `EnableDirectStream` — offer a container/audio change with the video copied. Defaults to
+    /// true on the server and is the documented middle rung between direct play and a re-encode;
+    /// withdrawing it collapses every container mismatch into a full video transcode.
+    direct_stream: bool,
+    /// `AllowVideoStreamCopy`.
+    allow_video_copy: bool,
+    /// `StartTimeTicks` — where this playback begins, so a conversion the server has to build is
+    /// primed at the resume point rather than at zero.
+    start_ticks: i64,
+    audio_index: Option<i64>,
+    subtitle_index: Option<i64>,
+    /// `AlwaysBurnInSubtitleWhenTranscoding` — overrides the subtitle profiles and forces `Encode`.
+    burn_subtitle: bool,
+}
+
 impl Jf<'_> {
-    fn playback_info(
-        &self,
-        guid: &str,
-        profile: Value,
-        enable_direct: bool,
-        allow_video_copy: bool,
-        start_ticks: i64,
-        audio_index: Option<i64>,
-        subtitle_index: Option<i64>,
-    ) -> Option<PlaybackInfoResponse> {
+    fn playback_info(&self, guid: &str, profile: Value, ask: &InfoAsk) -> Option<PlaybackInfoResponse> {
         let uid = self.user_id()?;
+        // `MaxAudioChannels` is a per-request bound and has no profile equivalent. Without it the
+        // server has no reason to downmix, so a 5.1 or 7.1 track reaches a stereo panel at its own
+        // channel count and the pipeline plays what it can of it.
+        let max_channels = plx_platform::devcaps::caps()
+            .audio_channels
+            .values()
+            .copied()
+            .max()
+            .filter(|&ch| ch > 0);
         let body = json!({
             "UserId": uid,
             "MaxStreamingBitrate": profile["MaxStreamingBitrate"].clone(),
-            "StartTimeTicks": start_ticks,
-            "AudioStreamIndex": audio_index,
-            "SubtitleStreamIndex": subtitle_index.unwrap_or(-1),
+            "MaxAudioChannels": max_channels,
+            "StartTimeTicks": ask.start_ticks,
+            "AudioStreamIndex": ask.audio_index,
+            "SubtitleStreamIndex": ask.subtitle_index.unwrap_or(-1),
             "DeviceProfile": profile,
-            "EnableDirectPlay": enable_direct,
-            "EnableDirectStream": false,
+            "EnableDirectPlay": ask.direct_play,
+            "EnableDirectStream": ask.direct_stream,
             "EnableTranscoding": true,
-            "AllowVideoStreamCopy": allow_video_copy,
+            "AllowVideoStreamCopy": ask.allow_video_copy,
             "AllowAudioStreamCopy": true,
+            // Movies and episodes are static files. `RequiresOpening` is only set for Live TV,
+            // IPTV and in-progress recordings, none of which this client offers, so there is no
+            // live stream to open or close.
             "AutoOpenLiveStream": false,
-            "AlwaysBurnInSubtitleWhenTranscoding": subtitle_index.is_some_and(|i| i >= 0),
+            "AlwaysBurnInSubtitleWhenTranscoding": ask.burn_subtitle,
         });
         self.post(&format!("/Items/{guid}/PlaybackInfo"), &body)
     }
@@ -310,7 +401,17 @@ impl Jf<'_> {
         let sub = (subtitle_stream_id > 0).then(|| ids::stream_index(subtitle_stream_id));
         let caps = plx_platform::devcaps::caps();
         let profile = device_profile(caps, &ProfileAsk { direct: true, forced, ceiling: None, burn: false });
-        let r = self.playback_info(&guid, profile, true, true, 0, audio, sub)?;
+        // Direct stream is offered on the ordinary ask so a container mismatch answers as a video
+        // copy; strict Original withdraws it, because that mode means the file as it is or nothing.
+        let r = self.playback_info(&guid, profile, &InfoAsk {
+            direct_play: true,
+            direct_stream: !forced,
+            allow_video_copy: true,
+            start_ticks: 0,
+            audio_index: audio,
+            subtitle_index: sub,
+            burn_subtitle: false,
+        })?;
         if let Some(e) = r.error_code.as_deref().filter(|e| !e.is_empty()) {
             return Some(refused(rk, e));
         }
@@ -328,13 +429,17 @@ impl Jf<'_> {
             item_guid: guid,
             media_source_id: src.id.clone(),
             play_session_id: r.play_session_id.clone().unwrap_or_default(),
-            play_method: if direct { "DirectPlay" } else { "Transcode" },
+            play_method: play_method(direct, video_copy),
             transcoding_url: url,
             audio_index: audio.or(a.map(|s| s.index)),
             subtitle_index: sub,
             started: false,
+            start_time_ticks: 0,
         });
-        if !direct && !src.supports_transcoding {
+        // `SupportsDirectStream` is the middle rung and counts as playable: the server will copy
+        // the video even where it refuses the file as-is. Only when all three are refused is there
+        // nothing left to play.
+        if !direct && !src.supports_transcoding && !src.supports_direct_stream {
             return Some(refused(rk, "Neither direct play nor conversion is available."));
         }
         let vcodec = v.and_then(|s| s.codec.clone()).unwrap_or_default();
@@ -360,9 +465,24 @@ impl Jf<'_> {
             TranscodeOffset::Fresh => 0,
             TranscodeOffset::AtMicros(us) => us.saturating_mul(10),
         };
+        // A positive `subtitle_stream_id` on the spec IS the request to burn (see `TranscodeSpec`),
+        // so the profile withdraws its soft methods and the request states the override. Both
+        // halves read the same flag: offering `External` while also forcing `Encode` would ask the
+        // server for two different things.
+        let burn = sub.is_some();
         let profile = device_profile(plx_platform::devcaps::caps(),
-            &ProfileAsk { direct: false, forced: false, ceiling, burn: sub.is_some() });
-        let r = self.playback_info(&guid, profile, false, allow_video_copy, start_ticks, audio, sub)?;
+            &ProfileAsk { direct: false, forced: false, ceiling, burn });
+        let r = self.playback_info(&guid, profile, &InfoAsk {
+            direct_play: false,
+            // The route asked for a conversion, and a copied video lane is the cheapest one that
+            // satisfies it. Withdrawing this would force a re-encode even for a bare remux.
+            direct_stream: true,
+            allow_video_copy,
+            start_ticks,
+            audio_index: audio,
+            subtitle_index: sub,
+            burn_subtitle: burn,
+        })?;
         if let Some(e) = r.error_code.as_deref().filter(|e| !e.is_empty()) {
             return Some(refused(spec.rating_key, e));
         }
@@ -383,11 +503,15 @@ impl Jf<'_> {
             item_guid: guid,
             media_source_id: src.id.clone(),
             play_session_id: r.play_session_id.clone().unwrap_or_default(),
-            play_method: "Transcode",
+            // A copied video lane is a `DirectStream`, however it was reached: the route asked for
+            // a conversion, but what the server agreed to produce is what the session must report,
+            // or the dashboard shows a re-encode that is not running.
+            play_method: play_method(false, video_copy),
             transcoding_url: url,
             audio_index: audio.or(a.map(|s| s.index)),
             subtitle_index: sub,
             started: false,
+            start_time_ticks: 0,
         });
         Some(verdict(spec.rating_key, DECISION_OK, "Direct play not available; Conversion OK.", "transcode", vec![
             decision_stream(1, &vcodec, if video_copy { "copy" } else { "transcode" }, v),
@@ -422,14 +546,18 @@ impl Jf<'_> {
         StreamUrl { origin: self.origin().clone(), path: super::url::with_api_key(&path, &self.token()) }
     }
 
-    /// End the server's transcode for `session`: Jellyfin 12 has no ActiveEncodings route, and
-    /// reporting the PlaySessionId stopped is what kills its ffmpeg job.
+    /// End the server's encoder for `session`: Jellyfin 12 has no `/Videos/ActiveEncodings` route,
+    /// and reporting the PlaySessionId stopped is what kills its ffmpeg job.
+    ///
+    /// Every method except `DirectPlay` has such a job — a `DirectStream` remux is still ffmpeg
+    /// copying streams into a new container, and gating this on the literal `Transcode` would
+    /// leave one running for the server's whole idle timeout.
     pub fn transcode_stop(&self, session_key: &str) -> bool {
         let Some(s) = session(session_key) else { return true };
-        if s.play_method != "Transcode" || s.play_session_id.is_empty() {
+        if s.play_method == DIRECT_PLAY || s.play_session_id.is_empty() {
             return true;
         }
-        let ok = self.report("/Sessions/Playing/Stopped", &s, 0, false);
+        let ok = self.report("/Sessions/Playing/Stopped", &s, 0, false, None);
         update_session(session_key, |s| s.started = false);
         ok
     }
@@ -437,7 +565,7 @@ impl Jf<'_> {
     pub fn timeline(&self, r: &TimelineReport) -> bool {
         let mut s = session(r.session).unwrap_or_else(|| Session {
             item_guid: self.guid(r.rating_key).unwrap_or_default(),
-            play_method: "DirectPlay",
+            play_method: DIRECT_PLAY,
             ..Default::default()
         });
         if s.item_guid.is_empty() {
@@ -449,23 +577,47 @@ impl Jf<'_> {
         if r.subtitle_stream_id > 0 {
             s.subtitle_index = Some(ids::stream_index(r.subtitle_stream_id));
         }
+        // Stamped once, on the first report, and carried by every later one. Taken here rather
+        // than at the decision because a decision that never reaches the engine (a refusal, a
+        // superseded resolve) never starts a playback to attribute time to.
+        if s.start_time_ticks == 0 {
+            s.start_time_ticks = ticks::now_utc();
+        }
+        // The queue position, when the caller has one. Sent as `PlaylistItemId` so the server can
+        // place this playback in the queue it was told about; "0" is this protocol's "no position"
+        // and must not be forwarded as one.
+        let playlist_item_id = Some(r.play_queue_item_id)
+            .filter(|id| !id.is_empty() && *id != "0")
+            .map(str::to_string);
         let paused = r.state == TimelineState::Paused;
         match r.state {
             TimelineState::Stopped => {
                 drop_session(r.session);
-                self.report("/Sessions/Playing/Stopped", &s, r.time_ms, paused)
+                self.report("/Sessions/Playing/Stopped", &s, r.time_ms, paused, playlist_item_id)
             }
             _ if !s.started => {
-                let ok = self.report("/Sessions/Playing", &s, r.time_ms, paused);
+                let ok = self.report("/Sessions/Playing", &s, r.time_ms, paused, playlist_item_id);
                 s.started = ok;
                 put_session(r.session, s);
                 ok
             }
-            _ => self.report("/Sessions/Playing/Progress", &s, r.time_ms, paused),
+            _ => {
+                let ok = self.report("/Sessions/Playing/Progress", &s, r.time_ms, paused, playlist_item_id);
+                // The start stamp is this session's and outlives the local copy above.
+                put_session(r.session, s);
+                ok
+            }
         }
     }
 
-    fn report(&self, path: &str, s: &Session, time_ms: i64, paused: bool) -> bool {
+    fn report(
+        &self,
+        path: &str,
+        s: &Session,
+        time_ms: i64,
+        paused: bool,
+        playlist_item_id: Option<String>,
+    ) -> bool {
         let body = PlaybackReport {
             item_id: s.item_guid.clone(),
             media_source_id: s.media_source_id.clone(),
@@ -475,7 +627,11 @@ impl Jf<'_> {
             can_seek: true,
             audio_stream_index: s.audio_index,
             subtitle_stream_index: s.subtitle_index,
-            play_method: if s.play_method.is_empty() { "DirectPlay".into() } else { s.play_method.into() },
+            play_method: if s.play_method.is_empty() { DIRECT_PLAY.into() } else { s.play_method.into() },
+            playback_start_time_ticks: (s.start_time_ticks > 0).then_some(s.start_time_ticks),
+            playback_order: Some("Default"),
+            repeat_mode: Some("RepeatNone"),
+            playlist_item_id,
             failed: None,
         };
         self.post_ok(path, Some(&body))
@@ -531,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn the_direct_profile_advertises_what_the_pms_profile_does() {
+    fn the_direct_profile_advertises_the_panels_own_decode_limits() {
         let p = device_profile(&caps(), &ProfileAsk { direct: true, forced: false, ceiling: None, burn: false });
         let dp = &p["DirectPlayProfiles"][0];
         assert_eq!(dp["VideoCodec"], "h264,hevc");
@@ -548,13 +704,45 @@ mod tests {
     }
 
     #[test]
-    fn a_ceiling_bounds_the_encode_and_a_burn_drops_the_soft_methods() {
+    fn a_ceiling_bounds_the_original_file_as_well_as_the_encode() {
         let c = Ceiling { max_kbps: 4000, max_w: 1280, max_h: 720 };
         let p = device_profile(&caps(), &ProfileAsk { direct: false, forced: false, ceiling: Some(c), burn: true });
         assert_eq!(p["MaxStreamingBitrate"], 4_000_000);
+        // The whole point: an explicit ask the direct-play branch cannot ignore.
+        assert_eq!(p["MaxStaticBitrate"], 4_000_000);
         assert_eq!(p["CodecProfiles"][0]["Conditions"][0]["Value"], "1280");
         assert!(p["DirectPlayProfiles"].as_array().unwrap().is_empty());
-        assert!(p["SubtitleProfiles"].as_array().unwrap().is_empty());
+        assert!(p["SubtitleProfiles"].as_array().unwrap().is_empty(), "a burn withdraws every soft method");
+    }
+
+    #[test]
+    fn no_ceiling_leaves_both_rates_unbounded() {
+        let p = device_profile(&caps(), &ProfileAsk { direct: true, forced: false, ceiling: None, burn: false });
+        assert_eq!(p["MaxStreamingBitrate"], UNBOUNDED_BPS);
+        assert_eq!(p["MaxStaticBitrate"], UNBOUNDED_BPS);
+    }
+
+    #[test]
+    fn a_conversion_still_offers_the_soft_subtitle_methods() {
+        let p = device_profile(&caps(), &ProfileAsk { direct: false, forced: false, ceiling: None, burn: false });
+        let subs = p["SubtitleProfiles"].as_array().unwrap();
+        assert!(!subs.is_empty(), "an empty list asks the server to burn the item's default track");
+        // Text travels as a sidecar, so the video lane stays copyable...
+        assert!(subs.iter().any(|s| s["Format"] == "srt" && s["Method"] == "External"));
+        // ...and a bitmap track, which has no text form, is muxed rather than burned.
+        assert!(subs.iter().any(|s| s["Format"] == "pgssub" && s["Method"] == "Embed"));
+        // `External` is not available for a bitmap format.
+        assert!(!subs.iter().any(|s| s["Format"] == "pgssub" && s["Method"] == "External"));
+    }
+
+    #[test]
+    fn the_play_method_is_one_of_the_three_the_api_defines() {
+        assert_eq!(play_method(true, true), "DirectPlay");
+        assert_eq!(play_method(true, false), "DirectPlay");
+        // A copied video lane is a remux or an audio-only conversion. The wire enum has one value
+        // for both, and it is not `Transcode`.
+        assert_eq!(play_method(false, true), "DirectStream");
+        assert_eq!(play_method(false, false), "Transcode");
     }
 
     #[test]
@@ -584,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn the_verdict_is_the_shape_the_route_grades() {
+    fn the_verdict_is_the_shape_the_shared_route_layer_grades() {
         let mc = verdict("7", DECISION_OK, "ok", "directplay", vec![
             decision_stream(1, "hevc", "copy", None),
             decision_stream(2, "dts", "copy", None),
