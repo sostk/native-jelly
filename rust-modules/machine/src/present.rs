@@ -73,7 +73,7 @@ pub enum PresentEvent {
     Fault(Fault),
 }
 
-/// The keepalive: a settled screen still presents at least this often (`plx_machine::idle`'s bound).
+/// The keepalive: a settled screen still presents at least this often (`nj_machine::idle`'s bound).
 pub const KEEPALIVE_MS: u32 = 2000;
 
 /// Whose springs are reporting (§4.4 `MotionScope`, structural): the dispatcher sets the scope
@@ -209,7 +209,7 @@ mod tests {
     /// main thread's `take` consumes the wake exactly once.
     #[test]
     fn a_worker_wakes_the_present_gate_through_the_one_door() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         super::clear_worker_wake();
         let mut p = super::Present::global();
         assert!(p.take(0), "the first frame always draws");

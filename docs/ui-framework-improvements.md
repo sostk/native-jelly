@@ -39,7 +39,7 @@ cap-band text contract are real and load-bearing.
    for clicks (`app.rs:1365`) though the key path is modal for all three (`:948`, `:967`, `:1014`).
    A click on the Info card's "Go to Show" starts a blind scrub-seek. *(Verified by hand.)*
 3. **The frame has two hand-copied tails** (`app.rs:1993`, `:2030` are the only `SDL_GL_SwapWindow`
-   sites) and they diverged: `/tmp/plxnative-framedrop` timings are collected at `app.rs:1967/1969`
+   sites) and they diverged: `/tmp/nativejelly-framedrop` timings are collected at `app.rs:1967/1969`
    and thrown away by the `continue` at `:2006`. The documented judder tool is **dead on the player
    route**.
 
@@ -336,7 +336,7 @@ lacks, and `return`ing out of `Grid::draw` entirely on `if r >= nh`.
 **After** — one loop, the lift declared in place:
 
 ```rust
-for c in 0..crate::pms::hub_len(r) {
+for c in 0..crate::catalog_fetch::hub_len(r) {
     let m = movie_at(r as c_int, c as c_int);
     let x = MARGIN_X + c as f32 * (CARD_W + GAP) - self.eff_scroll(r, env.sp);
     let focused = r == env.fr as usize && c == env.fc as usize && env.sp > 0.5;
@@ -492,7 +492,7 @@ Effort: **S** ≤ ~30 lines / one file; **M** one screen or a small cross-cut; *
 | B8 | **Two clamps on Home's focused column disagree**: draw clamps to `MAX_ITEMS-1`, `col()` (which OK dispatch uses) does not. Zero headroom — the max hub is exactly 24. Live sibling: detail's Cast row is uncapped, so past index 23 focus magnification silently stops. | `home.rs:666` vs `:55-57`; writes at `:570/593/612/640`; `card_row.rs:129-131`; `metadata.rs:237-241` | `CardRow::scale` → `.get(i).map(..).unwrap_or(1.0)`; bound `fc` at the five sites. Host-test a pure `col_of(fc, hub_len)`. | S |
 | B9 | **CJK has no line breaking.** `wrap_uncached` splits on `split_whitespace()`, so a space-less script yields one "word" and the over-wide safety net at `:154-159` ellipsizes it to **one line** where Latin gets 3-5. *(verified by hand)* | `text_view.rs:123`, `:151-159` | A break-opportunity test on CJK codepoint ranges inside `wrap_uncached` — ~15 lines, no perf cost (the wrap is memoized). RTL/bidi and Arabic shaping are out of reach on SDL2_ttf without HarfBuzz — **name that as a known limitation** in `ui/CLAUDE.md` rather than leaving it silently absent. | S |
 | B10 | **Poster texture memory has no byte budget and no failure path.** 64 slots evicted by *slot count*, with sizes spanning 130× — 250×375 posters (375 KB) up to a 1920×1080 backdrop (8.3 MB). Worst case is hundreds of MB of GL texture with no accounting; `upload_rgba` never checks `glGetError`. | `posters.rs:24`, `:179-188`, `:46`; `gfx.rs:556-570`; `detail.rs:660` vs `home.rs:293` | Shrink detail's backdrop request first (−55% upload/transcode/decode), then a byte-budgeted LRU — `px` is already tracked per slot, so it's ~20 lines. This is what keeps a 4-library server from OOMing. | S |
-| B11 | **The player HUD owns none of its state** — focus/btn/tab/dismissed plus a 7-variable scrub machine live as `plex_run` locals, touched at 15+ sites, reset in three ad-hoc places. | `app.rs:475-487`, `:1981`; resets at `:792`, `:1727`, `:1829-1832` | **Phase A only:** move the four pure-UI locals into `player_hud` statics behind accessors (`info_panel.rs:24-25` is the template); add `player_hud::reset()`. Leave the scrub machine — it belongs beside the atomics in `player/shared.rs:181-184`. | M |
+| B11 | **The player HUD owns none of its state** — focus/btn/tab/dismissed plus a 7-variable scrub machine live as `nj_run` locals, touched at 15+ sites, reset in three ad-hoc places. | `app.rs:475-487`, `:1981`; resets at `:792`, `:1727`, `:1829-1832` | **Phase A only:** move the four pure-UI locals into `player_hud` statics behind accessors (`info_panel.rs:24-25` is the template); add `player_hud::reset()`. Leave the scrub machine — it belongs beside the atomics in `player/shared.rs:181-184`. | M |
 | B12 | **The `View` trait is vestigial.** 4 home types + 6 widget leaves implement it; `layout` is overridden **exactly once** (`home.rs:454`). detail, library, profiles, login, track_menu, info_panel, chapters_panel and player_hud are all free `pub fn draw()`. `mod.rs:1-7` and `docs/ui-framework.md` describe a retained tree ~60% of screens don't participate in. | as cited | Either finish it or delete it — but decide, in the same commit as A8. Given `compose_frame` calls eight free functions happily, deleting is the honest answer. | S |
 
 ## Tier C — only if it starts hurting
@@ -505,7 +505,7 @@ verbatim**; invariant #9 is byte-identical motion). `C3` controls hard-cut betwe
 `C4` `elide` clones a `String` on every cache hit. `C5` `tabs_layout` rebuilds a `Vec<CString>` up to
 twice per frame. `C6` poster resolve does 2 allocs + a mutex + a 64-slot byte-walk per tile per
 frame. `C7` `poster_pump(3)` budgets by slot count though slots vary 130× in cost. `C8` `anim::probe`
-covers 6 of 21 springs (and `plxnative-anim.log` is missing from `DIAG`). `C9` `ScrollColumn` computes
+covers 6 of 21 springs (and `nativejelly-anim.log` is missing from `DIAG`). `C9` `ScrollColumn` computes
 the flow twice — but note `Column::height` for detail reaches `ep_meta_h()`, which fingerprints 4
 fields per call and on a miss re-measures every episode, so "make draw call `child_top`" turns 6
 `height()` calls into 21 on exactly the frame no FPS scene covers. Measure first.
@@ -521,7 +521,7 @@ decision. They are commits 1-5 below.
 **The harness is a prerequisite for two commits, not eight.** Because `(Content,0)` stays immediate
 (§1.4), the mechanism commit is inert *by construction* rather than by pixel-proof. Only two later
 commits genuinely move or risk pixels: the Home one-loop rewrite and the Library chrome flip. Build
-the harness before *those* — a `/tmp/plxnative-freeze` trigger pinning every spring at its target
+the harness before *those* — a `/tmp/nativejelly-freeze` trigger pinning every spring at its target
 plus a ~30-line `tools/pixdiff.py`, since `tools/` today has no diff script, no golden images and no
 way to freeze a deterministic frame. Add the four missing FPS scenes at the same time:
 `route=player overlay=none` (the bare HUD + B7's 5x subtitle path — the route A2 makes framedrop live
@@ -529,12 +529,12 @@ on), profiles, login/account, chapters. The suite covers 7 of ~11 drawable state
 plan moves pixels on three uncovered ones.
 
 **Commit 1 — lazy program cache** (A3). `gfx.rs` + `text.rs` only. Verify with
-`/tmp/plxnative-profile` before/after; expect the win in `FRAMEDROP`'s `draw=` term, not necessarily
+`/tmp/nativejelly-profile` before/after; expect the win in `FRAMEDROP`'s `draw=` term, not necessarily
 in `FPS=`.
 
 **Commit 2 — `modal_of` + pointer modality** (A1). Restructure `app.rs:1356-1390` so any non-`None`
 overlay is handled *before* `icon_hit`/`scrub_hit` are computed. Verify with a
-`/tmp/plxnative-remote` case: open Info, `ck:1600,830`, assert playback position unchanged.
+`/tmp/nativejelly-remote` case: open Info, `ck:1600,830`, assert playback position unchanged.
 
 **Commit 3 — one frame tail + `compose_head`** (A2). Replace the `continue` at `app.rs:2006` with
 `if player { … } else { … }`, and factor the clear into `compose_head(player)` **now** so commit 5

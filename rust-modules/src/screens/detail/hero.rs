@@ -26,7 +26,7 @@ use std::os::raw::c_int;
 
 use crate::metadata::{Detail, Episode, Extra};
 use crate::ui::label::HAlign;
-use plx_machine::machine::{GroupId, Measure};
+use nj_machine::machine::{GroupId, Measure};
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::{CircleButton, PosterMark};
 use crate::ui::{theme, Painter, Rect};
@@ -75,14 +75,14 @@ const FACTS_R: f32 = crate::ui::consts::SCR_W
 const HERO_ICON_RATIO: f32 = 1.15;
 const HERO_ICON_GAP: f32 = 12.0;
 
-pub(crate) fn alt_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_also_available_c() }
+pub(crate) fn alt_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_also_available_c() }
 
-fn mark_watched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_watched_c() }
-fn mark_unwatched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_unwatched_c() }
-fn mark_show_watched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_show_watched_c() }
-fn mark_show_unwatched_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_mark_show_unwatched_c() }
-fn play_from_start_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_play_start_c() }
-fn trailer_label() -> &'static CStr { plx_platform::i18n::msg::browse_detail_trailer_c() }
+fn mark_watched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_watched_c() }
+fn mark_unwatched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_unwatched_c() }
+fn mark_show_watched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_show_watched_c() }
+fn mark_show_unwatched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_show_unwatched_c() }
+fn play_from_start_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_play_start_c() }
+fn trailer_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_trailer_c() }
 
 /// A control in the hero action row, named rather than numbered — ported verbatim from
 /// `ui/detail.rs::HeroCtl`.
@@ -324,13 +324,13 @@ pub(crate) fn trailer_play(d: &Detail) -> Option<(&Extra, &str)> {
 /// The Play pill's label — the word the press will actually perform.
 pub(crate) fn hero_pill_label(has_restart: bool) -> &'static CStr {
     if has_restart {
-        plx_platform::i18n::msg::browse_detail_resume_c()
+        nj_platform::i18n::msg::browse_detail_resume_c()
     } else {
-        plx_platform::i18n::msg::browse_detail_play_c()
+        nj_platform::i18n::msg::browse_detail_play_c()
     }
 }
 
-/// `widgets::Button::pill_w_full`, reproduced over [`Measure`] rather than `plx_gfx::text` directly
+/// `widgets::Button::pill_w_full`, reproduced over [`Measure`] rather than `nj_gfx::text` directly
 /// — see [`HERO_ICON_RATIO`]'s doc for why the icon-box constants are duplicated, and
 /// `screens::login::status_action_rect`'s own doc for the general pattern (host-test-safe geometry
 /// shared by `Focusable::place` and `draw`).
@@ -465,7 +465,7 @@ pub(super) fn disc_caps_at(
 
 /// The live widths, combining [`hero_pill_w`]/[`alt_pill_w`]/[`disc_caps`] — the one function
 /// `DetailScreen`'s `Focusable` queries and `draw` both call, so they can never drift (mirrors
-/// `ui/detail.rs::hero_widths`, over `Measure` instead of `plx_gfx::text` directly).
+/// `ui/detail.rs::hero_widths`, over `Measure` instead of `nj_gfx::text` directly).
 pub(crate) fn hero_widths(
     measure: &dyn Measure,
     set: HeroSet,
@@ -488,10 +488,10 @@ pub(crate) fn hero_credit(d: &Detail) -> Option<(&'static str, Vec<&str>)> {
             .filter(|credit| credit.role.contains("Writer"))
             .map(|credit| credit.tag.as_str())
             .collect();
-        return (!names.is_empty()).then_some((plx_platform::i18n::msg::browse_detail_created_by(), names));
+        return (!names.is_empty()).then_some((nj_platform::i18n::msg::browse_detail_created_by(), names));
     }
     let names: Vec<&str> = d.directors.iter().map(String::as_str).collect();
-    (!names.is_empty()).then_some((plx_platform::i18n::msg::browse_detail_directed_by(), names))
+    (!names.is_empty()).then_some((nj_platform::i18n::msg::browse_detail_directed_by(), names))
 }
 
 pub(crate) fn has_people(d: &Detail) -> bool {
@@ -509,7 +509,7 @@ pub(crate) fn draw_people(p: Painter, d: &Detail, button_y: f32, measure: &dyn M
             .take(PEOPLE_CAST)
             .map(|credit| credit.tag.as_str())
             .collect();
-        bottom -= people_line(p, plx_platform::i18n::msg::browse_detail_starring(), &names, x, bottom, measure);
+        bottom -= people_line(p, nj_platform::i18n::msg::browse_detail_starring(), &names, x, bottom, measure);
     }
     if let Some((label, names)) = hero_credit(d) {
         people_line(p, label, &names, x, bottom, measure);
@@ -545,9 +545,9 @@ fn hero_facts(d: &Detail) -> (String, Option<String>) {
             return (date, None);
         }
         let episodes: i64 = d.seasons.iter().map(|season| season.leaf_count).sum();
-        let seasons = plx_platform::i18n::msg::browse_detail_seasons(seasons as i64);
+        let seasons = nj_platform::i18n::msg::browse_detail_seasons(seasons as i64);
         let extent = if episodes > 0 {
-            plx_platform::i18n::msg::browse_detail_extent(&plx_platform::i18n::msg::browse_detail_episodes(episodes), &seasons)
+            nj_platform::i18n::msg::browse_detail_extent(&nj_platform::i18n::msg::browse_detail_episodes(episodes), &seasons)
         } else { seasons };
         return (date, Some(extent));
     }
@@ -567,10 +567,10 @@ enum PlayNote {
 fn play_note(
     preview: crate::route::Preview,
     hdr: bool,
-    subscription: crate::plex::serverinfo::Subscription,
+    subscription: crate::catalog::serverinfo::Subscription,
 ) -> PlayNote {
     let converts = preview == crate::route::Preview::Converts;
-    let no_pass = subscription == crate::plex::serverinfo::Subscription::No;
+    let no_pass = subscription == crate::catalog::serverinfo::Subscription::No;
     if converts && no_pass && hdr {
         PlayNote::Warn
     } else if converts && no_pass {
@@ -580,12 +580,12 @@ fn play_note(
     }
 }
 
-fn item_subscription(d: &Detail) -> crate::plex::serverinfo::Subscription {
-    crate::plex::serverinfo::subscription_of(d.sid)
+fn item_subscription(d: &Detail) -> crate::catalog::serverinfo::Subscription {
+    crate::catalog::serverinfo::subscription_of(d.sid)
 }
 
 const FACTS_GLYPH_D: f32 = theme::size::CAPTION as f32;
-fn converts_on_server_c() -> &'static CStr { plx_platform::i18n::msg::browse_detail_converts_c() }
+fn converts_on_server_c() -> &'static CStr { nj_platform::i18n::msg::browse_detail_converts_c() }
 
 #[derive(Clone, Copy)]
 enum Bit {
@@ -614,8 +614,8 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
     match play_note(preview, d.hdr, item_subscription(d)) {
         PlayNote::Quiet => push(Bit::Word(
             match preview {
-                crate::route::Preview::DirectPlay => plx_platform::i18n::msg::browse_detail_direct_play_c(),
-                crate::route::Preview::Remux => plx_platform::i18n::msg::browse_detail_direct_stream_c(),
+                crate::route::Preview::DirectPlay => nj_platform::i18n::msg::browse_detail_direct_play_c(),
+                crate::route::Preview::Remux => nj_platform::i18n::msg::browse_detail_direct_stream_c(),
                 crate::route::Preview::Converts => converts_on_server_c(),
             },
             crate::ui::detail_layout::FACTS_INK,
@@ -625,7 +625,7 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
             push(Bit::Word(converts_on_server_c(), crate::ui::detail_layout::FACTS_INK, 0));
             push(Bit::Sep(theme::space::SM));
             push(Bit::Word(
-                plx_platform::i18n::msg::browse_detail_hardware_needs_c(),
+                nj_platform::i18n::msg::browse_detail_hardware_needs_c(),
                 theme::TEXT_SECONDARY,
                 0,
             ));
@@ -637,7 +637,7 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
             push(Bit::Air(theme::space::SM));
             push(Bit::Word(c"HDR \u{2192} SDR", theme::TEXT_SECONDARY, 1));
             push(Bit::Sep(theme::space::SM));
-            push(Bit::Word(plx_platform::i18n::msg::browse_detail_tonemap_needs_c(), theme::TEXT_SECONDARY, 0));
+            push(Bit::Word(nj_platform::i18n::msg::browse_detail_tonemap_needs_c(), theme::TEXT_SECONDARY, 0));
             push(Bit::Air(theme::space::SM));
             push(Bit::Capsule);
         }
@@ -645,7 +645,7 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
     (bits, n)
 }
 
-fn bit_w(bit: Bit, measure: &dyn plx_machine::machine::Measure) -> f32 {
+fn bit_w(bit: Bit, measure: &dyn nj_machine::machine::Measure) -> f32 {
     match bit {
         Bit::Word(text, _, bold) => measure.width(text, theme::size::CAPTION, bold != 0),
         Bit::Sep(gap) => 2.0 * gap + measure.width(c"\u{b7}", theme::size::CAPTION, false),
@@ -655,7 +655,7 @@ fn bit_w(bit: Bit, measure: &dyn plx_machine::machine::Measure) -> f32 {
     }
 }
 
-fn play_mode_w(d: &Detail, after: bool, measure: &dyn plx_machine::machine::Measure) -> f32 {
+fn play_mode_w(d: &Detail, after: bool, measure: &dyn nj_machine::machine::Measure) -> f32 {
     let (bits, n) = play_mode_bits(d, after);
     bits[..n].iter().copied().map(|b| bit_w(b, measure)).sum()
 }
@@ -666,9 +666,9 @@ fn draw_play_mode(
     x: f32,
     y: f32,
     after: bool,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) -> f32 {
-    let (top, baseline) = plx_gfx::text::text_cap_band(theme::size::CAPTION, 0);
+    let (top, baseline) = nj_gfx::text::text_cap_band(theme::size::CAPTION, 0);
     let cy = y + (top + baseline) * 0.5;
     let (bits, n) = play_mode_bits(d, after);
     let mut bx = x;
@@ -770,7 +770,7 @@ fn facts_flow(
     dx
 }
 
-pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn plx_machine::machine::Measure) {
+pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn nj_machine::machine::Measure) {
     let (date, extent) = hero_facts(d);
     let extent = extent.as_deref().unwrap_or("");
     let credit = crate::ui::fmt::shared_by(&d.source()).unwrap_or_default();
@@ -790,7 +790,7 @@ pub(crate) fn draw_facts(p: Painter, d: &Detail, y: f32, measure: &dyn plx_machi
     let elided;
     let date = if fit.elide {
         let budget = (FACTS_R - crate::ui::consts::MARGIN_X - play_mode_w(d, true, measure)).max(0.0);
-        elided = plx_gfx::text::elide_by(&date, budget, false, |t| {
+        elided = nj_gfx::text::elide_by(&date, budget, false, |t| {
             measure.width_str(t, theme::size::CAPTION, false)
         });
         elided.as_str()
@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn how_it_plays_resolves_the_full_docs_truth_table() {
-        use crate::plex::serverinfo::Subscription::{No, Unknown, Yes};
+        use crate::catalog::serverinfo::Subscription::{No, Unknown, Yes};
         use crate::route::Preview::{Converts, DirectPlay, Remux};
         for preview in [DirectPlay, Remux, Converts] {
             for hdr in [false, true] {
@@ -1104,18 +1104,18 @@ mod tests {
 
     #[test]
     fn the_pass_note_judges_the_items_own_server_not_the_browsed_one() {
-        let _guard = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test("own", "127.0.0.1", 1, "t", "c1");
-        let shared = crate::plex::register_for_test("shared", "127.0.0.2", 2, "t", "c2");
-        crate::plex::serverinfo::store_for_test(
+        let _guard = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
+        let own = crate::catalog::register_for_test("own", "127.0.0.1", 1, "t", "c1");
+        let shared = crate::catalog::register_for_test("shared", "127.0.0.2", 2, "t", "c2");
+        crate::catalog::serverinfo::store_for_test(
             own,
-            crate::plex::serverinfo::Subscription::Yes,
+            crate::catalog::serverinfo::Subscription::Yes,
             "1",
         );
-        crate::plex::serverinfo::store_for_test(
+        crate::catalog::serverinfo::store_for_test(
             shared,
-            crate::plex::serverinfo::Subscription::No,
+            crate::catalog::serverinfo::Subscription::No,
             "1",
         );
         let borrowed = Detail {
@@ -1128,13 +1128,13 @@ mod tests {
         };
         assert_eq!(
             item_subscription(&borrowed),
-            crate::plex::serverinfo::Subscription::No
+            crate::catalog::serverinfo::Subscription::No
         );
         assert_eq!(
             item_subscription(&ours),
-            crate::plex::serverinfo::Subscription::Yes
+            crate::catalog::serverinfo::Subscription::Yes
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     #[test]
@@ -1344,8 +1344,8 @@ mod tests {
 
     #[test]
     fn the_optimistic_flip_settles_a_leaf_at_once_and_a_container_a_round_trip_late() {
-        let _guard = plx_base::testlock::serial();
-        let sid = crate::plex::ServerId::UNSET;
+        let _guard = nj_base::testlock::serial();
+        let sid = crate::catalog::ServerId::UNSET;
         crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
             sid,
             rk: "movie".into(),
@@ -1734,8 +1734,8 @@ mod tests {
 
     #[test]
     fn the_trailer_unfurl_spring_reports_while_opening_and_is_quiet_at_rest() {
-        let _g = plx_base::testlock::serial();
-        plx_machine::idle::reset_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_machine::idle::reset_for_test();
         let mut springs = [crate::ui::Spring::at(0.0); 3];
         for spring in springs.iter_mut() {
             spring.step(0.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
@@ -1745,38 +1745,38 @@ mod tests {
             );
         }
 
-        plx_machine::idle::note_present(10_000);
-        plx_machine::idle::frame_begin(1.0 / 60.0);
-        plx_machine::idle::note_spring(0.0, 0.0, 0.0);
+        nj_machine::idle::note_present(10_000);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::note_spring(0.0, 0.0, 0.0);
         assert!(
-            !plx_machine::idle::should_present(10_016),
+            !nj_machine::idle::should_present(10_016),
             "a trailer=false set must not keep the present gate awake"
         );
 
-        plx_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
         springs[1].step(1.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
         assert!(
-            plx_machine::idle::should_present(10_032),
+            nj_machine::idle::should_present(10_032),
             "opening the trailer disc reports motion"
         );
         assert!(springs[1].pos > 0.01 || springs[1].vel.abs() > 0.01);
 
         for _ in 0..240 {
-            plx_machine::idle::frame_begin(1.0 / 60.0);
+            nj_machine::idle::frame_begin(1.0 / 60.0);
             springs[1].step(1.0, crate::ui::widgets::K_DISC_UNFURL, 1.0 / 60.0);
         }
         assert!(
             (springs[1].pos - 1.0).abs() < 0.01 && springs[1].vel.abs() < 0.01,
             "the third unfurl spring settles"
         );
-        plx_machine::idle::frame_begin(1.0 / 60.0);
-        plx_machine::idle::note_spring(1.0, 1.0, 0.0);
-        let _ = plx_machine::idle::should_present(19_000);
-        plx_machine::idle::note_present(20_000);
-        plx_machine::idle::frame_begin(1.0 / 60.0);
-        plx_machine::idle::note_spring(1.0, 1.0, 0.0);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::note_spring(1.0, 1.0, 0.0);
+        let _ = nj_machine::idle::should_present(19_000);
+        nj_machine::idle::note_present(20_000);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::note_spring(1.0, 1.0, 0.0);
         assert!(
-            !plx_machine::idle::should_present(20_016),
+            !nj_machine::idle::should_present(20_016),
             "the third unfurl spring is quiet at rest"
         );
     }

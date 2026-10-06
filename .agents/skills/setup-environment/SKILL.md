@@ -29,7 +29,7 @@ environment" means getting three things in place so `make` works:
 3. **Host CLI tools** — `curl`, `tar`, CMake (the pinned Sentry Native build), and `sshpass`
    (deploy/run over ssh, only when the TV refuses your key).
 
-The end state you're verifying: `make` produces `pkg/plxnative`, and it runs on the
+The end state you're verifying: `make` produces `pkg/nativejelly`, and it runs on the
 TV with no missing-symbol or illegal-instruction errors.
 
 ## Fast path
@@ -53,7 +53,7 @@ brew install sshpass      # deploy/run fallback when the TV refuses your ssh key
 Now build:
 
 ```bash
-make                  # -> pkg/plxnative
+make                  # -> pkg/nativejelly
 ```
 
 ### With a TV but no Plex account or token
@@ -73,7 +73,7 @@ tools/tv-session.sh up --guest --mock --screen home       # debug flavor only; d
 All three gitignored files are per-checkout, so a fresh worktree has none of them. `up` deploys
 the built binary itself; `make FLAVOR=debug install` is needed only on a TV that has never had
 the debug build. `--mock` makes `--guest` use `tools/mock-guest.py`, which refuses any server that
-is not the synthetic mock, instead of resolving a managed user through plex.tv. Take the TV lock
+is not the synthetic mock, instead of resolving a managed user through a live Jellyfin server. Take the TV lock
 first (`tv-lock` skill).
 
 The default mock answers 3 Home hubs; `mock_pms.py --home-hubs N` serves N, counting Continue
@@ -165,13 +165,13 @@ them.
 #   -> arm-webos-linux-gnueabi
 
 # 2. Full build
-make            # -> pkg/plxnative, no errors
+make            # -> pkg/nativejelly, no errors
 
 # 3. Inspect the binary (readelf is in the NDK bin/ dir)
 RE="$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot/bin/arm-webos-linux-gnueabi-readelf"
-"$RE" -A pkg/plxnative | grep Tag_CPU_arch       # -> v7  (NOT v6 — v6 SIGILLs)
-"$RE" --version-info pkg/plxnative | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1   # -> GLIBC_2.12
-"$RE" -d pkg/plxnative | grep NEEDED             # SONAMEs should match the TV's libs
+"$RE" -A pkg/nativejelly | grep Tag_CPU_arch       # -> v7  (NOT v6 — v6 SIGILLs)
+"$RE" --version-info pkg/nativejelly | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1   # -> GLIBC_2.12
+"$RE" -d pkg/nativejelly | grep NEEDED             # SONAMEs should match the TV's libs
 ```
 
 The decisive check is on the TV itself: `make test` (deploy + run) and read the
@@ -206,7 +206,7 @@ the path with `make -s print-eventlog FLAVOR=debug` rather than typing one. The
 | `error: "-Z build-std" ... rust-src` or `cargo +nightly` fails | Missing nightly or rust-src: `rustup toolchain install nightly && rustup component add rust-src --toolchain nightly`. |
 | `make check` dies at `make lint` with `no such command: clippy` | The nightly was installed with `--profile minimal`, which omits clippy (the default profile ships it): `rustup component add clippy --toolchain nightly`. `make check` runs `lint` first; the cross-build itself never needs clippy. |
 | `build-sentry-native: cmake is required` | Install the host build generator with `brew install cmake`. It runs the webOS cross-compiler; it does not compile target code with the Mac toolchain. |
-| Binary is `Tag_CPU_arch: v6`, or SIGILLs on the TV at first atomic | `RUSTFLAGS_TV` got dropped, or std wasn't rebuilt. Ensure `-C target-cpu=cortex-a9` and `-Z build-std` are intact; `rm` the stale `libplxnative_modules.a` and rebuild. |
+| Binary is `Tag_CPU_arch: v6`, or SIGILLs on the TV at first atomic | `RUSTFLAGS_TV` got dropped, or std wasn't rebuilt. Ensure `-C target-cpu=cortex-a9` and `-Z build-std` are intact; `rm` the stale `libnativejelly_modules.a` and rebuild. |
 | `relocation R_ARM_MOVW_ABS_NC ... recompile with -fPIC` when building a stub | A stub needs PIC. Stubs already use `-fPIC` in `STUBFLAGS`; if you added a bespoke stub rule, add `-fPIC`. |
 | Deploy/run steps fail with `the TV refused this machine's ssh key and sshpass is not installed` | Authorize your key on the TV, or `brew install sshpass`. `the TV is unreachable` means it is off or asleep (wake-tv skill; `make TV=<ip> ...`). |
 

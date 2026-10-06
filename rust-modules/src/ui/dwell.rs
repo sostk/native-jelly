@@ -9,7 +9,7 @@
 //! that different float sequence diverges a hashed dwell (`SHAPE`'s `season_settle:f32`) against
 //! the committed replay fixtures. Do not "upgrade" this to a ramp.
 
-use plx_machine::present::PresentEvent;
+use nj_machine::present::PresentEvent;
 
 /// `elapsed = elapsed + dt`, then note motion. The assignment form matches the hashed
 /// `season_settle` sequence; a `+=` that a later pass rewrites into a ramp is the bug.

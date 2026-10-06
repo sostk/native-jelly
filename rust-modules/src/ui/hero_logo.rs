@@ -25,7 +25,7 @@
 //! need the store to distinguish `P_FAILED`/absent from `P_WANT`/`P_LOADING` first. The swap is a
 //! cut, but nothing around it MOVES, which is the part that used to read as a glitch.
 use crate::ui::label::{HAlign, Label, VAlign};
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use crate::ui::{theme, Painter, Rect};
 use std::os::raw::c_int;
 
@@ -181,7 +181,7 @@ impl<'a> HeroLogo<'a> {
         // its replay need the same measurement census even when the logo happened to be resident
         // in only one run; texture residency is paint state, not logical replay state.
         let (_, _, _, sz) = self.rung.bounds();
-        let line = plx_gfx::text::elide_by(self.title, band.w, false, |t| {
+        let line = nj_gfx::text::elide_by(self.title, band.w, false, |t| {
             measure.width_str(t, sz, true)
         });
         // The hero draws the item the shelf under it has focused, and that shelf is the server

@@ -9,4 +9,4 @@ Homepage: https://github.com/sostk/native-jelly
 License: GPL-3.0-or-later
 Description: Native Jelly — unofficial native Jellyfin client for LG webOS (not affiliated with Jellyfin)
 webOS-Package-Format-Version: 2
-webOS-Packager-Version: plxnative-mkipk/1
+webOS-Packager-Version: nativejelly-mkipk/1

@@ -10,7 +10,7 @@
 # make this the one setup step that fails a fresh Linux dev machine outright, for a feature that
 # machine can still get by pasting one line into its own crontab.
 #
-# WHAT IT INSTALLS. `~/Library/LaunchAgents/com.plxnative.build-gc.plist`: `StartInterval 3600`
+# WHAT IT INSTALLS. `~/Library/LaunchAgents/com.nativejelly.build-gc.plist`: `StartInterval 3600`
 # (once an hour — `--auto`'s own lock and idle guard make a missed or doubled tick harmless, so
 # there is no reason to poll faster), `RunAtLoad false` (do not fire the moment this plist loads;
 # the first real run is the first scheduled tick, not login), and `LowPriorityIO` + `Nice` +
@@ -28,7 +28,7 @@
 #
 # TIME MACHINE. If `tmutil destinationinfo` succeeds (a destination is configured — an unconfigured
 # host prints nothing useful and would make this a false positive on every fresh machine), and
-# `$PLX_FLEET_DIR` (default ~/plx-fleet — the external lane target dirs `tools/build-gc.sh`
+# `$NJ_FLEET_DIR` (default ~/plx-fleet — the external lane target dirs `tools/build-gc.sh`
 # reclaims from) exists, exclude it with `tmutil addexclusion` (sticky, no `-p`, i.e. the exclusion
 # itself is what persists, not a path-only entry Time Machine forgets across a rename) — backing up
 # multi-gigabyte, fully rebuildable cargo output on an hourly cadence is exactly the kind of cost
@@ -43,7 +43,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 COMMON_DIR=$(cd "$ROOT" 2>/dev/null && git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || COMMON_DIR=""
 if [ -n "$COMMON_DIR" ]; then MAIN=$(dirname "$COMMON_DIR"); else MAIN="$ROOT"; fi
-LABEL=com.plxnative.build-gc
+LABEL=com.nativejelly.build-gc
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 SCRIPT="$MAIN/tools/build-gc.sh"
 
@@ -128,9 +128,9 @@ cat > "$PLIST" <<PLIST
   <key>ProcessType</key>
   <string>Background</string>
   <key>StandardOutPath</key>
-  <string>$HOME/Library/Logs/plxnative-build-gc-launchd.log</string>
+  <string>$HOME/Library/Logs/nativejelly-build-gc-launchd.log</string>
   <key>StandardErrorPath</key>
-  <string>$HOME/Library/Logs/plxnative-build-gc-launchd.log</string>
+  <string>$HOME/Library/Logs/nativejelly-build-gc-launchd.log</string>
 </dict>
 </plist>
 PLIST
@@ -142,13 +142,13 @@ launchctl bootout "$DOMAIN" "$PLIST" >/dev/null 2>&1 || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "install-disk-watch: installed $LABEL ($PLIST), runs tools/build-gc.sh --auto hourly"
 
-FLEET_DIR=${PLX_FLEET_DIR:-$HOME/plx-fleet}
+FLEET_DIR=${NJ_FLEET_DIR:-$HOME/plx-fleet}
 if command -v tmutil >/dev/null 2>&1 && tmutil destinationinfo >/dev/null 2>&1; then
   if [ -d "$FLEET_DIR" ]; then
-    # Sticky, no `-p`, on $PLX_FLEET_DIR ITSELF, not on anything under it. A sticky exclusion is
+    # Sticky, no `-p`, on $NJ_FLEET_DIR ITSELF, not on anything under it. A sticky exclusion is
     # an xattr on the item's own inode, which is exactly why it must land on the directory that
     # this script's `--lanes`/`--orphans` reclaim never removes: they delete each lane's target
-    # dir INSIDE `$PLX_FLEET_DIR`, never the directory itself, so the inode carrying the xattr is
+    # dir INSIDE `$NJ_FLEET_DIR`, never the directory itself, so the inode carrying the xattr is
     # never recreated. `-p` (a path-based exclusion, tracked separately by Time Machine against
     # the path string rather than the inode) is the wrong tool here, not the safer one — it is
     # what you would want on a lane subdirectory that DOES get deleted and recreated by name, and

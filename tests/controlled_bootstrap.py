@@ -52,8 +52,8 @@ def main():
                 process.wait(timeout=5)
 
     def launch(root, replay=False):
-        env = dict(os.environ, PLXNATIVE_RUNTIME_DIR=str(root),
-                   PLXNATIVE_APP_DIR=str(REPO / 'pkg'), PLXNATIVE_WIN='1920x1080')
+        env = dict(os.environ, NJ_RUNTIME_DIR=str(root),
+                   NJ_APP_DIR=str(REPO / 'pkg'), NJ_WIN='1920x1080')
         command = [binary, '127.0.0.1', str(args.port)]
         if replay:
             command = [sandbox, '-p', '(version 1)(allow default)(deny network-outbound)'] + command
@@ -93,21 +93,21 @@ def main():
         for name, value in [('settings', 'root'), ('consent', 'product'), ('token', 'UnrelatedSyntheticToken'),
                             ('logintest', ''), ('firstrun', ''), ('playbackquality', 'auto'),
                             ('ffprobe', 'http://203.0.113.10:9')]:
-            (root / ('plxnative-' + name)).write_text(value)
+            (root / ('nativejelly-' + name)).write_text(value)
 
     def replay_case(name, recording, expected, with_ambient=False, both=False, mode='targets'):
         root = out / name
         root.mkdir()
         assert mode in ('targets', 'resolve')
-        (root / 'plxnative-recplay').write_text('v1\n' + mode + '\n' + str(recording))
+        (root / 'nativejelly-recplay').write_text('v1\n' + mode + '\n' + str(recording))
         if with_ambient:
             ambient(root)
         if both:
-            (root / 'plxnative-rec').touch()
+            (root / 'nativejelly-rec').touch()
         before = snapshot(root)
         process = launch(root, True)
         code = process.wait(timeout=45)
-        lines = (root / 'plxnative-events.log').read_text(errors='replace').splitlines()
+        lines = (root / 'nativejelly-events.log').read_text(errors='replace').splitlines()
         assert not any(line.startswith('ff:') for line in lines), name + ': ambient playback probe/resource boot'
         summaries = [line for line in lines if line.startswith('replay: done ')]
         refused = any(line.startswith(('replay: REFUSED', 'rec: REFUSED')) for line in lines)
@@ -151,9 +151,9 @@ def main():
         wait_marker(mock, out / 'mock.log', 'serving', 10)
         normal = out / 'normal-live'
         normal.mkdir()
-        (normal / 'plxnative-token').write_text('synthetic-token')
+        (normal / 'nativejelly-token').write_text('synthetic-token')
         process = launch(normal)
-        wait_marker(process, normal / 'plxnative-events.log', 'hubs: landed')
+        wait_marker(process, normal / 'nativejelly-events.log', 'hubs: landed')
         assert (normal / 'auth.json').is_file(), 'normal boot still mints/persists its own identity'
         stop(process)
         publish({'case': 'normal-live', 'home_landed': True, 'identity_persisted': True})
@@ -162,13 +162,13 @@ def main():
         for name in ('unsupported-natural', 'recorder-open-failure', 'fresh-natural', 'plaintext-natural'):
             root = out / name
             root.mkdir()
-            (root / 'plxnative-rec').touch()
+            (root / 'nativejelly-rec').touch()
             if name != 'unsupported-natural':
-                (root / 'plxnative-token').write_text('synthetic-token')
+                (root / 'nativejelly-token').write_text('synthetic-token')
             if name == 'plaintext-natural':
                 (root / 'auth.json').write_text(json.dumps({'client_id': 's00000031'}))
             if name == 'recorder-open-failure':
-                capture_dir = root / 'plxnative-recordings/latest'
+                capture_dir = root / 'nativejelly-recordings/latest'
                 capture_dir.mkdir(parents=True)
                 (capture_dir / 'manifest.json').write_text('existing synthetic capture sentinel')
             before = snapshot(root)
@@ -180,8 +180,8 @@ def main():
                     if name == 'recorder-open-failure':
                         assert (capture_dir / 'manifest.json').read_text() == 'existing synthetic capture sentinel'
                 else:
-                    wait_marker(process, root / 'plxnative-events.log', 'hubs: landed')
-                    lines = (root / 'plxnative-events.log').read_text().splitlines()
+                    wait_marker(process, root / 'nativejelly-events.log', 'hubs: landed')
+                    lines = (root / 'nativejelly-events.log').read_text().splitlines()
                     assert lines.index('bootstrap: captured pre-effect initial state') < lines.index('bootstrap: captured session persistence applied')
                     assert (root / 'auth.json').is_file()
                     if name == 'plaintext-natural':
@@ -199,14 +199,14 @@ def main():
 
         record = out / 'record'
         record.mkdir()
-        subprocess.run([binary, '--write-synthetic-initial', str(record / 'plxnative-app-init'), '1', str(args.port)],
+        subprocess.run([binary, '--write-synthetic-initial', str(record / 'nativejelly-app-init'), '1', str(args.port)],
                        cwd=REPO, check=True)
         for flag in ('rec', 'focus', 'noidle'):
-            (record / ('plxnative-' + flag)).touch()
+            (record / ('nativejelly-' + flag)).touch()
         process = launch(record)
-        wait_marker(process, record / 'plxnative-events.log', 'hubs: landed')
+        wait_marker(process, record / 'nativejelly-events.log', 'hubs: landed')
         time.sleep(2)
-        fd = os.open(record / 'plxnative-remote', os.O_RDWR | os.O_NONBLOCK)
+        fd = os.open(record / 'nativejelly-remote', os.O_RDWR | os.O_NONBLOCK)
         try:
             for token in ('up', 'left', 'down', 'down', 'down'):
                 os.write(fd, (token + ' ').encode())
@@ -217,7 +217,7 @@ def main():
         assert process.poll() is None, 'record must remain alive through the flow'
         stop(process)
         stop(mock)
-        recording = record / 'plxnative-recordings/latest'
+        recording = record / 'nativejelly-recordings/latest'
         assert not (record / 'auth.json').exists(), 'typed record must not load/mint an ambient session'
         rows = [json.loads(line) for line in (recording / 'rec-0000.jsonl').read_text().splitlines() if line.strip()]
         ticks = [row['f'] for row in rows if row['t'] == 'tick']
@@ -229,12 +229,12 @@ def main():
         assert not any(row['t'] == 'eff' and 'unsupported' in row.get('payload', {}) for row in rows)
         assert sum(row['t'] == 'eff' and isinstance(row.get('payload', {}).get('delivery'), dict)
                    and row['payload']['delivery'].get('event') == 'input' for row in rows) == 10
-        record_lines = (record / 'plxnative-events.log').read_text(errors='replace').splitlines()
+        record_lines = (record / 'nativejelly-events.log').read_text(errors='replace').splitlines()
         capture = next(i for i, line in enumerate(record_lines) if line == 'bootstrap: captured pre-effect initial state')
         assert all(i > capture for i, line in enumerate(record_lines) if line.startswith(('hubs: source', 'browse: roster', 'plex: server slot')))
         assert recording.stat().st_mode & 0o777 == 0o700
         assert all(path.stat().st_mode & 0o777 == 0o600 for path in recording.iterdir() if path.is_file())
-        subprocess.run(['python3', '-B', str(REPO / 'tools/plxnative-rec'), 'check', str(recording)], cwd=REPO, check=True)
+        subprocess.run(['python3', '-B', str(REPO / 'tools/nativejelly-rec'), 'check', str(recording)], cwd=REPO, check=True)
 
         listener = socket.socket()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -10,7 +10,7 @@
 //! that implements it.
 
 use crate::ui::form::{Activation, FormTable, RowKey};
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Chrome, Cx, Effects, Fx, GroupId, Host, LogicalState, NavOp, ScreenId,
 };
 use crate::ui::screen::ScreenArg;
@@ -22,7 +22,7 @@ use super::registry::{AppFx, AppMsg, DirectoryLike};
 /// generation cursor as other session-derived views, while a live hub seed remains authoritative.
 pub(crate) struct SessionGround {
     ground: crate::ui::route_screen::RouteGround,
-    watch: crate::plex::session::VisibleSessionWatch,
+    watch: crate::catalog::session::VisibleSessionWatch,
     from_session: bool,
     seed: Option<[[f32; 3]; 4]>,
 }
@@ -33,7 +33,7 @@ impl SessionGround {
     }
     pub(crate) fn refresh(&mut self) -> bool {
         if !self.from_session || !self.watch.changed() { return false; }
-        let Some(session) = crate::plex::session::peek_settled() else { return false; };
+        let Some(session) = crate::catalog::session::peek_settled() else { return false; };
         if self.seed == session.last_hero_blur { return false; }
         self.seed = session.last_hero_blur;
         self.ground = crate::ui::route_screen::RouteGround::for_home(self.seed);
@@ -49,12 +49,12 @@ impl std::ops::DerefMut for SessionGround {
 }
 
 /// Prefer the already-published Home hero; otherwise observe the persisted seed as it lands.
-pub(crate) fn pre_home_ground(hubs: crate::pms::HubsView<'_>) -> SessionGround {
+pub(crate) fn pre_home_ground(hubs: crate::catalog_fetch::HubsView<'_>) -> SessionGround {
     let live = hubs.hero(0).filter(|hero| hero.item.has_blur).map(|hero| hero.item.blur);
     if let Some(blur) = live {
-        let _ = plx_base::storage_worker::submit_retained(move || crate::plex::session::record_last_hero(blur));
+        let _ = nj_base::storage_worker::submit_retained(move || crate::catalog::session::record_last_hero(blur));
     }
-    let seed = live.or_else(crate::plex::session::last_hero);
+    let seed = live.or_else(crate::catalog::session::last_hero);
     SessionGround { ground: crate::ui::route_screen::RouteGround::for_home(seed),
         watch: Default::default(), from_session: live.is_none(), seed }
 }
@@ -109,7 +109,7 @@ pub(crate) enum PickerKind {
 }
 
 impl SettingsPage {
-    /// The pages a boot target opens the surface over, root first: `plxnative-settings=picker-…`
+    /// The pages a boot target opens the surface over, root first: `nativejelly-settings=picker-…`
     /// is reached as root → Playback → the picker, so BACK from it lands where an interactive
     /// visit would. Every other page is booted as the surface's root.
     pub(crate) fn boot_trail(self) -> Vec<SettingsPage> {
@@ -388,14 +388,14 @@ mod tests {
 mod session_tests {
     #[test]
     fn session_refresh_restores_first_run_ground() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("first-run-seed-refresh");
-        let mut saved = (*crate::plex::session::peek()).clone();
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("first-run-seed-refresh");
+        let mut saved = (*crate::catalog::session::peek()).clone();
         saved.last_hero_blur = Some([[0.2, 0.3, 0.4]; 4]);
-        crate::plex::session::install_transient_for_test(true);
-        let mut ground = super::pre_home_ground(crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog::session::install_transient_for_test(true);
+        let mut ground = super::pre_home_ground(crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
         assert!(ground.seed.is_none());
-        crate::plex::session::save(&saved);
+        crate::catalog::session::save(&saved);
         assert!(ground.refresh());
         assert_eq!(ground.seed, saved.last_hero_blur);
         assert!(!ground.refresh());

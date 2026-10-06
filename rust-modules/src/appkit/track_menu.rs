@@ -76,10 +76,10 @@
 use crate::metadata;
 use crate::metadata::sub_layout::{self, LangId, OtherLang, RowBadge, RowTarget, SubHeader, SubModel, SubRow, SubTrack};
 use crate::metadata::track_label;
-use crate::plex::session::{SubtitlePosition, SubtitleSize, SubtitleTone};
+use crate::catalog::session::{SubtitlePosition, SubtitleSize, SubtitleTone};
 use crate::ui::frame::Budget;
 use crate::ui::geom::IndexElem;
-use plx_machine::machine::{Canon, Cx, EntryId, FocusKey, GroupId, Host, Measure};
+use nj_machine::machine::{Canon, Cx, EntryId, FocusKey, GroupId, Host, Measure};
 use crate::ui::popover::Popover;
 use crate::ui::screen::{At, Dir, DrawFrame, Focusable, GroupSpec, Part, Placed, Step};
 use crate::ui::form::{Activation, Form, FormId, FormSection, FormTable, RowKey, RowKind};
@@ -162,7 +162,7 @@ impl StyleField {
     }
 
     fn label(self) -> &'static str {
-        use plx_platform::i18n::msg;
+        use nj_platform::i18n::msg;
         match self {
             Self::Size => msg::widgets_tracks_style_size(),
             Self::Position => msg::widgets_tracks_style_position(),
@@ -210,9 +210,9 @@ impl TrackPage {
     /// model, [`TrackMenuState::other`]).
     fn title(self, other: &[OtherLang]) -> String {
         match self {
-            Self::Style => plx_platform::i18n::msg::widgets_tracks_style().to_string(),
+            Self::Style => nj_platform::i18n::msg::widgets_tracks_style().to_string(),
             Self::Picker(field) => field.label().to_string(),
-            Self::OtherLanguages => plx_platform::i18n::msg::widgets_tracks_other_languages().to_string(),
+            Self::OtherLanguages => nj_platform::i18n::msg::widgets_tracks_other_languages().to_string(),
             Self::Language(stream) => {
                 other.iter().find(|o| o.id.stream == stream).map(|o| o.name.clone()).unwrap_or_default()
             }
@@ -263,7 +263,7 @@ type TrackTable = FormTable<TrackRow, (), TrackPage>;
 /// [`TrackMenuState::enh_state`]'s answer: the Audio tab's Boost/Loudness offer as displayed, the
 /// route it rides, the reason it is disabled, and the live subtitle effect its note names.
 type EnhState = (
-    Option<crate::plex::AudioEnhancements>,
+    Option<crate::catalog::AudioEnhancements>,
     Option<crate::route::EnhancementRoute>,
     Option<crate::route::DisabledReason>,
     crate::route::SubtitleEffect,
@@ -272,7 +272,7 @@ type EnhState = (
 /// **A tab root's natural panel rect** — the layout of `table` as the panel would hug it. Each
 /// tab hugs its own rows (shared menu rule); the right edge is fixed, so switching tabs moves only
 /// the left edge.
-fn table_natural(table: &TableView, measure: &dyn plx_machine::machine::Measure) -> Rect {
+fn table_natural(table: &TableView, measure: &dyn nj_machine::machine::Measure) -> Rect {
     let pw = table.menu_panel_width(measure);
     // the transport control row's own right edge — one number for the discs and both panels
     let px = crate::appkit::player_hud::CTRL_RIGHT - pw;
@@ -318,8 +318,8 @@ impl SubRenderer {
     fn note(self) -> Option<&'static str> {
         match self {
             Self::Text => None,
-            Self::Image => Some(plx_platform::i18n::msg::widgets_tracks_style_image_note()),
-            Self::Styled => Some(plx_platform::i18n::msg::widgets_tracks_style_styled_note()),
+            Self::Image => Some(nj_platform::i18n::msg::widgets_tracks_style_image_note()),
+            Self::Styled => Some(nj_platform::i18n::msg::widgets_tracks_style_styled_note()),
         }
     }
 }
@@ -404,7 +404,7 @@ pub(crate) struct TrackMenuState {
     /// [`Self::offset_ms`]/[`Self::tone`] — a run of toggle presses inside one open counts from
     /// what THIS panel last drew, and [`Self::rebuild`] is the only writer, on every (re)build of
     /// the Audio tab (`new`/`focus_tab`).
-    enhance_shown: Option<crate::plex::AudioEnhancements>,
+    enhance_shown: Option<crate::catalog::AudioEnhancements>,
     /// The route [`Self::enhance_shown`] would take, kept alongside it (`Some` iff `enhance_shown`
     /// is `Some`) — the Audio tab's consequence note (M7: a burned subtitle, a dropped Dolby Vision
     /// declaration) reads the flavour, not just whether the toggle is on.
@@ -433,7 +433,7 @@ pub(crate) struct TrackMenuState {
     /// The card's resize and the page slide ([`crate::ui::panel_motion`]): the layout target is
     /// cached there, the top/left edges spring to it, and a push or pop slides the two pages.
     motion: PanelMotion,
-    /// The owner token of the background queue this menu parked ([`plx_gfx::text::park_prewarm_as_background`]).
+    /// The owner token of the background queue this menu parked ([`nj_gfx::text::park_prewarm_as_background`]).
     /// [`Drop`] clears the queue only while it is still this menu's: a dismissed menu lives on
     /// through its fade-out (`ModalStack`'s `Closing`), and a Tracks menu reopened inside that
     /// fade has parked its own queue by the time the old one drops.
@@ -457,7 +457,7 @@ pub(crate) enum TrackCommit {
     /// bits regardless of which row was pressed. Built from [`TrackMenuState::enhance_shown`],
     /// never re-derived from `ps` here — the panel owns its own rows, not the playback (see this
     /// enum's own doc).
-    AudioEnhancement(crate::plex::AudioEnhancements),
+    AudioEnhancement(crate::catalog::AudioEnhancements),
     /// `sidecar_key` is `Some` when the pick is an EXTERNAL text subtitle the client can draw
     /// on direct play (`metadata::Stream::sidecar_renderable`): it has no demuxer ordinal
     /// (`render_ordinal` is -1), so the loop hands it to `player::sidecar` beside the unchanged
@@ -509,7 +509,7 @@ impl Drop for TrackMenuState {
     /// work for nobody.
     fn drop(&mut self) {
         if let Some(owner) = self.background_owner {
-            plx_gfx::text::clear_background_prewarm_owned(owner);
+            nj_gfx::text::clear_background_prewarm_owned(owner);
         }
     }
 }
@@ -845,7 +845,7 @@ impl TrackMenuState {
         }
     }
 
-    /// Focus an ABSOLUTE table row — the /tmp/plxnative-menupick trigger's contract ("row N"), the
+    /// Focus an ABSOLUTE table row — the /tmp/nativejelly-menupick trigger's contract ("row N"), the
     /// one dev-only entry that speaks positions (the named targets below do not). The interactive
     /// path always moves relatively; this exists because the initial focus is the ACTIVE row
     /// (derived from playback state), so a relative walk from it would land elsewhere.
@@ -863,7 +863,7 @@ impl TrackMenuState {
     }
 
     /// Resolve a NAMED Audio-tab target (`"boost"`/`"loudness"`) to its absolute table row, for
-    /// the `/tmp/plxnative-menupick` trigger's named form — an alternative to a row number hand-
+    /// the `/tmp/nativejelly-menupick` trigger's named form — an alternative to a row number hand-
     /// derived from the item's track count, which is exactly the issue #266 PR4 bug: this harness
     /// once hardcoded the Normalize Loudness row from a WRONG assumed track count. Reading it back
     /// through the form, the same identities [`Self::on_ok`] dispatches on, means the name
@@ -878,7 +878,7 @@ impl TrackMenuState {
         self.form.index_of(&target).map(|i| i as c_int)
     }
 
-    /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/plxnative-menupick` trigger:
+    /// Resolve a NAMED Subtitles-tab target to a TRACK, for the `/tmp/nativejelly-menupick` trigger:
     /// `"track:N"` is the N-th (0-based) track in PAGE ORDER — the root's track rows first, then the
     /// Other languages page A-Z with a multi-track language expanded into its own ranked page —
     /// never Off, Timing or Style. It answers the track's index in the item's list, not a table
@@ -923,7 +923,7 @@ impl TrackMenuState {
                     TrackOk::Inert
                 }
                 target @ (Some(TrackRow::Boost) | Some(TrackRow::Loudness)) => {
-                    let mut a = self.enhance_shown.unwrap_or(crate::plex::AudioEnhancements::NONE);
+                    let mut a = self.enhance_shown.unwrap_or(crate::catalog::AudioEnhancements::NONE);
                     if target == Some(TrackRow::Boost) {
                         a.boost_dialog = !a.boost_dialog;
                     } else {
@@ -1102,7 +1102,7 @@ impl TrackMenuState {
                 let current = tracks.iter().find(|t| active >= 0 && t.i == active as usize);
                 let value = match current {
                     Some(t) => in_lang_label(t),
-                    None => plx_platform::i18n::msg::widgets_tracks_count(tracks.len() as i64),
+                    None => nj_platform::i18n::msg::widgets_tracks_count(tracks.len() as i64),
                 };
                 let row = Row::new(lang.name.clone()).value(value).checked(current.is_some());
                 sec.item(TrackRow::OpenLang(lang.id), RowKind::Nav(TrackPage::Language(lang.id.stream)), (), row)
@@ -1255,11 +1255,11 @@ impl TrackMenuState {
     fn enh_reason_text(reason: crate::route::DisabledReason) -> String {
         use crate::route::DisabledReason;
         match reason {
-            DisabledReason::NotAnalyzed => plx_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed(),
-            DisabledReason::DolbyVisionUnusable => plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable(),
-            DisabledReason::DolbyVisionSubtitle => plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle(),
-            DisabledReason::NotOriginalQuality => plx_platform::i18n::msg::widgets_tracks_enh_reason_quality(),
-            DisabledReason::ServerRefused => plx_platform::i18n::msg::widgets_tracks_enh_reason_refused(),
+            DisabledReason::NotAnalyzed => nj_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed(),
+            DisabledReason::DolbyVisionUnusable => nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable(),
+            DisabledReason::DolbyVisionSubtitle => nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle(),
+            DisabledReason::NotOriginalQuality => nj_platform::i18n::msg::widgets_tracks_enh_reason_quality(),
+            DisabledReason::ServerRefused => nj_platform::i18n::msg::widgets_tracks_enh_reason_refused(),
         }
         .to_string()
     }
@@ -1272,12 +1272,12 @@ impl TrackMenuState {
     ) -> Option<String> {
         use crate::route::{EnhancementRoute, SubtitleEffect};
         match route {
-            EnhancementRoute::Burn => Some(plx_platform::i18n::msg::widgets_tracks_enh_note_burn().to_string()),
+            EnhancementRoute::Burn => Some(nj_platform::i18n::msg::widgets_tracks_enh_note_burn().to_string()),
             EnhancementRoute::RemuxDropsDolbyVision => {
-                Some(plx_platform::i18n::msg::widgets_tracks_enh_note_dv_off().to_string())
+                Some(nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off().to_string())
             }
             EnhancementRoute::Remux if subtitle_effect == SubtitleEffect::Sidecar => {
-                Some(plx_platform::i18n::msg::widgets_tracks_enh_note_sidecar().to_string())
+                Some(nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar().to_string())
             }
             EnhancementRoute::Remux => None,
         }
@@ -1301,7 +1301,7 @@ impl TrackMenuState {
     /// so the Audio root can be built while the menu shows Subtitles and has not stored one.
     fn audio_form_for(&self, meta: metadata::MetadataView<'_>, enh: EnhState) -> TrackForm {
         let (enhance_shown, enhance_route, enhance_disabled, enhance_subtitle_effect) = enh;
-        let mut sec = FormSection::new(plx_platform::i18n::msg::widgets_tracks_audio());
+        let mut sec = FormSection::new(nj_platform::i18n::msg::widgets_tracks_audio());
         let d = match tracks(meta) {
             Some(t) => t,
             None => return Form::new().section(sec),
@@ -1309,12 +1309,12 @@ impl TrackMenuState {
         let names = crate::player::SHARED.track_names.lock().unwrap();
         for (i, s) in d.audio.iter().enumerate() {
             let lang = if s.lang.is_empty() {
-                plx_platform::i18n::msg::widgets_tracks_unknown()
+                nj_platform::i18n::msg::widgets_tracks_unknown()
             } else {
                 s.lang.as_str()
             };
             let label = if s.default {
-                plx_platform::i18n::msg::widgets_tracks_original(lang)
+                nj_platform::i18n::msg::widgets_tracks_original(lang)
             } else {
                 lang.to_string()
             };
@@ -1347,13 +1347,13 @@ impl TrackMenuState {
                     TrackRow::Boost,
                     RowKind::Toggle,
                     (),
-                    Row::new(plx_platform::i18n::msg::widgets_tracks_boost_dialog()).toggle(shown.boost_dialog),
+                    Row::new(nj_platform::i18n::msg::widgets_tracks_boost_dialog()).toggle(shown.boost_dialog),
                 )
                 .item(
                     TrackRow::Loudness,
                     RowKind::Toggle,
                     (),
-                    Row::new(plx_platform::i18n::msg::widgets_tracks_normalize_loudness()).toggle(shown.normalize_loudness),
+                    Row::new(nj_platform::i18n::msg::widgets_tracks_normalize_loudness()).toggle(shown.normalize_loudness),
                 );
             if let Some(route) = enhance_route {
                 if let Some(note) = Self::enh_note_text(route, enhance_subtitle_effect) {
@@ -1370,13 +1370,13 @@ impl TrackMenuState {
                     TrackRow::Boost,
                     RowKind::Toggle,
                     (),
-                    Row::new(plx_platform::i18n::msg::widgets_tracks_boost_dialog()).toggle(false).dim(true),
+                    Row::new(nj_platform::i18n::msg::widgets_tracks_boost_dialog()).toggle(false).dim(true),
                 )
                 .item(
                     TrackRow::Loudness,
                     RowKind::Toggle,
                     (),
-                    Row::new(plx_platform::i18n::msg::widgets_tracks_normalize_loudness()).toggle(false).dim(true),
+                    Row::new(nj_platform::i18n::msg::widgets_tracks_normalize_loudness()).toggle(false).dim(true),
                 )
                 .note(Self::enh_reason_text(reason));
             form = form.section(enh);
@@ -1434,17 +1434,26 @@ impl TrackMenuState {
     /// this triple, and computing it once here keeps them from independently re-deriving it (and
     /// risking disagreement).
     fn enh_state(ps: &crate::route::PlaybackSession) -> EnhState {
-        use crate::route::EnhancementAvailability;
         let subtitle_effect = crate::route::live_subtitle_effect(ps);
-        match crate::route::menu_enhancement_availability(ps) {
-            EnhancementAvailability::Hidden => (None, None, None, subtitle_effect),
-            EnhancementAvailability::Offered(route) => (
-                Some(crate::route::displayed_audio_enhancements(ps)),
-                Some(route),
-                None,
-                subtitle_effect,
-            ),
-            EnhancementAvailability::Disabled(reason) => (None, None, Some(reason), subtitle_effect),
+        // Jellyfin has no Plex Pass DSP. Product builds omit the Boost/Loudness rows; host tests
+        // still exercise the original offer/disabled matrix so the layout code stays covered.
+        #[cfg(not(test))]
+        {
+            return (None, None, None, subtitle_effect);
+        }
+        #[cfg(test)]
+        {
+            use crate::route::EnhancementAvailability;
+            match crate::route::menu_enhancement_availability(ps) {
+                EnhancementAvailability::Hidden => (None, None, None, subtitle_effect),
+                EnhancementAvailability::Offered(route) => (
+                    Some(crate::route::displayed_audio_enhancements(ps)),
+                    Some(route),
+                    None,
+                    subtitle_effect,
+                ),
+                EnhancementAvailability::Disabled(reason) => (None, None, Some(reason), subtitle_effect),
+            }
         }
     }
 
@@ -1489,7 +1498,7 @@ impl TrackMenuState {
     /// below — landing on the checked track — is exactly the existing open/switch behaviour.
     fn rebuild_audio(
         &mut self,
-        enhance_shown: Option<crate::plex::AudioEnhancements>,
+        enhance_shown: Option<crate::catalog::AudioEnhancements>,
         enhance_route: Option<crate::route::EnhancementRoute>,
         enhance_disabled: Option<crate::route::DisabledReason>,
         enhance_subtitle_effect: crate::route::SubtitleEffect,
@@ -1528,13 +1537,13 @@ impl TrackMenuState {
     /// `draw` and the focus queries so scrolling math matches. Cached against the table's
     /// [`TableView::layout_rev`]: text is measured when the table changed, not once per caller per
     /// frame. What is on screen is [`Self::shown_rect`], which springs toward this.
-    fn panel_rect(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    fn panel_rect(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         self.motion.natural(self.form.table.layout_rev(), || table_natural(&self.form.table, measure))
     }
 
     /// The card as it is drawn this frame: its top and left edges on their springs toward
     /// [`Self::panel_rect`], the bottom and right on the anchor.
-    fn shown_rect(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    fn shown_rect(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         self.motion.shown(self.panel_rect(measure))
     }
 
@@ -1556,7 +1565,7 @@ impl TrackMenuState {
     pub(crate) fn update(
         &mut self,
         dt: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         ps: &crate::route::PlaybackSession,
         meta: metadata::MetadataView<'_>,
     ) {
@@ -1587,7 +1596,7 @@ impl TrackMenuState {
     /// `prepare` runs after the mount on the same frame and before the presenting side's drain
     /// (`app::run::prepare_window`), so the strings are resident before the draw. Idempotent per
     /// table layout, like `update`'s own walk; queues only, uploads nothing.
-    pub(crate) fn warm_open(&self, measure: &dyn plx_machine::machine::Measure) {
+    pub(crate) fn warm_open(&self, measure: &dyn nj_machine::machine::Measure) {
         self.motion.warm_open(&self.form.table, || self.panel_rect(measure), measure);
     }
 
@@ -1606,12 +1615,12 @@ impl TrackMenuState {
         &mut self,
         ps: &crate::route::PlaybackSession,
         meta: metadata::MetadataView<'_>,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) {
         if self.background_owner.is_some()
             || !self.pages.is_empty()
             || self.motion.transitioning()
-            || plx_gfx::text::prewarm_pending()
+            || nj_gfx::text::prewarm_pending()
         {
             return;
         }
@@ -1633,7 +1642,7 @@ impl TrackMenuState {
         self.background_owner = Some(owner);
     }
 
-    pub(crate) fn draw(&mut self, appear: f32, measure: &dyn plx_machine::machine::Measure) {
+    pub(crate) fn draw(&mut self, appear: f32, measure: &dyn nj_machine::machine::Measure) {
         // The appear fade/rise — the container drives the phase and the appear spring. The dim
         // over the video plane is the container's too (`PlayerOverlayScreen::scrim`,
         // `theme::underlay::DIM_PLAYER`), painted at the end of the player's page pass.
@@ -1769,19 +1778,19 @@ fn visible_subs(ps: &crate::route::PlaybackSession, meta: metadata::MetadataView
 /// Resolve the typed tone at the UI boundary; persisted values and technical logs stay stable.
 fn tone_label(tone: SubtitleTone) -> &'static str {
     match tone {
-        SubtitleTone::White => plx_platform::i18n::msg::widgets_tracks_tone_white(),
-        SubtitleTone::Silver => plx_platform::i18n::msg::widgets_tracks_tone_silver(),
-        SubtitleTone::LightGrey => plx_platform::i18n::msg::widgets_tracks_tone_light_grey(),
-        SubtitleTone::Grey => plx_platform::i18n::msg::widgets_tracks_tone_grey(),
-        SubtitleTone::DarkGrey => plx_platform::i18n::msg::widgets_tracks_tone_dark_grey(),
-        SubtitleTone::Charcoal => plx_platform::i18n::msg::widgets_tracks_tone_charcoal(),
+        SubtitleTone::White => nj_platform::i18n::msg::widgets_tracks_tone_white(),
+        SubtitleTone::Silver => nj_platform::i18n::msg::widgets_tracks_tone_silver(),
+        SubtitleTone::LightGrey => nj_platform::i18n::msg::widgets_tracks_tone_light_grey(),
+        SubtitleTone::Grey => nj_platform::i18n::msg::widgets_tracks_tone_grey(),
+        SubtitleTone::DarkGrey => nj_platform::i18n::msg::widgets_tracks_tone_dark_grey(),
+        SubtitleTone::Charcoal => nj_platform::i18n::msg::widgets_tracks_tone_charcoal(),
     }
 }
 
 /// The localized name of a caption size rung — the one place both the player's Style pages and
 /// Settings' Playback read it.
 pub(crate) fn subtitle_size_label(size: SubtitleSize) -> &'static str {
-    use plx_platform::i18n::msg;
+    use nj_platform::i18n::msg;
     match size {
         SubtitleSize::Small => msg::settings_playback_subtitle_size_small(),
         SubtitleSize::Medium => msg::settings_playback_subtitle_size_medium(),
@@ -1792,7 +1801,7 @@ pub(crate) fn subtitle_size_label(size: SubtitleSize) -> &'static str {
 
 /// The localized name of a caption position rung, shared like [`subtitle_size_label`].
 pub(crate) fn subtitle_position_label(position: SubtitlePosition) -> &'static str {
-    use plx_platform::i18n::msg;
+    use nj_platform::i18n::msg;
     match position {
         SubtitlePosition::Low => msg::settings_playback_subtitle_position_low(),
         SubtitlePosition::Middle => msg::settings_playback_subtitle_position_middle(),
@@ -1803,7 +1812,7 @@ pub(crate) fn subtitle_position_label(position: SubtitlePosition) -> &'static st
 /// An offset as localized signed seconds to the tenth (`appkit::timing_capsule::offset_seconds_in`,
 /// the one offset formatter).
 fn format_offset(ms: i64) -> String {
-    crate::appkit::timing_capsule::offset_seconds_in(ms, true, plx_platform::i18n::current())
+    crate::appkit::timing_capsule::offset_seconds_in(ms, true, nj_platform::i18n::current())
 }
 
 // ---- section building ----
@@ -1817,8 +1826,8 @@ fn audio_descriptor(s: &metadata::Stream) -> String {
         channel_short(&s.layout)
     } else if s.channels > 0 {
         match s.channels {
-            1 => plx_platform::i18n::msg::widgets_tracks_mono().to_string(),
-            2 => plx_platform::i18n::msg::widgets_tracks_stereo().to_string(),
+            1 => nj_platform::i18n::msg::widgets_tracks_mono().to_string(),
+            2 => nj_platform::i18n::msg::widgets_tracks_stereo().to_string(),
             n => format!("{}.{}", n - 1, if n >= 6 { 1 } else { 0 }),
         }
     } else {
@@ -1836,8 +1845,8 @@ fn audio_descriptor(s: &metadata::Stream) -> String {
 fn channel_short(layout: &str) -> String {
     let base = layout.split('(').next().unwrap_or(layout).trim();
     match base {
-        "mono" => plx_platform::i18n::msg::widgets_tracks_mono().to_string(),
-        "stereo" => plx_platform::i18n::msg::widgets_tracks_stereo().to_string(),
+        "mono" => nj_platform::i18n::msg::widgets_tracks_mono().to_string(),
+        "stereo" => nj_platform::i18n::msg::widgets_tracks_stereo().to_string(),
         other => other.to_string(),
     }
 }
@@ -1849,7 +1858,7 @@ fn row_badge(b: &RowBadge) -> Badge {
     match b {
         RowBadge::Forced => Badge::Forced,
         RowBadge::Sdh => Badge::Sdh,
-        RowBadge::External => Badge::Text(plx_platform::i18n::msg::widgets_tracks_external_badge().to_string()),
+        RowBadge::External => Badge::Text(nj_platform::i18n::msg::widgets_tracks_external_badge().to_string()),
         RowBadge::Codec(c) => Badge::Text((*c).to_string()),
     }
 }
@@ -1863,7 +1872,7 @@ fn flat_row(t: &SubTrack, active_sub: c_int) -> Row {
         parts.push(t.detail.clone());
     }
     if let Some(n) = t.ordinal {
-        parts.push(plx_platform::i18n::msg::widgets_tracks_track_ordinal(n as i64));
+        parts.push(nj_platform::i18n::msg::widgets_tracks_track_ordinal(n as i64));
     }
     if !parts.is_empty() {
         row = row.detail(parts.join(" \u{b7} "));
@@ -1894,7 +1903,7 @@ fn in_lang_row(t: &SubTrack, active_sub: c_int) -> Row {
 /// A track's label inside its language: the source (+ "Track N" if needed), or the kind word for a
 /// nameless one. Also the value a language's drill-in reads out for its active variant.
 fn in_lang_label(t: &SubTrack) -> String {
-    let nth = t.ordinal.map(|n| plx_platform::i18n::msg::widgets_tracks_track_ordinal(n as i64));
+    let nth = t.ordinal.map(|n| nj_platform::i18n::msg::widgets_tracks_track_ordinal(n as i64));
     if !t.detail.is_empty() {
         match &nth {
             Some(n) => format!("{} \u{b7} {}", t.detail, n),
@@ -1926,7 +1935,7 @@ fn in_lang_label(t: &SubTrack) -> String {
 /// reason" idiom the Audio tab's own Boost dialog / Normalize loudness rows use when THEY are
 /// disabled.
 fn table_form(model: &SubModel, active_sub: c_int, offset_ms: i64, locked: bool) -> TrackForm {
-    use plx_platform::i18n::msg;
+    use nj_platform::i18n::msg;
     let active_other =
         model.other.iter().find(|o| o.tracks.iter().any(|t| active_sub >= 0 && t.i == active_sub as usize));
     model.sections.iter().fold(Form::new(), |form, sec| {
@@ -2184,7 +2193,7 @@ mod tests {
     /// server text and may elide; the fixture's sources are short so only app text is judged.)
     #[test]
     fn every_subtitles_row_fits_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let mut subs = vec![
             stream(1, 0, "Russian", "rus", "forced, DVD R5"),
             stream(2, 1, "Russian", "rus", "Netflix"),
@@ -2206,7 +2215,7 @@ mod tests {
                 sub_layout(&subs, &offered, &names, &["rus"], 1, true, -60_000);
             let mut table = TableView::new();
             table.set_sections(sections, 0, false);
-            out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+            out.extend(table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
             out.extend(table.app_fit_failures(crate::ui::table::MENU_MAX_W, language.tag()));
             out.extend(table.app_fit_failures_hugged(language.tag()));
         }
@@ -2218,7 +2227,7 @@ mod tests {
     /// accented vowels), the fixture's own server values, or letter-free.
     #[test]
     fn every_app_owned_subtitles_string_comes_from_the_catalog() {
-        let _pseudo = plx_platform::i18n::pseudo_on_this_thread_for_test();
+        let _pseudo = nj_platform::i18n::pseudo_on_this_thread_for_test();
         // a title's own "Commentary" stays its source (the mock strips no commentary word), so it
         // is server text here like the rest
         let server = ["Russian", "Spanish", "Portuguese", "Netflix", "DVD R5", "Commentary"];
@@ -2298,7 +2307,7 @@ mod tests {
 
     #[test]
     fn targets_map_flat_rows_to_off_sub_timing_and_style_in_drawn_order() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         crate::player::set_subtitle_offset(0);
         let ps = crate::route::PlaybackSession::IDLE;
@@ -2321,7 +2330,7 @@ mod tests {
 
     #[test]
     fn a_rebuild_lands_on_the_checked_sub_inside_a_multitrack_group() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
         let store = store_with(vec![
@@ -2355,7 +2364,7 @@ mod tests {
     /// the panel's layout changed (it resolved to Style and committed nothing).
     #[test]
     fn sub_track_for_target_finds_tracks_and_skips_off_timing_and_color() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
         let store = store_with(vec![
@@ -2377,7 +2386,7 @@ mod tests {
     /// "yours", so both land flat under "Subtitles"), then the headerless Timing/Style section.
     #[test]
     fn sidecar_and_settings_rows_map_to_their_own_commits_in_one_menu() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         crate::player::set_subtitle_offset(0);
         crate::player::restore_subtitle_tone(SubtitleTone::White);
@@ -2455,7 +2464,7 @@ mod tests {
 
     #[test]
     fn timing_returns_open_timing_once_a_subtitle_is_active_and_is_inert_while_off() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         crate::player::set_subtitle_offset(0);
         let ps = crate::route::PlaybackSession::IDLE;
@@ -2656,7 +2665,7 @@ mod enhancement_menu_tests {
 
     fn teardown(ps: &crate::route::PlaybackSession) {
         reset_player_control_for_test(ps);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **The other tab's warm is speculative to the recorder** (spec §5): its form build and
@@ -2665,15 +2674,15 @@ mod enhancement_menu_tests {
     #[test]
     fn the_background_warm_is_not_charged_against_a_strict_replay() {
         use crate::ui::rec::{Measurements, TableMeasure};
-        let _g = plx_base::testlock::serial();
-        plx_gfx::text::reset_prewarm_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_gfx::text::reset_prewarm_for_test();
         let (mut menu, ps) = audio_tab(EnhTestFixture::default());
         let store = one_track_store();
         let replay = Measurements::Replay(TableMeasure::new(std::collections::HashMap::new()));
         menu.warm_other_tab(&ps, store.view(), &replay);
         assert!(menu.background_owner.is_some(), "premise: the warm ran");
         assert_eq!(replay.drain(), Ok(Vec::new()), "the warm's queries are not strict replay queries");
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         teardown(&ps);
     }
 
@@ -2683,19 +2692,19 @@ mod enhancement_menu_tests {
     #[test]
     fn a_closing_menus_drop_keeps_the_newer_menus_background_queue() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
-        plx_gfx::text::reset_prewarm_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_gfx::text::reset_prewarm_for_test();
         let (mut old, ps) = audio_tab(EnhTestFixture::default());
         let store = one_track_store();
         old.warm_other_tab(&ps, store.view(), &M);
-        assert!(plx_gfx::text::background_prewarm_pending(), "premise: the old menu parked a warm");
+        assert!(nj_gfx::text::background_prewarm_pending(), "premise: the old menu parked a warm");
         let mut new = TrackMenuState::new(&ps, store.view(), 0, Vec::new());
         new.warm_other_tab(&ps, store.view(), &M);
         drop(old);
-        assert!(plx_gfx::text::background_prewarm_pending(), "the old menu's drop wiped the new menu's queue");
+        assert!(nj_gfx::text::background_prewarm_pending(), "the old menu's drop wiped the new menu's queue");
         drop(new);
-        assert!(!plx_gfx::text::background_prewarm_pending(), "the current owner clears on drop");
-        plx_gfx::text::reset_prewarm_for_test();
+        assert!(!nj_gfx::text::background_prewarm_pending(), "the current owner clears on drop");
+        nj_gfx::text::reset_prewarm_for_test();
         teardown(&ps);
     }
 
@@ -2703,9 +2712,9 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_absent_no_pass() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) =
-            audio_tab(EnhTestFixture { pass: crate::plex::serverinfo::Subscription::No, ..Default::default() });
+            audio_tab(EnhTestFixture { pass: crate::catalog::serverinfo::Subscription::No, ..Default::default() });
         assert_eq!(menu.enhance_shown, None);
         assert_eq!(menu.form.table.sections.len(), 1, "track list only — no second section at all");
         teardown(&ps);
@@ -2713,9 +2722,9 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_absent_unknown_subscription() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
-            pass: crate::plex::serverinfo::Subscription::Unknown,
+            pass: crate::catalog::serverinfo::Subscription::Unknown,
             ..Default::default()
         });
         assert_eq!(menu.enhance_shown, None);
@@ -2726,11 +2735,11 @@ mod enhancement_menu_tests {
     /// a viewer either way — Disabled(NotAnalyzed), not Hidden (owner direction, 2026-09-29).
     #[test]
     fn enh_rows_disabled_incapable_track() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { carried_capable: Some(false), ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotAnalyzed));
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed());
         teardown(&ps);
     }
 
@@ -2739,12 +2748,12 @@ mod enhancement_menu_tests {
     /// the toggle on plays the HDR10 base picture instead. The note says so in plain language.
     #[test]
     fn enh_rows_offered_dv_drops_declaration() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { dv_declared: true, ..Default::default() });
         assert_eq!(menu.enhance_route, Some(crate::route::EnhancementRoute::RemuxDropsDolbyVision));
         assert!(menu.enhance_shown.is_some());
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_note_dv_off());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off());
         teardown(&ps);
     }
 
@@ -2753,12 +2762,12 @@ mod enhancement_menu_tests {
     /// 2026-09-29).
     #[test]
     fn enh_rows_disabled_dv_unusable_base() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { dv_base_unusable: true, ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::DolbyVisionUnusable));
         assert_eq!(menu.enhance_shown, None);
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable());
         teardown(&ps);
     }
 
@@ -2767,7 +2776,7 @@ mod enhancement_menu_tests {
     /// viewer to turn subtitles off to use it.
     #[test]
     fn enh_rows_disabled_dv_with_embedded_subtitle() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
             dv_declared: true,
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
@@ -2775,7 +2784,7 @@ mod enhancement_menu_tests {
         });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::DolbyVisionSubtitle));
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle());
         teardown(&ps);
     }
 
@@ -2783,7 +2792,7 @@ mod enhancement_menu_tests {
     /// encode that burns it in, and the toggle stays enabled with a plain-language note.
     #[test]
     fn enh_rows_offered_embedded_subtitle_burns() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
             ..Default::default()
@@ -2791,7 +2800,7 @@ mod enhancement_menu_tests {
         assert_eq!(menu.enhance_route, Some(crate::route::EnhancementRoute::Burn));
         assert!(menu.enhance_shown.is_some());
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_note_burn());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_note_burn());
         teardown(&ps);
     }
 
@@ -2799,7 +2808,7 @@ mod enhancement_menu_tests {
     /// still an ordinary remux, with a reassuring note.
     #[test]
     fn enh_rows_offered_sidecar_subtitle_unaffected() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Sidecar,
             ..Default::default()
@@ -2807,7 +2816,7 @@ mod enhancement_menu_tests {
         assert_eq!(menu.enhance_route, Some(crate::route::EnhancementRoute::Remux));
         assert!(menu.enhance_shown.is_some());
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_note_sidecar());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar());
         teardown(&ps);
     }
 
@@ -2816,17 +2825,17 @@ mod enhancement_menu_tests {
     /// visible-and-dim, not hidden — "only at Original quality" is a plain reason.
     #[test]
     fn enh_rows_disabled_hls() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { remux: Some(false), ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotOriginalQuality));
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_reason_quality());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_reason_quality());
         teardown(&ps);
     }
 
     #[test]
     fn enh_rows_disabled_reencode_rung() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { remux: Some(false), ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotOriginalQuality));
         teardown(&ps);
@@ -2834,7 +2843,7 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_disabled_relay() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { remux: Some(false), ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotOriginalQuality));
         teardown(&ps);
@@ -2844,7 +2853,7 @@ mod enhancement_menu_tests {
     /// `auto_original` candidate at all — `base_present: false` reproduces exactly that.
     #[test]
     fn enh_rows_disabled_forced() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { base_present: false, ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotOriginalQuality));
         teardown(&ps);
@@ -2852,17 +2861,17 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_disabled_refused() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { refused: true, ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::ServerRefused));
         let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, plx_platform::i18n::msg::widgets_tracks_enh_reason_refused());
+        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_reason_refused());
         teardown(&ps);
     }
 
     #[test]
     fn enh_rows_disabled_server_default_audio() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { carried_capable: None, ..Default::default() });
         assert_eq!(menu.enhance_disabled, Some(crate::route::DisabledReason::NotAnalyzed));
         teardown(&ps);
@@ -2872,25 +2881,25 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_present_pass_capable_direct() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { remux: None, ..Default::default() });
         assert!(menu.enhance_shown.is_some());
         assert_eq!(menu.form.table.sections.len(), 2, "track list + the headerless enhancement section");
         let enh = &menu.form.table.sections[1];
         assert_eq!(enh.header, "");
         assert_eq!(enh.rows.len(), 2);
-        assert_eq!(enh.rows[0].label, plx_platform::i18n::msg::widgets_tracks_boost_dialog());
-        assert_eq!(enh.rows[1].label, plx_platform::i18n::msg::widgets_tracks_normalize_loudness());
+        assert_eq!(enh.rows[0].label, nj_platform::i18n::msg::widgets_tracks_boost_dialog());
+        assert_eq!(enh.rows[1].label, nj_platform::i18n::msg::widgets_tracks_normalize_loudness());
         teardown(&ps);
     }
 
-    /// `TrackMenuState::row_for_audio_target` is the `/tmp/plxnative-menupick` named-target
+    /// `TrackMenuState::row_for_audio_target` is the `/tmp/nativejelly-menupick` named-target
     /// resolver: `"boost"`/`"loudness"` map to the two toggle rows AFTER the one track, and any
     /// other name is `None` rather than a guess — the same "unknown name, no commit" contract
     /// `menupick_arm` logs on.
     #[test]
     fn row_for_audio_target_resolves_boost_and_loudness_when_shown() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { remux: None, ..Default::default() });
         assert_eq!(menu.row_for_audio_target("boost"), Some(1), "row 0 is the one track");
         assert_eq!(menu.row_for_audio_target("loudness"), Some(2));
@@ -2903,9 +2912,9 @@ mod enhancement_menu_tests {
     /// never to a stale row from a previous build.
     #[test]
     fn row_for_audio_target_none_without_enhancement_rows() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) =
-            audio_tab(EnhTestFixture { pass: crate::plex::serverinfo::Subscription::No, ..Default::default() });
+            audio_tab(EnhTestFixture { pass: crate::catalog::serverinfo::Subscription::No, ..Default::default() });
         assert_eq!(menu.row_for_audio_target("boost"), None);
         assert_eq!(menu.row_for_audio_target("loudness"), None);
         teardown(&ps);
@@ -2913,10 +2922,10 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_present_pass_capable_enhanced_remux() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
             remux: Some(true),
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             ..Default::default()
         });
         assert!(menu.enhance_shown.is_some());
@@ -2930,7 +2939,7 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_rows_follow_audio_rows_indices_stable() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (ps, _sid) = enhancement_test_session(EnhTestFixture::default());
         let store = store_with_audio(vec![
             crate::metadata::Stream {
@@ -2957,7 +2966,7 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_ok_toggles_and_keeps_open() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps) = audio_tab(EnhTestFixture::default());
         let store = one_track_store();
         menu.focus_row(1); // row 0 = the one audio track; row 1 = Boost dialog
@@ -2965,7 +2974,7 @@ mod enhancement_menu_tests {
         assert_eq!(
             outcome,
             TrackOk::Commit {
-                commit: TrackCommit::AudioEnhancement(crate::plex::AudioEnhancements {
+                commit: TrackCommit::AudioEnhancement(crate::catalog::AudioEnhancements {
                     boost_dialog: true,
                     normalize_loudness: false,
                 }),
@@ -2979,7 +2988,7 @@ mod enhancement_menu_tests {
         assert_eq!(
             outcome,
             TrackOk::Commit {
-                commit: TrackCommit::AudioEnhancement(crate::plex::AudioEnhancements::NONE),
+                commit: TrackCommit::AudioEnhancement(crate::catalog::AudioEnhancements::NONE),
                 keep_open: true,
             }
         );
@@ -2988,37 +2997,37 @@ mod enhancement_menu_tests {
 
     #[test]
     fn enh_row_shows_desired_while_pending_applied_otherwise() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // Settled (no user edit queued): the row reads what the contract actually APPLIED.
         let (menu, ps) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             ..Default::default()
         });
         assert_eq!(
             menu.enhance_shown,
-            Some(crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true }),
+            Some(crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true }),
         );
         teardown(&ps);
         drop(_g);
 
         // In flight (a user edit queued, not yet settled): the row reads the DESIRED preference.
-        let _g = plx_base::testlock::serial();
-        let desired = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
+        let _g = nj_base::testlock::serial();
+        let desired = crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
         crate::player::set_audio_enhancements(desired);
         let (menu, ps) = audio_tab(EnhTestFixture { in_flight: true, ..Default::default() });
         assert_eq!(menu.enhance_shown, Some(desired));
-        crate::player::set_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+        crate::player::set_audio_enhancements(crate::catalog::AudioEnhancements::NONE);
         teardown(&ps);
     }
 
     #[test]
     fn enh_row_stops_reading_on_once_a_live_refusal_settles() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // Opens reading Normalize Loudness ON — the same shape `on_ok`'s own optimistic
         // `self.enhance_shown = Some(a)` leaves a freshly-picked row in, before the server has
         // answered.
         let (mut menu, ps_ok) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             ..Default::default()
         });
         assert_eq!(menu.form.table.sections[1].rows[1].toggle, Some(true));
@@ -3054,39 +3063,39 @@ mod enhancement_menu_tests {
     #[test]
     fn update_rasterises_the_live_pages_text_before_the_draw() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps) = audio_tab(EnhTestFixture::default());
         let store = one_track_store();
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         // a held modal's leftover must not eat the drain's budget
-        plx_gfx::text::queue_prewarm(c"stale held string".as_ptr(), 24, 0);
+        nj_gfx::text::queue_prewarm(c"stale held string".as_ptr(), 24, 0);
         menu.update(0.0, &M, &ps, store.view());
         let labels: Vec<String> =
             menu.form.table.sections.iter().flat_map(|s| s.rows.iter()).map(|r| r.label.clone()).collect();
         assert!(!labels.is_empty(), "premise: the Audio tab has rows");
         // `update` alone is a frame that may not present: it records, it uploads nothing.
-        assert!(plx_gfx::text::prewarm_pending(), "update queued the page's strings");
+        assert!(nj_gfx::text::prewarm_pending(), "update queued the page's strings");
         for label in &labels {
             assert!(
-                !plx_gfx::text::prewarm_resident_any_size_for_test(label.as_bytes()),
+                !nj_gfx::text::prewarm_resident_any_size_for_test(label.as_bytes()),
                 "{label:?} was uploaded by update, which may run on a frame that does not present"
             );
         }
         // The presenting side's drain rasterises them, up to its time budget.
         crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
         let resident =
-            labels.iter().filter(|l| plx_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())).count();
+            labels.iter().filter(|l| nj_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())).count();
         assert!(resident > 0, "the drain rasterised none of the page's strings");
         assert!(
-            !plx_gfx::text::prewarm_resident_any_size_for_test(b"stale held string"),
+            !nj_gfx::text::prewarm_resident_any_size_for_test(b"stale held string"),
             "the walk's queue must replace, not extend, what a held surface left"
         );
 
         // The same layout is walked once, not every frame.
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         menu.update(0.016, &M, &ps, store.view());
         assert!(
-            !plx_gfx::text::prewarm_resident_any_size_for_test(labels[0].as_bytes()),
+            !nj_gfx::text::prewarm_resident_any_size_for_test(labels[0].as_bytes()),
             "an unchanged layout was walked again"
         );
         teardown(&ps);
@@ -3102,11 +3111,11 @@ mod enhancement_menu_tests {
     #[test]
     fn warm_open_makes_the_root_strings_resident_without_an_update() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture::default());
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         menu.warm_open(&M);
-        assert!(plx_gfx::text::prewarm_pending(), "warm_open queued the root page's strings");
+        assert!(nj_gfx::text::prewarm_pending(), "warm_open queued the root page's strings");
         let labels: Vec<String> = menu
             .form
             .table
@@ -3119,22 +3128,22 @@ mod enhancement_menu_tests {
         assert!(!labels.is_empty(), "premise: the Audio tab has rows");
         for label in &labels {
             assert!(
-                !plx_gfx::text::prewarm_resident_any_size_for_test(label.as_bytes()),
+                !nj_gfx::text::prewarm_resident_any_size_for_test(label.as_bytes()),
                 "{label:?} was uploaded by a walk, which may run on a frame that does not present"
             );
         }
         crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
         assert!(
-            labels.iter().any(|l| plx_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())),
+            labels.iter().any(|l| nj_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())),
             "the presenting side's drain rasterised none of the root page"
         );
         // The same layout is walked once: the first `update` does not queue it again.
-        plx_gfx::text::clear_prewarm();
+        nj_gfx::text::clear_prewarm();
         menu.warm_open(&M);
-        assert!(!plx_gfx::text::prewarm_pending(), "an unchanged layout was walked again by warm_open");
+        assert!(!nj_gfx::text::prewarm_pending(), "an unchanged layout was walked again by warm_open");
         let mut menu = menu;
         menu.update(0.016, &M, &ps, crate::stores::metadata::MetadataStore::default().view());
-        assert!(!plx_gfx::text::prewarm_pending(), "the first update walked the layout again");
+        assert!(!nj_gfx::text::prewarm_pending(), "the first update walked the layout again");
         teardown(&ps);
     }
 
@@ -3144,7 +3153,7 @@ mod enhancement_menu_tests {
     #[test]
     fn an_idle_menu_warms_the_other_tabs_strings_before_a_switch() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (ps, _sid) = enhancement_test_session(EnhTestFixture::default());
         let mut store = crate::stores::metadata::MetadataStore::default();
         let sub = |id: i64, index: i64, lang: &str, code: &str| metadata::Stream {
@@ -3162,7 +3171,7 @@ mod enhancement_menu_tests {
         item.audio = vec![metadata::Stream { id: 501, index: 0, codec: "ac3".into(), channels: 2, default: true, ..Default::default() }];
         assert!(store.run(crate::stores::metadata::MetadataCmd::InstallPlaying(Some(item))));
         let mut menu = TrackMenuState::new(&ps, store.view(), 0, Vec::new());
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         // A second of presented frames on the Audio tab: open, settle, drain. The first frame
         // drains the live page; every later one drains the other tab's strings in the
         // background, as many as the frame's time budget admits (the host clock charges 1 ms a
@@ -3173,7 +3182,7 @@ mod enhancement_menu_tests {
             let drained = crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
             // The draw drops whatever the live queue still holds (`ui::dispatch`, every frame
             // with no page warm), which on the TV left the background warm one string deep.
-            plx_gfx::text::clear_prewarm();
+            nj_gfx::text::clear_prewarm();
             if frame > 0 {
                 assert!(drained <= 3, "frame {frame} rasterised {drained} background strings");
             }
@@ -3190,7 +3199,7 @@ mod enhancement_menu_tests {
             .collect();
         assert!(!labels.is_empty(), "premise: the Subtitles tab has rows");
         let cold: Vec<&String> =
-            labels.iter().filter(|l| !plx_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())).collect();
+            labels.iter().filter(|l| !nj_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())).collect();
         assert!(cold.is_empty(), "the switch met these Subtitles labels cold: {cold:?}");
         teardown(&ps);
     }
@@ -3202,7 +3211,7 @@ mod enhancement_menu_tests {
     #[test]
     fn a_live_walk_that_interrupts_the_other_tabs_warm_requeues_it() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (ps, _sid) = enhancement_test_session(EnhTestFixture::default());
         let mut store = crate::stores::metadata::MetadataStore::default();
         let sub = |id: i64, index: i64, lang: &str, code: &str| metadata::Stream {
@@ -3238,17 +3247,17 @@ mod enhancement_menu_tests {
         ];
         assert!(store.run(crate::stores::metadata::MetadataCmd::InstallPlaying(Some(item))));
         let mut menu = TrackMenuState::new(&ps, store.view(), 1, Vec::new());
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         let frame = |menu: &mut TrackMenuState| {
             menu.update(0.016, &M, &ps, store.view());
             crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
             // What the drain left of the live queue, the draw drops (`ui::dispatch`).
-            plx_gfx::text::clear_prewarm();
+            nj_gfx::text::clear_prewarm();
         };
         // The open drains the Subtitles root; the next frame queues Audio and drains one string.
         frame(&mut menu);
         frame(&mut menu);
-        assert!(plx_gfx::text::background_prewarm_pending(), "premise: the Audio warm is draining");
+        assert!(nj_gfx::text::background_prewarm_pending(), "premise: the Audio warm is draining");
         // Into Other languages and straight back, the way the osc walks it.
         let nav = (menu.form.table.sections.iter())
             .flat_map(|s| s.rows.iter())
@@ -3272,7 +3281,7 @@ mod enhancement_menu_tests {
             .flat_map(|s| s.rows.iter())
             .map(|r| r.label.clone())
             .filter(|l| {
-                !l.is_empty() && !plx_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())
+                !l.is_empty() && !nj_gfx::text::prewarm_resident_any_size_for_test(l.as_bytes())
             })
             .collect();
         assert!(cold.is_empty(), "the switch met these Audio labels cold: {cold:?}");
@@ -3286,9 +3295,9 @@ mod enhancement_menu_tests {
     #[test]
     fn a_note_added_by_a_live_rebuild_sizes_the_panel_on_the_same_update() {
         use crate::ui::fixture::FixtureMeasure as M;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps_ok) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             ..Default::default()
         });
         assert!(!menu.form.table.sections.iter().flat_map(|s| s.rows.iter()).any(|r| r.is_note()), "premise: no note yet");
@@ -3318,9 +3327,9 @@ mod enhancement_menu_tests {
     /// engine's remembered element and the drawn cursor still name the same row.
     #[test]
     fn live_update_preserves_focus_on_the_toggled_row_not_the_checked_track() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps_before) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: false },
             ..Default::default()
         });
         // Row 0 is the one audio track (checked/active); row 1 is Boost dialog. Move the ENGINE's
@@ -3332,7 +3341,7 @@ mod enhancement_menu_tests {
         // request (mirrors the server's async `EnhancementOutcome` landing), delivered the way
         // `update` is fed every frame: a fresh `&PlaybackSession`, not a rebuild the panel triggers.
         let (ps_after, _sid2) = enhancement_test_session(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             ..Default::default()
         });
         let store = one_track_store();
@@ -3365,7 +3374,7 @@ mod enhancement_menu_tests {
     /// was banked before the vanish, not whatever `table.sel` happens to hold once the rows return.
     #[test]
     fn a_rows_vanish_and_return_restores_focus_on_the_toggle_row_not_wherever_the_clamp_landed() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let two_tracks = || {
             store_with_audio(vec![
                 crate::metadata::Stream {
@@ -3393,7 +3402,7 @@ mod enhancement_menu_tests {
         // The offer vanishes for a frame — under M7 only a Plex Pass flip does that (I1/I2); every
         // other gate that used to hide the rows is now a visible `Disabled` reason instead.
         let (ps_hidden, _sid_hidden) = enhancement_test_session(EnhTestFixture {
-            pass: crate::plex::serverinfo::Subscription::No,
+            pass: crate::catalog::serverinfo::Subscription::No,
             ..Default::default()
         });
         let store_hidden = two_tracks();
@@ -3431,12 +3440,12 @@ mod enhancement_menu_tests {
     /// prose the viewer who HAS them ever reads.
     #[test]
     fn enh_locale_values_never_mention_plex_pass() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         for language in SHIPPED {
             let _guard = language_on_this_thread_for_test(language);
             for value in [
-                plx_platform::i18n::msg::widgets_tracks_boost_dialog(),
-                plx_platform::i18n::msg::widgets_tracks_normalize_loudness(),
+                nj_platform::i18n::msg::widgets_tracks_boost_dialog(),
+                nj_platform::i18n::msg::widgets_tracks_normalize_loudness(),
             ] {
                 let lower = value.to_lowercase();
                 assert!(!lower.contains("plex pass"), "{language:?}: {value:?} names the gate");
@@ -3450,7 +3459,7 @@ mod enhancement_menu_tests {
     /// never heard the word "remux" and should not need to.
     #[test]
     fn enh_notes_and_reasons_never_use_jargon() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
         const BANNED: &[&str] = &[
             "remux",
             "transcode",
@@ -3465,15 +3474,15 @@ mod enhancement_menu_tests {
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);
             for (name, value) in [
-                ("enh_note_sidecar", plx_platform::i18n::msg::widgets_tracks_enh_note_sidecar()),
-                ("enh_note_burn", plx_platform::i18n::msg::widgets_tracks_enh_note_burn()),
-                ("enh_note_dv_off", plx_platform::i18n::msg::widgets_tracks_enh_note_dv_off()),
-                ("enh_reason_not_analyzed", plx_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed()),
-                ("enh_reason_dv_unusable", plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable()),
-                ("enh_reason_dv_subtitle", plx_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle()),
-                ("enh_reason_quality", plx_platform::i18n::msg::widgets_tracks_enh_reason_quality()),
-                ("enh_reason_refused", plx_platform::i18n::msg::widgets_tracks_enh_reason_refused()),
-                ("style_locked_note", plx_platform::i18n::msg::widgets_tracks_style_locked_note()),
+                ("enh_note_sidecar", nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar()),
+                ("enh_note_burn", nj_platform::i18n::msg::widgets_tracks_enh_note_burn()),
+                ("enh_note_dv_off", nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off()),
+                ("enh_reason_not_analyzed", nj_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed()),
+                ("enh_reason_dv_unusable", nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable()),
+                ("enh_reason_dv_subtitle", nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle()),
+                ("enh_reason_quality", nj_platform::i18n::msg::widgets_tracks_enh_reason_quality()),
+                ("enh_reason_refused", nj_platform::i18n::msg::widgets_tracks_enh_reason_refused()),
+                ("style_locked_note", nj_platform::i18n::msg::widgets_tracks_style_locked_note()),
             ] {
                 let lower = value.to_lowercase();
                 for word in BANNED {
@@ -3498,16 +3507,16 @@ mod enhancement_menu_tests {
     /// string back; do not assume either phrase's width from the source text alone.
     #[test]
     fn enh_rows_fit_menu_cap_es_be() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let mut out = Vec::new();
         for language in SHIPPED {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             let (menu, ps) = audio_tab(EnhTestFixture {
-                applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
+                applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
                 ..Default::default()
             });
-            out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+            out.extend(menu.form.table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
             out.extend(menu.form.table.app_fit_failures(crate::ui::table::MENU_MAX_W, language.tag()));
             out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
             teardown(&ps);
@@ -3538,10 +3547,10 @@ mod enhancement_menu_tests {
     /// it. The track-selection rows (Off, the embedded track itself) are unaffected.
     #[test]
     fn subtitles_tab_dims_timing_and_color_under_live_burn() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps) = subtitles_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             applied_burn: true,
             ..Default::default()
         });
@@ -3555,7 +3564,7 @@ mod enhancement_menu_tests {
 
         let note_i = style_i + 1;
         assert_eq!(menu.form.id_at(note_i), None, "a note is an inert slot with no id");
-        assert_eq!(rows[note_i].label, plx_platform::i18n::msg::widgets_tracks_style_locked_note());
+        assert_eq!(rows[note_i].label, nj_platform::i18n::msg::widgets_tracks_style_locked_note());
         assert!(rows[note_i].sep, "a note row is non-selectable");
 
         // The track rows themselves stay live: Off, and the embedded subtitle, neither dim.
@@ -3571,7 +3580,7 @@ mod enhancement_menu_tests {
     /// must NOT lock the rows — only an actually-applied Burn does.
     #[test]
     fn subtitles_tab_timing_and_color_stay_live_when_not_applied() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // `remux: None` (Direct family) so this is not itself "a transcode" — isolates the case
         // from `timing_is_omitted_under_transcode_and_dim_while_subtitles_are_off`'s own coverage
         // of an ordinary (non-enhancement) transcode omitting Timing outright.
@@ -3592,10 +3601,10 @@ mod enhancement_menu_tests {
     /// the Timing capsule or push Style while the server owns the picture.
     #[test]
     fn subtitles_ok_on_locked_timing_and_color_is_inert() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps) = subtitles_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             applied_burn: true,
             ..Default::default()
         });
@@ -3617,10 +3626,10 @@ mod enhancement_menu_tests {
     /// must keep re-routing normally; only Timing/Style are locked.
     #[test]
     fn subtitles_off_stays_live_under_a_burn() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps) = subtitles_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             applied_burn: true,
             ..Default::default()
         });
@@ -3650,13 +3659,13 @@ mod enhancement_menu_tests {
     /// per-tick poll (mirroring the Audio tab's own live poll just above it) started catching it.
     #[test]
     fn subtitles_tab_poll_catches_a_burn_that_lands_after_the_panel_opened() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // Opened before the pick: subtitle Off, no burn yet — the same cold-start shape
         // `subtitle_first_pick_while_plain_enhanced_remux_burns_it` (route/decision_audio_
         // enhancement_tests.rs) drives before its own live pick.
         let (mut menu, _ps_before) = subtitles_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::None,
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             applied_burn: false,
             ..Default::default()
         });
@@ -3668,7 +3677,7 @@ mod enhancement_menu_tests {
         // sat untouched — `ps` is process-external state the menu never owns a copy of).
         let (ps_after, _sid) = enhancement_test_session(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             applied_burn: true,
             ..Default::default()
         });
@@ -3691,18 +3700,18 @@ mod enhancement_menu_tests {
     /// `enh_rows_fit_menu_cap_es_be` over the Audio panel.
     #[test]
     fn subtitles_locked_note_fits_menu_cap_es_be() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             let (menu, ps) = subtitles_tab(EnhTestFixture {
                 subtitle_effect: crate::route::SubtitleEffect::Embedded,
-                applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+                applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
                 applied_burn: true,
                 ..Default::default()
             });
-            out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+            out.extend(menu.form.table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
             out.extend(menu.form.table.app_fit_failures(crate::ui::table::MENU_MAX_W, language.tag()));
             out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
             teardown(&ps);
@@ -3714,19 +3723,19 @@ mod enhancement_menu_tests {
     /// judges the note row, and its row is as tall as its wrapped lines.
     #[test]
     fn spanish_locked_note_wraps_within_the_subtitles_panel() {
-        use plx_machine::machine::Measure;
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_machine::machine::Measure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         use crate::ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
-        let _g = plx_base::testlock::serial();
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
+        let _g = nj_base::testlock::serial();
         let _guard = language_on_this_thread_for_test(Preference::Es);
         let (menu, ps) = subtitles_tab(EnhTestFixture {
             subtitle_effect: crate::route::SubtitleEffect::Embedded,
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             applied_burn: true,
             ..Default::default()
         });
-        let note = plx_platform::i18n::msg::widgets_tracks_style_locked_note();
+        let note = nj_platform::i18n::msg::widgets_tracks_style_locked_note();
         let line = ShippedMeasure.width_str(&note, crate::ui::theme::size::CAPTION, false);
         let before = menu.form.table.measured_height();
         let pw = menu.form.table.menu_panel_width(&ShippedMeasure);
@@ -3741,7 +3750,7 @@ mod enhancement_menu_tests {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
-    use plx_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
+    use nj_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
 
     /// The focus element of the `i`-th Audio row, named by identity.
     fn audio_key(i: usize) -> u32 {
@@ -3951,7 +3960,7 @@ mod focus_tests {
 mod localized_offset_tests {
     #[test]
     fn subtitle_timing_uses_locale_decimal_and_unit_without_changing_offset_sign() {
-        use plx_platform::i18n::{LocaleContext, Preference};
+        use nj_platform::i18n::{LocaleContext, Preference};
         for (preference, region, negative, positive) in [
             (Preference::En, "en-US", "-0.1 s", "+1.3 s"),
             (Preference::Es, "es-ES", "-0,1 s", "+1,3 s"),
@@ -3998,10 +4007,10 @@ mod keyed_form_tests {
     /// found by id, with no pending reseat (the engine's key still names the landed row).
     #[test]
     fn a_live_refresh_inserting_the_enhancement_rows_keeps_focus_on_the_same_audio_track() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let store = store_with_audio(vec![audio(501, 0, true), audio(502, 1, false)]);
         let (ps_hidden, _s1) = enhancement_test_session(EnhTestFixture {
-            pass: crate::plex::serverinfo::Subscription::No,
+            pass: crate::catalog::serverinfo::Subscription::No,
             ..Default::default()
         });
         let mut menu = TrackMenuState::new(&ps_hidden, store.view(), 0, Vec::new());
@@ -4018,14 +4027,14 @@ mod keyed_form_tests {
         assert_eq!(key_of(&menu, TrackRow::Audio(1)), before, "the track's key did not move");
         assert_eq!(RowKeys::reseat(&menu.form), None, "the engine's key still names the landed row");
         reset_player_control_for_test(&ps_hidden);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **Adding a subtitle track to the offered list moves no other row's key**, even though the
     /// added track sorts above them on screen (its key is its subs-list index, not its position).
     #[test]
     fn focus_keys_are_stable_when_a_subtitle_track_is_added() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
         let two = vec![stream(1, 0, "English", "eng", ""), stream(2, 1, "French", "fra", "")];
@@ -4051,7 +4060,7 @@ mod keyed_form_tests {
     /// engine along.
     #[test]
     fn an_open_lang_is_the_same_row_when_tracks_are_added() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
         let base = vec![
@@ -4081,7 +4090,7 @@ mod keyed_form_tests {
     /// **Initial focus is the active track on both tabs** — and Off when no subtitle is active.
     #[test]
     fn initial_focus_lands_on_the_active_track_on_both_tabs() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
         // Audio: the flagged default (IDLE records no sid) is the SECOND track
@@ -4112,7 +4121,7 @@ mod style_page_tests {
 
     fn teardown(ps: &crate::route::PlaybackSession) {
         reset_player_control_for_test(ps);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// A direct-play route with the subtitle `codec` active (or none when `effect` is `None`).
@@ -4151,7 +4160,7 @@ mod style_page_tests {
     /// the checked rung focused; LEFT pops each back onto the row that opened it.
     #[test]
     fn push_lands_on_an_explicit_id_and_pop_restores_the_opener() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         assert_eq!(menu.on_ok(store.view()), TrackOk::Navigated);
@@ -4181,7 +4190,7 @@ mod style_page_tests {
     /// RIGHT on a Nav row enters the page exactly as OK does; RIGHT off one is the tab switch.
     #[test]
     fn right_on_a_nav_row_pushes_and_left_at_the_root_switches_tab() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         menu.on_right(&ps, store.view());
@@ -4196,7 +4205,7 @@ mod style_page_tests {
     /// A pop reinstates the scroll the page was left at, not the top.
     #[test]
     fn pop_restores_the_scroll_the_root_was_left_at() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (ps, _sid) = enhancement_test_session(EnhTestFixture {
             remux: None,
             subtitle_effect: SubtitleEffect::Sidecar,
@@ -4223,7 +4232,7 @@ mod style_page_tests {
     /// already-checked rung is inert.
     #[test]
     fn a_picker_pick_commits_live_and_moves_the_checkmark() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         assert_eq!(menu.on_ok(store.view()), TrackOk::Navigated);
@@ -4250,7 +4259,7 @@ mod style_page_tests {
     /// The Style page reads the current value of each field on its Nav row.
     #[test]
     fn the_style_page_shows_each_fields_current_value() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         menu.on_ok(store.view());
@@ -4267,11 +4276,11 @@ mod style_page_tests {
     /// and a dimmed row is inert for OK.
     #[test]
     fn size_and_position_lock_by_renderer_kind_and_color_never_does() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (codec, renderer, note) in [
             ("srt", SubRenderer::Text, None),
-            ("pgs", SubRenderer::Image, Some(plx_platform::i18n::msg::widgets_tracks_style_image_note())),
-            ("ass", SubRenderer::Styled, Some(plx_platform::i18n::msg::widgets_tracks_style_styled_note())),
+            ("pgs", SubRenderer::Image, Some(nj_platform::i18n::msg::widgets_tracks_style_image_note())),
+            ("ass", SubRenderer::Styled, Some(nj_platform::i18n::msg::widgets_tracks_style_styled_note())),
         ] {
             let (mut menu, ps, store) = open_with(codec, SubtitleEffect::Sidecar);
             assert_eq!(menu.renderer, renderer, "{codec}");
@@ -4308,7 +4317,7 @@ mod style_page_tests {
     /// availability: an ordinary transcode omits both, an own burn keeps both drawn and dim.
     #[test]
     fn style_follows_timings_availability() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let has = |menu: &TrackMenuState, id| menu.form.index_of(&id).is_some();
         // an ordinary transcode that is not the own burn: neither row
         let (ps, _) = enhancement_test_session(EnhTestFixture { remux: Some(false), ..Default::default() });
@@ -4329,7 +4338,7 @@ mod style_page_tests {
     /// refreshes in place.
     #[test]
     fn a_rebuild_signature_mismatch_on_a_sub_page_pops_to_the_root() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_with("srt", SubtitleEffect::Sidecar);
         focus_id(&mut menu, TrackRow::Style);
         menu.on_ok(store.view());
@@ -4353,7 +4362,7 @@ mod style_page_tests {
     /// refreshes the open Size picker in place: same page, same focused row, new signature stored.
     #[test]
     fn a_signature_change_that_keeps_the_pages_availability_refreshes_in_place() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         menu.on_ok(store.view());
@@ -4399,15 +4408,15 @@ mod style_page_tests {
     /// notes), and each picker page, judged by the same gates as the rest of the menu.
     #[test]
     fn every_style_page_fits_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             for codec in ["srt", "pgs", "ass"] {
                 let (mut menu, ps, store) = open_with(codec, SubtitleEffect::Sidecar);
                 let mut judge = |menu: &TrackMenuState| {
-                    out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+                    out.extend(menu.form.table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
                     out.extend(menu.form.table.app_fit_failures(crate::ui::table::MENU_MAX_W, language.tag()));
                     out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
                 };
@@ -4430,10 +4439,10 @@ mod style_page_tests {
     /// note wrapped to three lines in a sliver.
     #[test]
     fn the_style_note_fits_two_lines_at_the_player_menu_floor() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
-        let measure = plx_base::fontcov::advances::ShippedMeasure;
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
+        let measure = nj_base::fontcov::advances::ShippedMeasure;
         for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             for codec in ["pgs", "ass"] {
                 let (mut menu, ps, _store) = open_with(codec, SubtitleEffect::Sidecar);
@@ -4455,7 +4464,7 @@ mod style_page_tests {
     /// The title band is a pointer-only stop: its key is recognised, no row owns it.
     #[test]
     fn the_title_key_is_the_bands_and_no_rows() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open_text();
         focus_id(&mut menu, TrackRow::Style);
         menu.on_ok(store.view());
@@ -4468,7 +4477,7 @@ mod style_page_tests {
     /// states that differ in any of them hash apart.
     #[test]
     fn the_canon_tells_pages_openers_and_selections_apart() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let hash = |menu: &TrackMenuState| {
             let mut c = Canon::new();
             menu.canon(&mut c);
@@ -4504,7 +4513,7 @@ mod language_page_tests {
 
     fn teardown(ps: &crate::route::PlaybackSession) {
         reset_player_control_for_test(ps);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     fn pgs(mut s: metadata::Stream) -> metadata::Stream {
@@ -4561,7 +4570,7 @@ mod language_page_tests {
     /// pops each back onto the row that opened it, by id, and the title follows the page.
     #[test]
     fn push_and_pop_walk_root_other_languages_and_a_language() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         assert_eq!(menu.ids()[..3], [TrackRow::SubOff, TrackRow::Sub(0), TrackRow::OpenOther]);
         assert_eq!(row_of(&menu, TrackRow::OpenOther).value.as_deref(), Some("3"), "Dutch, French, German");
@@ -4600,7 +4609,7 @@ mod language_page_tests {
     /// RIGHT on a drill-in enters it like OK; LEFT on a page pops, never switches tab.
     #[test]
     fn right_enters_a_language_and_left_leaves_it() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         focus_id(&mut menu, TrackRow::OpenOther);
         menu.on_right(&ps, store.view());
@@ -4618,7 +4627,7 @@ mod language_page_tests {
     /// the Other languages page and on a language page alike.
     #[test]
     fn the_format_badge_is_only_on_image_subtitles() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, _store) = open(subs_with_vobsub());
         menu.push(TrackPage::OtherLanguages);
         let badges = |m: &TrackMenuState, id| row_of(m, id).badges.iter().map(|b| b.text().to_string()).collect::<Vec<_>>();
@@ -4652,7 +4661,7 @@ mod language_page_tests {
     /// the active track is inside one), a language page on its active variant, else on its first.
     #[test]
     fn a_page_opens_on_the_active_track_when_it_is_inside() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         menu.active_sub = 2; // French SDH
         menu.rebuild(&ps, store.view(), 1, false);
@@ -4691,7 +4700,7 @@ mod language_page_tests {
     /// A pick on a language page commits like a root pick does and dismisses the panel.
     #[test]
     fn a_pick_on_a_language_page_commits_and_dismisses() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         menu.push(TrackPage::OtherLanguages);
         menu.push(TrackPage::Language(11));
@@ -4725,7 +4734,7 @@ mod language_page_tests {
     /// and keeps the viewer's row.
     #[test]
     fn a_vanished_language_pops_to_the_root_and_a_changed_one_refreshes_in_place() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let store = store_with(sidecar_french(["/a.srt", "/b.srt", "/c.srt"]));
         let _ = crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
@@ -4759,7 +4768,7 @@ mod language_page_tests {
     /// With no language left to list, an open Other languages page pops too.
     #[test]
     fn the_other_languages_page_pops_when_nothing_is_left_to_list() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         focus_id(&mut menu, TrackRow::OpenOther);
         menu.on_ok(store.view());
@@ -4789,7 +4798,7 @@ mod language_page_tests {
     /// commits by the track's own id.
     #[test]
     fn the_harness_picks_a_subtitle_behind_other_languages() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(vec![stream(21, 0, "German", "deu", ""), stream(22, 1, "Dutch", "nld", "")]);
         // page order: Dutch (A-Z) is the first Other-languages row, German the second
         let i = menu.sub_track_for_target("track:0").expect("track:0 resolves behind Other languages");
@@ -4808,7 +4817,7 @@ mod language_page_tests {
     /// multi-track language's own ranked page.
     #[test]
     fn the_harness_track_order_is_root_then_other_pages_expanded() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (menu, ps, _store) = open(subs());
         // root: English(0); Other A-Z: Dutch(5), French full/SDH/forced (1,2,3), German(4)
         let order: Vec<_> = (0..7).map(|n| menu.sub_track_for_target(&format!("track:{n}"))).collect();
@@ -4821,7 +4830,7 @@ mod language_page_tests {
     /// root.
     #[test]
     fn opening_with_the_active_track_behind_other_languages_focuses_that_row() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(vec![stream(10, 0, "English", "eng", ""), stream(11, 1, "Unknown", "", "")]);
         menu.active_sub = 1;
         menu.rebuild(&ps, store.view(), 1, false);
@@ -4833,7 +4842,7 @@ mod language_page_tests {
     #[test]
     fn the_poll_fallback_lands_on_other_languages_when_the_active_track_is_behind_it() {
         use crate::route::{enhancement_test_session, EnhTestFixture, SubtitleEffect};
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _ = crate::player::sidecar::reset();
         // cur_sub_sid is 999: no such stream yet
         let (ps, _sid) = enhancement_test_session(EnhTestFixture { subtitle_effect: SubtitleEffect::Embedded, ..Default::default() });
@@ -4858,7 +4867,7 @@ mod language_page_tests {
     /// stay French (it must never show Dutch under a French stack).
     #[test]
     fn a_language_page_survives_earlier_tracks_leaving() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let before = vec![
             stream(10, 0, "English", "eng", ""),
             stream(11, 1, "German", "deu", ""),
@@ -4887,7 +4896,7 @@ mod language_page_tests {
     /// If the page's language is gone altogether the page pops to the root.
     #[test]
     fn a_language_page_pops_when_its_language_is_gone_whatever_the_indices() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open(subs());
         open_language_named(&mut menu, &store, "French");
         let after = store_with(vec![
@@ -4906,7 +4915,7 @@ mod language_page_tests {
     /// Other languages page on French's now-direct row.
     #[test]
     fn a_language_page_that_drops_to_one_track_stays_and_pops_onto_the_single_row() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let store = store_with(sidecar_french(["/a.srt", "/b.srt", "/c.srt"]));
         let _ = crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
@@ -4927,7 +4936,7 @@ mod language_page_tests {
     /// tracks while the viewer sits on it; focus follows it to its drill-in.
     #[test]
     fn a_single_track_language_that_grows_keeps_the_focus_on_its_new_row() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let store = store_with(sidecar_french(["/a.srt", "", ""]));
         let _ = crate::player::sidecar::reset();
         let ps = crate::route::PlaybackSession::IDLE;
@@ -4947,7 +4956,7 @@ mod language_page_tests {
     /// The canon tells the three new pages and their openers apart.
     #[test]
     fn the_canon_tells_the_language_pages_apart() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let hash = |menu: &TrackMenuState| {
             let mut c = Canon::new();
             menu.canon(&mut c);
@@ -4976,14 +4985,14 @@ mod language_page_tests {
     /// judged by the same gates as the rest of the menu.
     #[test]
     fn the_language_pages_fit_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             let (mut menu, ps, store) = open(subs_with_vobsub());
             let judge = |menu: &TrackMenuState, out: &mut Vec<_>| {
-                out.extend(menu.form.table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+                out.extend(menu.form.table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
                 out.extend(menu.form.table.app_fit_failures(crate::ui::table::MENU_MAX_W, language.tag()));
                 out.extend(menu.form.table.app_fit_failures_hugged(language.tag()));
             };
@@ -5013,14 +5022,14 @@ mod language_page_tests {
 mod motion_tests {
     use super::tests::{store_with, stream};
     use super::*;
-    use plx_base::fontcov::advances::ShippedMeasure;
+    use nj_base::fontcov::advances::ShippedMeasure;
     use crate::route::reset_player_control_for_test;
 
     const DT: f32 = 1.0 / 60.0;
 
     fn teardown(ps: &crate::route::PlaybackSession) {
         reset_player_control_for_test(ps);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     fn subs() -> Vec<metadata::Stream> {
@@ -5046,9 +5055,9 @@ mod motion_tests {
     /// One loop frame, as the dispatcher runs it: forget last frame's motion, then update. Returns
     /// whether a spring moved (what keeps the present gate awake).
     fn frame(menu: &mut TrackMenuState, ps: &crate::route::PlaybackSession, store: &crate::stores::metadata::MetadataStore) -> bool {
-        plx_machine::idle::frame_begin(DT);
+        nj_machine::idle::frame_begin(DT);
         menu.update(DT, &ShippedMeasure, ps, store.view());
-        plx_machine::idle::present_moving()
+        nj_machine::idle::present_moving()
     }
 
     fn run(menu: &mut TrackMenuState, ps: &crate::route::PlaybackSession, store: &crate::stores::metadata::MetadataStore, n: usize) {
@@ -5074,7 +5083,7 @@ mod motion_tests {
     /// **A push animates, reports motion each frame it runs and stops asking for frames at rest.**
     #[test]
     fn a_push_is_animating_then_asks_for_no_more_frames_at_rest() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let root = natural(&menu);
         push_style(&mut menu, &store);
@@ -5105,7 +5114,7 @@ mod motion_tests {
     /// that was live leaves from its own: no layer's alpha steps at the swap.
     #[test]
     fn an_interrupted_push_then_pop_reverses_and_settles_at_the_root_rect() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let root = natural(&menu);
         let root_shown = shown(&menu);
@@ -5147,7 +5156,7 @@ mod motion_tests {
     /// focus pill (the arriving page owns the only one).
     #[test]
     fn the_two_pages_are_never_both_above_the_gate_and_only_one_draws_a_pill() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let check = |menu: &TrackMenuState, what: &str| {
             let (leaving, live) = menu.motion.alphas();
@@ -5191,7 +5200,7 @@ mod motion_tests {
     /// alpha and offset it had, the older leaving page keeps fading, and the new page starts clear.
     #[test]
     fn a_push_during_a_push_steps_no_layer() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         push_style(&mut menu, &store);
         run(&mut menu, &ps, &store, 12);
@@ -5219,7 +5228,7 @@ mod motion_tests {
     /// card off its layout.
     #[test]
     fn rapid_pushes_and_pops_leave_one_slide_and_land_on_the_logical_page() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let root = natural(&menu);
         for _ in 0..4 {
@@ -5250,7 +5259,7 @@ mod motion_tests {
     /// does not slide.
     #[test]
     fn a_tab_switch_animates_the_height() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let tall = natural(&menu);
         menu.focus_tab(&ps, store.view(), 0);
@@ -5277,7 +5286,7 @@ mod motion_tests {
     /// The layout target is measured when the table changed and not otherwise.
     #[test]
     fn the_layout_is_cached_until_the_table_changes() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut menu, ps, store) = open();
         let rev = menu.form.table.layout_rev();
         let a = natural(&menu);

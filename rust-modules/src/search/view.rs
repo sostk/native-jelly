@@ -103,8 +103,8 @@ mod tests {
         fx.set_query("wallace");
         fx.state.publish_shelves_for_test(vec![Shelf {
             kind: Kind::Movie,
-            items: vec![Item::Media(crate::pms::PmsMovie {
-                sid: crate::plex::ServerId::UNSET, rk: "retained-search".into(),
+            items: vec![Item::Media(crate::catalog_fetch::PmsMovie {
+                sid: crate::catalog::ServerId::UNSET, rk: "retained-search".into(),
                 title: "Synthetic result".into(), unwatched: true, ..Default::default()
             })],
         }]);
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn a_query_slice_is_consumed_before_replacing_its_publication() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut fx = Fixture::new();
         fx.set_query("wallace");
         let prefix = fx.state.query()[..2].to_string();
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn captures_share_published_buffers_and_whitespace_preserves_the_result_identity() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut fx, old) = publish_fixture();
         let another = fx.snapshot();
         assert!(old.same_publication(&another));
@@ -140,13 +140,13 @@ mod tests {
         assert_eq!(old.view().query_gen(), spaced.view().query_gen());
         assert_eq!(spaced.view().state(), State::Ready);
         assert!(Arc::ptr_eq(old.shelves.as_ref().unwrap(), spaced.shelves.as_ref().unwrap()));
-        assert!(!crate::search::set_watched_local_for_test(&mut fx.state, crate::plex::ServerId::UNSET, "absent", true));
+        assert!(!crate::search::set_watched_local_for_test(&mut fx.state, crate::catalog::ServerId::UNSET, "absent", true));
         assert!(Arc::ptr_eq(spaced.shelves.as_ref().unwrap(), fx.snapshot().shelves.as_ref().unwrap()));
     }
 
     #[test]
     fn query_replacement_and_profile_reset_cannot_rewrite_a_retained_view() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut fx, old) = publish_fixture();
         fx.set_query("gromit");
         let next = fx.snapshot();
@@ -168,16 +168,16 @@ mod tests {
 
     #[test]
     fn optimistic_edits_copy_on_write_and_preserve_the_old_item() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut fx, old) = publish_fixture();
         let watched = |snapshot: &SearchSnapshot| match &snapshot.view().shelves()[0].items[0] {
             Item::Media(item) => item.watched,
             _ => panic!("fixture must be a media item"),
         };
         assert!(!watched(&old));
-        assert!(!crate::search::set_watched_local_for_test(&mut fx.state, crate::plex::ServerId::from_raw(9), "retained-search", true));
+        assert!(!crate::search::set_watched_local_for_test(&mut fx.state, crate::catalog::ServerId::from_raw(9), "retained-search", true));
         assert!(Arc::ptr_eq(old.shelves.as_ref().unwrap(), fx.snapshot().shelves.as_ref().unwrap()));
-        assert!(crate::search::set_watched_local_for_test(&mut fx.state, crate::plex::ServerId::UNSET, "retained-search", true));
+        assert!(crate::search::set_watched_local_for_test(&mut fx.state, crate::catalog::ServerId::UNSET, "retained-search", true));
         let changed = fx.snapshot();
         assert!(!old.same_publication(&changed), "optimistic edits do not change the query epoch");
         assert!(!watched(&old));
@@ -188,15 +188,15 @@ mod tests {
 
     #[test]
     fn rebuilding_a_source_answer_replaces_only_the_new_publication() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         struct RegistryReset;
-        impl Drop for RegistryReset { fn drop(&mut self) { crate::plex::reset_servers_for_test(); } }
+        impl Drop for RegistryReset { fn drop(&mut self) { crate::catalog::reset_servers_for_test(); } }
         let _registry = RegistryReset;
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
         let (mut fx, old) = publish_fixture();
-        let sid = crate::plex::register_for_test("search-view", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = crate::catalog::register_for_test("search-view", "127.0.0.1", 9, "synthetic", "fixture");
         let mut answer = [const { Vec::new() }; super::super::NKIND];
-        answer[0].push(Item::Media(crate::pms::PmsMovie {
+        answer[0].push(Item::Media(crate::catalog_fetch::PmsMovie {
             sid, rk: "new-answer".into(), title: "Replacement result".into(), ..Default::default()
         }));
         crate::search::record_for_test(&mut fx.state, sid.raw() as usize, Some(answer));

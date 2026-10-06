@@ -14,7 +14,7 @@ name: build + verify
 # .ipk plus its sidecar evidence files, uploaded as one artifact.
 #
 # A third caller, `nightly.yml` (a scheduled build from `main`), now uses this too — `flavor:
-# nightly` with the `nightly-date` input, passed through as `PLX_NIGHTLY_DATE`, so the FLAVOR/
+# nightly` with the `nightly-date` input, passed through as `NJ_NIGHTLY_DATE`, so the FLAVOR/
 # version machinery this job already exercised for stable and debug covers nightly the same way.
 # The boolean inputs below (`homebrew-manifest`, `source-asset`, `caches`, `fwcompat`) are what let
 # three callers each select the right subset without a third copy of this job.
@@ -33,9 +33,9 @@ on:
       nightly-date:
         description: >
           UTC date (YYYYMMDD) a nightly build reports in its version string
-          (`X.Y.Z-nightly-<date>`), passed through as PLX_NIGHTLY_DATE. Ignored by stable/debug,
+          (`X.Y.Z-nightly-<date>`), passed through as NJ_NIGHTLY_DATE. Ignored by stable/debug,
           which never read it. A nightly caller must supply a real date: `rust-modules/build.rs`
-          fails the build on `PLX_CHANNEL=nightly` with no date or a malformed one, by design —
+          fails the build on `NJ_CHANNEL=nightly` with no date or a malformed one, by design —
           only a bare local `make FLAVOR=nightly RELEASE=1 ipk`, with the variable truly absent
           from the shell rather than set empty here, gets the Makefile's own today's-date default.
         type: string
@@ -73,7 +73,7 @@ on:
       fwcompat:
         description: >
           Run the per-binary firmware-database compatibility check (tools/fwcompat.py) against
-          pkg/plxnative and pkg/plxnative-storage, in addition to webosbrew-ipk-verify. Nightly and
+          pkg/nativejelly and pkg/nativejelly-storage, in addition to webosbrew-ipk-verify. Nightly and
           release both pass this true; a non-publishing caller can still opt out.
         type: boolean
         default: false
@@ -169,7 +169,7 @@ jobs:
           FLAVOR: ${{ inputs.flavor }}
           # Only meaningful for `flavor: nightly` — `build.rs` never reads it for stable/debug.
           # See the `nightly-date` input's own comment for what an empty value here means.
-          PLX_NIGHTLY_DATE: ${{ inputs.nightly-date }}
+          NJ_NIGHTLY_DATE: ${{ inputs.nightly-date }}
           # DWARF, so the release can be symbolicated later. It must be set on EVERY invocation in
           # this step and it must be the SAME invocation that cuts the .ipk: a debuginfo build and a
           # plain one produce DIFFERENT BUILD IDs from identical sources (measured — see the
@@ -196,10 +196,10 @@ jobs:
           # workflow never names reads as dead code to the next person editing it — which is how a
           # guard gets deleted. It also makes the check hold if a `set -u` is ever added to the
           # script.
-          PLX_SENTRY_DSN: ${{ inputs.telemetry == 'production' && vars.PLX_SENTRY_DSN || '' }}
-          PLX_POSTHOG_KEY: ${{ inputs.telemetry == 'production' && vars.PLX_POSTHOG_KEY || '' }}
-          PLX_SENTRY_DSN_DEV: ${{ inputs.telemetry == 'development' && vars.PLX_SENTRY_DSN_DEV || '' }}
-          PLX_POSTHOG_KEY_DEV: ${{ inputs.telemetry == 'development' && vars.PLX_POSTHOG_KEY_DEV || '' }}
+          NJ_SENTRY_DSN: ${{ inputs.telemetry == 'production' && vars.NJ_SENTRY_DSN || '' }}
+          NJ_POSTHOG_KEY: ${{ inputs.telemetry == 'production' && vars.NJ_POSTHOG_KEY || '' }}
+          NJ_SENTRY_DSN_DEV: ${{ inputs.telemetry == 'development' && vars.NJ_SENTRY_DSN_DEV || '' }}
+          NJ_POSTHOG_KEY_DEV: ${{ inputs.telemetry == 'development' && vars.NJ_POSTHOG_KEY_DEV || '' }}
         run: |
           make -j"$(nproc)"
           make ipk symbols
@@ -214,29 +214,29 @@ jobs:
           # nobody shipped.
           grep -q '+symbols' pkg/.build-config \
             || { echo "::error::SYMBOLS=1 did not take — pkg/.build-config says [$(cat pkg/.build-config)]"; exit 1; }
-          test -s pkg/plxnative.debug \
-            || { echo "::error::pkg/plxnative.debug is missing or empty"; exit 1; }
+          test -s pkg/nativejelly.debug \
+            || { echo "::error::pkg/nativejelly.debug is missing or empty"; exit 1; }
           # The build id is what pairs the two. Assert it here rather than trusting the upload:
           # `sentry-cli` will happily accept a .debug whose id matches nothing that shipped.
           idof() { readelf -n "$1" | awk '/Build ID/{print $3}'; }
-          [ "$(idof pkg/plxnative)" = "$(idof pkg/plxnative.debug)" ] \
+          [ "$(idof pkg/nativejelly)" = "$(idof pkg/nativejelly.debug)" ] \
             || { echo "::error::build id mismatch between the shipped binary and its .debug"; exit 1; }
-          echo "build-id $(idof pkg/plxnative)"
+          echo "build-id $(idof pkg/nativejelly)"
           if [ "$TELEMETRY" = production ]; then
             # **The telemetry configuration FAILS CLOSED here, and only here.** For a local build,
             # "no endpoint -> telemetry compiled out" is the right default and the safe one. For an
             # OFFICIAL RELEASE it is a configuration failure: a binary that silently cannot report is
             # indistinguishable from a healthy one until months later, when the crash that should
             # have arrived never did. This step used to warn and continue.
-            [ -n "$PLX_SENTRY_DSN" ] \
-              || { echo "::error::PLX_SENTRY_DSN is unset — refusing to ship a release that cannot report a crash. Set it as a repository VARIABLE (not a secret)."; exit 1; }
-            [ -n "$PLX_POSTHOG_KEY" ] \
-              || { echo "::error::PLX_POSTHOG_KEY is unset — refusing to ship a release that cannot report usage. Set it as a repository VARIABLE (not a secret)."; exit 1; }
+            [ -n "$NJ_SENTRY_DSN" ] \
+              || { echo "::error::NJ_SENTRY_DSN is unset — refusing to ship a release that cannot report a crash. Set it as a repository VARIABLE (not a secret)."; exit 1; }
+            [ -n "$NJ_POSTHOG_KEY" ] \
+              || { echo "::error::NJ_POSTHOG_KEY is unset — refusing to ship a release that cannot report usage. Set it as a repository VARIABLE (not a secret)."; exit 1; }
             # The DEVELOPMENT pair must be ABSENT. Supplying both is already a compile error —
             # `telemetry::sender`'s const block refuses it, because the environment a build reports
             # is derived from which pair it was given and two pairs have no answer — so this is the
             # same assertion, made earlier and in words that name the workflow rather than the crate.
-            [ -z "$PLX_SENTRY_DSN_DEV$PLX_POSTHOG_KEY_DEV" ] \
+            [ -z "$NJ_SENTRY_DSN_DEV$NJ_POSTHOG_KEY_DEV" ] \
               || { echo "::error::development telemetry credentials are present in a release build"; exit 1; }
             grep -q 'tel:' pkg/.build-config \
               || { echo "::error::telemetry endpoints were set but did not reach the build"; exit 1; }
@@ -246,23 +246,23 @@ jobs:
             # took the production branch, and so that `ENVIRONMENT` is `production` and every event
             # from this release lands in the right project. Substring, not whole-line: Rust string
             # literals are not NUL-terminated and adjacent ones merge into one `strings` record.
-            strings pkg/plxnative | grep -qF "$PLX_SENTRY_DSN" \
+            strings pkg/nativejelly | grep -qF "$NJ_SENTRY_DSN" \
               || { echo "::error::the packaged binary does not carry the production Sentry DSN"; exit 1; }
-            strings pkg/plxnative | grep -qF "$PLX_POSTHOG_KEY" \
+            strings pkg/nativejelly | grep -qF "$NJ_POSTHOG_KEY" \
               || { echo "::error::the packaged binary does not carry the production PostHog key"; exit 1; }
             # Fingerprints, not values. These are publishable, but they are also usable to write junk
             # into the project and burn a free-tier quota, and a workflow log is a far more casually
             # read surface than the audit file — which does record them in full, deliberately, being
             # the document that makes the package reproducible by somebody other than the maintainer.
             echo "telemetry fingerprints (sha256, first 16):"
-            printf '  sentry  %s\n' "$(printf %s "$PLX_SENTRY_DSN"  | sha256sum | cut -c1-16)"
-            printf '  posthog %s\n' "$(printf %s "$PLX_POSTHOG_KEY" | sha256sum | cut -c1-16)"
+            printf '  sentry  %s\n' "$(printf %s "$NJ_SENTRY_DSN"  | sha256sum | cut -c1-16)"
+            printf '  posthog %s\n' "$(printf %s "$NJ_POSTHOG_KEY" | sha256sum | cut -c1-16)"
           else
-            [ -n "$PLX_SENTRY_DSN_DEV" ] || { echo '::error::PLX_SENTRY_DSN_DEV is required for a development-telemetry build.'; exit 1; }
-            [ -n "$PLX_POSTHOG_KEY_DEV" ] || { echo '::error::PLX_POSTHOG_KEY_DEV is required for a development-telemetry build.'; exit 1; }
-            [ -z "$PLX_SENTRY_DSN$PLX_POSTHOG_KEY" ] || { echo '::error::production telemetry is present in a development-telemetry build.'; exit 1; }
+            [ -n "$NJ_SENTRY_DSN_DEV" ] || { echo '::error::NJ_SENTRY_DSN_DEV is required for a development-telemetry build.'; exit 1; }
+            [ -n "$NJ_POSTHOG_KEY_DEV" ] || { echo '::error::NJ_POSTHOG_KEY_DEV is required for a development-telemetry build.'; exit 1; }
+            [ -z "$NJ_SENTRY_DSN$NJ_POSTHOG_KEY" ] || { echo '::error::production telemetry is present in a development-telemetry build.'; exit 1; }
             grep -q 'tel:' pkg/.build-config
-            python3 -c 'import os; b=open("pkg/plxnative","rb").read(); assert os.environ["PLX_SENTRY_DSN_DEV"].encode() in b; assert os.environ["PLX_POSTHOG_KEY_DEV"].encode() in b'
+            python3 -c 'import os; b=open("pkg/nativejelly","rb").read(); assert os.environ["NJ_SENTRY_DSN_DEV"].encode() in b; assert os.environ["NJ_POSTHOG_KEY_DEV"].encode() in b'
           fi
           # ...and carry the stamp to the caller's downstream jobs under a NON-HIDDEN name:
           # upload-artifact silently drops dotfiles, so `pkg/.build-config` would never arrive and
@@ -281,7 +281,7 @@ jobs:
             || { echo "::error::packaged the wrong flavour — pkg/ holds $(ls pkg/*.ipk 2>&1)"; exit 1; }
 
       - name: Upload debug files to Sentry
-        # **In the same job as the build, deliberately.** `pkg/plxnative.debug` is 75 MB and exists
+        # **In the same job as the build, deliberately.** `pkg/nativejelly.debug` is 75 MB and exists
         # only here; carrying it between jobs as an artifact would cost an upload and a download to
         # move a file whose only consumer is this step. It also keeps the pairing local: the binary
         # and its .debug are asserted to share a build id twenty lines up, and nothing can come
@@ -313,9 +313,9 @@ jobs:
           # `debug-files check` first: it is the step that says whether Symbolicator can use this
           # object at all, and its answer (`Arch: arm`, `Usable: yes`) is the one thing no vendor
           # documentation states about armv7.
-          npx --yes @sentry/cli@3.7.0 debug-files check pkg/plxnative.debug
+          npx --yes @sentry/cli@3.7.0 debug-files check pkg/nativejelly.debug
           npx --yes @sentry/cli@3.7.0 debug-files upload \
-              --include-sources pkg/plxnative.debug pkg/plxnative
+              --include-sources pkg/nativejelly.debug pkg/nativejelly
 
       - name: ELF + packaging assertions
         # REQUIRE_PACKAGE: this step runs AFTER `make ipk`, so "nothing staged" here means the build
@@ -370,8 +370,8 @@ jobs:
         if: inputs.fwcompat
         run: |
           set -euo pipefail
-          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/plxnative | tee -a "$GITHUB_STEP_SUMMARY"
-          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/plxnative-storage | tee -a "$GITHUB_STEP_SUMMARY"
+          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/nativejelly | tee -a "$GITHUB_STEP_SUMMARY"
+          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/nativejelly-storage | tee -a "$GITHUB_STEP_SUMMARY"
           # The bundled FFmpeg libraries are dlopen'd, so neither line above nor webosbrew-ipk-verify
           # (which grades the app and service executables only) resolves THEIR DT_NEEDED against a
           # firmware; #235's `libz.so.1` on libavformat was graded by nobody. `--shipped pkg` takes
@@ -450,10 +450,10 @@ jobs:
         env:
           # Both telemetry pairs, whichever one `inputs.telemetry` compiled in: the scan proves the
           # source tarball carries no private value, and a development build holds the `_DEV` pair.
-          GPL_SCAN_SENTRY_DSN: ${{ vars.PLX_SENTRY_DSN }}
-          GPL_SCAN_POSTHOG_KEY: ${{ vars.PLX_POSTHOG_KEY }}
-          GPL_SCAN_SENTRY_DSN_DEV: ${{ vars.PLX_SENTRY_DSN_DEV }}
-          GPL_SCAN_POSTHOG_KEY_DEV: ${{ vars.PLX_POSTHOG_KEY_DEV }}
+          GPL_SCAN_SENTRY_DSN: ${{ vars.NJ_SENTRY_DSN }}
+          GPL_SCAN_POSTHOG_KEY: ${{ vars.NJ_POSTHOG_KEY }}
+          GPL_SCAN_SENTRY_DSN_DEV: ${{ vars.NJ_SENTRY_DSN_DEV }}
+          GPL_SCAN_POSTHOG_KEY_DEV: ${{ vars.NJ_POSTHOG_KEY_DEV }}
           GPL_SCAN_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           # The NDK the release was built with: prepare-source-release.py records its compiler hash
           # and verify-source-rebuild.py rebuilds with it. Both refuse to run without it.
@@ -482,7 +482,7 @@ jobs:
           # (the Makefile's IPK_VERSION); a nightly's reported version adds `-nightly-<date>` on
           # top, dated by the `+nightly:<date>` field of pkg/.build-config — the Makefile's record
           # of the date it built with, the same stamp ci/check-package.py grades the binary
-          # against. Stable has no such field and keeps plxnative-source-X.Y.Z. Read through
+          # against. Stable has no such field and keeps nativejelly-source-X.Y.Z. Read through
           # `ci/check-package.py --print-nightly-date` rather than a second copy of its regex here
           # — see that flag's own comment for why a `sed` twin of it is the thing to avoid.
           version=${ipk##*/"${appid}"_}; version=${version%_arm.ipk}
@@ -490,7 +490,7 @@ jobs:
           label="$version${nightly_date:+-nightly-$nightly_date}"
           [[ "$label" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-nightly-[0-9]{8})?$ ]] \
             || { echo "::error::cannot name the source bundle: got version label '$label' from $ipk"; exit 1; }
-          source="pkg/plxnative-source-$label.tar.gz"
+          source="pkg/nativejelly-source-$label.tar.gz"
           python3 ci/prepare-source-release.py --inputs "$RUNNER_TEMP/gpl-source-inputs" \
             --output "$source" --rust-toolchain nightly-2026-07-02 --binary "$ipk" --private-values "$private_values"
           snapshot=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_snapshot_sha256"])' "$source.release.json")
@@ -510,6 +510,6 @@ jobs:
             pkg/ipk-verify.md
             pkg/gates.md
             pkg/build-config.txt
-            pkg/plxnative-source-*.tar.gz*
+            pkg/nativejelly-source-*.tar.gz*
             pkg/source-rebuild.json
           if-no-files-found: error

@@ -20,9 +20,9 @@ use crate::stores::search::SearchCmd;
 use crate::ui::card_row::CardRow;
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId,
+use nj_machine::machine::{Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId,
     Handled, InputKind, InputOwner, InstanceId, Key, LogicalState, Machine, MachineId, TextEdit};
-use plx_machine::present::Provenance;
+use nj_machine::present::Provenance;
 use crate::ui::screen::{At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, Enter, FocusTarget,
     Focusable, GroupKind, GroupSpec, Link, Placed, RenderStrategy, Screen, ScreenEvent, Seat, Step};
 use crate::ui::{Rect, Spring};
@@ -46,8 +46,8 @@ pub(crate) const SHAPE: &str = "SearchScreen{entry:u32,instance:u32,draft:{text:
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
     Recent(String),
-    Media(Kind, crate::plex::ServerId, String),
-    Tag(Kind, crate::plex::ServerId, String),
+    Media(Kind, crate::catalog::ServerId, String),
+    Tag(Kind, crate::catalog::ServerId, String),
     Slot(Kind, u32, usize),
 }
 #[derive(Clone, Debug)]
@@ -504,7 +504,7 @@ impl SearchScreen {
             focused.map_or(0.0, |i| layout::reveal(self.scroll_target, &kinds[..n], i))
         };
     }
-    fn tick<H: SearchLike>(&mut self, tick: plx_machine::machine::Tick, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
+    fn tick<H: SearchLike>(&mut self, tick: nj_machine::machine::Tick, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
         fx.push(Fx::App(AppFx::StoreWork(crate::stores::StoreWork::BrowseDiscovery)));
         fx.push(Fx::App(AppFx::StoreWork(crate::stores::StoreWork::Search { dt_us: tick.dt_us })));
         if self.step_blink(tick.dt_us) { fx.invalidate(Provenance::Input); }
@@ -534,17 +534,17 @@ impl SearchScreen {
         // integrator, so each one keeps the present gate awake exactly while it is visibly
         // travelling and goes quiet the frame it arrives (`machine/src/motion.rs`'s rest test —
         // magnitude-relative, capped under a quarter pixel, velocity judged as this frame's
-        // travel). `Spring::step` reports to `plx_machine::idle` and says nothing to the dispatcher's
+        // travel). `Spring::step` reports to `nj_machine::idle` and says nothing to the dispatcher's
         // own gate, which is the one an owned page is graded on.
         let hot = if self.field_hot(cx) { 1.0 } else { 0.0 };
         let owner = if settled && !self.owner.is_empty() { 1.0 } else { 0.0 };
         {
             let mut present = fx.present();
             let (k_scale, k_scroll) = (crate::ui::consts::K_SCALE, crate::ui::consts::K_SCROLL);
-            plx_machine::motion::spring(&mut self.hot.pos, &mut self.hot.vel, hot, k_scale, tick, &mut present);
-            plx_machine::motion::spring(&mut self.scroll.pos, &mut self.scroll.vel, self.scroll_target,
+            nj_machine::motion::spring(&mut self.hot.pos, &mut self.hot.vel, hot, k_scale, tick, &mut present);
+            nj_machine::motion::spring(&mut self.scroll.pos, &mut self.scroll.vel, self.scroll_target,
                 k_scroll, tick, &mut present);
-            plx_machine::motion::spring(&mut self.owner_alpha.pos, &mut self.owner_alpha.vel, owner,
+            nj_machine::motion::spring(&mut self.owner_alpha.pos, &mut self.owner_alpha.vel, owner,
                 k_scale, tick, &mut present);
         }
         if !settled && self.owner_alpha.pos < OWNER_FLOOR {
@@ -635,7 +635,7 @@ impl<H: SearchLike> Focusable<H> for SearchScreen {
 }
 
 impl<H: SearchLike> Screen<H> for SearchScreen {
-    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<plx_machine::machine::FocusKey<u32>>) {
+    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<nj_machine::machine::FocusKey<u32>>) {
         SearchScreen::redraw_focused::<H>(self, f, focus)
     }
     fn name(&self) -> &'static str { "search" }

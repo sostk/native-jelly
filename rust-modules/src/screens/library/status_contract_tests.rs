@@ -3,7 +3,7 @@ use crate::stores::browse::{SecFetch, SecKind, SrcGroup, SourceState, SrcRow};
 use crate::screens::registry::{LibraryLike, PageMemory};
 use crate::ui::fixture::FixtureMeasure;
 use crate::ui::consts::SCR_W;
-use plx_machine::machine::{Canon, Cx, EntryId, FocusKey, FocusRead, Host, InputOwner, InstanceId, LogicalState, PressRead, ScreenId, Tick};
+use nj_machine::machine::{Canon, Cx, EntryId, FocusKey, FocusRead, Host, InputOwner, InstanceId, LogicalState, PressRead, ScreenId, Tick};
 use crate::ui::screen::{At, Focusable, GroupSpec, ScreenArg};
 
 #[derive(Clone)]
@@ -15,7 +15,7 @@ impl LogicalState for Arg {
 }
 
 impl ScreenArg for Arg {
-    fn chrome(&self) -> plx_machine::machine::Chrome { plx_machine::machine::Chrome::None }
+    fn chrome(&self) -> nj_machine::machine::Chrome { nj_machine::machine::Chrome::None }
     fn id(&self) -> ScreenId { ScreenId(1) }
     fn title(&self) -> Option<&str> { None }
     fn same_instance(&self, _: &Self) -> bool { true }
@@ -58,10 +58,10 @@ struct Fixture {
 
 impl Fixture {
     fn normal() -> Self {
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::catalog::ServerId::from_raw(0);
         let listing = crate::stores::browse::ListingSnapshot::fixture(
             sid,
-            (0..36).map(|i| Some(crate::pms::PmsMovie {
+            (0..36).map(|i| Some(crate::catalog_fetch::PmsMovie {
                 sid,
                 rk: format!("status-{i}"),
                 title: format!("Status {i}"),
@@ -78,7 +78,7 @@ impl Fixture {
 
     fn section(section: usize, key: i64, title: &str, current: bool) -> crate::stores::browse::SectionView {
         crate::stores::browse::SectionView {
-            sid: Some(crate::plex::ServerId::from_raw(0)),
+            sid: Some(crate::catalog::ServerId::from_raw(0)),
             key,
             kind: SecKind::Movie,
             row: SrcRow { section, title: title.into(), pinned: true, current, ..Default::default() },
@@ -86,10 +86,10 @@ impl Fixture {
     }
 
     fn listing(fetch: SecFetch, total: i64) -> crate::stores::browse::ListingSnapshot {
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::catalog::ServerId::from_raw(0);
         crate::stores::browse::ListingSnapshot::fixture(
             sid,
-            (0..total.max(0) as usize).map(|i| Some(crate::pms::PmsMovie {
+            (0..total.max(0) as usize).map(|i| Some(crate::catalog_fetch::PmsMovie {
                 sid,
                 rk: format!("status-{i}"),
                 title: format!("Status {i}"),
@@ -140,7 +140,7 @@ fn owned_readout_helper_preserves_the_legacy_precedence_matrix() {
 
 #[test]
 fn failed_status_occupies_content_and_keeps_only_navigation_and_retry() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::normal();
     fixture.listing = Fixture::listing(SecFetch::Failed, -1);
     let page = fixture.screen();
@@ -171,8 +171,8 @@ fn failed_status_occupies_content_and_keeps_only_navigation_and_retry() {
 
 #[test]
 fn empty_loading_and_failed_discovery_publish_no_false_grid_controls() {
-    let _guard = plx_base::testlock::serial();
-    let sid = crate::plex::ServerId::from_raw(7);
+    let _guard = nj_base::testlock::serial();
+    let sid = crate::catalog::ServerId::from_raw(7);
     let scenarios = [
         ("reachable empty table", crate::stores::browse::DirectorySnapshot::fixture_source(
             1, sid, SrcGroup { name: "Cinema server".into(), handle: String::new(), state: SourceState::Reachable, tier: None }, SecFetch::Ready),
@@ -205,7 +205,7 @@ fn empty_loading_and_failed_discovery_publish_no_false_grid_controls() {
 
 #[test]
 fn failed_page_or_source_with_resident_items_stays_a_grid_without_status_controls() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     assert_eq!(readout(SecFetch::Failed, 3, SecFetch::Failed, 185), Readout::Grid,
         "a failed source with resident items keeps the grid verdict");
     let mut fixture = Fixture::normal();

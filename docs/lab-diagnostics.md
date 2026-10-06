@@ -3,18 +3,18 @@
 **Diagnostics status: BUILT and DEVICE-VERIFIED on the dev set, 2026-08-26** (against `main`
 @5a8ef2ef). The whole chain —
 a **physical BLUE press** on the Magic Remote → snapshot → scrub → gzip → pinned TLS POST from the
-television's own libcurl → receiver → `plxnative-lab logs` — has run on the LG 49SM9000PLA. §11 is
+television's own libcurl → receiver → `nativejelly-lab logs` — has run on the LG 49SM9000PLA. §11 is
 what that did and did not prove; §12 records the separately verified public leg through the router.
 
 **Lab Control status: BUILT and HOST-VERIFIED, not yet device-verified.** The same lab package can
-hold an outbound pinned HTTPS poll, receive ordered app-input commands from `plxnative-lab send`,
+hold an outbound pinned HTTPS poll, receive ordered app-input commands from `nativejelly-lab send`,
 dispatch them on the SDL main thread and acknowledge delivery. It adds no dependency. The remaining
 proof is an `.ipk` installed on a Cloud Test Lab set and one command/ack round trip (§11).
 
 LG Cloud Test Lab rents us physical sets on webOS/SoC combinations nobody here owns. It gives a
 picture and a virtual remote, and **no console, no ssh, no stdout, no way to download a file**. We
 can reproduce a bug on a k8hpp webOS 10 set and watch it happen, and the agent fixing it cannot see
-one line of `plxnative-events.log`.
+one line of `nativejelly-events.log`.
 
 This is the bridge: a lab-only build presses its own log out through the internet to a receiver on
 the developer's Mac and optionally holds an outbound command poll. Commands come back only as the
@@ -28,7 +28,7 @@ normal build.
 
 Five pieces of this feature already exist, and the design is mostly wiring them together.
 
-* **One log sink.** Every diagnostic line in the app goes through `plx_base::eventlog::log(&str)`,
+* **One log sink.** Every diagnostic line in the app goes through `nj_base::eventlog::log(&str)`,
   which is also where `redact_tokens` already strips `X-Plex-Token=…`. A ring buffer tapped there
   sees *everything* the app knows and inherits the redaction that is already the shipped policy.
 * **One structured state snapshot, already audited for secrets.** `player::Diag` (`player/mod.rs`,
@@ -40,7 +40,7 @@ Five pieces of this feature already exist, and the design is mostly wiring them 
   public issue threads. A snapshot built from `Diag` is redacted by construction.
 * **Device identity.** `tv::device::info()` (release, codename, api, name, from `/var/run/nyx/os_info.json`),
   `devcaps::caps()` (the SoC's own codec table), `paths::app_id()`/`flavour()`,
-  `env!("PLX_VERSION")` (the reported app version — `X.Y.Z` for a release build, and the next
+  `env!("NJ_VERSION")` (the reported app version — `X.Y.Z` for a release build, and the next
   MINOR with the patch reset for every other one, `X.(Y+1).0-dev`; see `rust-modules/build.rs`).
 * **A TLS client with runtime-bound libcurl.** `net::request` — verification on, `NOSIGNAL`, curl
   bound by SONAME candidate list so it works from webOS 4.4 to 11.2. Adding one pinning option is a
@@ -64,12 +64,12 @@ And two constraints that shape everything below:
 ## 2. Topology
 
 ```
-Cloud Test Lab TV  ──HTTPS POST / long poll──▶  lab.plxnative.com:39443
+Cloud Test Lab TV  ──HTTPS POST / long poll──▶  lab.nativejelly.com:39443
                    ◀── bounded command response ──┘          (same outbound connection)
                                             │
                                         Keenetic  ──UPnP IGD AddPortMapping (temporary)
                                             │
-                                    Mac:<ephemeral>  ──▶  plxnative-lab  ──▶  ~/.plxnative-lab/…
+                                    Mac:<ephemeral>  ──▶  nativejelly-lab  ──▶  ~/.nativejelly-lab/…
                                                                                     │
                                                                           the coding agent reads
 ```
@@ -89,7 +89,7 @@ authenticates the receiver to the television. Redirects are disabled.
 
 ```
 POST /v1/diag HTTP/1.1
-Host: lab.plxnative.com:39443
+Host: lab.nativejelly.com:39443
 Authorization: Bearer <session secret, 32 random bytes, base64url>
 X-Plx-Session: <session id, 8 hex>
 Content-Type: application/x-ndjson
@@ -180,9 +180,9 @@ by forgetting a flag.
 **The tap** is two lines in `eventlog::log`, after `redact_tokens`:
 
 ```rust
-let line = plx_base::eventlog::scrub::scrub_local(m);   // was: redact_tokens(m)
+let line = nj_base::eventlog::scrub::scrub_local(m);   // was: redact_tokens(m)
 #[cfg(feature = "lab-diagnostics")]
-plx_base::eventlog::ring::record(&line);
+nj_base::eventlog::ring::record(&line);
 ```
 
 so the ring is a strict subset of what the event log already contains — there is no second logging
@@ -214,7 +214,7 @@ budget is declared in `appinfo.json`, which is why both caps exist rather than a
 
 **The overlay**: `Uploading diagnostics…` → `Diagnostics uploaded (142 KB)` / `Upload failed: <reason>`,
 auto-dismissing after ~4 s, drawn from `theme` tokens through the existing `Label`/card widgets, and
-calling `plx_machine::idle::invalidate()` on every state change — it animates from a clock, not a spring, so
+calling `nj_machine::idle::invalidate()` on every state change — it animates from a clock, not a spring, so
 the present gate cannot see it otherwise (`docs/agent-reference.md`, the `Xfade`/`Spinner` precedent).
 
 **Threading.** `Diag` is main-thread-only by contract, so the snapshot is built on the SDL thread
@@ -230,11 +230,11 @@ poll and starving sign-in or diagnostics.
 
 ## 5. Transport security: pin, don't trust the world
 
-The Mac has no CA-issued certificate and getting one for `lab.plxnative.com` means ACME plumbing,
+The Mac has no CA-issued certificate and getting one for `lab.nativejelly.com` means ACME plumbing,
 renewals and a private key on a laptop. The cheaper and *stronger* answer for a two-party private
 channel:
 
-* `plxnative-lab start` generates a **fresh self-signed cert per session** (`openssl`, already on
+* `nativejelly-lab start` generates a **fresh self-signed cert per session** (`openssl`, already on
   macOS) and computes its **SPKI SHA-256 pin**.
 * The lab build sets `CURLOPT_PINNEDPUBLICKEY = "sha256//<base64>"` with `SSL_VERIFYPEER=0` /
   `VERIFYHOST=0`. libcurl checks the pin **independently of** VERIFYPEER (documented), and
@@ -319,7 +319,7 @@ which appears nowhere in this tree and is unbound.
 **The design absorbs every outcome**, which is why none of this blocked the build:
 
 * the trigger is a **list in `lab.json`** (`trigger_wcodes` / `trigger_syms`), so trying another
-  code is a repack, not a rebuild — `plxnative-lab start --trigger 489,488` writes it. It stays a
+  code is a repack, not a rebuild — `nativejelly-lab start --trigger 489,488` writes it. It stays a
   list now that the codes are known, because 486–489 is one remote on one firmware and a rented
   set may spell them differently or not send them at all;
 * the **account-menu and player-overflow rows** reach the same upload with the D-pad alone, which
@@ -329,33 +329,33 @@ which appears nowhere in this tree and is unbound.
   own key binding. The recipe is `docs/remote-keys.md` §7, run through this bridge instead of over
   ssh.
 
-The default in `plxnative-lab start` is **489**, the measured BLUE. `406` survives only as a unit
+The default in `nativejelly-lab start` is **489**, the measured BLUE. `406` survives only as a unit
 test's fixture in `labcfg/config.rs` — it was the original guess (the CEA-2014 / webOS web-runtime
 keycode for BLUE) and it was wrong, which is the whole lesson of this section.
 
-## 8. Receiver — `tools/plxnative-lab`, python3 stdlib only
+## 8. Receiver — `tools/nativejelly-lab`, python3 stdlib only
 
 Matches the repo's existing tool idiom (`tools/netcond.py`, `tools/stream-screen.py`): one file, no
 dependencies, `--selftest`.
 
 ```
-plxnative-lab start [--port 39443] [--no-upnp] [--json]
-plxnative-lab status [--json]
-plxnative-lab send down down ok wait:1000 diag [--timeout 30] [--no-wait]
-plxnative-lab clear
-plxnative-lab logs [--follow] [--since 5m] [--seq N]
-plxnative-lab stop
+nativejelly-lab start [--port 39443] [--no-upnp] [--json]
+nativejelly-lab status [--json]
+nativejelly-lab send down down ok wait:1000 diag [--timeout 30] [--no-wait]
+nativejelly-lab clear
+nativejelly-lab logs [--follow] [--since 5m] [--seq N]
+nativejelly-lab stop
 ```
 
 `start` generates the session (id, secret, cert, pin), binds `0.0.0.0:<ephemeral>`, creates the UPnP
-mapping, writes `~/.plxnative-lab/session.json` + `receiver.pid`, forks to the background and prints
+mapping, writes `~/.nativejelly-lab/session.json` + `receiver.pid`, forks to the background and prints
 one JSON object containing the credentials **and the exact `make` line to build the matching ipk**.
 It refuses to start if a session is already live (one session, by design).
 
 `status --json` is the agent's poll:
 
 ```json
-{"receiver":"listening","endpoint":"lab.plxnative.com:39443","upnp":"mapped",
+{"receiver":"listening","endpoint":"lab.nativejelly.com:39443","upnp":"mapped",
  "dns_matches":true,"tv":"recent upload","uploads":3,"tv_control":"connected",
  "last_poll_age_s":2,"queued":0,"inflight":null,
  "last_upload_age_s":14,"webos":"10.3.1","board":"k8hpp","model":"OLED55C1",
@@ -371,7 +371,7 @@ is not redelivered on a later relaunch. It cannot recall a response the app has 
 
 `logs` prints the newest snapshot's records as JSONL to stdout (gunzipped); `--follow` blocks and
 emits each new upload as it lands; `--since 5m` filters by record
-timestamp. Uploads are stored verbatim under `~/.plxnative-lab/uploads/NNNN-<unix>.jsonl.gz` — the
+timestamp. Uploads are stored verbatim under `~/.nativejelly-lab/uploads/NNNN-<unix>.jsonl.gz` — the
 agent can also just read those.
 
 **Hardening** (the exposed surface is the whole internet for the life of the session): the public
@@ -384,7 +384,7 @@ path; `stop` verifies deletion with `GetSpecificPortMappingEntry`.
 
 **UPnP IGD** is SSDP `M-SEARCH` → device description → `WANIPConnection`/`WANPPPConnection` control
 URL → `AddPortMapping` (1 h lease, renewed while running) / `DeletePortMapping`, plus
-`GetExternalIPAddress` compared against the `lab.plxnative.com` A record — that comparison is the
+`GetExternalIPAddress` compared against the `lab.nativejelly.com` A record — that comparison is the
 only cheap check that the path actually exists before a tester spends a lab hour on it.
 
 ---
@@ -392,13 +392,13 @@ only cheap check that the path actually exists before a tester spends a lab hour
 ## 9. Build and deploy loop
 
 ```
-plxnative-lab start                       # prints session + the make line below
+nativejelly-lab start                       # prints session + the make line below
 make LAB=1 FLAVOR=debug ipk               # bakes pkg/lab.json into the package
    → upload pkg/com.sostk.nativejelly.debug_0.4.1_arm.ipk to Cloud Test Lab and install it
-plxnative-lab status                       # wait for tv_control: connected
-plxnative-lab send down down ok wait:1000 diag
-plxnative-lab logs --follow               # the agent watches
-plxnative-lab stop                        # mapping removed
+nativejelly-lab status                       # wait for tv_control: connected
+nativejelly-lab send down down ok wait:1000 diag
+nativejelly-lab logs --follow               # the agent watches
+nativejelly-lab stop                        # mapping removed
 ```
 
 `LAB=1` sets `RUST_FEATFLAGS += --features lab-diagnostics` and its own `RUST_TDIR=target-lab` —
@@ -420,7 +420,7 @@ id, is a packaging error**, which is where this class of mistake gets caught rat
 **In:** the feature flag, the ring + tap, the snapshot envelope from `Diag`/`webos`/`devcaps`, the
 scrub pass, pinned gzip upload on a worker, the account-menu row **and** the configurable colour-key
 arm, the toast, the pinned HTTPS long-poll worker + main-thread mailbox, bounded ordered command
-queue/redelivery/ack, loopback-only enqueue/status/clear, `plxnative-lab
+queue/redelivery/ack, loopback-only enqueue/status/clear, `nativejelly-lab
 start/status/send/clear/logs/stop` with
 UPnP, and `LAB=1` packaging + the two package assertions.
 
@@ -439,7 +439,7 @@ not pretending the old filesystem contract exists.
 
 * `make check` is green in both configurations. **Take the counts yourself** — this repository has
   rotted four written test counts already and the fifth is not going to be this one:
-  `cd rust-modules && cargo +nightly test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net -- --list | grep -c ': test'`, with and without
+  `cd rust-modules && cargo +nightly test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net -- --list | grep -c ': test'`, with and without
   `--features lab-diagnostics`. What the feature's own tests cover: the ring's two caps and its
   `dropped` delta, the `lab.json` parse and each refusal it names, the five scrub rewrites and the
   outright refusal (including the bare address and the household name the device test found), the
@@ -448,21 +448,21 @@ not pretending the old filesystem contract exists.
   that the toast sits inside the safe area and clear of the stats panel.
 * All four feature configurations type-check clean under `warnings = "deny"`: default,
   `--no-default-features`, `+lab-diagnostics`, and `--no-default-features +lab-diagnostics`.
-* `tools/plxnative-lab selftest` — a real TLS listener with a freshly generated certificate, a real
+* `tools/nativejelly-lab selftest` — a real TLS listener with a freshly generated certificate, a real
   gzip upload accepted and stored, upload refusals, command enqueue, ordered delivery, redelivery
   before ack, advancement after ack, status, grammar refusal and stale-session refusal. Wired into
   `make check`.
 * Lab Control's Rust tests cover response parsing, bounded waits and the worker↔main-thread mailbox.
   Both default and `+lab-diagnostics` configurations compile under `warnings = "deny"`; the control
   module and its persistent worker do not exist in the former.
-* **The whole chain, end to end, on loopback**: `plxnative-lab start --hostname 127.0.0.1
+* **The whole chain, end to end, on loopback**: `nativejelly-lab start --hostname 127.0.0.1
   --no-upnp` → `make LAB=1 sim` → `k:0,406` down the remote FIFO → the app logged
   `lab: snapshot seq=1 reason=key route=login` and `lab: uploaded seq=1 4689B -> 2053B (gzip)
-  status=200`, and `plxnative-lab logs` printed the envelope and 44 records. The toast was
+  status=200`, and `nativejelly-lab logs` printed the envelope and 44 records. The toast was
   screenshotted reading *Diagnostics uploaded / 2 KB sent*.
 * The **network path exists**: the Keenetic answers SSDP (`http://<router>:1900/ctl/IPConn`),
-  reports its external address, and `lab.plxnative.com` resolves to exactly that address. Checked
-  by `plxnative-lab selftest`'s closing note and by `status`'s `dns_matches`.
+  reports its external address, and `lab.nativejelly.com` resolves to exactly that address. Checked
+  by `nativejelly-lab selftest`'s closing note and by `status`'s `dns_matches`.
 
 **Verified ON THE DEV TELEVISION** (LG 49SM9000PLA, webOS 4.10.2), 2026-08-26, under the
 `tv-lock`, `make LAB=1 FLAVOR=debug deploy`:
@@ -514,12 +514,12 @@ default build. Re-run it after any change here, or give the matrix a LAB leg.
 
 **It works.** Measured 2026-08-26, in this order, so none of it is inference:
 
-1. `plxnative-lab start` discovered the Keenetic's IGD (`http://<router>:1900/ctl/IPConn`,
+1. `nativejelly-lab start` discovered the Keenetic's IGD (`http://<router>:1900/ctl/IPConn`,
    `WANIPConnection:1`) and **`AddPortMapping` succeeded** — not the tool trusting its own return
    value: a raw `GetSpecificPortMappingEntry` read back
    `NewInternalPort <the ephemeral local port> / NewInternalClient 203.0.113.7 / NewEnabled 1 /
-   NewLeaseDuration 3600 / NewPortMappingDescription plxnative-lab`.
-2. The router's external address equals what `lab.plxnative.com` resolves to (`status`'s
+   NewLeaseDuration 3600 / NewPortMappingDescription nativejelly-lab`.
+2. The router's external address equals what `lab.nativejelly.com` resolves to (`status`'s
    `dns_matches: true`).
 3. **A phone on LTE — off the LAN entirely — reached the receiver**, got the expected certificate
    warning (the self-signed cert of §5, which is the thing the app pins) and then the receiver's

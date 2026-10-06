@@ -33,7 +33,7 @@ FAKE_CARGO = """#!/bin/sh
   echo "cwd=$(pwd)"
   echo "incremental=$CARGO_INCREMENTAL"
   echo "target_dir=$CARGO_TARGET_DIR"
-  echo "runtime_dir_set=$([ -n "$PLXNATIVE_RUNTIME_DIR" ] && echo yes || echo no)"
+  echo "runtime_dir_set=$([ -n "$NJ_RUNTIME_DIR" ] && echo yes || echo no)"
   echo "args=$*"
   echo "--"
 } >> "$FAKE_CARGO_LOG"
@@ -97,7 +97,7 @@ class OtherTargetsAreUnaffected(unittest.TestCase):
         # `make check` waits forever on the lock its own parent holds. They are read as text instead.
         for target in ("check-cargo", "check-cargo-lint", "check-cargo-unit-default",
                        "check-cargo-unit-hostsim", "lint"):
-            out = make("-n", target, env={"PLX_CHECK_LOCK": "off"})
+            out = make("-n", target, env={"NJ_CHECK_LOCK": "off"})
             self.assertEqual(out.returncode, 0, f"{target}: {out.stderr}")
             self.assertNotRegex(out.stdout, r"CARGO_INCREMENTAL=1", target)
             self.assertNotIn(TDIR, out.stdout, target)
@@ -128,13 +128,13 @@ class TestFastRuns(unittest.TestCase):
             self.assertEqual(call["target_dir"], TDIR)
             self.assertTrue(call["cwd"].endswith("rust-modules"), call["cwd"])
             self.assertEqual(call["runtime_dir_set"], "yes")
-            self.assertRegex(call["args"], r"^\+\S+ test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net route::$")
+            self.assertRegex(call["args"], r"^\+\S+ test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net route::$")
 
     def test_no_filter_runs_the_whole_default_feature_suite(self):
         with FakeCargoHome() as fake:
             self.assertEqual(fake.run("test-fast").returncode, 0)
             (call,) = fake.calls()
-            self.assertRegex(call["args"], r"^\+\S+ test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net$")
+            self.assertRegex(call["args"], r"^\+\S+ test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net$")
             self.assertNotIn("--features", call["args"])
 
     def test_own_dir_is_neither_of_the_dirs_other_builds_use(self):

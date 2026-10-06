@@ -1,7 +1,7 @@
 //! The frame loop — phase 1b-ii's THIN COORDINATOR (restructure spec §13).
 //!
 //! `run` is the one `while app.running` loop; each phase of an iteration is a function below,
-//! cut VERBATIM out of `plex_run`'s former body at the eight `FRAMEDROP` stamps (spec §8.4) so
+//! cut VERBATIM out of `nj_run`'s former body at the eight `FRAMEDROP` stamps (spec §8.4) so
 //! that a diff of this commit is moves and renames only — `app.<field>` for what used to be a
 //! loop-local, `fr.<field>` ([`Frame`]) for the handful of per-iteration values that cross a
 //! phase boundary. Nothing is reordered;
@@ -91,7 +91,7 @@ impl Frame {
     }
 }
 
-/// The loop. `plex_run` calls this once, after `boot`, and `shutdown` after it returns.
+/// The loop. `nj_run` calls this once, after `boot`, and `shutdown` after it returns.
 ///
 /// **No `mt: &MainThread` parameter since phase 9.** The token is a FIELD now
 /// (`app.adapters.player`, see `player::adapter`), so the proof travels with `&mut App` — every
@@ -99,11 +99,11 @@ impl Frame {
 /// `app.adapters.player.mt()`. Threading a second `&MainThread` beside `&mut App` would have
 /// needed a second token, and minting one is the hole `MainThread::assume` documents.
 pub(crate) unsafe fn run(app: &mut App) {
-    let watchdog = plx_base::task::watchdog::LoopWatch::start();
+    let watchdog = nj_base::task::watchdog::LoopWatch::start();
     let mut clock_notice = super::clock_notice::ClockNotice::new();
     while app.running {
         watchdog.advance();
-        let _frame_scope = plx_base::task::FrameScope::enter();
+        let _frame_scope = nj_base::task::FrameScope::enter();
         #[cfg(all(feature = "hostsim", target_os = "linux"))]
         let wslg_frame_budget = app.wslg_frame_pacing.then(super::window_activity::WslgFrameBudget::begin);
         // Resolve the control row ONCE per iteration, before the event pump, and pass this
@@ -118,13 +118,13 @@ pub(crate) unsafe fn run(app: &mut App) {
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
         let first_controlled_frame = app.boot_initial.is_some() && app.prev == 0;
         let fr = &mut fr;
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Top);
-        // The frame index the LANDING SCHEDULE stamps against (§3.3 step 3, `plx_machine::landgate`),
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Top);
+        // The frame index the LANDING SCHEDULE stamps against (§3.3 step 3, `nj_machine::landgate`),
         // published at the TOP because a landing site is reachable from the dev scenarios below
         // as well as from `land_results` and the dispatcher's own frame. One relaxed atomic load
-        // unless `plxnative-rec` or `plxnative-recplay` is armed.
+        // unless `nativejelly-rec` or `nativejelly-recplay` is armed.
         app.rec.begin_frame(app.bridge.landgate());
-        // REPLAY (`plxnative-recplay`): this frame runs on the recorded tick — set BEFORE
+        // REPLAY (`nativejelly-recplay`): this frame runs on the recorded tick — set BEFORE
         // ingest, whose key arms stamp `last_input` from the clock — and the frame's recorded
         // inputs are re-injected through the same synthesis the remote FIFO uses, so the poll
         // below consumes them exactly as it consumed the originals.
@@ -134,12 +134,12 @@ pub(crate) unsafe fn run(app: &mut App) {
                 replay_inject(app, fr, &v);
             }
         }
-        plx_platform::tv::window::pump_bus();
-        plx_platform::tv::home::poll();
+        nj_platform::tv::window::pump_bus();
+        nj_platform::tv::home::poll();
         // The one toast key mode owes the viewer (`net::keypin`'s facts), on every route.
         clock_notice.poll();
         ingest(app, fr);
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Ingest); // ingest
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Ingest); // ingest
 
         fr.now = clock::now();
         // Share the actual/replay frame timestamp, before spring dt is clamped.
@@ -150,7 +150,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         // it, so that stamp cannot disagree with the frame it belongs to. It used to come from
         // `player::vclock_ms()`, read at whatever depth of the call stack happened to need it.
         app.player.set_now(fr.now);
-        // dev: /tmp/plxnative-autoplay auto-presses OK once
+        // dev: /tmp/nativejelly-autoplay auto-presses OK once
         //
         // **Never from the sign-in or the picker.** The auth flow hands its credentials to
         // the main thread through `take_ready`, which is polled only on those two routes; a
@@ -163,7 +163,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         // The `results` phase is four steps (scenarios, playback pump, clock/press, result
         // landing); three of them carry their own FRAMEDROP spans (`scen`, `pump`, `land`), so a
         // slow `results=` names which held the frame.
-        let scenarios_ok = plx_base::diag::spans::span("scen", || {
+        let scenarios_ok = nj_base::diag::spans::span("scen", || {
             if app.boot_initial.is_some() {
                 crate::dev::scenarios::controlled_each_frame(app, fr)
             } else {
@@ -172,13 +172,13 @@ pub(crate) unsafe fn run(app: &mut App) {
         });
         if !scenarios_ok {
             // This iteration presents nothing, so its spans belong to no FRAMEDROP line.
-            let _ = plx_base::diag::spans::take();
+            let _ = nj_base::diag::spans::take();
             continue;
         }
-        plx_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
+        nj_base::diag::spans::span("pump", || unsafe { playback_tick(app, fr) });
         clock_and_press(app, fr);
-        plx_base::diag::spans::span("land", || unsafe { land_results(app, fr) });
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Results); // results
+        nj_base::diag::spans::span("land", || unsafe { land_results(app, fr) });
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Results); // results
         // **Was the player the page on top going INTO this frame?** The container's own commit
         // may take it off during `bridge::frame_with_tap` below, and the detail page it uncovers
         // has to be told to reveal the episode that played. This used to be a disagreement between
@@ -189,7 +189,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         // and the draw that follows it, so every owned screen in one frame reads one consistent
         // picture. Only while something that reads it is mounted — see `Bridge::publish_playback`.
         if app.adapters.player.poll_repair(&mut app.player.repair) {
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
         // A timed-out native Load parked by teardown is released here, on the main thread, the
         // first frame after its media thread returns (`player::engine::AbandonedLoad`).
@@ -201,25 +201,25 @@ pub(crate) unsafe fn run(app: &mut App) {
         let supplied = match app.rec.replay_results(|id| app.bridge.recorded_client(id)) {
             Ok(results) => results,
             Err(reason) => {
-                plx_base::eventlog::log(&format!("replay: REFUSED — {reason}"));
+                nj_base::eventlog::log(&format!("replay: REFUSED — {reason}"));
                 app.running = false;
                 break;
             }
         };
-        let tick = plx_machine::machine::Tick { ms: fr.now, dt_us: (fr.dt * 1_000_000.0) as u32 };
-        if first_controlled_frame { plx_base::eventlog::log(&format!("bootstrap: pre-dispatch dt={} transition={:?} alpha={} flight={}",
+        let tick = nj_machine::machine::Tick { ms: fr.now, dt_us: (fr.dt * 1_000_000.0) as u32 };
+        if first_controlled_frame { nj_base::eventlog::log(&format!("bootstrap: pre-dispatch dt={} transition={:?} alpha={} flight={}",
             tick.dt_us, app.pages.nav.tabs.stack.transition.commit_point(),
             app.pages.nav.tabs.stack.transition.page_alpha(), app.pages.nav.tabs.stack.transition.in_flight())); }
         app.rec.prepare_resources(&mut app.bridge);
         let (_word, tree_report) = if let Some(results) = supplied {
             let mut stores = std::collections::BTreeSet::new();
             for (address, _) in &results {
-                if let plx_machine::machine::MachineId::Store(ord) = address.to {
+                if let nj_machine::machine::MachineId::Store(ord) = address.to {
                     stores.insert(ord.0);
                 }
             }
             for ord in stores {
-                app.bridge.landgate().landed(plx_machine::machine::StoreOrd(ord));
+                app.bridge.landgate().landed(nj_machine::machine::StoreOrd(ord));
             }
             super::bridge::frame_with_results(&mut app.pages, &mut app.bridge, tick,
                 std::mem::take(&mut app.inputs), || {
@@ -230,18 +230,18 @@ pub(crate) unsafe fn run(app: &mut App) {
         } else { super::bridge::frame_with_tap(
             &mut app.pages,
             &mut app.bridge,
-            plx_machine::machine::Tick {
+            nj_machine::machine::Tick {
                 ms: fr.now,
                 dt_us: (fr.dt * 1_000_000.0) as u32,
             },
             std::mem::take(&mut app.inputs),
             &mut app.rec,
         ) };
-        if first_controlled_frame { plx_base::eventlog::log(&format!("bootstrap: post-dispatch alpha={} flight={}",
+        if first_controlled_frame { nj_base::eventlog::log(&format!("bootstrap: post-dispatch alpha={} flight={}",
             app.pages.nav.tabs.stack.transition.page_alpha(), app.pages.nav.tabs.stack.transition.in_flight())); }
         app.rec.resource_requests(app.bridge.take_resource_requests());
         if let Some(reason) = app.rec.failure().or_else(|| app.bridge.controlled_failure()) {
-            plx_base::eventlog::log(&format!("replay: REFUSED — {reason}"));
+            nj_base::eventlog::log(&format!("replay: REFUSED — {reason}"));
             app.running = false;
             break;
         }
@@ -264,10 +264,10 @@ pub(crate) unsafe fn run(app: &mut App) {
         content_requests(app, fr);
         crate::dev::scenarios::advance_content_boot(app, fr);
         loop_requests(app);
-        app.instr.mark(plx_base::diag::heartbeat::Phase::NavCommit); // navcommit
+        app.instr.mark(nj_base::diag::heartbeat::Phase::NavCommit); // navcommit
         update(app, fr);
         app.rec.content_results();
-        app.instr.mark(plx_base::diag::heartbeat::Phase::TickDrain); // tick_drain
+        app.instr.mark(nj_base::diag::heartbeat::Phase::TickDrain); // tick_drain
         prepare_window(app, fr);
         present_and_swap(
             app,
@@ -284,13 +284,13 @@ pub(crate) unsafe fn run(app: &mut App) {
 /// **The frame's clock and the click's spring** (spec §3.3 step 3's head).
 ///
 /// `dt` is clamped at 50 ms: a frame that took longer than that is a stall, and integrating one
-/// as if it were real time teleports every spring. It is stamped into `plx_machine::idle::frame_begin`
+/// as if it were real time teleports every spring. It is stamped into `nj_machine::idle::frame_begin`
 /// BEFORE the update phase re-steps anything, so the motion flag the gate reads at the bottom
 /// describes THIS frame and a spring's velocity can be judged as travel-this-frame rather than as
 /// a bare units-per-second.
 fn clock_and_press(app: &mut App, fr: &mut Frame) {
     if app.boot_initial.is_some() && app.prev == 0 {
-        plx_base::eventlog::log(&format!("bootstrap: first-loop tree={:016x} now={}", app.pages.state_hash(), fr.now));
+        nj_base::eventlog::log(&format!("bootstrap: first-loop tree={:016x} now={}", app.pages.state_hash(), fr.now));
     }
     fr.dt = {
         let mut d = if app.prev != 0 {
@@ -305,26 +305,26 @@ fn clock_and_press(app: &mut App, fr: &mut Frame) {
     };
     app.prev = fr.now;
     app.rec.tick(fr.now, fr.dt);
-    // Whole-frame present gate (`plx_machine::idle`): forget last frame's motion BEFORE the update
+    // Whole-frame present gate (`nj_machine::idle`): forget last frame's motion BEFORE the update
     // phase below re-steps every spring, so the flag it leaves describes THIS frame, and
     // stamp `dt` so a spring's velocity can be judged as travel-this-frame rather than as
     // a bare units-per-second. The decision itself is taken just above `glViewport`.
-    plx_machine::idle::frame_begin(fr.dt);
+    nj_machine::idle::frame_begin(fr.dt);
     // Is a page capture still in flight on the GPU, and is recorded text still warming? Latched
     // once, before the springs step, so the held appear spring and the present gate below read
     // the same answer — and, being the machine's speed rather than the inputs, recorded or
     // supplied by the recorder like any other environmental observation.
-    let text = plx_gfx::text::prewarm_pending();
-    plx_gfx::gfx::snapshot_frame_begin(|snapshot| {
+    let text = nj_gfx::text::prewarm_pending();
+    nj_gfx::gfx::snapshot_frame_begin(|snapshot| {
         let seen = app.rec.capture_readiness(crate::ui::rec::Readiness { snapshot, text });
-        plx_gfx::text::latch_surface_text_pending(seen.text);
+        nj_gfx::text::latch_surface_text_pending(seen.text);
         seen.snapshot
     });
     // ui::press (tvOS click) — advance the dip/spring every frame; when a deferred activation
     // commits (the spring-back bounce has played), run it for whichever CARD view armed the
     // press. A long-press does NOT commit (`press::tick` clears `want_commit` at `LONG_MS`):
     // on Home it opens the item menu below, and anywhere else it just springs back.
-    let (_, press_moving) = plx_machine::idle::scoped_motion(|| {
+    let (_, press_moving) = nj_machine::idle::scoped_motion(|| {
         app.input.press.tick(fr.now, fr.dt);
     });
     // The motion of whatever page is UNDER a popover — Home, the Library or Search, since
@@ -346,7 +346,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // tick drain, so on a cold-open frame (~62 ms) every upload was over the ceiling and
     // only the forward-progress escape let ONE through. A quota of three that was really a
     // quota of one, on exactly the frames with the most textures waiting.
-    app.pages.budget.begin_frame(plx_base::diag::heartbeat::now_us());
+    app.pages.budget.begin_frame(nj_base::diag::heartbeat::now_us());
     // The poster adapter's frame (spec §3.3 step 3's tail): a new frame for the slot LRU and
     // every decoded image handed to the render cache as owned pixels. No GL here — the
     // upload is below, on the presenting side of the decision.
@@ -366,11 +366,11 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
             .map(|p| p.clock_fingerprint(&app.player.session, fr.now));
         if let Some(fp) = fp {
             if app.player.note_clock(fp) {
-                plx_machine::idle::invalidate();
+                nj_machine::idle::invalidate();
             }
         }
     }
-    // ---- whole-frame present gate (`plx_machine::idle`) --------------------------------------
+    // ---- whole-frame present gate (`nj_machine::idle`) --------------------------------------
     // A screen with nothing moving on it does not need to be re-sent to the panel. This
     // skips `glViewport`…`SDL_GL_SwapWindow` WHOLESALE — it is not dirty-RECTANGLE
     // tracking, which `ui/mod.rs`'s renderer doc rejects: when this says yes, the frame
@@ -411,15 +411,15 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // A third term goes FIRST and short-circuits the other two: a page capture still in flight on
     // the GPU (`gfx::SNAPSHOT_THIS_FRAME`'s doc). Presenting now would only wait a whole vsync for
     // a buffer; not asking `should_present` leaves its damage and motion for the frame that does.
-    // The simulator's settled capture (`PLXNATIVE_SHOT_SETTLE`): once nothing has changed for the
+    // The simulator's settled capture (`NJ_SHOT_SETTLE`): once nothing has changed for the
     // asked-for quiet, invalidate so the NEXT present is the settled frame and `maybe_capture`
     // takes it. Before the decision below, so that invalidate selects this very frame.
     #[cfg(feature = "hostsim")]
-    crate::shot::tick(fr.now, app.pages.budget.has_queued_work() || plx_gfx::gfx::snapshot_pending()
+    crate::shot::tick(fr.now, app.pages.budget.has_queued_work() || nj_gfx::gfx::snapshot_pending()
         || app.scenarios.shots.pending());
-    fr.present = !plx_gfx::gfx::snapshot_pending()
+    fr.present = !nj_gfx::gfx::snapshot_pending()
         && app.window_activity.allow_present(
-            plx_machine::idle::should_present(fr.now) || app.pages.budget.has_queued_work(),
+            nj_machine::idle::should_present(fr.now) || app.pages.budget.has_queued_work(),
         );
     app.rec.present(fr.present);
     if fr.present {
@@ -440,18 +440,18 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
         // A Tracks/More page's text, recorded in `update` or, on the mount frame, in the overlay's
         // `prepare` (`PanelMotion::prewarm_text`), and uploaded here: `fr.present` already carries the window-activity gate, so a frame that
         // does not present, or one while the window is backgrounded, uploads nothing.
-        crate::ui::panel_motion::PanelMotion::drain_queued_text(plx_base::diag::heartbeat::now_us);
+        crate::ui::panel_motion::PanelMotion::drain_queued_text(nj_base::diag::heartbeat::now_us);
         // The player's UltraBlur envelope, latched while nothing is open so the first Tracks/More
         // popover's open frame does not pay for it (`ModalUnderlay::preload`; an upload, hence here).
         app.pages.nav.modals.preload_underlay();
-        let mut ph = plx_machine::machine::PresentHandle::of(&mut app.present);
+        let mut ph = nj_machine::machine::PresentHandle::of(&mut app.present);
         super::adapters::poster::prepare(
             &mut app.pages.budget,
             &mut ph,
-            plx_base::diag::heartbeat::now_us,
+            nj_base::diag::heartbeat::now_us,
         );
     }
-    // EXPERIMENT (`/tmp/plxnative-opaque`): one `static` read and a return when the trigger
+    // EXPERIMENT (`/tmp/nativejelly-opaque`): one `static` read and a return when the trigger
     // is absent. Edge-triggered — see `system.rs`.
     //
     // Called on EVERY frame, from the BIT rather than from the route. The false edge after an
@@ -459,8 +459,8 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // there is nothing else in the loop that would carry it: a `return` above, or a term that
     // only ran on player frames, would leave the compositor believing our surface is still
     // opaque with an ordinary UI on it.
-    plx_platform::tv::window::opaque_route(app.player.video_plane_bound);
-    app.instr.mark(plx_base::diag::heartbeat::Phase::Prepare); // prepare
+    nj_platform::tv::window::opaque_route(app.player.video_plane_bound);
+    app.instr.mark(nj_base::diag::heartbeat::Phase::Prepare); // prepare
     // `worstprep=`: the prepare phase is timed on EVERY iteration, presented or not — a
     // settled screen must never run untimed work at the loop rate (spec §8.3).
     app.instr.note_prepare();
@@ -474,21 +474,21 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
 /// syntactic unit, and that `impl Rig<AppHost> for Bridge` block carries two dozen other methods
 /// beside these three — so this is the "or just its three privileged methods" half of the D4
 /// move. `Bridge::opaque_route`/`Bridge::clear_opaque_region` call these instead of
-/// `plx_platform::tv::window::` directly, which is what keeps the OS-facing text — the thing the `frame`
+/// `nj_platform::tv::window::` directly, which is what keeps the OS-facing text — the thing the `frame`
 /// gate greps for — in this ONE file rather than split across the loop and the bridge. Each is a
-/// pure pass-through: the loop's own per-frame call above (`plx_platform::tv::window::opaque_route`, from
+/// pure pass-through: the loop's own per-frame call above (`nj_platform::tv::window::opaque_route`, from
 /// `fr`) and the dispatcher's `Rig` hook (from `Bridge`'s own copy of the same bit) are two
 /// independent callers of one primitive, not two implementations of it. `ls2_pump` needs no
 /// twin here — `Bridge::ls2_pump` is or stays a no-op, since the dispatcher does not yet run a
 /// phase this early in the frame.
 pub(crate) fn rig_opaque_route(video_plane_bound: bool) {
-    plx_platform::tv::window::opaque_route(video_plane_bound);
+    nj_platform::tv::window::opaque_route(video_plane_bound);
 }
 
 /// See [`rig_opaque_route`]. The `if self.video_plane` guard stays on `Bridge`'s side — this is
-/// the OS call alone, exactly what `plx_platform::tv::window::clear_opaque_region` was before the move.
+/// the OS call alone, exactly what `nj_platform::tv::window::clear_opaque_region` was before the move.
 pub(crate) fn rig_clear_opaque_region() {
-    plx_platform::tv::window::clear_opaque_region();
+    nj_platform::tv::window::clear_opaque_region();
 }
 
 /// One idle iteration's font-warming slice: a key pressed during it waits at most this long more
@@ -505,12 +505,12 @@ unsafe fn present_and_swap(
 ) {
     if fr.present {
         // the glyph cache's frame serial (phase 11, text.rs's hot window): a drawn frame
-        plx_gfx::text::begin_frame();
+        nj_gfx::text::begin_frame();
         // A finished underlay-field reduction is read HERE, before framebuffer 0 holds anything
         // of this frame — a read between the page and the surfaces splits its render pass.
-        plx_gfx::gfx::field_frame_begin();
+        nj_gfx::gfx::field_frame_begin();
         let (_vx, _vy, _vw, _vh) = draw(app, fr);
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Draw); // draw
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Draw); // draw
         // dev capture stream: grab this finished frame before the swap (after the last draw,
         // so the copy's pass-flush is work the swap would submit anyway). One atomic when idle.
         // Deliberately NOT while the video plane is BOUND (the UI plane is transparent over
@@ -521,8 +521,8 @@ unsafe fn present_and_swap(
         if !app.player.video_plane_bound {
             crate::capture::tick(fr.now);
         }
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Capture); // capture
-        // `plxnative-simvideo`: the decoded picture goes UNDER the finished UI, as the television's
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Capture); // capture
+        // `nativejelly-simvideo`: the decoded picture goes UNDER the finished UI, as the television's
         // compositor puts its video plane under ours — before the capture, so shots include it.
         #[cfg(feature = "hostsim")]
         if fr.player {
@@ -537,43 +537,43 @@ unsafe fn present_and_swap(
         }
         {
             #[cfg(feature = "threadcheck")]
-            let _present_scope = plx_base::task::watchdog::present_scope();
+            let _present_scope = nj_base::task::watchdog::present_scope();
             #[cfg(feature = "hostsim")]
-            plx_base::surface::present_supersampled();
-            // dev (`/tmp/plxnative-framecb`): this frame's compositor callback, requested before
+            nj_base::surface::present_supersampled();
+            // dev (`/tmp/nativejelly-framecb`): this frame's compositor callback, requested before
             // the swap that commits it. One latched bool unarmed.
-            plx_platform::tv::window::frame_probe_request();
+            nj_platform::tv::window::frame_probe_request();
             SDL_GL_SwapWindow(app.win);
         }
         app.window_activity.presented(fr.player);
         // One increment, then nothing: re-ask EGL for the back buffer's AGE after real
         // presents have happened. The boot reading is 0 by construction. See `egl.rs`.
-        plx_gfx::egl::late_probe();
+        nj_gfx::egl::late_probe();
         #[cfg(feature = "devtools")]
         {
             app.buffer_flip_count = (app.buffer_flip_count + 1) % 60;
         }
-        app.instr.mark(plx_base::diag::heartbeat::Phase::Swap); // swap
+        app.instr.mark(nj_base::diag::heartbeat::Phase::Swap); // swap
         // Inside the gate: `frame_end` is the end of a DRAWN frame. Counting frames the
         // idle gate skipped would pace the profiler's once-per-N-frames log off frames
         // that ran no phases at all.
         crate::ui::profile::frame_end();
-        plx_gfx::overdraw::frame_end();
+        nj_gfx::overdraw::frame_end();
         // Same reason, same gate: the blur's region accounting is per DRAWN frame. It rolls
         // "what every glass surface asked for this frame" into the region the next frame's
         // first snapshot is taken at. Once that union is known, several surfaces share one
         // capture; a first discovery frame may still need a second non-contained grab.
-        plx_gfx::gfx::blur_frame_end();
+        nj_gfx::gfx::blur_frame_end();
         app.glass.sources.borrow_mut().finish();
         // …and a queued underlay-field reduction has had one more drawn frame to finish in.
-        plx_gfx::gfx::field_frame_end();
+        nj_gfx::gfx::field_frame_end();
         // …and a frame that captured the page leaves a fence the next frames wait on.
-        plx_gfx::gfx::snapshot_frame_end();
+        nj_gfx::gfx::snapshot_frame_end();
         // …and a ground probe's queued copy is read back here, between frames, if it is done.
-        plx_gfx::gfx::ground_probes_frame_end();
-        plx_machine::idle::note_present(fr.now);
+        nj_gfx::gfx::ground_probes_frame_end();
+        nj_machine::idle::note_present(fr.now);
         // The poster-gate scenes' frame counter, at the same post-swap seam as the present count
-        // above. It was called from inside `note_present`; `plx_machine::idle` is the machine layer and
+        // above. It was called from inside `note_present`; `nj_machine::idle` is the machine layer and
         // no longer names `ui`'s metrics.
         #[cfg(feature = "devtriggers")]
         crate::ui::card_motion_metrics::presented(fr.now);
@@ -586,11 +586,11 @@ unsafe fn present_and_swap(
         // The one stretch of main-thread time nothing is waiting on: spend a bounded slice of it
         // opening the theme faces and loading their glyph metrics (`text::warm_fonts_idle`), so
         // a page's first layout does not pay for them inside a transition. A no-op once warm.
-        plx_gfx::text::warm_fonts_idle(FONT_WARM_SLICE_US, plx_base::diag::heartbeat::now_us);
+        nj_gfx::text::warm_fonts_idle(FONT_WARM_SLICE_US, nj_base::diag::heartbeat::now_us);
         // Device and macOS presented frames block in swap; WSLg/X11 presented frames use the
         // software budget above. A skipped frame reaches neither path, so sleep here to keep a
         // settled screen from becoming a CPU spinner.
-        SDL_Delay(plx_machine::idle::IDLE_POLL_MS);
+        SDL_Delay(nj_machine::idle::IDLE_POLL_MS);
     }
 }
 
@@ -640,7 +640,7 @@ unsafe fn ingress_token(app: &mut App, fr: &mut Frame, token: &str) -> bool {
     if super::bridge::text_field_owns_input(&app.pages) {
         if let Some(text) = token.strip_prefix("txt:") {
             ingest_text(app, &text.replace('+', " "), crate::textinput::available(),
-                plx_machine::machine::Source::RemoteFifo);
+                nj_machine::machine::Source::RemoteFifo);
             return true;
         }
     }
@@ -668,18 +668,18 @@ pub(crate) fn pin_headless_hud(app: &mut App, now: u32, tab: Option<i32>) {
     }
 }
 
-fn ingest_text(app: &mut App, text: &str, panel: bool, source: plx_machine::machine::Source) {
+fn ingest_text(app: &mut App, text: &str, panel: bool, source: nj_machine::machine::Source) {
     if text.is_empty() { return; }
-    let at = plx_machine::machine::Tick { ms: clock::now(), dt_us: 0 };
+    let at = nj_machine::machine::Tick { ms: clock::now(), dt_us: 0 };
     app.rec.input(super::recorder::enc_text(text, panel, at, source));
     app.inputs.extend(text_inputs(text, panel, at, source));
     app.last_input = at.ms;
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// One polled event. Shared by ordinary polling and ordered FIFO/replay ingestion.
 unsafe fn ingest_sdl_event(app: &mut App, fr: &mut Frame) {
-    ingest_sdl_event_with_window(app, fr, plx_platform::tv::window::grab);
+    ingest_sdl_event_with_window(app, fr, nj_platform::tv::window::grab);
 }
 
 /// The window reacquisition is a platform operation, supplied separately so the
@@ -712,11 +712,11 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
     } else {
         None
     };
-    // ANY event is a reason to repaint (`plx_machine::idle`): a key changes focus or a label,
+    // ANY event is a reason to repaint (`nj_machine::idle`): a key changes focus or a label,
     // a lifecycle event changes the whole screen. Marked here — once, for every event
     // kind — rather than in each of the ~30 arms below, where the next one added would
     // silently draw nothing.
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     if et == SDL_KEYDOWN
         || et == SDL_KEYUP
         || et == SDL_TEXTINPUT
@@ -779,9 +779,9 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // there is no legacy fallback left to dispatch to.
         // Keep dismissal after earlier text/keys in this input batch. The dispatcher
         // releases both system ownership and the native start latch at delivery.
-        app.inputs.push(plx_machine::machine::InputEvent {
-            at: plx_machine::machine::Tick { ms: fr.now, dt_us: 0 }, source: plx_machine::machine::Source::Sdl,
-            kind: plx_machine::machine::InputKind::SystemKeyboard(false),
+        app.inputs.push(nj_machine::machine::InputEvent {
+            at: nj_machine::machine::Tick { ms: fr.now, dt_us: 0 }, source: nj_machine::machine::Source::Sdl,
+            kind: nj_machine::machine::InputKind::SystemKeyboard(false),
         });
         // **The TREE hears it too** (spec §9, §12.1) — phase 9. `ScreenEvent::Suspend` down every
         // mounted body at this frame's NAV COMMIT, and `Navigation.suspended` set. The vocabulary
@@ -795,7 +795,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         super::bridge::background(&mut app.pages);
         // Revoke our borrowed SDL proxies before another frame can use them while backgrounded.
         // SDL owns their lifetime; foreground must query its current window again.
-        plx_platform::tv::window::release();
+        nj_platform::tv::window::release();
         // A trailer preview is not parked: the OS taking the screen ends it, like any other way
         // off its page (`content::halt_preview_off_its_page`). A Load that has not returned is
         // left Abandoning, and a preview session is never parked for the foreground reload —
@@ -859,10 +859,10 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             // unencrypted connections on: every plaintext grant ends here, and each server that
             // lost one is queued for a fresh discovery (requested by the upgrade retry's frame
             // step) that re-proves eligibility before minting again (`plex::grant`).
-            crate::plex::grant::network_changed();
+            crate::catalog::grant::network_changed();
             // Reacquire only on DID foreground, before playback restoration and rendering.
             restore_window(app.win);
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
             let activation = drive_foreground(
                 &mut app.player.lifecycle,
                 &mut app.player.session,
@@ -897,7 +897,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         let key = classify(sym, wcode);
         if app.boot_initial.is_some() {
             let event = super::bridge::key_input(sym, wcode, state,
-                plx_machine::machine::Tick { ms: clock::now(), dt_us: 0 }, plx_machine::machine::Source::Sdl);
+                nj_machine::machine::Tick { ms: clock::now(), dt_us: 0 }, nj_machine::machine::Source::Sdl);
             controlled_key_input(app, event);
             return;
         }
@@ -919,13 +919,13 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // ladder below reaches for the clock to fill `app.last_input`. `dt_us` is 0
         // because an event's `at` is a stamp, not a timestep: every machine the
         // dispatcher steps is driven by the FRAME's tick, which `bridge::frame` supplies.
-        let tree_tick = plx_machine::machine::Tick {
+        let tree_tick = nj_machine::machine::Tick {
             ms: clock::now(),
             dt_us: 0,
         };
         if (state & 0xff) != 1 {
             if tree_owns_key {
-                app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, plx_machine::machine::Source::Sdl));
+                app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, nj_machine::machine::Source::Sdl));
             }
             // …and the loop's own key-up bookkeeping runs either way: it retires the sym
             // from the physically-down slot and releases a deferred press, both of which are
@@ -956,7 +956,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
                 // looks like a lost key-up and springs back without activating.
                 let ok = is_ok(sym);
                 if ok || app.modal_repeat.ready(tree_tick.ms) {
-                    app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, plx_machine::machine::Source::Sdl));
+                    app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, nj_machine::machine::Source::Sdl));
                 }
                 return;
             }
@@ -1028,7 +1028,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // it. Nothing is stranded by going to the television's Home — the question is
         // neither answered nor dismissed, and selecting the tile again comes back to it.
         if tree_owns_key {
-            app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, plx_machine::machine::Source::Sdl));
+            app.inputs.push(super::bridge::key_input(sym, wcode, state, tree_tick, nj_machine::machine::Source::Sdl));
             return;
         }
         // `Route::Login | Route::Profiles` is deliberately absent here (phase 6, mirroring
@@ -1193,7 +1193,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             && !app.pages.surface_up()
             && super::bridge::owns_input(&app.pages)
         {
-            let at = plx_machine::machine::Tick { ms: app.last_input, dt_us: 0 };
+            let at = nj_machine::machine::Tick { ms: app.last_input, dt_us: 0 };
             app.inputs.push(if app.ptr.button_down {
                 super::bridge::drag_input(mx, my, at)
             } else {
@@ -1221,7 +1221,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             app.inputs.push(super::bridge::pointer_input(
                 mx,
                 my,
-                plx_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
+                nj_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
             ));
             return;
         }
@@ -1266,7 +1266,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             app.inputs.push(super::bridge::click_input(
                 cx,
                 cy,
-                plx_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
+                nj_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
             ));
             return;
         }
@@ -1324,7 +1324,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // else). Unconditional on ownership for `press.release`'s reason above — a
         // release with nothing armed is a no-op, and asking `owns_input` would drop the
         // release of a press armed on the frame a surface began to close.
-        app.inputs.push(super::bridge::release_input(plx_machine::machine::Tick {
+        app.inputs.push(super::bridge::release_input(nj_machine::machine::Tick {
             ms: app.last_input,
             dt_us: 0,
         }));
@@ -1371,10 +1371,10 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
                 return;
             }
             if super::bridge::search_owns_input(&app.pages) {
-                app.inputs.push(plx_machine::machine::InputEvent {
-                    at: plx_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
-                    source: plx_machine::machine::Source::Sdl,
-                    kind: plx_machine::machine::InputKind::Wheel { dy: dy as f32 },
+                app.inputs.push(nj_machine::machine::InputEvent {
+                    at: nj_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
+                    source: nj_machine::machine::Source::Sdl,
+                    kind: nj_machine::machine::InputKind::Wheel { dy: dy as f32 },
                 });
             } else if super::bridge::owns_input(&app.pages) {
                 // A tick becomes the DIRECTION KEY it stands for (`bridge::wheel_input`),
@@ -1385,7 +1385,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
                 // repeat, so sharing it would let a held key mute a scroll and vice versa.
                 app.inputs.extend(super::bridge::wheel_input(
                     dy,
-                    plx_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
+                    nj_machine::machine::Tick { ms: app.last_input, dt_us: 0 },
                 ));
             }
             // `Route::Search` is deliberately absent here: `search_owns_input()` above
@@ -1407,7 +1407,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         // own edit state, because the route changes at the fade floor.
         if super::bridge::text_field_owns_input(&app.pages) {
             let text = crate::textinput::decode(&app.ev);
-            ingest_text(app, &text, crate::textinput::available(), plx_machine::machine::Source::Sdl);
+            ingest_text(app, &text, crate::textinput::available(), nj_machine::machine::Source::Sdl);
         } else {
             crate::textinput::on_event(&app.ev);
         }
@@ -1446,11 +1446,11 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // nothing keys the plane's consequences on the route any more.
         if let Some(bound) = crate::player::observe_video_plane(&mut app.player, &mut app.adapters.player) {
             // One edge, three gates. `set_video_plane_bound` has already told the LIVE one
-            // (`plx_machine::idle`); these are the two §4.4 machines — the one `App` owns and the
+            // (`nj_machine::idle`); these are the two §4.4 machines — the one `App` owns and the
             // dispatcher's, which is what answers `Rig::opaque_route` at step 9 — plus the rig's
             // own copy for the draw-entry call. `PresentEvent::VideoPlane` has no other source.
-            app.present.note(plx_machine::present::PresentEvent::VideoPlane(bound));
-            app.pages.present.note(plx_machine::present::PresentEvent::VideoPlane(bound));
+            app.present.note(nj_machine::present::PresentEvent::VideoPlane(bound));
+            app.pages.present.note(nj_machine::present::PresentEvent::VideoPlane(bound));
             app.bridge.publish_video_plane(bound);
         }
         if playback_may_run(app) {
@@ -1784,7 +1784,7 @@ pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
 
         // The ONE consumer of a cast-row person request, drained every frame whatever the
         // route. `detail::on_ok`'s cast arm raises it, and it is reached from three places
-        // (the immediate OK, the press-commit above, and the `plxnative-detailok`/-detailplay
+        // (the immediate OK, the press-commit above, and the `nativejelly-detailok`/-detailplay
         // dev triggers) — polling next to each of those left the flag SET on any path that
         // didn't poll, and a set flag then fired on an unrelated OK several screens later.
         // One drain cannot latch. The push is what STACKS the new page: the detail page being
@@ -1821,11 +1821,11 @@ pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
                 super::bridge::dismiss_surfaces(&mut app.pages);
             }
         }
-        // dev: /tmp/plxnative-navosc — `crate::dev::scenarios::nav_osc_tick`.
+        // dev: /tmp/nativejelly-navosc — `crate::dev::scenarios::nav_osc_tick`.
         crate::dev::scenarios::nav_osc_tick(app, fr.now);
-        // dev: /tmp/plxnative-pushbench — `crate::dev::scenarios::push_bench_tick`.
+        // dev: /tmp/nativejelly-pushbench — `crate::dev::scenarios::push_bench_tick`.
         crate::dev::scenarios::push_bench_tick(app, fr.now);
-        // dev: /tmp/plxnative-deepbench — `crate::dev::scenarios::deep_bench_tick`.
+        // dev: /tmp/nativejelly-deepbench — `crate::dev::scenarios::deep_bench_tick`.
         crate::dev::scenarios::deep_bench_tick(app, fr.now);
 
         // ---- the page cross-fade's commit frame ------------------------------------------
@@ -1991,7 +1991,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // and whatever per-frame animation the legacy `ui::login`/`ui::profiles` scenes used to
         // step belongs to their `Screen::step`/`prepare` on a `Tick` the dispatcher already
         // delivers every frame through `bridge::frame` — not a second call from this function.
-        // dev: /tmp/plxnative-pickuser=<index> — `crate::dev::scenarios::pickuser_tick`.
+        // dev: /tmp/nativejelly-pickuser=<index> — `crate::dev::scenarios::pickuser_tick`.
         crate::dev::scenarios::pickuser_tick(app);
         // **The bare route, for every screen below** — `page_of` stood on each of these three
         // guards while a popover was a ROUTE that had to be resolved onto the page beneath it.
@@ -2008,7 +2008,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             // only when home is actually drawn — stepping its 16×24 cell springs during
             // Player/Detail frames was pure waste on the A53 (the ui::press dip/commit is driven
             // route-agnostically right after `dt` above)
-            let (_, moving) = plx_machine::idle::scoped_motion(|| {
+            let (_, moving) = nj_machine::idle::scoped_motion(|| {
                 app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
             });
             fr.underlay_moving |= moving;
@@ -2019,7 +2019,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             crate::dev::scenarios::lib_switch_tick(app, fr.now);
             // scoped like Home's above, because this page can be the one UNDER the account
             // popover now and its glass backdrop is refreshed off the underlay's motion
-            let (_, moving) = plx_machine::idle::scoped_motion(|| {
+            let (_, moving) = nj_machine::idle::scoped_motion(|| {
                 app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
             });
             fr.underlay_moving |= moving;
@@ -2034,12 +2034,12 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             // previously-drawn page left them at, and `ChromeSnapshot::members`'s published
             // strip rects (read by pointer hit-testing and focus) go stale. This mirrors the
             // Home/Library arms above rather than adding a fourth call site.
-            let (_, moving) = plx_machine::idle::scoped_motion(|| {
+            let (_, moving) = nj_machine::idle::scoped_motion(|| {
                 app.bridge.update_home_chrome(&mut app.pages, &mut app.glass, fr.dt);
             });
             fr.underlay_moving |= moving;
         }
-        // dev: /tmp/plxnative-searchosc — `crate::dev::scenarios::search_osc_tick`.
+        // dev: /tmp/nativejelly-searchosc — `crate::dev::scenarios::search_osc_tick`.
         crate::dev::scenarios::search_osc_tick(app, fr.now);
         // (The television's keyboard used to be dismissed HERE, by an `else` that called
         // `textinput::stop()` on every frame of every other route — because `search::leave`
@@ -2048,7 +2048,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // ends in a `WillLeave`/`Unmount`/`Cover` on `SearchScreen`, which drops the keyboard on
         // each. That is also the half the per-frame poll never did — it cleared `textinput`'s own
         // flag and left the screen's editing state set.)
-        // dev: /tmp/plxnative-acctosc — `crate::dev::scenarios::account_osc_tick`.
+        // dev: /tmp/nativejelly-acctosc — `crate::dev::scenarios::account_osc_tick`.
         crate::dev::scenarios::account_osc_tick(app, fr.now);
         // ---- the Settings family's dev oscillators, on the tree -------------------------
         //
@@ -2059,7 +2059,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // for the modal ramp, 520 ms for the three focus sweeps. Bodies live in
         // `crate::dev::scenarios` now; this frame still runs them at the same phase boundary.
         crate::dev::scenarios::modal_osc_tick(app, fr.now);
-        // dev: /tmp/plxnative-modalbench — `crate::dev::scenarios::modal_bench_tick`.
+        // dev: /tmp/nativejelly-modalbench — `crate::dev::scenarios::modal_bench_tick`.
         crate::dev::scenarios::modal_bench_tick(app, fr.now);
         crate::dev::scenarios::legal_doc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::alert_tick(app, fr.now, fr.dt);
@@ -2116,7 +2116,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                     return;
                 }
                 if let Some(r) = crate::route::pump_play(&mut app.player.session, app.bridge.metadata_mut()) {
-                    plx_machine::idle::invalidate();
+                    nj_machine::idle::invalidate();
                     // A preview landing nobody is waiting for any more (the page halted it while
                     // the resolve was in flight) must not start an engine: nothing would track
                     // it, so nothing would stop it at its end or hand the engine to a later Play.
@@ -2166,7 +2166,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                             // A host Load of 0 with the clock sink off is "no video path", not an
                             // admitted slot. Counting it spends the cycle and the later failure
                             // opens the breaker, so every later title is skipped.
-                            let seam_absent = cfg!(feature = "hostsim") && !plx_base::devtrig::flag("clocksink");
+                            let seam_absent = cfg!(feature = "hostsim") && !nj_base::devtrig::flag("clocksink");
                             if started && !seam_absent {
                                 crate::player::preview::note_admitted();
                             } else if crate::route::url(&app.player.session).is_empty() {
@@ -2190,7 +2190,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // the same reason as pump_play — play_item_now requests a detail from Home and flips
         // straight to the player, so a Detail-gated pump would never land it.
         if app.bridge.metadata_pump_detail() {
-            plx_machine::idle::invalidate(); // a detail landing rewrites the page under us
+            nj_machine::idle::invalidate(); // a detail landing rewrites the page under us
         }
         // Async season load: install the worker's episode list into CURRENT. Route-unconditional
         // for the same reason as pump_detail above; see `stores/metadata.rs`'s module doc for why
@@ -2200,7 +2200,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // Pumping season first could apply a stale season landing to CURRENT in the one frame
         // before pump_detail() replaces it.
         if app.bridge.metadata_pump_season() {
-            plx_machine::idle::invalidate(); // a season landing rewrites the episode row under us
+            nj_machine::idle::invalidate(); // a season landing rewrites the episode row under us
         }
         // D7: the continuation half of `activate_card`'s show/season Play — see
         // `App::menu_play_await`/`input::menu_play_tick`'s own doc. Right beside the pump above
@@ -2241,13 +2241,13 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
 /// instruments. Returns the viewport for the host-side screenshot that follows the draw.
 pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32) {
     #[cfg(feature = "threadcheck")]
-    let _draw_scope = plx_base::task::watchdog::draw_scope();
-            // EXPERIMENT (`/tmp/plxnative-egldamage`), no-op without the trigger. FIRST, before
+    let _draw_scope = nj_base::task::watchdog::draw_scope();
+            // EXPERIMENT (`/tmp/nativejelly-egldamage`), no-op without the trigger. FIRST, before
             // any GL command of this frame: `EGL_KHR_partial_update` only permits a damage
             // region to be declared before rendering begins. See `egl.rs`.
-            plx_gfx::egl::frame_damage();
+            nj_gfx::egl::frame_damage();
             // dev: the backdrop-glass LOAD DIAL and the blurred-transition prototype
-            // (`/tmp/plxnative-glassload`, `/tmp/plxnative-navblur`). Both are no-ops when
+            // (`/tmp/nativejelly-glassload`, `/tmp/nativejelly-navblur`). Both are no-ops when
             // their trigger is absent. HERE and not below the gate, because the dial's cadence
             // is counted in PRESENTS — a loop iteration the gate skipped drew no glass — and
             // because a step rollover invalidates the snapshot, which must precede every glass
@@ -2259,9 +2259,9 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
             // drawable size. At 1:1 on every television seen so far; on any 16:9 surface a
             // plain scale with zero letterbox (1080p->4K is exactly 2x); and on an unexpected
             // aspect, letterboxed rather than stretched or stuffed into a corner. See `surface`.
-            let (vx, vy, vw, vh) = plx_base::surface::viewport();
+            let (vx, vy, vw, vh) = nj_base::surface::viewport();
             glViewport(vx, vy, vw, vh);
-            // EVERY screen draws inside ONE panic barrier. `plex_run` is `extern "C"` (main.c calls
+            // EVERY screen draws inside ONE panic barrier. `nj_run` is `extern "C"` (main.c calls
             // it), so a panic unwinding out of a screen's draw is UB the toolchain turns into
             // abort() — the app dies and a live Starfish session is torn down mid-Feed(), on a
             // device with no debugger. Guarding HERE, at the route→screen dispatch, is what makes
@@ -2279,7 +2279,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
             crate::ui::profile::phase("frame.ui", || {
                 crate::ui::guard(|| {
                     if fr.player {
-                        // `plx_platform::tv::window::clear_opaque_region()` used to be called here. It is
+                        // `nj_platform::tv::window::clear_opaque_region()` used to be called here. It is
                         // §3.3 step 10's privileged call and belongs at the container library's
                         // OWN draw entry, which `app.pages.draw` below reaches in this same frame:
                         // `Bridge::clear_opaque_region` performs it, keyed on the plane's bit
@@ -2288,11 +2288,11 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         glClearColor(0.0, 0.0, 0.0, 0.0);
                         // The frame's first framebuffer-0 command, where this driver parks the
                         // wait for a free back buffer: spanned like every other route's `clear`.
-                        // dev (`/tmp/plxnative-framecb`): the frame thread's cost over the wait
+                        // dev (`/tmp/nativejelly-framecb`): the frame thread's cost over the wait
                         // and, from the acquired buffer to the swap, over the commit phase.
-                        plx_platform::tv::window::frame_probe_waiting();
-                        plx_base::diag::spans::span("clear", || glClear(GL_COLOR_BUFFER_BIT));
-                        plx_platform::tv::window::frame_probe_acquired();
+                        nj_platform::tv::window::frame_probe_waiting();
+                        nj_base::diag::spans::span("clear", || glClear(GL_COLOR_BUFFER_BIT));
+                        nj_platform::tv::window::frame_probe_acquired();
                         // ONE resolve of which surface owns the "pipeline is working" signal,
                         // handed to both the transport and the read-out, so the centred read-out
                         // and the transport's inline spinner can never both light in the same
@@ -2346,7 +2346,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         // debug assertion. A popover from this page halts the preview first, so
                         // this frame only skips while the picture is the intended ground.
                         if !(app.player.video_plane_bound && crate::route::is_preview(&app.player.session)) {
-                            plx_base::diag::spans::span("host", || crate::ui::popover::host::begin_frame(fr.underlay_moving));
+                            nj_base::diag::spans::span("host", || crate::ui::popover::host::begin_frame(fr.underlay_moving));
                         }
                         use crate::ui::frame::backdrop::Z;
                         let layers = app.pages.backdrop_layers(crate::ui::nav::page_alpha());
@@ -2365,7 +2365,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                             if page_owned {
                                 app.pages.draw_with_glass_below(&mut app.bridge, &mut app.glass, true, ceiling);
                             } else {
-                                plx_gfx::gfx::frame_clear(crate::ui::theme::CLEAR_RGB.0, crate::ui::theme::CLEAR_RGB.1, crate::ui::theme::CLEAR_RGB.2);
+                                nj_gfx::gfx::frame_clear(crate::ui::theme::CLEAR_RGB.0, crate::ui::theme::CLEAR_RGB.1, crate::ui::theme::CLEAR_RGB.2);
                             }
                             if plan != super::bridge::PagePlan::SurfacesOnly && Z::OPENER < ceiling {
                                 let _opener = crate::ui::frame::backdrop::layer(Z::OPENER, false);
@@ -2374,7 +2374,7 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         };
                         {
                             let _declarations = crate::ui::frame::backdrop::discover(sources.clone());
-                            plx_base::diag::spans::span("disc", || page(Z::ALL));
+                            nj_base::diag::spans::span("disc", || page(Z::ALL));
                         }
                         sources.borrow_mut().resolve();
                         let jobs = sources.borrow().jobs();
@@ -2382,11 +2382,11 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         // A band intersecting lower glass captures that composite in visible order.
                         for (ceiling, rect) in jobs {
                             let _source_walk = crate::ui::frame::backdrop::enter(sources.clone(), ceiling);
-                            let reg = plx_gfx::gfx::blur_region(rect.x, rect.y, rect.w, rect.h);
+                            let reg = nj_gfx::gfx::blur_region(rect.x, rect.y, rect.w, rect.h);
                             // `src`: one blur source job, its replay of the page prefix included.
-                            plx_base::diag::spans::span("src", || {
-                                if plx_gfx::gfx::blur_snapshot_direct(reg, &mut || page(ceiling)) {
-                                    plx_gfx::gfx::retain_backdrop(ceiling);
+                            nj_base::diag::spans::span("src", || {
+                                if nj_gfx::gfx::blur_snapshot_direct(reg, &mut || page(ceiling)) {
+                                    nj_gfx::gfx::retain_backdrop(ceiling);
                                 }
                             });
                         }
@@ -2437,13 +2437,13 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         // A supersampled simulator render (`surface::render_scale`) exists to be
                         // captured, so it leaves the diagnostic digits out of the picture.
                         #[cfg(feature = "devtools")]
-                        if plx_base::surface::render_scale() == 1 {
+                        if nj_base::surface::render_scale() == 1 {
                             let fps_col = if app.buffer_flip_count < 30 {
                                 crate::ui::theme::DIAG_FLIP_A
                             } else {
                                 crate::ui::theme::DIAG_FLIP_B
                             };
-                            plx_gfx::gfx::draw_number(
+                            nj_gfx::gfx::draw_number(
                                 app.fps_shown,
                                 SCR_W as f32 - 70.0,
                                 64.0,
@@ -2472,7 +2472,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         crate::dev::scenarios::bench_frame_tick(app, fr.present, fr.now);
         fr.rn = super::words::route_word(&app.route());
     let rn = fr.rn;
-    if plx_gfx::text::take_measure_fault() && !app.measure_fault_logged {
+    if nj_gfx::text::take_measure_fault() && !app.measure_fault_logged {
         // once per process: the layout that was built on estimates is the thing to go and look at
         app.measure_fault_logged = true;
         log("text: a width was measured with NO FONT loaded — layout is on average-advance estimates");
@@ -2490,7 +2490,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         // tester was on would be worse than one that omitted the field. Compiles away in every
         // build that is not a lab build.
         crate::lab::note_route(fr.rn);
-        // dev: the FOCUS FINGERPRINT (`/tmp/plxnative-focus`, see `crate::focusprobe`). One
+        // dev: the FOCUS FINGERPRINT (`/tmp/nativejelly-focus`, see `crate::focusprobe`). One
         // ordered line naming everything the key ladder above can move, logged only when it
         // changes, so a (route x key) characterization run can read what a press did out of the
         // diff instead of out of `route=` alone.
@@ -2499,7 +2499,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         // been handled and the screen already drawn, so what it samples is the state a press
         // MOVED rather than the state it was about to act on; and this point is outside the
         // idle gate's `present` block, so a settled screen — which stops presenting but keeps
-        // looping — is still observed. The probe reports nothing to `plx_machine::idle` in return: a
+        // looping — is still observed. The probe reports nothing to `nj_machine::idle` in return: a
         // frame gate that a diagnostic could hold open would stop being measurable.
         //
         // `rn` is passed rather than re-derived so the fingerprint's `route=` is the same
@@ -2630,7 +2630,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         }
         // frame-drop detector: attribute slow frames to pump(uploads)/draw/swap(GPU).
         // ONE tail for every route — this used to live only on the non-player path, which left
-        // /tmp/plxnative-framedrop dead during playback (the timings were collected, then a
+        // /tmp/nativejelly-framedrop dead during playback (the timings were collected, then a
         // `continue` threw them away).
         // `present` gates this too: a frame the idle gate skipped drew nothing, so grading it
         // would drag `worstframe` toward zero and read as a perf WIN. A skipped frame is not a
@@ -2643,8 +2643,8 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
             // Two atomic swaps a frame is what "per frame" costs; the comment here claimed it
             // was already being paid.
             let (uploads, upload_px) = super::adapters::poster::take_upload_stats();
-            let (cards, cards_off) = plx_gfx::gfx::take_card_stats();
-            app.instr.note_frame_counters(plx_base::diag::heartbeat::FrameCounters {
+            let (cards, cards_off) = nj_gfx::gfx::take_card_stats();
+            app.instr.note_frame_counters(nj_base::diag::heartbeat::FrameCounters {
                 uploads,
                 upload_px,
                 cards,
@@ -2652,7 +2652,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
             });
             // Taken on every presented frame for the counters' reason above: a span belongs to
             // the frame it ran in, never to the next slow one.
-            let spans = plx_base::diag::spans::take();
+            let spans = nj_base::diag::spans::take();
             for line in app.instr.frame_drop_lines(&|| {
                 format!(
                     "route={rn} dip={} load={} snapt={:.2} snap={:.3} {spans}{}",
@@ -2660,7 +2660,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                     crate::ui::glassload::step_index(),
                     app.bridge.home_snap_target(&app.pages),
                     app.bridge.home_snap_pos(&app.pages),
-                    plx_platform::tv::window::frame_probe_fields()
+                    nj_platform::tv::window::frame_probe_fields()
                 )
             }) {
                 log(&line);
@@ -2669,7 +2669,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
             // Spans recorded on a frame that did not present (`scen`/`pump`/`land`, `feed`, the
             // engine's `sfv`/`sfa`) belong to no FRAMEDROP line: left in place they would print on
             // the next presented frame's.
-            let _ = plx_base::diag::spans::take();
+            let _ = nj_base::diag::spans::take();
         }
 }
 
@@ -2746,14 +2746,14 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             } else {
                 String::new()
             };
-            // `fps=<n>` — frames actually SWAPPED this second, which is what `plx_machine::idle` moves,
+            // `fps=<n>` — frames actually SWAPPED this second, which is what `nj_machine::idle` moves,
             // and the only field here that is a frame rate. `loop=` counts LOOP iterations: it
             // is the app's liveness signal and `pos=` is anchored to it, so it must not read 0
             // on a screen that is merely idle. The pair is the diagnostic — `loop=62 fps=0` is
             // a settled screen doing its job, `loop=0` is an app in trouble, and `fps=0` on its
             // own is not a fault at all. The dev on-screen counter draws this same drained
             // value, cached below; it never reads a second presentation counter.
-            let pres = plx_machine::idle::take_presents();
+            let pres = nj_machine::idle::take_presents();
             #[cfg(feature = "devtools")]
             {
                 app.fps_shown = pres.min(i32::MAX as u32) as i32;
@@ -2768,7 +2768,7 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
                 format!(
                     " load={} snap={}",
                     crate::ui::glassload::step_index(),
-                    plx_gfx::gfx::take_blur_snapshots()
+                    nj_gfx::gfx::take_blur_snapshots()
                 )
             } else {
                 String::new()
@@ -2789,13 +2789,13 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             let budget = app.pages.budget.take_frame_stats();
             let (carried, dropped) = app.pages.take_heartbeat_counters();
             let tail = app.instr.heartbeat_tail(
-                plx_base::diag::heartbeat::HeartbeatFields {
+                nj_base::diag::heartbeat::HeartbeatFields {
                     carried,
                     dropped,
                     admitted: budget.admitted,
                     refused: budget.refused,
                     solo: budget.solo.map(|c| c.name()),
-                    evicted_hot: plx_gfx::text::take_evicted_hot(),
+                    evicted_hot: nj_gfx::text::take_evicted_hot(),
                 },
                 app.rec.take_spent_us(),
             );
@@ -2841,14 +2841,14 @@ unsafe fn replay_inject(app: &mut App, fr: &mut Frame, v: &serde_json::Value) {
                 // Same navigation owner as ordinary foreground, with platform and
                 // player restoration kept behind actual SDL lifecycle ingress.
                 super::bridge::foreground(&mut app.pages);
-                plx_machine::idle::invalidate();
+                nj_machine::idle::invalidate();
                 return;
             }
             Err(reason) => { app.rec.refuse(reason); return; }
             Ok(None) => {}
         }
         match super::recorder::decode_input(v) {
-            Ok(input) if input.source == plx_machine::machine::Source::Script => {
+            Ok(input) if input.source == nj_machine::machine::Source::Script => {
                 // The typed initial scenario regenerates this internal step at its recorded
                 // clock. Dispatch still observes and grades it once; it is not external ingress.
             }
@@ -2867,7 +2867,7 @@ unsafe fn replay_inject(app: &mut App, fr: &mut Frame, v: &serde_json::Value) {
                 log("replay: text has no owned text-field recipient");
             } else if let Some(events) = super::recorder::dec_text(v) {
                 app.inputs.extend(events);
-                plx_machine::idle::invalidate();
+                nj_machine::idle::invalidate();
             } else { log("replay: malformed text input"); }
         }
         "key" => {
@@ -2895,19 +2895,19 @@ fn controlled_replay(app: &App) -> bool {
 
 /// The same bounded physical-key bookkeeping for controlled recording and supplied replay.
 /// The original source and event timestamp survive; replay does not synthesize a new SDL time.
-unsafe fn controlled_key_input(app: &mut App, event: plx_machine::machine::InputEvent<u32>) {
-    use plx_machine::machine::{InputKind, Key, Edge};
+unsafe fn controlled_key_input(app: &mut App, event: nj_machine::machine::InputEvent<u32>) {
+    use nj_machine::machine::{InputKind, Key, Edge};
     if matches!(event.kind, InputKind::Pointer{..}|InputKind::Click{..}|InputKind::Drag{..}) {
         app.last_input=event.at.ms;
         app.ptr.last_motion=event.at.ms;
         app.ptr.cur_hidden=false;
         if matches!(event.kind,InputKind::Click{..}) { app.ptr.button_down=true; }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         app.inputs.push(event);
         return;
     }
     if matches!(event.kind,InputKind::Key { key:Key::Ok,sym:0,wcode:0,edge:Edge::Up,at_edge:false })
-        && event.source==plx_machine::machine::Source::Sdl {
+        && event.source==nj_machine::machine::Source::Sdl {
         app.last_input=event.at.ms;
         app.input.press.release(event.at.ms);
         app.ptr.button_down=false;
@@ -2976,7 +2976,7 @@ mod lifecycle_regression_tests {
             player: crate::player::machine::Player::new(),
             adapters: Adapters {
                 player: crate::player::adapter::PlayerAdapter::new(unsafe {
-                    plx_base::task::MainThread::assume()
+                    nj_base::task::MainThread::assume()
                 }),
             },
             repause_at: -1,
@@ -2993,7 +2993,7 @@ mod lifecycle_regression_tests {
             #[cfg(target_os = "linux")]
             wslg_frame_pacing: false,
             t0: Default::default(),
-            instr: plx_base::diag::heartbeat::Instruments::new(false, 22.0),
+            instr: nj_base::diag::heartbeat::Instruments::new(false, 22.0),
             scenarios: crate::dev::scenarios::Scenarios {
             #[cfg(feature = "devtriggers")]
             poster_gate: Default::default(),
@@ -3083,7 +3083,7 @@ mod lifecycle_regression_tests {
             rec: super::super::recorder::Recplay::Off,
             boot_initial: Default::default(),
             telemetry_guard: Default::default(),
-            present: plx_machine::present::Present::new(),
+            present: nj_machine::present::Present::new(),
             glass: Default::default(),
             pages: crate::ui::dispatch::Dispatcher::new(),
             inputs: Default::default(),
@@ -3097,7 +3097,7 @@ mod lifecycle_regression_tests {
         super::super::bridge::frame(
             &mut app.pages,
             &mut app.bridge,
-            plx_machine::machine::Tick {
+            nj_machine::machine::Tick {
                 ms: now,
                 dt_us: 16_000,
             },
@@ -3114,8 +3114,8 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn controlled_content_boot_waits_for_the_queued_home_root() {
-        use plx_machine::machine::{Fx, MachineId, NavOp};
-        let _serial = plx_base::testlock::serial();
+        use nj_machine::machine::{Fx, MachineId, NavOp};
+        let _serial = nj_base::testlock::serial();
         let mut app = app();
         let encoded = super::super::synthetic_home_initial(1, 32517, Some("flow12".into())).unwrap();
         app.boot_initial = Some(serde_json::from_str(&encoded).unwrap());
@@ -3139,7 +3139,7 @@ mod lifecycle_regression_tests {
     fn a_recorded_raw_hang_probe_replays_without_missing_input() {
         use super::super::{bootstrap::{Initial, Preflight}, recorder::{Recplay, ReplayMode, state_fp}};
         use crate::ui::{dispatch::Tap, rec::{Header, MemSink, Recording}};
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut app = app();
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
         let initial = Initial::synthetic_home(1, 32517, None).unwrap();
@@ -3149,11 +3149,11 @@ mod lifecycle_regression_tests {
         app.rec = Recplay::recording_with_sink(&initial, Box::new(sink)).unwrap();
         app.rec.tick(initial.clock_start, 0.0);
         {
-            let _frame = plx_base::task::FrameScope::enter();
+            let _frame = nj_base::task::FrameScope::enter();
             assert!(unsafe { ingress_token(&mut app, &mut fr, "hang-raw:1") });
         }
         app.rec.end_frame(&|| 7);
-        std::mem::replace(&mut app.rec, Recplay::Off).finish(plx_machine::landgate::fixture_gate());
+        std::mem::replace(&mut app.rec, Recplay::Off).finish(nj_machine::landgate::fixture_gate());
         let recording = Recording::parse(&manifest,
             &segments.borrow().iter().map(Vec::as_slice).collect::<Vec<_>>(), state_fp()).unwrap();
         assert_eq!(recording.frames[0].inputs[0]["tok"], "hang-raw:1");
@@ -3164,7 +3164,7 @@ mod lifecycle_regression_tests {
             app.rec = Recplay::controlled(Preflight::Replay {
                 initial: initial.clone(), recording, mode: ReplayMode::Resolve }, &initial).unwrap();
             for value in app.rec.replay_inputs() {
-                let _frame = plx_base::task::FrameScope::enter();
+                let _frame = nj_base::task::FrameScope::enter();
                 unsafe { replay_inject(&mut app, &mut fr, &value); }
             }
             Tap::focus(&mut app.rec, 0, None);
@@ -3177,8 +3177,8 @@ mod lifecycle_regression_tests {
     fn controlled_foreground_replays_once_without_platform_authority() {
         use super::super::{bootstrap::{Initial, Preflight}, recorder::{Recplay, ReplayMode, state_fp}};
         use crate::ui::{dispatch::Tap, rec::{Header, Recording}};
-        use plx_machine::{machine::Tick};
-        let _serial = plx_base::testlock::serial();
+        use nj_machine::{machine::Tick};
+        let _serial = nj_base::testlock::serial();
         for mode in [ReplayMode::Targets, ReplayMode::Resolve] {
             let mut app = app();
             let initial = Initial::synthetic_home(1, 32517, None).unwrap();
@@ -3202,7 +3202,7 @@ mod lifecycle_regression_tests {
 
             app.pages.suspend();
             app.window_activity.event(0x104);
-            let revision = crate::plex::grant::revision();
+            let revision = crate::catalog::grant::revision();
             let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
             for value in app.rec.replay_inputs() {
                 unsafe { replay_inject(&mut app, &mut fr, &value); }
@@ -3210,7 +3210,7 @@ mod lifecycle_regression_tests {
             assert!(!app.pages.nav.suspended, "recorded foreground reaches the navigation owner");
             assert!(!app.window_activity.allow_present(true),
                 "a recording cannot authorize EGL presentation while the real window is backgrounded");
-            assert_eq!(crate::plex::grant::revision(), revision,
+            assert_eq!(crate::catalog::grant::revision(), revision,
                 "recorded foreground has no network-grant authority");
 
             // The actual compositor's startup pair may arrive at another frame. It
@@ -3223,7 +3223,7 @@ mod lifecycle_regression_tests {
             assert_eq!(restored_windows, 1, "only the real DID foreground restores native handles");
             assert!(app.window_activity.allow_present(true));
             assert!(app.inputs.is_empty(), "ambient keys cannot enter the recorded scenario");
-            assert_eq!(crate::plex::grant::revision(), revision);
+            assert_eq!(crate::catalog::grant::revision(), revision);
             app.rec.present(true);
             Tap::focus(&mut app.rec, 1, None);
             assert!(app.rec.end_frame(&|| 7));
@@ -3241,27 +3241,27 @@ mod lifecycle_regression_tests {
     #[test]
     #[should_panic(expected = "main-thread block: dev hang probe")]
     fn hang_probe_dispatch_uses_frame_guard() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut app = app();
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
-        let _scope = plx_base::task::FrameScope::enter();
+        let _scope = nj_base::task::FrameScope::enter();
         unsafe { ingress_token(&mut app, &mut fr, "hang:1"); }
     }
 
     #[cfg(feature = "devtriggers")]
     #[test]
     fn hang_probe_dispatch_raw_bypasses_frame_guard() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut app = app();
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
-        let _scope = plx_base::task::FrameScope::enter();
+        let _scope = nj_base::task::FrameScope::enter();
         assert!(unsafe { ingress_token(&mut app, &mut fr, "hang-raw:1") });
     }
 
     #[cfg(feature = "devtriggers")]
     #[test]
     fn hang_probe_dispatch_preserves_key_order() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         // Only SDL's event subsystem: no window, renderer, boot or device.
         assert_eq!(unsafe { SDL_Init(0x4000) }, 0);
         struct Events;
@@ -3281,7 +3281,7 @@ mod lifecycle_regression_tests {
             // The labelled probe's guard panic is the observation boundary BEFORE sleeping.
             // No final drain can make an incorrectly ordered dispatch pass this assertion.
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _scope = plx_base::task::FrameScope::enter();
+                let _scope = nj_base::task::FrameScope::enter();
                 unsafe {
                     if fifo {
                         ingest(&mut app, &mut fr);
@@ -3305,8 +3305,8 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn remote_fifo_exposes_independent_pointer_edges() {
-        use plx_machine::machine::{Edge, InputKind, Key};
-        let _serial = plx_base::testlock::serial();
+        use nj_machine::machine::{Edge, InputKind, Key};
+        let _serial = nj_base::testlock::serial();
         // SDL's event subsystem only: no window, renderer, native playback or device.
         assert_eq!(unsafe { SDL_Init(0x4000) }, 0);
         struct Events;
@@ -3335,7 +3335,7 @@ mod lifecycle_regression_tests {
         // frame per edge. Screen tests separately grade these coordinates against record_stops;
         // this map isolates the FIFO -> SDL -> app -> dispatcher -> scrub ownership boundary.
         use crate::ui::{screen::{Activate, Hover, Stop}, Rect};
-        use plx_machine::{machine::{FocusKey, Tick}};
+        use nj_machine::{machine::{FocusKey, Tick}};
         use crate::screens::registry::PlayerReq;
         let key = FocusKey { elem: crate::appkit::player_hud::ELEM_SCRUB,
             ..app.pages.focus().expect("the player has a scrub seat") };
@@ -3368,7 +3368,7 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn controlled_sdl_pointer_gestures_match_ordinary_ingress() {
-        let _serial=plx_base::testlock::serial();
+        let _serial=nj_base::testlock::serial();
         let mut observed=Vec::new();
         for controlled in [false,true] {
             let mut app=app();
@@ -3414,8 +3414,8 @@ mod lifecycle_regression_tests {
     #[test]
     fn controlled_sdl_records_one_owned_event_after_hitmap_for_each_pointer_edge() {
         use crate::ui::{rec::{MemSink,Header,Recording}, screen::{Stop,Hover,Activate}, Rect};
-        use plx_machine::{machine::Tick};
-        let _serial=plx_base::testlock::serial();
+        use nj_machine::{machine::Tick};
+        let _serial=nj_base::testlock::serial();
         let mut app=app();
         super::super::bridge::show_page(&mut app.pages,AppArg::Settings(crate::screens::family::SettingsPage::Root));
         frame(&mut app,0);
@@ -3454,12 +3454,12 @@ mod lifecycle_regression_tests {
         assert_eq!(inputs[1]["body"]["kind"],"pointer");
         for v in &inputs[..2] { assert_eq!(v["body"]["hit"],key.elem); }
         assert_eq!(inputs[2]["body"]["edge"],"Up");
-        plx_machine::landgate::disarm();
+        nj_machine::landgate::disarm();
     }
 
     struct Rig {
         app: App,
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         release: mpsc::Sender<()>,
         entered: mpsc::Receiver<()>,
         requests: Arc<Mutex<Vec<String>>>,
@@ -3468,7 +3468,7 @@ mod lifecycle_regression_tests {
     }
 
     impl Rig {
-        /// `None` means `plx_base::task::spawn_small_keeping` was refused by the OS (Finding 4: the
+        /// `None` means `nj_base::task::spawn_small_keeping` was refused by the OS (Finding 4: the
         /// rig must honour `task.rs`'s "a refused spawn is a return value, not a panic" contract
         /// instead of `.expect`-ing it into a panic that reads as a product regression). Nothing
         /// past the spawn point has been armed yet at that moment — `register_for_test` and
@@ -3478,7 +3478,7 @@ mod lifecycle_regression_tests {
         /// function returns `None`.
         ///
         /// **RED observed for this contract, SIMULATED (not a real OS refusal):** temporarily
-        /// change the `match plx_base::task::spawn_small_keeping(...)` below to unconditionally
+        /// change the `match nj_base::task::spawn_small_keeping(...)` below to unconditionally
         /// evaluate to `None` (discarding the real handle), leaving the closure and everything
         /// else untouched, then run the five tests in this module. Before this fix that
         /// substitution panicked every one of them — at the old `.expect("spawn lifecycle
@@ -3495,7 +3495,7 @@ mod lifecycle_regression_tests {
         /// `successor: false` serves a one-row queue — a film, with no Up Next to hand off to — so
         /// an end of stream leaves the player instead of starting the next item.
         fn serving(successor: bool) -> Option<Rig> {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -3505,10 +3505,10 @@ mod lifecycle_regression_tests {
             let log = requests.clone();
             let stop = Arc::new(AtomicBool::new(false));
             let stopping = stop.clone();
-            let worker = match plx_base::task::spawn_small_keeping("lifecycle-fixture", move || {
+            let worker = match nj_base::task::spawn_small_keeping("lifecycle-fixture", move || {
                 let mut first = true;
                 while !stopping.load(Ordering::Acquire) {
-                    let (mut socket, _) = match plx_base::testnet::accept(&listener) {
+                    let (mut socket, _) = match nj_base::testnet::accept(&listener) {
                         Ok(v) => v,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             std::thread::sleep(Duration::from_millis(1));
@@ -3577,11 +3577,11 @@ mod lifecycle_regression_tests {
                 None => {
                     // See the doc comment above: nothing past this point has run yet, so undoing
                     // the initial reset is the whole cleanup owed.
-                    crate::plex::reset_servers_for_test();
+                    crate::catalog::reset_servers_for_test();
                     return None;
                 }
             };
-            let sid = crate::plex::register_for_test(
+            let sid = crate::catalog::register_for_test(
                 "lifecycle-fixture",
                 "127.0.0.1",
                 port as i32,
@@ -3679,23 +3679,23 @@ mod lifecycle_regression_tests {
             // not re-panic here. `.join().unwrap()` used to propagate the worker's `Err` into
             // this destructor, and a panic inside a destructor while another panic is already
             // unwinding is a Rust abort (SIGABRT) that takes down the whole test binary — every
-            // other module's result in that `make check` run along with it. `plx_base::task::join`
+            // other module's result in that `make check` run along with it. `nj_base::task::join`
             // (task.rs's own documented contract: a bare `.join()` outside that module is a
             // stall nobody can see) logs a panicked worker instead of re-panicking, and the
             // `if let` tolerates an absent handle on the refused-spawn path this rig can no
             // longer actually reach (`Rig` is only ever constructed with `worker: Some(..)`).
             if let Some(h) = self.worker.take() {
-                plx_base::task::join("lifecycle-fixture", h);
+                nj_base::task::join("lifecycle-fixture", h);
             }
             crate::player::SHARED.reset_session();
             crate::route::reset_player_control_for_test(&self.app.player.session);
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
 
     #[test]
     fn did_background_cancels_accepted_resolve_before_player_mount() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!(
                 "SKIPPED did_background_cancels_accepted_resolve_before_player_mount: \
@@ -3764,7 +3764,7 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn did_background_suspends_created_engine_before_player_mount() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!(
                 "SKIPPED did_background_suspends_created_engine_before_player_mount: \
@@ -3801,7 +3801,7 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn did_background_prevents_due_up_next_from_launching_while_suspended() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!(
                 "SKIPPED did_background_prevents_due_up_next_from_launching_while_suspended: \
@@ -3848,7 +3848,7 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn foreground_due_up_next_still_requests_its_successor() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!(
                 "SKIPPED foreground_due_up_next_still_requests_its_successor: \
@@ -3869,7 +3869,7 @@ mod lifecycle_regression_tests {
 
     #[test]
     fn replacement_play_retires_failed_foreground_owner_and_lands() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!(
                 "SKIPPED replacement_play_retires_failed_foreground_owner_and_lands: \
@@ -3975,7 +3975,7 @@ mod lifecycle_regression_tests {
     /// resolved plan lands).
     use crate::ui::screen::ScreenArg;
 
-    fn step(app: &mut App, t: &mut u32, inputs: Vec<plx_machine::machine::InputEvent<u32>>) {
+    fn step(app: &mut App, t: &mut u32, inputs: Vec<nj_machine::machine::InputEvent<u32>>) {
         *t += 16;
         app.inputs.extend(inputs);
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
@@ -3984,7 +3984,7 @@ mod lifecycle_regression_tests {
         let was_player = super::super::bridge::player(&app.pages).is_some();
         unsafe { playback_tick(app, &mut fr); }
         super::super::bridge::frame(&mut app.pages, &mut app.bridge,
-            plx_machine::machine::Tick { ms: *t, dt_us: 16_000 }, std::mem::take(&mut app.inputs));
+            nj_machine::machine::Tick { ms: *t, dt_us: 16_000 }, std::mem::take(&mut app.inputs));
         if was_player && super::super::bridge::player(&app.pages).is_none() {
             restore_played_entry(app);
         }
@@ -4015,7 +4015,7 @@ mod lifecycle_regression_tests {
     /// origin seed; and when the plan then lands, the committed route still names the page under
     /// the dip, so `update`'s landing arm asks for the player a second time (`pump_play: engine
     /// started off-route`). Returns the entry the session was launched from.
-    fn play_with_a_landing_inside_the_dip(rig: &mut Rig, t: &mut u32) -> plx_machine::machine::EntryId {
+    fn play_with_a_landing_inside_the_dip(rig: &mut Rig, t: &mut u32) -> nj_machine::machine::EntryId {
         let origin = rig.app.pages.nav.top_page().expect("a page is on top").id;
         rig.request();
         rig.accept_start();
@@ -4040,15 +4040,15 @@ mod lifecycle_regression_tests {
 
     /// BACK as the remote spells it (ESC — the dev remote's own spelling of BACK in the field
     /// report): the player classifies `sym`/`wcode`, not the fixture's `Key`.
-    fn back_key(ms: u32) -> plx_machine::machine::InputEvent<u32> {
-        let mut event = crate::ui::fixture::key(plx_machine::machine::Key::Back, crate::ui::fixture::tick(ms));
-        if let plx_machine::machine::InputKind::Key { sym, .. } = &mut event.kind {
+    fn back_key(ms: u32) -> nj_machine::machine::InputEvent<u32> {
+        let mut event = crate::ui::fixture::key(nj_machine::machine::Key::Back, crate::ui::fixture::tick(ms));
+        if let nj_machine::machine::InputKind::Key { sym, .. } = &mut event.kind {
             *sym = crate::ui::consts::SDLK_ESCAPE;
         }
         event
     }
 
-    fn detail_arg(sid: crate::plex::ServerId) -> AppArg {
+    fn detail_arg(sid: crate::catalog::ServerId) -> AppArg {
         AppArg::Content(crate::screens::registry::ContentArg::Detail { sid, rk: "1".into() })
     }
 
@@ -4056,7 +4056,7 @@ mod lifecycle_regression_tests {
     /// detail page the film was started from — the same entry, not a fresh copy of it.
     #[test]
     fn back_from_the_player_returns_to_the_detail_page_it_was_started_from() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::serving(false) else {
             eprintln!("SKIPPED back_from_the_player_returns_to_the_detail_page_it_was_started_from: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4083,7 +4083,7 @@ mod lifecycle_regression_tests {
     /// session was launched from (§5.1), not Home.
     #[test]
     fn an_end_of_stream_without_up_next_returns_to_the_detail_page() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::serving(false) else {
             eprintln!("SKIPPED an_end_of_stream_without_up_next_returns_to_the_detail_page: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4109,7 +4109,7 @@ mod lifecycle_regression_tests {
     /// page the session returns to is Home itself — the same entry, with its memory.
     #[test]
     fn back_from_a_session_started_on_home_returns_to_home() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::serving(false) else {
             eprintln!("SKIPPED back_from_a_session_started_on_home_returns_to_home: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4174,7 +4174,7 @@ mod lifecycle_regression_tests {
     /// then plays the successor exactly as it always has.
     #[test]
     fn after_credits_requests_no_successor_until_the_stream_ends() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!("SKIPPED after_credits_requests_no_successor_until_the_stream_ends: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4203,7 +4203,7 @@ mod lifecycle_regression_tests {
     /// successor before the stream ends.
     #[test]
     fn countdown_requests_the_successor_from_inside_the_credits() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::new() else {
             eprintln!("SKIPPED countdown_requests_the_successor_from_inside_the_credits: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4226,7 +4226,7 @@ mod lifecycle_regression_tests {
     /// film does: back to the page the session was launched from, nothing requested.
     #[test]
     fn off_returns_to_the_detail_page_at_the_end_of_an_episode_with_a_successor() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let Some(mut rig) = Rig::serving(true) else {
             eprintln!("SKIPPED off_returns_to_the_detail_page_at_the_end_of_an_episode_with_a_successor: \
                 lifecycle fixture worker thread could not be spawned");
@@ -4253,12 +4253,12 @@ mod lifecycle_regression_tests {
 
 #[cfg(test)]
 mod video_plane_gate_tests {
-    //! **The present gate's plane term, end to end.** It began in `plx_machine::idle`'s tests and lives here
+    //! **The present gate's plane term, end to end.** It began in `nj_machine::idle`'s tests and lives here
     //! because it needs three things no lower layer owns together: a `Player` (the bit's one
-    //! writer), the gate (`plx_machine::idle`, the machine layer) and this file's own source (the loop is
+    //! writer), the gate (`nj_machine::idle`, the machine layer) and this file's own source (the loop is
     //! the one consumer a unit test cannot drive). The gate-only half stayed beside the gate:
-    //! `plx_machine::idle`'s `the_present_gate_answers_true_only_while_the_plane_bit_is_set`.
-    use plx_machine::idle::{
+    //! `nj_machine::idle`'s `the_present_gate_answers_true_only_while_the_plane_bit_is_set`.
+    use nj_machine::idle::{
         invalidate, reset_for_test, should_present, take_local_damage, video_plane_bound,
     };
 
@@ -4285,7 +4285,7 @@ mod video_plane_gate_tests {
     /// `fr.player` back as `opaque_route`'s argument fails claim 3.
     #[test]
     fn the_present_gate_answers_true_only_while_the_plane_is_bound() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         reset_for_test();
         let mut player = crate::player::machine::Player::new();
         assert!(!video_plane_bound(), "a fresh machine has no plane");
@@ -4341,7 +4341,7 @@ mod video_plane_gate_tests {
             .next()
             .expect("the loop's source");
         assert!(
-            !src.contains("plx_platform::tv::window::opaque_route(fr.player)"),
+            !src.contains("nj_platform::tv::window::opaque_route(fr.player)"),
             "the opaque region must not be keyed on the ROUTE — the plane's bit is the question",
         );
         // **UNCONDITIONAL.** The claim this pins is not where the call sits relative to the
@@ -4356,7 +4356,7 @@ mod video_plane_gate_tests {
         // 200-line budget, so "the loop body's own depth" is now two claims: the call is at
         // `prepare_window`'s own body depth (four spaces, never inside that function's one
         // `if fr.present`), and `prepare_window` itself is called at the loop body's (eight).
-        const CALL: &str = "    plx_platform::tv::window::opaque_route(app.player.video_plane_bound);";
+        const CALL: &str = "    nj_platform::tv::window::opaque_route(app.player.video_plane_bound);";
         assert_eq!(
             src.lines().filter(|l| *l == CALL).count(),
             1,

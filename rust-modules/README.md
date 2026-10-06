@@ -1,12 +1,12 @@
 # rust-modules — the Rust app core
 
-This crate's ARM build is a `staticlib` linked into the C binary (`pkg/plxnative`). It began as a
+This crate's ARM build is a `staticlib` linked into the C binary (`pkg/nativejelly`). It began as a
 gradual, module-by-module C→Rust migration; today it IS the app — UI, event loop, player
-engine, demux pipeline, and the Plex data layer all live here (see `docs/agent-reference.md`
+engine, demux pipeline, and the catalog data layer all live here (see `docs/agent-reference.md`
 for the architecture). The C side boots the process, records an async-signal-safe fallback crash
 line and image marker, wraps the Starfish C++ seam, and keeps Sentry's opaque value ABI on the C
-side. Its Rust entry points are `plex_run`, `plx_crash_write_image_marker`,
-`plx_sentry_spool_external`, and the two Starfish callbacks.
+side. Its Rust entry points are `nj_run`, `nj_crash_write_image_marker`,
+`nj_sentry_spool_external`, and the two Starfish callbacks.
 
 ## Ported to Rust (10) — the whole data / logic / UI / render / platform stack
 
@@ -16,7 +16,7 @@ side. Its Rust entry points are `plex_run`, `plx_crash_write_image_marker`,
 | `stream` | HTTP/1.1 client | `repr(C)` `http_stream`; bounds-checked parsing |
 | `aq` | access-unit FIFO | `repr(C)` + libc pthread; flexible-array node |
 | `mkv` | Matroska/EBML demuxer | ~450 lines; `catch_unwind` entry points |
-| `pms` | Plex catalog fetch/parse | `serde_json` replaces the hand-scrape; shared `pms_movies[]` |
+| `catalog_fetch` | catalog fetch/parse | `serde_json`; shared movie list |
 | `posters` | async artwork store | idiomatic rewrite on `std::sync` Mutex/Condvar + threads |
 | `text` | SDL2_ttf rendering | font + glyph-texture caches |
 | `gfx` | GLES2 draw primitives | 3 shader programs, SDF cards, FPS digits |

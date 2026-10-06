@@ -6,7 +6,7 @@
 //! retirement drains an event already inside that epoch and rejects every later event, so stable
 //! storage is not mistaken for permission to mutate the next playback.
 use crate::metadata::track_names::TrackNames;
-use plx_net::stream::HttpStream;
+use nj_net::stream::HttpStream;
 use std::ffi::CString;
 use std::sync::atomic::{
     AtomicBool, AtomicI32, AtomicI64, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering,
@@ -474,11 +474,11 @@ impl PlaybackState {
     /// load window, and indefinitely in `Error`.
     pub fn caption(self) -> &'static std::ffi::CStr {
         match self {
-            PlaybackState::Resolving => plx_platform::i18n::msg::widgets_status_preparing_c(),
-            PlaybackState::Connecting => plx_platform::i18n::msg::widgets_status_connecting_c(),
-            PlaybackState::Buffering => plx_platform::i18n::msg::widgets_status_buffering_c(),
-            PlaybackState::Seeking => plx_platform::i18n::msg::widgets_status_seeking_c(),
-            PlaybackState::Error => plx_platform::i18n::msg::widgets_status_failed_c(),
+            PlaybackState::Resolving => nj_platform::i18n::msg::widgets_status_preparing_c(),
+            PlaybackState::Connecting => nj_platform::i18n::msg::widgets_status_connecting_c(),
+            PlaybackState::Buffering => nj_platform::i18n::msg::widgets_status_buffering_c(),
+            PlaybackState::Seeking => nj_platform::i18n::msg::widgets_status_seeking_c(),
+            PlaybackState::Error => nj_platform::i18n::msg::widgets_status_failed_c(),
             _ => c"",
         }
     }
@@ -2237,7 +2237,7 @@ impl Shared {
     }
 }
 
-/// UI-facing transport state. Main-thread-only in practice (plex_run + pump +
+/// UI-facing transport state. Main-thread-only in practice (nj_run + pump +
 /// player_hud all run on M), but exposed as atomics so app.rs / player_hud.rs read
 /// it with plain .load()/.store(). Replaces the #[no_mangle] transport globals.
 pub(crate) struct Transport {

@@ -9,18 +9,18 @@
 //! capture stream's MPEG1 + MPEG-TS muxer, kept here because every FFmpeg ABI
 //! detail — struct offsets, AVOption names, custom AVIO — belongs in one module.
 //! The struct layouts below are the FFmpeg n3.3 ABI, confirmed on-device by the
-//! Phase A probe (/tmp/plxnative-ffprobe logs codec_id/width/height for a known title).
+//! Phase A probe (/tmp/nativejelly-ffprobe logs codec_id/width/height for a known title).
 #![allow(dead_code)]
 use crate::aq::AuQueue;
 use crate::player::threads::SendPtr;
 use crate::player::SHARED;
-use plx_net::stream::HttpStream;
+use nj_net::stream::HttpStream;
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_uchar, c_uint, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
-/// Feed audio (es=2) to the pipeline. Cleared by the /tmp/plxnative-noaudio dev trigger to
+/// Feed audio (es=2) to the pipeline. Cleared by the /tmp/nativejelly-noaudio dev trigger to
 /// A/B whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
 static FEED_AUDIO: AtomicBool = AtomicBool::new(true);
 /// Does the FFmpeg on this device have the ABI these offsets were written for? Set once by
@@ -336,7 +336,7 @@ pub struct AVSubtitleRect {
 // One consequence worth knowing: the `cfg(test)` gate is gone. With no link directive the host
 // suite links unconditionally, and a test that calls into FFmpeg now fails by taking `dlopen`'s
 // None branch on Darwin instead of by failing to link.
-plx_base::dynlib! {
+nj_base::dynlib! {
     avformat: [
         // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
         // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
@@ -396,7 +396,7 @@ plx_base::dynlib! {
     fn avio_flush(s: *mut AVIOContext);
     fn avformat_free_context(s: *mut AVFormatContext);
 }}
-plx_base::dynlib! {
+nj_base::dynlib! {
     avcodec: [
         // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
         // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
@@ -440,7 +440,7 @@ plx_base::dynlib! {
     fn avcodec_parameters_from_context(par: *mut AVCodecParameters, ctx: *const AVCodecContext) -> c_int;
     fn av_packet_rescale_ts(pkt: *mut AVPacket, tb_src: AVRational, tb_dst: AVRational);
 }}
-plx_base::dynlib! {
+nj_base::dynlib! {
     // avformat_version lives in libavformat, not libavutil — but it was declared here and the
     // loader resolves by symbol, not by header, so it must move to the library that defines it or
     // the whole avutil table reports Incomplete on every device.
@@ -473,7 +473,7 @@ plx_base::dynlib! {
         flags: c_int,
     ) -> *const AVDictionaryEntry;
 }}
-plx_base::dynlib! {
+nj_base::dynlib! {
     swscale: [
         // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
         // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
@@ -832,21 +832,21 @@ impl Venc {
     ) -> Option<Box<Venc>> {
         ensure_registered(); // the file's ONE network-init guard
         if !SWS_OK.load(Ordering::Relaxed) {
-            plx_base::eventlog::log("venc: libswscale is not loaded (RELEASE build) — mpeg1 capture off");
+            nj_base::eventlog::log("venc: libswscale is not loaded (RELEASE build) — mpeg1 capture off");
             return None;
         }
         unsafe {
             let cname = b"mpeg1video\0".as_ptr() as *const c_char;
             let codec = avcodec_find_encoder_by_name(cname);
             if codec.is_null() {
-                plx_base::eventlog::log("venc: mpeg1video encoder absent");
+                nj_base::eventlog::log("venc: mpeg1video encoder absent");
                 return None;
             }
             let fmt_yuv = av_get_pix_fmt(b"yuv420p\0".as_ptr() as *const c_char);
             let fmt_rgba = av_get_pix_fmt(b"rgba\0".as_ptr() as *const c_char);
             let fmt_nv12 = av_get_pix_fmt(b"nv12\0".as_ptr() as *const c_char);
             if fmt_yuv < 0 || fmt_rgba < 0 || fmt_nv12 < 0 {
-                plx_base::eventlog::log("venc: pix fmt lookup failed");
+                nj_base::eventlog::log("venc: pix fmt lookup failed");
                 return None;
             }
             let ctx = avcodec_alloc_context3(codec);
@@ -906,7 +906,7 @@ impl Venc {
             set(b"dct\0", "fastint".into());
             let r = avcodec_open2(ctx, codec, std::ptr::null_mut());
             if r < 0 {
-                plx_base::eventlog::log(&format!("venc: avcodec_open2 failed ({r})"));
+                nj_base::eventlog::log(&format!("venc: avcodec_open2 failed ({r})"));
                 return None; // Drop frees ctx
             }
             // Runtime ABI self-check: the options set above must round-trip through the
@@ -921,7 +921,7 @@ impl Venc {
             // our model stays a read-only PREFIX, which is all it was ever used as.
             let par = avcodec_parameters_alloc();
             if par.is_null() {
-                plx_base::eventlog::log("venc: avcodec_parameters_alloc failed");
+                nj_base::eventlog::log("venc: avcodec_parameters_alloc failed");
                 return None;
             }
             let ok = avcodec_parameters_from_context(par, ctx) >= 0
@@ -929,7 +929,7 @@ impl Venc {
                 && (*par).height == h
                 && (*par).format == fmt_yuv;
             if !ok {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "venc: ABI self-check FAILED (par {}x{} fmt {} vs {}x{} fmt {}) — mpeg off",
                     (*par).width,
                     (*par).height,
@@ -954,7 +954,7 @@ impl Venc {
             poke_i32(frame, OFF_FRAME_HEIGHT, h);
             poke_i32(frame, OFF_FRAME_FORMAT, fmt_yuv);
             if av_frame_get_buffer(frame, 32) < 0 {
-                plx_base::eventlog::log("venc: frame buffer alloc failed");
+                nj_base::eventlog::log("venc: frame buffer alloc failed");
                 return None;
             }
             v.sws = sws_getContext(
@@ -970,7 +970,7 @@ impl Venc {
                 std::ptr::null(),
             );
             if v.sws.is_null() {
-                plx_base::eventlog::log("venc: sws_getContext failed");
+                nj_base::eventlog::log("venc: sws_getContext failed");
                 return None;
             }
             // ---- muxer over custom AVIO ----
@@ -982,7 +982,7 @@ impl Venc {
                 std::ptr::null(),
             );
             if r < 0 || oc.is_null() {
-                plx_base::eventlog::log(&format!("venc: no mpegts muxer in this build ({r})"));
+                nj_base::eventlog::log(&format!("venc: no mpegts muxer in this build ({r})"));
                 return None;
             }
             v.oc = oc;
@@ -1020,7 +1020,7 @@ impl Venc {
             // sink.fd is still -1 here: header bytes buffer in the 32KB AVIO buffer and
             // reach the socket with the first flushed frame.
             if avformat_write_header(oc, std::ptr::null_mut()) < 0 {
-                plx_base::eventlog::log("venc: write_header failed");
+                nj_base::eventlog::log("venc: write_header failed");
                 return None;
             }
             v.st_tb = stream_time_base(st);
@@ -1028,7 +1028,7 @@ impl Venc {
             if v.pkt.is_null() {
                 return None;
             }
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "venc: mpeg1/ts up {}x{} @{}bps (st_tb {}/{})",
                 w, h, bitrate_bps, v.st_tb.num, v.st_tb.den
             ));
@@ -1098,7 +1098,7 @@ impl Venc {
             self.pts += 1;
             let r = avcodec_send_frame(self.ctx, self.frame);
             if r < 0 {
-                plx_base::eventlog::log(&format!("venc: send_frame failed ({r})"));
+                nj_base::eventlog::log(&format!("venc: send_frame failed ({r})"));
                 return false;
             }
             loop {
@@ -1107,7 +1107,7 @@ impl Venc {
                     break;
                 }
                 if r < 0 {
-                    plx_base::eventlog::log(&format!("venc: receive_packet failed ({r})"));
+                    nj_base::eventlog::log(&format!("venc: receive_packet failed ({r})"));
                     return false;
                 }
                 av_packet_rescale_ts(self.pkt, VENC_TB, self.st_tb);
@@ -1124,7 +1124,7 @@ impl Venc {
             self.t_enc_us += t1.elapsed().as_micros() as u64;
             self.t_n += 1;
             if self.t_last_log.elapsed().as_secs_f32() >= 5.0 && self.t_n > 0 {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "venc: {} frm, sws {:.1}ms enc {:.1}ms avg",
                     self.t_n,
                     self.t_sws_us as f32 / self.t_n as f32 / 1000.0,
@@ -1448,7 +1448,7 @@ fn load_libraries() -> bool {
     // The bundled FFmpeg lives beside the binary, which is on no library search path — so it is
     // opened by ABSOLUTE PATH. That is not a convenience: webOS 11.2.0 ships FFmpeg 6 itself, and
     // a bare SONAME there could open the television's copy instead of ours.
-    let dir = Some(plx_base::paths::app_dir());
+    let dir = Some(nj_base::paths::app_dir());
 
     // DEPENDENCY ORDER, and it is load-bearing. libavformat NEEDs libavcodec NEEDs libavutil by
     // SONAME, and these libraries carry no rpath (FFmpeg's configure evals its flags, so
@@ -1463,19 +1463,19 @@ fn load_libraries() -> bool {
         ("avformat", avformat::load(dir)),
     ] {
         match verdict {
-            plx_base::dynlib::Loaded::Ok(soname) => {
-                plx_base::eventlog::log(&format!("ff: bound {what} -> {soname}"))
+            nj_base::dynlib::Loaded::Ok(soname) => {
+                nj_base::eventlog::log(&format!("ff: bound {what} -> {soname}"))
             }
-            plx_base::dynlib::Loaded::NoLibrary => {
+            nj_base::dynlib::Loaded::NoLibrary => {
                 ok = false;
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "ff: {what} is MISSING from the app directory — the bundled FFmpeg did not \
                      deploy. Playback will refuse; reinstall the package."
                 ));
             }
-            plx_base::dynlib::Loaded::Incomplete(soname, n) => {
+            nj_base::dynlib::Loaded::Incomplete(soname, n) => {
                 ok = false;
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "ff: {soname} is missing {n} symbol(s) we need — named above"
                 ));
             }
@@ -1487,12 +1487,12 @@ fn load_libraries() -> bool {
     // failure, and refused to play anything — in the configuration users actually receive, and in
     // no configuration ever tested here.
     match swscale::load(dir) {
-        plx_base::dynlib::Loaded::Ok(soname) => {
+        nj_base::dynlib::Loaded::Ok(soname) => {
             SWS_OK.store(true, Ordering::Relaxed);
-            plx_base::eventlog::log(&format!("ff: bound swscale -> {soname}"));
+            nj_base::eventlog::log(&format!("ff: bound swscale -> {soname}"));
         }
         _ => {
-            plx_base::eventlog::log("ff: no swscale (expected in a RELEASE build) — dev capture JPEG/MPEG1 off")
+            nj_base::eventlog::log("ff: no swscale (expected in a RELEASE build) — dev capture JPEG/MPEG1 off")
         }
     }
     ok
@@ -1537,7 +1537,7 @@ pub(crate) fn boot() {
     crate::curlio::boot();
     if !load_libraries() {
         ABI_OK.store(false, std::sync::atomic::Ordering::Relaxed);
-        plx_base::eventlog::log("ff: FFmpeg unavailable — the app runs, playback will refuse");
+        nj_base::eventlog::log("ff: FFmpeg unavailable — the app runs, playback will refuse");
         return;
     }
     unsafe {
@@ -1563,16 +1563,16 @@ pub(crate) fn boot() {
         let bad = (fmt >> 16, cod >> 16, utl >> 16) != (63, 63, 61);
         ABI_OK.store(!bad, Ordering::Relaxed);
         if bad {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "ff: BUNDLED FFmpeg is not the one this build expects (want avformat 63 / \
                  avcodec 63 / avutil 61) — the app directory holds a stale or foreign \
                  libav*-plx; refusing to demux",
             );
         }
     }
-    // Phase A dev trigger: /tmp/plxnative-ffprobe holds a media URL to open + dump streams,
+    // Phase A dev trigger: /tmp/nativejelly-ffprobe holds a media URL to open + dump streams,
     // confirming the FFmpeg-3.3 struct offsets against known media before we build on them.
-    if let Some(u) = plx_base::devtrig::read("ffprobe") {
+    if let Some(u) = nj_base::devtrig::read("ffprobe") {
         if !u.is_empty() {
             probe(&u);
         }
@@ -1683,11 +1683,11 @@ enum Src {
 impl Src {
     /// What the transport has RECEIVED of the current body beyond what FFmpeg has read — the
     /// one completion question both sources answer (`stream::BodyReceipt`).
-    fn body_receipt(&mut self) -> plx_net::stream::BodyReceipt {
+    fn body_receipt(&mut self) -> nj_net::stream::BodyReceipt {
         match self {
-            Src::Socket { hs, .. } => plx_net::stream::http_body_receipt(*hs),
+            Src::Socket { hs, .. } => nj_net::stream::http_body_receipt(*hs),
             Src::Curl(cs) => cs.body_receipt(),
-            Src::Idle => plx_net::stream::BodyReceipt {
+            Src::Idle => nj_net::stream::BodyReceipt {
                 ahead: 0,
                 finished: false,
                 stepped: false,
@@ -2095,11 +2095,11 @@ struct BlockingDeadline {
 }
 
 impl TransportWatchdog {
-    fn for_origin(origin: &crate::plex::Origin) -> Self {
+    fn for_origin(origin: &crate::catalog::Origin) -> Self {
         let inactivity = if origin.is_tls() {
             crate::curlio::media_stall_budget()
         } else {
-            plx_net::stream::media_stall_budget()
+            nj_net::stream::media_stall_budget()
         };
         Self::with_inactivity(inactivity)
     }
@@ -2394,7 +2394,7 @@ impl AvioState {
     fn transfer_finished(&self) -> bool {
         match &self.src {
             Src::Idle => true,
-            Src::Socket { hs, .. } => plx_net::stream::http_body_done(*hs),
+            Src::Socket { hs, .. } => nj_net::stream::http_body_done(*hs),
             Src::Curl(cs) => cs.body_complete(),
         }
     }
@@ -2436,7 +2436,7 @@ impl AvioState {
             let read_started = std::time::Instant::now();
             let n = match &mut self.src {
                 Src::Socket { hs, .. } => {
-                    plx_net::stream::http_drain_available(*hs, &mut self.bounce[start..])
+                    nj_net::stream::http_drain_available(*hs, &mut self.bounce[start..])
                 }
                 Src::Curl(cs) => cs.drain_available(&mut self.bounce[start..]),
                 Src::Idle => 0,
@@ -2579,8 +2579,8 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             // the open and the transport waits consult. See `StallGuard`.
             s.note_received();
             if let Some(acquisition) = &mut s.acquisition {
-                if plx_base::checkpoint::Checkpoint::check(acquisition)
-                    == plx_base::checkpoint::Flow::Stop
+                if nj_base::checkpoint::Checkpoint::check(acquisition)
+                    == nj_base::checkpoint::Flow::Stop
                 {
                     return avio_stopped(s);
                 }
@@ -2603,13 +2603,13 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             // Both sources use the same three-way return — >0 bytes, 0 clean end, <0 error — so
             // the EOF decision below stays one branch rather than one per transport.
             let read_started = std::time::Instant::now();
-            let mut unarmed = plx_base::checkpoint::NoCheckpoint;
-            let checkpoint: &mut dyn plx_base::checkpoint::Checkpoint = match &mut s.acquisition {
+            let mut unarmed = nj_base::checkpoint::NoCheckpoint;
+            let checkpoint: &mut dyn nj_base::checkpoint::Checkpoint = match &mut s.acquisition {
                 Some(acquisition) => acquisition,
                 None => &mut unarmed,
             };
             let r = match &mut s.src {
-                Src::Socket { hs, .. } => plx_net::stream::http_read_until(
+                Src::Socket { hs, .. } => nj_net::stream::http_read_until(
                     *hs,
                     dst as *mut c_uchar,
                     n,
@@ -2626,7 +2626,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                 Src::Idle => return AVERROR_EOF,
             };
             let wake =
-                if r == plx_net::stream::HTTP_READ_DEADLINE || r == crate::curlio::READ_DEADLINE {
+                if r == nj_net::stream::HTTP_READ_DEADLINE || r == crate::curlio::READ_DEADLINE {
                     let current_rebuffering = SHARED.hls_rebuffering.load(Ordering::Acquire);
                     match (blocking_deadline, s.transport_watchdog.as_ref()) {
                         (Some(attempted), Some(watchdog)) => Some(observe_hls_deadline(
@@ -2666,7 +2666,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                     }
                 }
             }
-            if r == plx_net::stream::HTTP_READ_STOPPED || r == crate::curlio::READ_STOPPED {
+            if r == nj_net::stream::HTTP_READ_STOPPED || r == crate::curlio::READ_STOPPED {
                 return avio_stopped(s);
             }
             if let Some(wake) = wake {
@@ -2757,10 +2757,10 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
                 port,
                 path,
             } => {
-                plx_net::stream::http_close(*hs);
-                let origin = crate::plex::Origin::http(&host.to_string_lossy(), *port);
+                nj_net::stream::http_close(*hs);
+                let origin = crate::catalog::Origin::http(&host.to_string_lossy(), *port);
                 let from = path.to_string_lossy().into_owned();
-                let req = plx_net::stream::redirect::Request {
+                let req = nj_net::stream::redirect::Request {
                     origin: &origin,
                     path: &from,
                     credentials: None,
@@ -2769,12 +2769,12 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
                     same_origin_only: false,
                     credential_gate: crate::http::credential_transport_allowed,
                 };
-                match plx_net::stream::redirect::open_following(
+                match nj_net::stream::redirect::open_following(
                     *hs,
                     &req,
-                    &mut plx_base::checkpoint::NoCheckpoint,
+                    &mut nj_base::checkpoint::NoCheckpoint,
                 ) {
-                    Ok(plx_net::stream::redirect::Opened::Socket(t)) => {
+                    Ok(nj_net::stream::redirect::Opened::Socket(t)) => {
                         if let (Ok(h), Ok(p)) =
                             (CString::new(t.origin.host()), CString::new(t.path))
                         {
@@ -2784,7 +2784,7 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
                         }
                         true
                     }
-                    Ok(plx_net::stream::redirect::Opened::Tls(t)) => {
+                    Ok(nj_net::stream::redirect::Opened::Tls(t)) => {
                         match open_curl_hop(&t.url(), target, aq) {
                             Ok(cs) => {
                                 hopped_to_tls = Some(cs);
@@ -3411,13 +3411,13 @@ fn hls_prefetch_is_fatal(err: &HlsExit) -> bool {
     matches!(err, HlsExit::Aborted)
 }
 
-fn classify_plaintext_open_failure(error: plx_net::stream::HttpOpenError) -> HlsExit {
+fn classify_plaintext_open_failure(error: nj_net::stream::HttpOpenError) -> HlsExit {
     match error {
-        plx_net::stream::HttpOpenError::Deadline => HlsExit::PrimeExpired,
-        plx_net::stream::HttpOpenError::Status(404) => HlsExit::NotReady,
-        plx_net::stream::HttpOpenError::Aborted => HlsExit::Aborted,
-        plx_net::stream::HttpOpenError::Stopped => UNLATCHED_STOP,
-        plx_net::stream::HttpOpenError::Status(_) | plx_net::stream::HttpOpenError::Transport => {
+        nj_net::stream::HttpOpenError::Deadline => HlsExit::PrimeExpired,
+        nj_net::stream::HttpOpenError::Status(404) => HlsExit::NotReady,
+        nj_net::stream::HttpOpenError::Aborted => HlsExit::Aborted,
+        nj_net::stream::HttpOpenError::Stopped => UNLATCHED_STOP,
+        nj_net::stream::HttpOpenError::Status(_) | nj_net::stream::HttpOpenError::Transport => {
             HlsExit::Failed("HTTP request failed")
         }
     }
@@ -3456,7 +3456,7 @@ fn hls_open_source(
     deadline: Option<std::time::Instant>,
     // Consulted by every blocking wait of the open with a deadline. Playlist fetches pass
     // `NoCheckpoint`; a segment fetch passes its acquisition runtime.
-    checkpoint: &mut dyn plx_base::checkpoint::Checkpoint,
+    checkpoint: &mut dyn nj_base::checkpoint::Checkpoint,
 ) -> Result<(Src, i64, crate::hls::Resource), HlsExit> {
     if unsafe { crate::aq::aq_is_aborted(aq) } {
         return Err(HlsExit::Aborted);
@@ -3480,7 +3480,7 @@ fn hls_open_curl(
     aq: *mut AuQueue,
     net: &mut HlsNet,
     deadline: Option<std::time::Instant>,
-    checkpoint: &mut dyn plx_base::checkpoint::Checkpoint,
+    checkpoint: &mut dyn nj_base::checkpoint::Checkpoint,
 ) -> Result<(Src, i64), HlsExit> {
     if let Some(mut cs) = net.curl.take() {
         let reopened = cs.reopen_until(url, deadline, &mut *checkpoint);
@@ -3550,20 +3550,20 @@ fn hls_open_curl(
 /// stay on the PMS origin. Also returns the resource the open landed on: a playlist's children
 /// resolve against it, not against the path that was requested.
 fn hls_open_plain(
-    origin: &crate::plex::Origin,
+    origin: &crate::catalog::Origin,
     request_path: &str,
     aq: *mut AuQueue,
     net: &mut HlsNet,
     deadline: Option<std::time::Instant>,
-    checkpoint: &mut dyn plx_base::checkpoint::Checkpoint,
+    checkpoint: &mut dyn nj_base::checkpoint::Checkpoint,
 ) -> Result<(Src, i64, crate::hls::Resource), HlsExit> {
-    use plx_net::stream::redirect::{FollowError, Opened};
+    use nj_net::stream::redirect::{FollowError, Opened};
     let hs = net.hs;
     if deadline.is_some_and(|at| std::time::Instant::now() >= at) {
         return Err(HlsExit::PrimeExpired);
     }
     // Keep-alive: `http_open` reuses the live fd when the previous body was drained.
-    let req = plx_net::stream::redirect::Request {
+    let req = nj_net::stream::redirect::Request {
         origin,
         path: request_path,
         credentials: None,
@@ -3573,7 +3573,7 @@ fn hls_open_plain(
         same_origin_only: true,
         credential_gate: crate::http::credential_transport_allowed,
     };
-    let opened = plx_net::stream::redirect::open_following(hs, &req, &mut *checkpoint);
+    let opened = nj_net::stream::redirect::open_following(hs, &req, &mut *checkpoint);
     if unsafe { crate::aq::aq_is_aborted(aq) } {
         return Err(HlsExit::Aborted);
     }
@@ -3584,7 +3584,7 @@ fn hls_open_plain(
         Err(error) => {
             SHARED
                 .dg_http_status
-                .store(plx_net::stream::hs_status(hs), Ordering::Relaxed);
+                .store(nj_net::stream::hs_status(hs), Ordering::Relaxed);
             return Err(match error {
                 FollowError::Open(error) => classify_plaintext_open_failure(error),
                 FollowError::TooManyHops
@@ -3601,8 +3601,8 @@ fn hls_open_plain(
     let port = target.origin.port() as c_int;
     let path =
         CString::new(target.path).map_err(|_| HlsExit::Failed("invalid HLS request path"))?;
-    let status = plx_net::stream::hs_status(hs);
-    let size = plx_net::stream::hs_content_length(hs);
+    let status = nj_net::stream::hs_status(hs);
+    let size = nj_net::stream::hs_content_length(hs);
     SHARED.dg_http_status.store(status, Ordering::Relaxed);
     SHARED.file_size.store(size, Ordering::Release);
     Ok((
@@ -3644,13 +3644,13 @@ fn open_curl_hop(
 /// on the curl source. Publishes the same two diagnostics the TLS arm of `demux` does.
 fn open_plain_progressive(
     hs_p: *mut HttpStream,
-    origin: &crate::plex::Origin,
+    origin: &crate::catalog::Origin,
     path: &str,
     aq_p: *mut AuQueue,
 ) -> Result<(Src, i64), MediaOpenFail> {
-    use plx_net::stream::redirect::Opened;
-    plx_net::stream::http_close(hs_p);
-    let req = plx_net::stream::redirect::Request {
+    use nj_net::stream::redirect::Opened;
+    nj_net::stream::http_close(hs_p);
+    let req = nj_net::stream::redirect::Request {
         origin,
         path,
         credentials: None,
@@ -3659,12 +3659,12 @@ fn open_plain_progressive(
         same_origin_only: false,
         credential_gate: crate::http::credential_transport_allowed,
     };
-    match plx_net::stream::redirect::open_following(hs_p, &req, &mut plx_base::checkpoint::NoCheckpoint)
+    match nj_net::stream::redirect::open_following(hs_p, &req, &mut nj_base::checkpoint::NoCheckpoint)
     {
         Ok(Opened::Socket(t)) => {
-            let size = plx_net::stream::hs_content_length(hs_p);
+            let size = nj_net::stream::hs_content_length(hs_p);
             SHARED.file_size.store(size, Ordering::Release);
-            let st = plx_net::stream::hs_status(hs_p);
+            let st = nj_net::stream::hs_status(hs_p);
             SHARED.dg_http_status.store(st, Ordering::Relaxed);
             crate::player::log(&format!("ff: open status={st} clen={size}"));
             let (Ok(host), Ok(path)) = (CString::new(t.origin.host()), CString::new(t.path)) else {
@@ -3701,7 +3701,7 @@ fn open_plain_progressive(
             if unsafe { crate::aq::aq_is_aborted(aq_p) } {
                 return Err(MediaOpenFail::Aborted);
             }
-            let st = plx_net::stream::hs_status(hs_p);
+            let st = nj_net::stream::hs_status(hs_p);
             SHARED.dg_http_status.store(st, Ordering::Relaxed);
             crate::player::log(&format!("ff: http_open FAILED status={st} ({e:?})"));
             Err(MediaOpenFail::Failed)
@@ -3722,14 +3722,14 @@ fn hls_source_read(
         return Err(HlsExit::Aborted);
     }
     let read = match src {
-        Src::Socket { hs, .. } => plx_net::stream::http_read_until(
+        Src::Socket { hs, .. } => nj_net::stream::http_read_until(
             *hs,
             dst.as_mut_ptr(),
             dst.len() as c_int,
             deadline,
-            &mut plx_base::checkpoint::NoCheckpoint,
+            &mut nj_base::checkpoint::NoCheckpoint,
         ),
-        Src::Curl(cs) => cs.read_until(dst, deadline, &mut plx_base::checkpoint::NoCheckpoint),
+        Src::Curl(cs) => cs.read_until(dst, deadline, &mut nj_base::checkpoint::NoCheckpoint),
         Src::Idle => return Err(HlsExit::Failed("HLS source idle")),
     };
     // The wake used to interrupt a blocked body read is deliberately transport-shaped (EOF for
@@ -3741,7 +3741,7 @@ fn hls_source_read(
         }
         return Err(HlsExit::Aborted);
     }
-    if read == plx_net::stream::HTTP_READ_DEADLINE || read == crate::curlio::READ_DEADLINE {
+    if read == nj_net::stream::HTTP_READ_DEADLINE || read == crate::curlio::READ_DEADLINE {
         Err(HlsExit::PrimeExpired)
     } else if read < 0 {
         Err(HlsExit::Failed("HLS response body failed"))
@@ -3793,7 +3793,7 @@ fn hls_fetch_text(
             aq,
             net,
             Some(effective.at),
-            &mut plx_base::checkpoint::NoCheckpoint,
+            &mut nj_base::checkpoint::NoCheckpoint,
         ) {
             Ok(opened) => {
                 // A complete response head is transport progress and begins a fresh inactivity
@@ -3872,11 +3872,11 @@ fn hls_wait(
     aq: *mut AuQueue,
     duration: std::time::Duration,
     absolute_deadline: Option<std::time::Instant>,
-    checkpoint: &mut dyn plx_base::checkpoint::Checkpoint,
+    checkpoint: &mut dyn nj_base::checkpoint::Checkpoint,
 ) -> Result<(), HlsExit> {
     let nominal_end = std::time::Instant::now() + duration;
     let wait_until = absolute_deadline.map_or(nominal_end, |at| at.min(nominal_end));
-    let mut pacer = plx_base::checkpoint::Pacer::new(checkpoint);
+    let mut pacer = nj_base::checkpoint::Pacer::new(checkpoint);
     while std::time::Instant::now() < wait_until {
         if unsafe { crate::aq::aq_is_aborted(aq) } {
             return Err(HlsExit::Aborted);
@@ -4650,7 +4650,7 @@ struct HlsCursor {
 }
 
 fn hls_cursor_open(
-    origin: &crate::plex::Origin,
+    origin: &crate::catalog::Origin,
     path: &str,
     aq: *mut AuQueue,
     net: &mut HlsNet,
@@ -4764,7 +4764,7 @@ fn hls_cursor_next(
                 aq,
                 poll,
                 reserve_snapshot,
-                &mut plx_base::checkpoint::NoCheckpoint,
+                &mut nj_base::checkpoint::NoCheckpoint,
             ) {
                 Err(HlsExit::PrimeExpired) => {
                     if reserve.as_deref_mut().map_or(true, |reserve| {
@@ -6059,7 +6059,7 @@ unsafe fn hls_prefetch_same_encoder(
 }
 
 fn hls_demux(
-    origin: &crate::plex::Origin,
+    origin: &crate::catalog::Origin,
     path: &str,
     acodec: &str,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
@@ -6982,7 +6982,7 @@ fn hls_demux(
             crate::player::log("abr: candidate spent its exploration reserve in the control plane");
             continue;
         }
-        let candidate_url = crate::plex::StreamUrl::parse(&primed.url);
+        let candidate_url = crate::catalog::StreamUrl::parse(&primed.url);
         if candidate_url.origin != *origin {
             control.abandon(&primed.encoder_session);
             reject_hls_abr_after_transaction(
@@ -7680,14 +7680,14 @@ fn open_input_failure_note(r: c_int, lane_aborted: bool) -> String {
 
 /// The demux thread body (spawned by `engine::start_bufferfeed`).
 ///
-/// Takes an [`Origin`](crate::plex::Origin) rather than a `(host, port)` pair because **the scheme
+/// Takes an [`Origin`](crate::catalog::Origin) rather than a `(host, port)` pair because **the scheme
 /// decides the transport**: `http` reads through the Engine's `stream.rs` socket, `https` through
 /// [`crate::curlio`]. An origin is parsed from a URL and never rebuilt from an address, which is
 /// what keeps the `plex.direct` hostname TLS validates against intact all the way down here
 /// (`net/origin.rs`). `hs` is still passed on both paths — it is the Engine's, and it stays
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub(crate) fn demux(
-    origin: crate::plex::Origin,
+    origin: crate::catalog::Origin,
     path: String,
     acodec: String,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,

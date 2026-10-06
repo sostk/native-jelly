@@ -58,9 +58,9 @@ class BuildGcAutoHookTests(unittest.TestCase):
 
     def run_hook(self, env_extra=None):
         env = dict(os.environ)
-        env.pop("PLX_GC_LOG", None)
+        env.pop("NJ_GC_LOG", None)
         env["CLAUDE_PROJECT_DIR"] = self.root
-        env["PLX_GC_LOG"] = self.log
+        env["NJ_GC_LOG"] = self.log
         if env_extra:
             env.update(env_extra)
         t0 = time.monotonic()
@@ -111,9 +111,9 @@ class BuildGcAutoHookTests(unittest.TestCase):
                        check=True)
         lane_marker = os.path.join(lane, "ran")
         env = dict(os.environ)
-        env.pop("PLX_GC_LOG", None)
+        env.pop("NJ_GC_LOG", None)
         env["CLAUDE_PROJECT_DIR"] = lane
-        env["PLX_GC_LOG"] = self.log
+        env["NJ_GC_LOG"] = self.log
         result = subprocess.run(["sh", HOOK], input="{}", env=env, text=True,
                                 capture_output=True, timeout=10, cwd=lane)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -137,9 +137,9 @@ class BuildGcAutoHookTests(unittest.TestCase):
         os.chmod(stub_path, 0o755)
         marker = os.path.join(root, "ran")
         env = dict(os.environ)
-        env.pop("PLX_GC_LOG", None)
+        env.pop("NJ_GC_LOG", None)
         env["CLAUDE_PROJECT_DIR"] = root
-        env["PLX_GC_LOG"] = os.path.join(root, "gc.log")
+        env["NJ_GC_LOG"] = os.path.join(root, "gc.log")
         result = subprocess.run(["sh", HOOK], input="{}", env=env, text=True,
                                 capture_output=True, timeout=10, cwd=root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

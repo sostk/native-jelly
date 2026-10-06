@@ -26,7 +26,7 @@ Windows and needs no webOS NDK; run `tools/sim.ps1 setup` there.
 make setup-env
 rustup toolchain install nightly --component rust-src --component clippy
 brew install cmake sshpass        # or your distribution's equivalent
-make                              # builds pkg/plxnative — a developer build
+make                              # builds pkg/nativejelly — a developer build
 make ipk                          # pkg/com.sostk.nativejelly.debug_<version>_arm.ipk
 ```
 
@@ -40,14 +40,14 @@ different in kind, not degree: it removes FINISHED lane checkouts themselves (cl
 already on `main`) — not just their build output — so it is not part of `--all`.
 
 None of the above has to be run by hand: `tools/build-gc.sh --auto` stages the same reclaim on its
-own, gated by free space on the volume (`PLX_GC_MIN_FREE_GIB`, default 20) and, for `--lanes`, by
-a lane idle guard (`PLX_GC_IDLE_MIN`, default 60) so a lane an agent might resume soon is spared.
+own, gated by free space on the volume (`NJ_GC_MIN_FREE_GIB`, default 20) and, for `--lanes`, by
+a lane idle guard (`NJ_GC_IDLE_MIN`, default 60) so a lane an agent might resume soon is spared.
 It runs from a Claude Code `SessionEnd` hook and from the hourly launchd agent `make disk-watch`
 installs (`tools/install-disk-watch.sh`, macOS only — run it yourself; nothing here installs it
-for you). Logs land in `~/Library/Logs/plxnative-build-gc.log` (or `$PLX_GC_LOG`).
+for you). Logs land in `~/Library/Logs/nativejelly-build-gc.log` (or `$NJ_GC_LOG`).
 
 The bundled FFmpeg is not rebuilt per checkout. Its source and object tree is machine-wide under
-`$PLX_BUILD_CACHE` (default `~/.cache/plxnative`), keyed by configure flags and toolchain, so a
+`$NJ_BUILD_CACHE` (default `~/.cache/nativejelly`), keyed by configure flags and toolchain, so a
 fresh clone gets its own prefix in seconds rather than minutes.
 
 ## Two flavours, and the default is the developer one
@@ -80,8 +80,8 @@ The platform entry points are deliberately separate:
   host FFmpeg, so the pipeline between the socket and decoder runs on the host. The historical
   `sim`, `sim-run`, and `sim-shot` names remain aliases for these macOS targets.
 - Linux: `make sim-linux` builds the optimized UI/Plex simulator without host FFmpeg. Run the
-  resulting `rust-modules/target-sim/release/plxnative-sim` under X11 or Wayland with
-  `PLXNATIVE_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
+  resulting `rust-modules/target-sim/release/nativejelly-sim` under X11 or Wayland with
+  `NJ_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
 - Windows/WSLg: `tools/sim.ps1 build|run|shot|send`, backed by the `make sim-wsl` compatibility
   alias for `sim-linux`. It adds dependency setup, isolated assets/runtime state and WSLg checks.
 

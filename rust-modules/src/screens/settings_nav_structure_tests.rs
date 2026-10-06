@@ -12,13 +12,13 @@
 use super::composed_tests::{consent_opened, frame, opened, path, settle_frames, walk_to, SurfaceRig};
 use super::*;
 use super::test_support::*;
-use crate::plex::account::{AudioPreferences, PreferenceRequest};
+use crate::catalog::account::{AudioPreferences, PreferenceRequest};
 use super::super::family::PickerKind;
 use crate::screens::registry;
 use crate::ui::dispatch::Dispatcher;
 use crate::ui::fixture::{key, tick};
 use crate::ui::form::{FormTable, RowKind};
-use plx_machine::machine::{Edge, InputEvent, InputKind, Source, Tick};
+use nj_machine::machine::{Edge, InputEvent, InputKind, Source, Tick};
 use crate::ui::screen::{Activate, Hover, Stop};
 
 #[derive(Clone, Copy, Debug)]
@@ -99,7 +99,7 @@ fn root_items() -> Vec<(u32, SettingsPage)> {
 
 #[test]
 fn every_root_nav_item_pushes_exactly_its_dest_signed_out() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-root-out");
     let items = root_items();
     assert!(items.iter().any(|(_, d)| *d == SettingsPage::Playback), "{items:?}");
@@ -108,7 +108,7 @@ fn every_root_nav_item_pushes_exactly_its_dest_signed_out() {
 
 #[test]
 fn every_root_nav_item_pushes_exactly_its_dest_signed_in() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = multi_user_session("nav-structure-root-in");
     let items = root_items();
     assert!(items.iter().any(|(_, d)| *d == SettingsPage::AudioSubtitles), "{items:?}");
@@ -117,7 +117,7 @@ fn every_root_nav_item_pushes_exactly_its_dest_signed_in() {
 
 #[test]
 fn every_playback_field_pushes_its_picker() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-playback");
     let items = super::super::preferences::nav_items_for_test(super::super::preferences::Kind::Playback, None);
     assert_eq!(items.iter().map(|(_, d)| *d).collect::<Vec<_>>(),
@@ -129,16 +129,16 @@ fn every_playback_field_pushes_its_picker() {
 
 #[test]
 fn every_audio_and_subtitles_field_pushes_its_picker() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-audio");
-    let previous = crate::plex::session::current_snapshot();
-    struct Restore(std::sync::Arc<crate::plex::session::CurrentProfile>);
+    let previous = crate::catalog::session::current_snapshot();
+    struct Restore(std::sync::Arc<crate::catalog::session::CurrentProfile>);
     impl Drop for Restore {
-        fn drop(&mut self) { crate::plex::session::publish_profile_for_test(self.0.user.clone(), self.0.generation); }
+        fn drop(&mut self) { crate::catalog::session::publish_profile_for_test(self.0.user.clone(), self.0.generation); }
     }
     let _restore = Restore(previous);
-    let user = crate::plex::session::UserRef { id: 7, uuid: "nav-structure-audio".into(), ..Default::default() };
-    crate::plex::session::publish_profile_for_test(Some(user.clone()), 81);
+    let user = crate::catalog::session::UserRef { id: 7, uuid: "nav-structure-audio".into(), ..Default::default() };
+    crate::catalog::session::publish_profile_for_test(Some(user.clone()), 81);
     let (request, snapshot) = PreferenceRequest::fixture_for_test(user, 81, AudioPreferences::default());
     let items = super::super::preferences::nav_items_for_test(super::super::preferences::Kind::AudioSubtitles, Some(&AudioPreferences::default()));
     assert_eq!(items.len(), 4, "{items:?}");
@@ -159,14 +159,14 @@ fn every_audio_and_subtitles_field_pushes_its_picker() {
 /// code, which the host test build has no GL context for.
 #[test]
 fn every_language_nav_item_pushes_exactly_its_dest() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-language");
     let items = nav_items(&LanguagePage::new(EntryId(0)).form);
     assert_eq!(items.iter().map(|(_, d)| *d).collect::<Vec<_>>(), [SettingsPage::Contribute]);
     for &(elem, dest) in &items {
         for method in [Method::Ok, Method::Right] {
             let mut surface = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Language,
-                crate::pms::HubsSnapshot::empty_for_test().view());
+                crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
             step(&mut surface, ScreenEvent::Mount, None);
             let focus = FocusKey { entry: EntryId(0), elem };
             let ev = match method {
@@ -185,7 +185,7 @@ fn every_language_nav_item_pushes_exactly_its_dest() {
 
 #[test]
 fn every_legal_index_row_pushes_its_own_document() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-legal");
     let items = super::super::legal::nav_items_for_test();
     assert_eq!(items.len(), 6, "{items:?}");
@@ -195,7 +195,7 @@ fn every_legal_index_row_pushes_its_own_document() {
 
 #[test]
 fn every_consent_settings_preview_row_pushes_its_preview() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("nav-structure-consent");
     let items = super::super::consent::nav_items_for_test(None);
     assert_eq!(items.len(), 5, "{items:?}");

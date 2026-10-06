@@ -14,16 +14,16 @@ use std::time::Duration;
 const EXEC_URI: &str = "luna://org.webosbrew.hbchannel.service/exec";
 #[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
 const BUDGET: Duration = Duration::from_secs(10);
-const OK_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_OK_74";
-const NOT_ROOT_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_NOT_ROOT_74";
+const OK_MARKER: &str = "NJ_JAIL_REPAIR_OK_74";
+const NOT_ROOT_MARKER: &str = "NJ_JAIL_REPAIR_NOT_ROOT_74";
 const HBC_ABSENT_TEXT: &str = "Service does not exist: org.webosbrew.hbchannel.service.";
 
 /// Called only by the PlayerAdapter worker after the owner accepts explicit confirmation.
 pub fn execute() -> Result<(), Failure> {
     repair(
         call_hbc,
-        plx_base::paths::app_dir(),
-        plx_base::paths::app_id(),
+        nj_base::paths::app_dir(),
+        nj_base::paths::app_id(),
         || device_readable(RTKMEM),
     )
 }
@@ -53,7 +53,7 @@ fn device_readable(path: &str) -> bool {
 }
 
 fn valid_id(id: &str) -> bool {
-    let Some(suffix) = id.strip_prefix(plx_base::paths::STABLE_APP_ID) else {
+    let Some(suffix) = id.strip_prefix(nj_base::paths::STABLE_APP_ID) else {
         return false;
     };
     (suffix.is_empty() || (suffix.starts_with('.') && suffix.len() > 1))
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn only_exact_success_marker_plus_fresh_local_read_is_success() {
-        let id = plx_base::paths::STABLE_APP_ID;
+        let id = nj_base::paths::STABLE_APP_ID;
         assert_eq!(
             repair(|_| Ok(reply(OK_MARKER)), &dir(id), id, || true),
             Ok(())
@@ -133,8 +133,8 @@ mod tests {
         for output in [
             "",
             "ok",
-            "PLXNATIVE_JAIL_REPAIR_OK_74\n",
-            "PLXNATIVE_JAIL_REPAIR_OK_74 extra",
+            "NJ_JAIL_REPAIR_OK_74\n",
+            "NJ_JAIL_REPAIR_OK_74 extra",
         ] {
             assert_eq!(
                 repair(|_| Ok(reply(output)), &dir(id), id, || true),
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn service_errors_malformed_replies_and_no_root_fail_closed() {
-        let id = plx_base::paths::STABLE_APP_ID;
+        let id = nj_base::paths::STABLE_APP_ID;
         assert_eq!(
             repair(|_| Err(Failure::Timeout), &dir(id), id, || true),
             Err(Failure::Timeout)
@@ -187,13 +187,13 @@ mod tests {
             (dir("com.sostk.nativejelly.bad;id"), "com.sostk.nativejelly.bad;id"),
             (
                 PathBuf::from("/tmp/com.sostk.nativejelly"),
-                plx_base::paths::STABLE_APP_ID,
+                nj_base::paths::STABLE_APP_ID,
             ),
             (
                 PathBuf::from(
                     "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly.debug",
                 ),
-                plx_base::paths::STABLE_APP_ID,
+                nj_base::paths::STABLE_APP_ID,
             ),
         ] {
             assert_eq!(

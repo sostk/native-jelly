@@ -8,13 +8,13 @@ use super::test_support::{frame, frame_with_results};
 
 #[test]
 fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
-    let _guard = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("bridge-browse-tabs");
+    let _guard = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("bridge-browse-tabs");
     session.watching("u-bridge-browse-tabs");
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test(
+    crate::catalog::reset_servers_for_test();
+    let own = crate::catalog::register_for_test(
         "bridge-tabs-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::plex::register_for_test(
+    let shared = crate::catalog::register_for_test(
         "bridge-tabs-shared", "127.0.0.1", 10, "synthetic", "fixture");
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([own, shared]);
@@ -39,7 +39,7 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     assert_eq!(rig.chrome.labels().generation, changed_gen,
         "capturing again must not republish the owner's old tab generation");
     assert!(!rig.chrome.labels().labels.iter().any(|label| label == "TV Shows"));
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 // Dev-only: this fixture drives a plaintext loopback PMS with a real, token-bearing registered
@@ -51,10 +51,10 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
 #[test]
 fn production_bridges_do_not_share_browse_state_or_landings() {
     use std::io::{Read, Write};
-    let _guard = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("bridge-browse-owners");
+    let _guard = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("bridge-browse-owners");
     session.watching("u-bridge-browse-owners");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback bind");
     let port = listener.local_addr().unwrap().port();
     let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(0);
@@ -81,9 +81,9 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
         socket.write_all(head.as_bytes()).unwrap();
         socket.write_all(body).unwrap();
     });
-    let own = crate::plex::register_for_test(
+    let own = crate::catalog::register_for_test(
         "bridge-browse-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::plex::register_for_test(
+    let shared = crate::catalog::register_for_test(
         "bridge-browse-shared", "127.0.0.1", port as i32, "synthetic", "fixture");
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
@@ -120,7 +120,7 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
 
     struct BrowseNotices(usize);
     impl crate::ui::dispatch::Tap<AppHost> for BrowseNotices {
-        fn effect(&mut self, _: u64, stamped: &plx_machine::machine::Stamped<AppHost>) {
+        fn effect(&mut self, _: u64, stamped: &nj_machine::machine::Stamped<AppHost>) {
             if matches!(&stamped.fx, Fx::Deliver(_, Delivery::Screen(
                 ScreenEvent::StoreChanged(ord, _))) if *ord == StoreId::Browse.ord()) {
                 self.0 += 1;
@@ -133,19 +133,19 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
     assert_eq!(notices.0, 1,
         "capture publication and notice drain must coalesce one page into one StoreChanged");
     assert!(first.stores.take_notices().is_empty());
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
 fn session_boot_picker_publishes_captured_profile_without_ready_handoff() {
-    let stored = crate::plex::session::Session {
+    let stored = crate::catalog::session::Session {
         client_id: "synthetic-client".into(), account_token: "synthetic-account".into(),
-        server: crate::plex::session::ServerRef { machine_id: "synthetic-server".into(),
+        server: crate::catalog::session::ServerRef { machine_id: "synthetic-server".into(),
             address: "192.0.2.1".into(), port: 32400, token: "synthetic-server-token".into(),
             ..Default::default() },
-        user: crate::plex::session::UserRef { uuid: "synthetic-user".into(), title: "A".into(),
+        user: crate::catalog::session::UserRef { uuid: "synthetic-user".into(), title: "A".into(),
             ..Default::default() },
-        home_users: vec![crate::plex::session::HomeUserRef { uuid: "synthetic-user".into(),
+        home_users: vec![crate::catalog::session::HomeUserRef { uuid: "synthetic-user".into(),
             title: "A".into(), protected: true, ..Default::default() }], ..Default::default()
     };
     let mut rig = Bridge::for_session_test(crate::auth::SessionInit::captured(stored));
@@ -163,12 +163,12 @@ fn session_boot_picker_publishes_captured_profile_without_ready_handoff() {
 
 #[test]
 fn session_stored_boot_publishes_before_handoff_without_saving_credentials() {
-    let stored = crate::plex::session::Session {
+    let stored = crate::catalog::session::Session {
         client_id: "synthetic-client".into(), account_token: "synthetic-account".into(),
-        server: crate::plex::session::ServerRef { machine_id: "synthetic-server".into(),
+        server: crate::catalog::session::ServerRef { machine_id: "synthetic-server".into(),
             address: "192.0.2.1".into(), port: 32400, token: "synthetic-server-token".into(),
             ..Default::default() },
-        user: crate::plex::session::UserRef { uuid: "synthetic-user".into(), title: "A".into(),
+        user: crate::catalog::session::UserRef { uuid: "synthetic-user".into(), title: "A".into(),
             ..Default::default() }, ..Default::default()
     };
     assert!(stored.can_go_local());
@@ -199,8 +199,8 @@ fn session_current_negative_commit_reply_unblocks_independent_carried_work() {
     use crate::auth::owner::{AdmissionId, AdmissionState, Command, Identity, Pending,
         SessionEvent, SessionOp, SessionWorkKey, StreamPhase};
     use crate::auth::{AuthProgress, LoginProgress, RegistryProgress};
-    use plx_machine::machine::RequestId;
-    let mut init = crate::auth::SessionInit::captured(crate::plex::session::Session {
+    use nj_machine::machine::RequestId;
+    let mut init = crate::auth::SessionInit::captured(crate::catalog::session::Session {
         client_id: "synthetic-client".into(), account_token: "synthetic-account".into(),
         ..Default::default()
     });
@@ -217,7 +217,7 @@ fn session_current_negative_commit_reply_unblocks_independent_carried_work() {
     let mut rig = Bridge::for_session_test(init);
     rig.session_adapter.launch(RequestId(1), a_key, true, |job| { job(); true }, |output| {
         assert!(output.complete(LoginProgress::SignedIn { epoch: 1,
-            server: crate::plex::session::ServerRef { machine_id: "synthetic-server".into(),
+            server: crate::catalog::session::ServerRef { machine_id: "synthetic-server".into(),
                 address: "192.0.2.1".into(), port: 32400, token: "synthetic-token".into(),
                 ..Default::default() }, sources: Vec::new(), users: Vec::new() }.into()).is_ok());
     }).unwrap();
@@ -262,8 +262,8 @@ fn session_cancel_preserves_carried_receipts_until_unique_discard() {
     use crate::auth::owner::{AdmissionId, AdmissionState, Command, Identity, Pending, Receipt,
         SessionEvent, SessionFx, SessionOp, SessionWorkKey, StreamPhase};
     use crate::auth::{AuthProgress, LoginProgress, RegistryProgress};
-    use plx_machine::machine::RequestId;
-    let mut init = crate::auth::SessionInit::captured(crate::plex::session::Session {
+    use nj_machine::machine::RequestId;
+    let mut init = crate::auth::SessionInit::captured(crate::catalog::session::Session {
         client_id: "synthetic-client".into(), ..Default::default()
     });
     let key = SessionWorkKey { epoch: 1, op: SessionOp::Login };
@@ -327,7 +327,7 @@ fn session_cancel_preserves_carried_receipts_until_unique_discard() {
 #[test]
 fn two_session_bridges_dispatch_without_global_capture_or_a_serial_lock() {
     use crate::auth::{Phase, SessionCmd, SessionInit};
-    let init = || SessionInit::captured(crate::plex::session::Session {
+    let init = || SessionInit::captured(crate::catalog::session::Session {
         client_id: "synthetic-client".into(), ..Default::default()
     });
     let mut a = Bridge::for_session_test(init());
@@ -382,9 +382,9 @@ fn session_registry_then_terminal_waits_for_queued_commit_replies() {
     use crate::auth::owner::{AdmissionId, AdmissionState, Identity, Pending, SessionOp,
         SessionWorkKey, StreamPhase};
     use crate::auth::{AuthProgress, LoginProgress, RegistryProgress};
-    use plx_machine::machine::RequestId;
+    use nj_machine::machine::RequestId;
     for (success, carry) in [(true, false), (false, false), (true, true), (false, true)] {
-        let mut init = crate::auth::SessionInit::captured(crate::plex::session::Session {
+        let mut init = crate::auth::SessionInit::captured(crate::catalog::session::Session {
             client_id: "synthetic-client".into(), account_token: "synthetic-account".into(),
             ..Default::default()
         });
@@ -402,7 +402,7 @@ fn session_registry_then_terminal_waits_for_queued_commit_replies() {
                 })).is_ok());
             }
             let terminal = if success {
-                LoginProgress::SignedIn { epoch: key.epoch, server: crate::plex::session::ServerRef {
+                LoginProgress::SignedIn { epoch: key.epoch, server: crate::catalog::session::ServerRef {
                     machine_id: "synthetic-server".into(), address: "192.0.2.1".into(),
                     port: 32400, token: "synthetic-server-token".into(), ..Default::default()
                 }, sources: Vec::new(), users: Vec::new() }
@@ -453,7 +453,7 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
     use crate::ui::dispatch::Tap;
     struct Replies(Vec<(u32, u32, bool)>);
     impl Tap<AppHost> for Replies {
-        fn effect(&mut self, _: u64, stamped: &plx_machine::machine::Stamped<AppHost>) {
+        fn effect(&mut self, _: u64, stamped: &nj_machine::machine::Stamped<AppHost>) {
             if let Fx::Deliver(MachineId::Instance(instance),
                 Delivery::Screen(ScreenEvent::Async(req, message))) = &stamped.fx {
                 match message {
@@ -472,7 +472,7 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
     }
     // This existing constructor captures other global store publications. This test is
     // dispatch evidence, not the still-owed lock-free two-Bridge fixture proof.
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut rig = Bridge::for_test(|| 0);
     let mut dispatcher = Dispatcher::<AppHost>::new();
     let mut replies = Replies(Vec::new());
@@ -494,7 +494,7 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
 #[test]
 fn session_frame_read_borrows_the_bridge_publication() {
     use crate::screens::registry::AuthLike;
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut rig = Bridge::for_test(|| 0);
     let retained = rig.session.publication();
     let parts = CxParts { tick: Tick::default(), press: Default::default(),
@@ -505,14 +505,14 @@ fn session_frame_read_borrows_the_bridge_publication() {
 }
 #[test]
 fn endpoint_outcomes_cross_central_dispatch_machine_bridge_and_boot() {
-    let _g = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("endpoint-edges");
-    crate::plex::reset_servers_for_test();
-    let a = crate::plex::register_for_test("endpoint-a", "127.0.0.1", 9, "synthetic", "cid");
-    let b = crate::plex::register_for_test("endpoint-b", "127.0.0.1", 10, "synthetic", "cid");
-    crate::plex::describe_server(a, "Synthetic", "Synthetic share", crate::plex::GrantEvidence::outside());
+    let _g = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("endpoint-edges");
+    crate::catalog::reset_servers_for_test();
+    let a = crate::catalog::register_for_test("endpoint-a", "127.0.0.1", 9, "synthetic", "cid");
+    let b = crate::catalog::register_for_test("endpoint-b", "127.0.0.1", 10, "synthetic", "cid");
+    crate::catalog::describe_server(a, "Synthetic", "Synthetic share", crate::catalog::GrantEvidence::outside());
     let expected = [b, a]; // Home's own-first observation order, deliberately not slot order.
-    crate::pms::with_refused_fetches_for_test(|| {
+    crate::catalog_fetch::with_refused_fetches_for_test(|| {
         let mut rig = Bridge::for_test(|| 0);
         for cmd in [crate::stores::hubs::HubsCmd::RefetchHubs, crate::stores::hubs::HubsCmd::Retry] {
             let _ = rig.stores.take_notices();
@@ -524,7 +524,7 @@ fn endpoint_outcomes_cross_central_dispatch_machine_bridge_and_boot() {
         }
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
             focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
-        let mut present = plx_machine::present::Present::default();
+        let mut present = nj_machine::present::Present::default();
         let mut out = Vec::new();
         let mut fx = Effects::new(&mut out, MachineId::Store(StoreId::Hubs.ord()), &mut present);
         rig.deliver(MachineId::Store(StoreId::Hubs.ord()),
@@ -576,7 +576,7 @@ fn endpoint_outcomes_cross_central_dispatch_machine_bridge_and_boot() {
         assert!(matches!(out[0].fx, Fx::App(AppFx::Session(
             crate::auth::SessionCmd::RequestEndpoint { sid })) if sid == b));
         crate::browse::with_refused_discovery_for_test(|| {
-            let client = crate::plex::client_for(a).unwrap();
+            let client = crate::catalog::client_for(a).unwrap();
             rig.stores.browse.borrow_mut().queue_discovery_for_test(
                 client, client.token_gen(), false);
             let mut out = Vec::new();
@@ -597,5 +597,5 @@ fn endpoint_outcomes_cross_central_dispatch_machine_bridge_and_boot() {
             assert_eq!(boot_executed, expected);
         });
     });
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }

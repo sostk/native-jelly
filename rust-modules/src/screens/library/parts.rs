@@ -9,7 +9,7 @@ use crate::screens::registry::{tile_facts, LibraryIdentity, LibraryLike, Library
 use crate::ui::card_row;
 use crate::ui::consts::{MARGIN_X, SCR_H};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{Cx, EntryId, FocusKey, GroupId};
+use nj_machine::machine::{Cx, EntryId, FocusKey, GroupId};
 use crate::ui::screen::{
     Activate, At, AxisMask, Dir, EdgeRule, ElemKind, Focusable, GroupKind, GroupSpec, Hover, Part,
     Placed, Seat, Step, Stop,
@@ -27,12 +27,12 @@ pub(super) const GRID_GROUP: GroupId = GroupId(0x4c49_4201);
 pub(super) const RAIL_GROUP: GroupId = GroupId(0x4c49_4202);
 const NO_HOLES: &[(usize, usize)] = &[];
 
-pub(super) fn grid_art(item: &crate::pms::PmsMovie) -> Art<'_> {
+pub(super) fn grid_art(item: &crate::catalog_fetch::PmsMovie) -> Art<'_> {
     if item.kind == 3 { Art::Still(Some(tile_facts::of(item))) } else { Art::Poster(Some(tile_facts::of(item))) }
 }
 
 /// One label construction for the normal and modal-lifted focused grid card.
-pub(super) fn grid_label(item: &crate::pms::PmsMovie) -> card_row::TileLabel {
+pub(super) fn grid_label(item: &crate::catalog_fetch::PmsMovie) -> card_row::TileLabel {
     if item.kind == 3 {
         let name = if item.title.is_empty() || item.title == item.show_title {
             crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64)
@@ -117,7 +117,7 @@ pub(super) struct GridPart {
     group: GroupId,
     pub(super) elems: Vec<u32>,
     known: Vec<(u32, usize)>,
-    identity: Option<(u32, crate::plex::ServerId, i64, u32)>,
+    identity: Option<(u32, crate::catalog::ServerId, i64, u32)>,
     layout: Layout,
     scroll: f32,
     target_layout: Layout,
@@ -149,7 +149,7 @@ impl GridPart {
 
     pub(super) const SHAPE: &'static str = "LibraryGrid{group:u32,elems:[u32],known:[(elem:u32,index:u32)],identity:Option<(epoch:u32,sid:u32,section:u64,query:u32)>,layout:LibraryLayout,scroll:f32,target_layout:LibraryLayout,scroll_target:f32,pop:(index:Option<u32>,sp:Spring{pos:f32,vel:f32}),shrink:(index:Option<u32>,sp:Spring{pos:f32,vel:f32}),bands:{focus:Option<u32>,slots:[(row:u32,sp:Spring{pos:f32,vel:f32})]}}";
 
-    pub(super) fn write(&self, c: &mut plx_machine::machine::Canon) {
+    pub(super) fn write(&self, c: &mut nj_machine::machine::Canon) {
         // The retained snapshot is a read-publication cache, not another cursor. Its placement
         // projection and identity are traversed below; its Arc address never enters logical state.
         let Self { entry: _, group, elems, known, identity, layout, scroll, target_layout,
@@ -599,7 +599,7 @@ mod pop_tests {
     use super::*;
     use crate::ui::card_row::RowStyle;
     use crate::ui::consts::{CARD_H, CARD_W};
-    use plx_machine::machine::{EntryId, GroupId};
+    use nj_machine::machine::{EntryId, GroupId};
 
     #[test]
     fn episode_grid_geometry_and_page_window_share_four_column_rows() {

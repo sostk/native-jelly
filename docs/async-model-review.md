@@ -14,7 +14,7 @@ raised, 84 confirmed, 13 refuted.** Every claim below is cited to `file:line`.
 
 There is no async model. There is a **strictly serial single-threaded frame loop** in which any
 operation that needs the network is performed inline, and the frame simply does not present until
-it returns. `plex_run` has exactly one `SDL_GL_SwapWindow` (`app.rs:2075`); everything from the
+it returns. `nj_run` has exactly one `SDL_GL_SwapWindow` (`app.rs:2075`); everything from the
 poll loop (`app.rs:799`) onward runs before it. So a blocking call anywhere in event handling, the
 per-frame pump, or draw is a **directly visible freeze**.
 
@@ -245,9 +245,9 @@ becomes an Error card with a retry instead of a permanent black screen.
 
 - `tests/run.py` (all 18, especially the two rapid-seek-burst cases — they exercise Phase A
   hardest) and `tests/run.py --fps --fps-player`.
-- Proposed new regression gate: a `/tmp/plxnative-slowpms=<ms>` dev trigger injecting an
+- Proposed new regression gate: a `/tmp/nativejelly-slowpms=<ms>` dev trigger injecting an
   artificial per-request delay in `stream.rs`'s one-shot wrappers, so "the HUD stays live through
   a slow resolve" becomes an assertable case rather than a manual observation.
-- On device: `/tmp/plxnative-framedrop` armed at `22`, drive `ok` then `back` through
-  `/tmp/plxnative-remote`, and confirm no long frame; `/tmp/plxnative-capture` +
+- On device: `/tmp/nativejelly-framedrop` armed at `22`, drive `ok` then `back` through
+  `/tmp/nativejelly-remote`, and confirm no long frame; `/tmp/nativejelly-capture` +
   `tools/stream-screen.py` to watch the HUD appear within one frame of the press.

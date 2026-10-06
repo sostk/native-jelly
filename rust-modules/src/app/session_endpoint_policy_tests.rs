@@ -3,12 +3,12 @@
 mod tests {
     use super::super::*;
     use crate::auth::owner::{SessionEvent, SessionWork};
-    use crate::plex::session::{self, Session, SourceRef, ServerRef, UserRef};
+    use crate::catalog::session::{self, Session, SourceRef, ServerRef, UserRef};
 
-    struct Cleanup<'a>(&'a plx_base::task::MainThread);
+    struct Cleanup<'a>(&'a nj_base::task::MainThread);
     impl Drop for Cleanup<'_> {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
             session::ProfilePublisher::new(self.0).publish(None, 0);
         }
     }
@@ -20,13 +20,13 @@ mod tests {
 
     #[test]
     fn endpoint_request_refusal_early_return_and_retoken_release_exact_admission() {
-        let _lock = plx_base::testlock::serial();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _lock = nj_base::testlock::serial();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         for scenario in 0..4 {
             let tmp = session::TempSession::new("owner-endpoint-policy");
             let _cleanup = Cleanup(&mt);
             tmp.assert_only_target();
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
             let source = SourceRef { machine_id: "synthetic-server".into(), address: "127.0.0.1".into(),
                 port: 32400, origin_url: "http://127.0.0.1:32400".into(), token: "synthetic-old-token".into(),
                 owned: true, ..Default::default() };
@@ -37,9 +37,9 @@ mod tests {
                 sources: vec![source], ..Default::default() };
             session::save(&saved);
             let before = std::fs::read(tmp.path()).unwrap();
-            let id = crate::plex::register_for_test("synthetic-server", "127.0.0.1", 32400,
+            let id = crate::catalog::register_for_test("synthetic-server", "127.0.0.1", 32400,
                 "synthetic-old-token", "synthetic-client");
-            let client = crate::plex::client_for(id).unwrap();
+            let client = crate::catalog::client_for(id).unwrap();
             let mut init = crate::auth::SessionInit::captured(saved);
             init.epoch = u64::from(u32::MAX) + 81;
             let epoch = init.epoch;
@@ -64,8 +64,8 @@ mod tests {
                                 (Some(SourceRef { address: "127.0.0.9".into(),
                                     origin_url: "http://127.0.0.9:32400".into(), ..old_source }),
                                     crate::auth::settled_probe(
-                                        &crate::plex::probe::plan(resource, crate::plex::CredentialPolicy::HttpsOnly),
-                                        crate::plex::probe::Outcome::Reachable, None, Some("127.0.0.9".into())))
+                                        &crate::catalog::probe::plan(resource, crate::catalog::CredentialPolicy::HttpsOnly),
+                                        crate::catalog::probe::Outcome::Reachable, None, Some("127.0.0.9".into())))
                             });
                     }).join().expect("endpoint worker failed");
                 });
@@ -86,7 +86,7 @@ mod tests {
                 let generation = client.token_gen();
                 client.set_token("synthetic-new-token");
                 assert_ne!(client.token_gen(), generation);
-                assert!(std::ptr::eq(client, crate::plex::client_for(id).unwrap()));
+                assert!(std::ptr::eq(client, crate::catalog::client_for(id).unwrap()));
             }
             frame(&mut rig, &mut d, records);
             assert!(!rig.session.snapshot_init().pending.contains_key(&1));

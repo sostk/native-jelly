@@ -1,16 +1,16 @@
 {
   "members": [
     "browse",
+    "catalog_fetch",
     "collection",
     "metadata",
     "person",
-    "pms",
     "search",
     "stores",
     "viewstate"
   ],
   "size": 8,
-  "outside_count": 26,
+  "outside_count": 27,
   "other_cycles": [
     [
       "abr",
@@ -26,12 +26,13 @@
       "textinput"
     ],
     [
-      "diag",
-      "telemetry"
+      "catalog",
+      "http",
+      "jf"
     ],
     [
-      "http",
-      "plex"
+      "diag",
+      "telemetry"
     ]
   ]
 }

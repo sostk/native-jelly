@@ -76,9 +76,9 @@ must be installed for a subsequent close-first `make FLAVOR=debug run` launch un
 1. Build and deploy the current debug binary. Confirm its deployed hash, then close the app. Set
    aside its image-cache directory for a cold run, preserving any pre-existing cache to restore
    afterwards. Do not touch the stable installation or sign out to clear the cache.
-2. In the debug runtime root, arm `plxnative-pms-origin` with `http://<HOST_LAN_IP>:8027`,
-   `plxnative-token` with a synthetic value such as `image-cache-fixture`, and empty
-   `plxnative-library`, `plxnative-libosc`, `plxnative-framedrop` and `plxnative-imagecache-stats`
+2. In the debug runtime root, arm `nativejelly-pms-origin` with `http://<HOST_LAN_IP>:8027`,
+   `nativejelly-token` with a synthetic value such as `image-cache-fixture`, and empty
+   `nativejelly-library`, `nativejelly-libosc`, `nativejelly-framedrop` and `nativejelly-imagecache-stats`
    files. Remove the GPU/CPU profiler and recorder triggers for quotable frame rates.
 3. Launch the app and verify the `route=library` heartbeat and 1,200-item grid. The existing
    oscillator traverses the real grid at one row per 350 ms and reverses at the document ends.
@@ -86,7 +86,7 @@ must be installed for a subsequent close-first `make FLAVOR=debug run` launch un
    startup. Longer legs may be needed if discovery or the host firewall delays requests. Finish
    based on the distinct-image and disk-hit evidence, not the elapsed time alone.
 4. While running, sample the selected binary's PID (use its executable inode, not a bare
-   `pidof plxnative`) and `/proc/<pid>/status`. Save JSONL memory rows shaped as
+   `pidof nativejelly`) and `/proc/<pid>/status`. Save JSONL memory rows shaped as
    `{"at_s":0,"rss_kib":123456,"hwm_kib":123456}`. Capture and inspect the grid near both ends;
    take screenshots outside the pacing interval. Keep the complete cold event log and PID.
 5. Close the process, retaining the disk cache, then run the control command above. Relaunch
@@ -123,7 +123,7 @@ regression checks both reuse on scrolling frames and snapshot isolation after ca
 
 ## Frame-drop control run
 
-A 60 FPS average does not rule out a noticeable stall. With `plxnative-framedrop` armed, the
+A 60 FPS average does not rule out a noticeable stall. With `nativejelly-framedrop` armed, the
 heartbeat now measures consecutive Swap-to-Swap intervals as well as CPU work. Intentional idle
 gaps are excluded. `frame_gt16`, `frame_gt33`, `frame_gt50` and `frame_gt100` count intervals
 strictly longer than 1/60, 1/30, 1/20 and 1/10 second. The fixed-memory histogram reports rounded-up
@@ -133,7 +133,7 @@ percentiles of the entire run. `FRAMEDROP` lines separately explain slow CPU wor
 upload count. The existing `dropped=` field counts undeliverable UI messages and is **not** a
 frame-drop counter.
 
-For an A/B control on the same binary, arm the diagnostic `plxnative-imagecache-bypass`, label the
+For an A/B control on the same binary, arm the diagnostic `nativejelly-imagecache-bypass`, label the
 fixture phase `baseline` with images on, restart, and repeat the same traversal. This bypasses
 only disk reads/writes; the bounded RAM/GPU tiers and frame budget stay the same. Remove the
 trigger before cold/warm legs. Pass `--baseline-events` and optionally `--baseline-memory` to

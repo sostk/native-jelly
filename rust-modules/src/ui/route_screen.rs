@@ -85,7 +85,7 @@
 
 use crate::ui::consts::SAFE;
 use crate::ui::icons::{self, Icon};
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use crate::ui::text_view::TextView;
 use crate::ui::underlay::{FrameLatch, Grade, Role, UnderlayField};
 use crate::ui::widgets::ControlPalette;
@@ -199,7 +199,7 @@ impl RouteGround {
     /// sample at all.
     ///
     /// `latch_from_frame` refuses on `gfx::field_kick`'s list (§9's video-plane door among them —
-    /// see [`plx_gfx::gfx::field_kick`]'s doc): whenever it answers [`FrameLatch::Refused`] this falls
+    /// see [`nj_gfx::gfx::field_kick`]'s doc): whenever it answers [`FrameLatch::Refused`] this falls
     /// back to the same authored atmosphere [`Self::draw_default`] uses when it has no host at all,
     /// graded [`Grade::Ground`] because it is standing in for a live sample rather than being drawn
     /// as itself.
@@ -228,7 +228,7 @@ impl RouteGround {
 
     pub(crate) fn draw_host(&mut self, p: Painter) {
         // `ModalStack::draw_scrims_on`'s rule, for its reason — see [`ground_reads_host`].
-        if ground_reads_host(p.opacity(), plx_gfx::gfx::snapshot_captured_this_frame()) {
+        if ground_reads_host(p.opacity(), nj_gfx::gfx::snapshot_captured_this_frame()) {
             self.latch_host();
         }
         self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
@@ -345,14 +345,14 @@ impl RoutePush {
     pub(crate) fn tick(
         &mut self,
         open: bool,
-        t: plx_machine::machine::Tick,
-        present: &mut plx_machine::machine::PresentHandle<'_>,
+        t: nj_machine::machine::Tick,
+        present: &mut nj_machine::machine::PresentHandle<'_>,
     ) {
         if self.resting(open) {
             return;
         }
         let target = if open { 1.0 } else { 0.0 };
-        plx_machine::motion::spring(
+        nj_machine::motion::spring(
             &mut self.progress.pos,
             &mut self.progress.vel,
             target,
@@ -1085,16 +1085,16 @@ mod tests {
         }
         let measure = TitleMeasure;
         let min_content = RouteLayout::screen().content.w;
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            let title = plx_platform::i18n::msg::browse_person_filmography_in(&locale);
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+            let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
+            let title = nj_platform::i18n::msg::browse_person_filmography_in(&locale);
             let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
             let full_width = measure.width_str(title, theme::size::HERO, true);
             assert!(layout.narrative.w >= full_width, "route label must fit in full: {title}");
             assert!(layout.content.w >= min_content);
             assert!(inside_safe(layout.content));
             assert!(inside_safe(layout.narrative));
-            if preference == plx_platform::i18n::Preference::Be {
+            if preference == nj_platform::i18n::Preference::Be {
                 assert!(layout.narrative.w > 480.0, "exercise the clipped screenshot's narrow column");
             }
         }
@@ -1138,7 +1138,7 @@ mod tests {
     #[test]
     fn translated_consent_questions_keep_their_complete_titles() {
         struct QuestionMeasure;
-        impl plx_machine::machine::Measure for QuestionMeasure {
+        impl nj_machine::machine::Measure for QuestionMeasure {
             fn width(&self, text: &std::ffi::CStr, size: i32, _bold: bool) -> f32 {
                 text.to_string_lossy().chars().count() as f32 * size as f32 * 0.6
             }
@@ -1147,10 +1147,10 @@ mod tests {
         }
         let measure = QuestionMeasure;
         let layout = RouteLayout::screen();
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            for question in [plx_platform::i18n::msg::settings_consent_crash_title_in(&locale),
-                plx_platform::i18n::msg::settings_consent_product_title_in(&locale)] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+            let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
+            for question in [nj_platform::i18n::msg::settings_consent_crash_title_in(&locale),
+                nj_platform::i18n::msg::settings_consent_product_title_in(&locale)] {
                 let title = RouteLayout::narrative_title(question).with_measure(&measure);
                 assert!(!title.truncates(layout.narrative.w), "question was elided: {question}");
                 let height = title.measure_h(layout.narrative.w);
@@ -1246,7 +1246,7 @@ mod tests {
         // `CtlPop::scale` reads the crate-global `press` machine for whichever index is focused —
         // see `[[test-suite-global-pollution]]` — so this holds the same lock every `press.rs`
         // test does for its own body.
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut row: ActionRow<2> = ActionRow::new();
         for _ in 0..300 {
             row.step(Some(0), 1.0 / 60.0);
@@ -1593,10 +1593,10 @@ mod tests {
         // A refusal is not a pending read, and the deferred read must not turn one into a frame of
         // no atmosphere.
         {
-            let was = plx_gfx::gfx::set_video_plane_frame(true);
+            let was = nj_gfx::gfx::set_video_plane_frame(true);
             let mut ground = RouteGround::new();
             ground.latch_host();
-            plx_gfx::gfx::set_video_plane_frame(was);
+            nj_gfx::gfx::set_video_plane_frame(was);
 
             assert!(
                 ground.is_latched(),

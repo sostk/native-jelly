@@ -5,9 +5,9 @@
 //!
 //! The control plane has two request transports and they are not interchangeable:
 //!
-//! * [`plx_net::stream`] is a raw TCP socket. It resolves through `getaddrinfo` and dials either
+//! * [`nj_net::stream`] is a raw TCP socket. It resolves through `getaddrinfo` and dials either
 //!   address family, it is fast, and it speaks **cleartext only**.
-//! * [`plx_net::net`] is libcurl. It also validates certificates, and it is what plex.tv has always
+//! * [`nj_net::net`] is libcurl. It also validates certificates, and it is what plex.tv has always
 //!   been reached through.
 //!
 //! Media makes its own scheme decision under `ff.rs`: the same `stream.rs` socket for plaintext,
@@ -32,7 +32,7 @@
 //! `stream.rs` used to offer three one-shot wrappers — `http_get`, `http_put`, `http_post` — and
 //! each folded away half the answer: the first two returned `Option<Vec<u8>>`, collapsing every
 //! non-2xx into the same `None` a refused connection produces, and the third returned the status
-//! with the body dropped. That collapse is precisely the bug [`crate::plex::probe::Outcome`] exists
+//! with the body dropped. That collapse is precisely the bug [`crate::catalog::probe::Outcome`] exists
 //! to prevent: a final `401` after the parallel direct and relay candidates settle is a TOKEN or
 //! access-policy problem, while a refusal is a REACHABILITY problem, and reporting the first as
 //! the second sends a user to look at their friend's router. `auth::get_identity` had already had
@@ -67,7 +67,7 @@
 //! cannot, because libcurl owns that framing and `net.rs` sees only the assembled body. The gap is
 //! narrower than it looks: `plex::client::get_json` logs the status, the byte count and serde's own
 //! error whenever a 2xx will not parse, over either transport.
-use crate::plex::{CredentialPolicy, Origin, Scheme, ResolvePin};
+use crate::catalog::{CredentialPolicy, Origin, Scheme, ResolvePin};
 
 /// The verb. Three, because three is what the Plex control plane uses: reads, the body-less
 /// `PUT /library/parts/{id}` that selects a track server-side, and the POSTs whose params ride the
@@ -104,7 +104,7 @@ pub(crate) struct Reply {
     pub body: Vec<u8>,
     /// The peer leaf's `CURLOPT_PINNEDPUBLICKEY` string. Present only on the answer to a
     /// [`request_probe_learning_key`] over a strictly verified TLS connection (see
-    /// [`plx_net::net::Resp::peer_pin`]); `None` for every other request and always over plaintext.
+    /// [`nj_net::net::Resp::peer_pin`]); `None` for every other request and always over plaintext.
     pub peer_pin: Option<String>,
 }
 
@@ -115,10 +115,10 @@ pub(crate) struct Reply {
 pub(crate) enum RequestOutcome {
     Response(Reply),
     Deadline,
-    /// Nothing answered. Carries libcurl's [`plx_net::net::RequestFailure`] when the TLS transport
+    /// Nothing answered. Carries libcurl's [`nj_net::net::RequestFailure`] when the TLS transport
     /// ran and produced one; `None` from the plaintext transport and from a request refused
     /// before any transport ran.
-    Transport(Option<plx_net::net::RequestFailure>),
+    Transport(Option<nj_net::net::RequestFailure>),
 }
 
 impl RequestOutcome {
@@ -253,7 +253,7 @@ pub(crate) fn request_until_outcome(
 /// not encode the address it was persisted with gets no pin, and resolves through DNS exactly as
 /// before.
 ///
-/// `Err` is a transport failure, carrying libcurl's [`plx_net::net::RequestFailure`] when the TLS
+/// `Err` is a transport failure, carrying libcurl's [`nj_net::net::RequestFailure`] when the TLS
 /// arm produced one — the evidence a discovery verdict names per route
 /// (`plex::probe::RouteOutcome::of_failure`). `None` from the plaintext arm, which has no code.
 pub(crate) fn request_probe(
@@ -264,7 +264,7 @@ pub(crate) fn request_probe(
     max_body: usize,
     timeout_s: i32,
     pin: Option<&ResolvePin>,
-) -> Result<Reply, Option<plx_net::net::RequestFailure>> {
+) -> Result<Reply, Option<nj_net::net::RequestFailure>> {
     probe(origin, path, method, headers, max_body, timeout_s, pin, false)
 }
 
@@ -272,7 +272,7 @@ pub(crate) fn request_probe(
 /// [`Reply::peer_pin`] (issue #380, for the offline fallback of #378). The identity probe is its
 /// only caller, and only for a candidate that has a [`ResolvePin`] (`auth::get_identity`):
 /// reading the chain makes libcurl decode all of it, which no ordinary request should pay, and the
-/// key is only worth remembering when the same probe also learns WHICH machine answered. The rules for when a pin is present live on [`plx_net::net::Resp::peer_pin`]; over
+/// key is only worth remembering when the same probe also learns WHICH machine answered. The rules for when a pin is present live on [`nj_net::net::Resp::peer_pin`]; over
 /// plaintext it is always `None`.
 pub(crate) fn request_probe_learning_key(
     origin: &Origin,
@@ -282,7 +282,7 @@ pub(crate) fn request_probe_learning_key(
     max_body: usize,
     timeout_s: i32,
     pin: Option<&ResolvePin>,
-) -> Result<Reply, Option<plx_net::net::RequestFailure>> {
+) -> Result<Reply, Option<nj_net::net::RequestFailure>> {
     probe(origin, path, method, headers, max_body, timeout_s, pin, true)
 }
 
@@ -296,7 +296,7 @@ fn probe(
     timeout_s: i32,
     pin: Option<&ResolvePin>,
     learn_pin: bool,
-) -> Result<Reply, Option<plx_net::net::RequestFailure>> {
+) -> Result<Reply, Option<nj_net::net::RequestFailure>> {
     match request_with(
         origin,
         path,
@@ -336,7 +336,7 @@ fn request_with(
     // `route::decision::try_retranscode` for the pattern) or, if it is a pre-existing, not-yet-split
     // path, wrap the call with `allow_blocking` and say why.
     let _guard =
-        plx_base::task::assert_may_block(const { &plx_base::task::BlockingLabel::new("PMS HTTP") });
+        nj_base::task::assert_may_block(const { &nj_base::task::BlockingLabel::new("PMS HTTP") });
     if !credential_transport_allowed(origin, path, headers) {
         return RequestOutcome::Transport(None);
     }
@@ -367,7 +367,7 @@ pub(crate) fn credential_transport_allowed_by_policy(
     headers: &[&str],
     policy: CredentialPolicy,
 ) -> bool {
-    !carries_credential(path, headers) || crate::plex::grant::allowed_under(policy, origin)
+    !carries_credential(path, headers) || crate::catalog::grant::allowed_under(policy, origin)
 }
 
 /// The shared control/media credential boundary: a request that carries a credential reaches the
@@ -385,7 +385,7 @@ pub(crate) fn credential_transport_allowed(origin: &Origin, path: &str, headers:
     if !origin.is_tls() && carries_credential(path, headers) {
         static REPORTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
         if let Some(line) = plaintext_credential_report(&REPORTED, CredentialPolicy::build(), allowed) {
-            plx_base::eventlog::log(line);
+            nj_base::eventlog::log(line);
         }
     }
     allowed
@@ -409,7 +409,7 @@ fn plaintext_credential_report(
     (seen.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0).then_some(line)
 }
 
-/// The plaintext arm: [`plx_net::stream`]'s raw socket.
+/// The plaintext arm: [`nj_net::stream`]'s raw socket.
 ///
 /// Open, read `hs_status`, drain, close — the composition the three deleted one-shot wrappers each
 /// did a lopped-off version of (module doc), and exactly what `auth::get_identity` used to perform
@@ -460,15 +460,15 @@ fn plaintext(
     let extra_c = std::ffi::CString::new(extra).ok();
     let extra_ptr = extra_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut deadline_liveness = matches!(body_policy, BodyPolicy::Deadline { .. }).then(|| {
         std::time::Instant::now()
-            .checked_add(plx_net::stream::media_stall_budget())
+            .checked_add(nj_net::stream::media_stall_budget())
             .unwrap_or_else(std::time::Instant::now)
     });
     let mut response_status = None;
     let opened = match body_policy {
-        BodyPolicy::Probe { timeout_s, .. } => plx_net::stream::http_open_probe(
+        BodyPolicy::Probe { timeout_s, .. } => nj_net::stream::http_open_probe(
             &mut *hs,
             host_c.as_ptr(),
             origin.port(),
@@ -485,7 +485,7 @@ fn plaintext(
                 .map_or((at, DeadlineOwner::Caller), |liveness| {
                     effective_deadline(at, liveness)
                 });
-            match plx_net::stream::http_open_until_result(
+            match nj_net::stream::http_open_until_result(
                 &mut *hs,
                 host_c.as_ptr(),
                 origin.port(),
@@ -493,14 +493,14 @@ fn plaintext(
                 extra_ptr,
                 method.as_str(),
                 effective,
-                &mut plx_base::checkpoint::NoCheckpoint,
+                &mut nj_base::checkpoint::NoCheckpoint,
             ) {
                 Ok(()) => 0,
-                Err(plx_net::stream::HttpOpenError::Status(status)) => {
+                Err(nj_net::stream::HttpOpenError::Status(status)) => {
                     response_status = Some(status);
                     -1
                 }
-                Err(plx_net::stream::HttpOpenError::Deadline) => {
+                Err(nj_net::stream::HttpOpenError::Deadline) => {
                     return match owner {
                         DeadlineOwner::Caller => RequestOutcome::Deadline,
                         DeadlineOwner::Liveness => RequestOutcome::Transport(None),
@@ -508,15 +508,15 @@ fn plaintext(
                 }
                 // `Stopped` cannot occur: this request has no checkpoint.
                 Err(
-                    plx_net::stream::HttpOpenError::Aborted
-                    | plx_net::stream::HttpOpenError::Stopped
-                    | plx_net::stream::HttpOpenError::Transport,
+                    nj_net::stream::HttpOpenError::Aborted
+                    | nj_net::stream::HttpOpenError::Stopped
+                    | nj_net::stream::HttpOpenError::Transport,
                 ) => {
                     return RequestOutcome::Transport(None);
                 }
             }
         }
-        _ if !request_body.is_empty() => plx_net::stream::http_open_with_body(
+        _ if !request_body.is_empty() => nj_net::stream::http_open_with_body(
             &mut *hs,
             host_c.as_ptr(),
             origin.port(),
@@ -525,7 +525,7 @@ fn plaintext(
             method.as_str(),
             request_body,
         ),
-        _ => plx_net::stream::http_open(
+        _ => nj_net::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
             origin.port(),
@@ -540,14 +540,14 @@ fn plaintext(
         // SO_RCVTIMEO do; connect/header latency cannot silently consume the body's watchdog.
         deadline_liveness = Some(
             std::time::Instant::now()
-                .checked_add(plx_net::stream::media_stall_budget())
+                .checked_add(nj_net::stream::media_stall_budget())
                 .unwrap_or_else(std::time::Instant::now),
         );
     }
     // Read the status BEFORE anything else: a non-2xx open has already closed the socket, and the
     // code survives on the struct (`http_open` says so where it closes). That is the whole reason
     // this arm is a composition rather than a wrapper call.
-    let status = response_status.unwrap_or_else(|| plx_net::stream::hs_status(&*hs));
+    let status = response_status.unwrap_or_else(|| nj_net::stream::hs_status(&*hs));
     let mut body = Vec::new();
     // The two non-positive returns are split rather than folded into one `n <= 0`: -1 is a recv
     // ERROR and 0 a clean end, and `note_short_body` needs them apart to say which ended the
@@ -577,25 +577,25 @@ fn plaintext(
                             effective_deadline(at, liveness)
                         });
                     (
-                        plx_net::stream::http_read_until(
+                        nj_net::stream::http_read_until(
                             &mut *hs,
                             chunk.as_mut_ptr(),
                             want as i32,
                             Some(effective),
-                            &mut plx_base::checkpoint::NoCheckpoint,
+                            &mut nj_base::checkpoint::NoCheckpoint,
                         ),
                         Some(owner),
                     )
                 }
                 _ => (
-                    plx_net::stream::http_read(&mut *hs, chunk.as_mut_ptr(), want as i32),
+                    nj_net::stream::http_read(&mut *hs, chunk.as_mut_ptr(), want as i32),
                     None,
                 ),
             };
             if n < 0 {
                 recv_err = true;
                 if matches!(body_policy, BodyPolicy::Deadline { .. }) {
-                    deadline_failure = Some(if n == plx_net::stream::HTTP_READ_DEADLINE {
+                    deadline_failure = Some(if n == nj_net::stream::HTTP_READ_DEADLINE {
                         match read_deadline_owner.unwrap_or(DeadlineOwner::Caller) {
                             DeadlineOwner::Caller => RequestOutcome::Deadline,
                             DeadlineOwner::Liveness => RequestOutcome::Transport(None),
@@ -617,22 +617,22 @@ fn plaintext(
             if matches!(body_policy, BodyPolicy::Deadline { .. }) {
                 deadline_liveness = Some(
                     std::time::Instant::now()
-                        .checked_add(plx_net::stream::media_stall_budget())
+                        .checked_add(nj_net::stream::media_stall_budget())
                         .unwrap_or_else(std::time::Instant::now),
                 );
             }
         }
         if !overflowed {
-            plx_net::stream::note_short_body(method.as_str(), path, &hs, recv_err);
+            nj_net::stream::note_short_body(method.as_str(), path, &hs, recv_err);
         }
     }
-    let content_length = plx_net::stream::hs_content_length(&*hs);
-    plx_net::stream::http_close(&mut *hs);
+    let content_length = nj_net::stream::hs_content_length(&*hs);
+    nj_net::stream::http_close(&mut *hs);
     if let Some(failure) = deadline_failure {
         return failure;
     }
     if overflowed {
-        plx_base::eventlog::log("http: response exceeded body limit");
+        nj_base::eventlog::log("http: response exceeded body limit");
         return RequestOutcome::Transport(None);
     }
     if matches!(body_policy, BodyPolicy::Deadline { .. })
@@ -653,7 +653,7 @@ fn plaintext(
     }
 }
 
-/// The TLS arm: [`plx_net::net`]'s libcurl.
+/// The TLS arm: [`nj_net::net`]'s libcurl.
 ///
 /// The URL is `origin.base()` + `path`, so the authority is the one the origin PARSED — the
 /// `plex.direct` name a certificate is issued for, bracketed if it is a v6 literal — and never a
@@ -681,7 +681,7 @@ fn tls(
     let url = format!("{}{}", origin.base(), path);
     let resolve = pin
         .filter(|p| p.host() == origin.host() && p.port() == origin.port())
-        .map(plx_net::net::resolve::entry_of);
+        .map(nj_net::net::resolve::entry_of);
     let owned: Vec<String> = headers.iter().map(|h| (*h).to_string()).collect();
     // A POST carries a body even when that body is empty — the Plex control plane's POSTs put
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
@@ -689,8 +689,8 @@ fn tls(
     let body: Option<&[u8]> =
         (matches!(method, Method::Post) || !request_body.is_empty()).then_some(request_body);
     let (timeouts, max_body, caller_owns_timeout) = match body_policy {
-        BodyPolicy::Api => (plx_net::net::API, None, false),
-        BodyPolicy::Bulk => (plx_net::net::BULK, None, false),
+        BodyPolicy::Api => (nj_net::net::API, None, false),
+        BodyPolicy::Bulk => (nj_net::net::BULK, None, false),
         BodyPolicy::Deadline { at } => {
             let now = std::time::Instant::now();
             if now >= at {
@@ -702,20 +702,20 @@ fn tls(
                 .max(1)
                 .min(std::os::raw::c_long::MAX as u128))
                 as std::os::raw::c_long;
-            let api_ms = plx_net::net::API
+            let api_ms = nj_net::net::API
                 .total_s
                 .saturating_mul(1_000)
-                .max(plx_net::net::API.total_ms)
+                .max(nj_net::net::API.total_ms)
                 .max(1);
             let effective_ms = reserve_ms.min(api_ms);
             // Curl reports both connect and total expiry as code 28. The caller owns that code only
             // when its reserve is no later than BOTH ordinary ceilings; otherwise the issued fact
             // is ambiguous and must remain Transport rather than being relabelled from the clock.
-            let ordinary_connect_ms = plx_net::net::API.connect_s.saturating_mul(1_000).max(1);
+            let ordinary_connect_ms = nj_net::net::API.connect_s.saturating_mul(1_000).max(1);
             let caller_owns_timeout = reserve_ms <= api_ms && reserve_ms <= ordinary_connect_ms;
             (
-                plx_net::net::Timeouts {
-                    connect_s: plx_net::net::API
+                nj_net::net::Timeouts {
+                    connect_s: nj_net::net::API
                         .connect_s
                         .min((effective_ms.saturating_add(999) / 1_000).max(1)),
                     total_s: 0,
@@ -728,7 +728,7 @@ fn tls(
             )
         }
         BodyPolicy::Probe { max, timeout_s, .. } => (
-            plx_net::net::Timeouts {
+            nj_net::net::Timeouts {
                 connect_s: timeout_s as _,
                 total_s: timeout_s as _,
                 total_ms: 0,
@@ -742,7 +742,7 @@ fn tls(
     // PMS redirects are responses, never instructions: the path already carries a token. Keeping
     // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
     let learn_pin = matches!(body_policy, BodyPolicy::Probe { learn_pin: true, .. });
-    match plx_net::net::request_result_evidence(
+    match nj_net::net::request_result_evidence(
         &url,
         &owned,
         method.as_str(),
@@ -758,7 +758,7 @@ fn tls(
             body: r.body,
             peer_pin: r.peer_pin,
         }),
-        Err(failure) if failure.cause == plx_net::net::RequestError::TimedOut && caller_owns_timeout => {
+        Err(failure) if failure.cause == nj_net::net::RequestError::TimedOut && caller_owns_timeout => {
             RequestOutcome::Deadline
         }
         Err(failure) => RequestOutcome::Transport(Some(failure)),
@@ -794,8 +794,8 @@ mod tests {
     /// sent, so the same request stays undialled.
     #[test]
     fn a_pinned_tls_origin_is_dialled_at_the_pinned_address() {
-        let _g = plx_base::testlock::serial();
-        if !plx_net::net::global_init() {
+        let _g = nj_base::testlock::serial();
+        if !nj_net::net::global_init() {
             return;
         }
         let Ok(srv) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
@@ -840,8 +840,8 @@ mod tests {
     /// pin pointed at that socket, never reaches it.
     #[test]
     fn request_probe_hands_the_pin_to_the_tls_path_only() {
-        let _g = plx_base::testlock::serial();
-        if !plx_net::net::global_init() {
+        let _g = nj_base::testlock::serial();
+        if !nj_net::net::global_init() {
             return;
         }
         let Ok(srv) = std::net::TcpListener::bind("127.0.0.1:0") else { return };

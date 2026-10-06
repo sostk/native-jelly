@@ -13,8 +13,8 @@
 use super::shared::{HlsPlayCompletion, HlsPrimeKind, Stage};
 use super::{log, sink, threads, ACB_OK, PTYPE, SHARED, TX};
 use crate::aq::{AuNode, AuQueue};
-use plx_net::stream::HttpStream;
-use plx_base::task::MainThread;
+use nj_net::stream::HttpStream;
+use nj_base::task::MainThread;
 use std::os::raw::{c_char, c_int, c_long, c_void};
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -48,13 +48,13 @@ use std::sync::atomic::{AtomicI64, Ordering};
 // anchor and the payload to drift apart. For the shipped app the composed bytes and the key order
 // are identical to what every release so far sent — asserted in the tests below, because the
 // webOS 5+ splice path is one this project's 4.5 dev set cannot exercise.
-const PAYLOAD_V: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
+const PAYLOAD_V: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"nativejelly"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
 // NB: pauseAtDecodeTime stays FALSE here. Kodi uses true, but only alongside its decode-time
 // trigger machinery (setTimeToDecode); with true and no trigger the decoder never starts
 // (verified on-device: Load+Play OK but zero frames decoded). The feed-ahead throttle
 // (MAX_FEED_AHEAD_NS in feed_stream) is the anti-stall mechanism; the other Kodi payload
 // flags are being re-introduced one at a time.
-const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264","audio":"AC3"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":1048576},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":true,"queryPosition":false,"lowDelayMode":false,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
+const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264","audio":"AC3"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"nativejelly"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":1048576},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":true,"queryPosition":false,"lowDelayMode":false,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
 // Phase 0 HEVC probe payload — identical to PAYLOAD_V but codec video "H265", to isolate
 // the single variable: does StarfishMediaAPIs BUFFERSTREAM decode HEVC on this panel?
 /// **`streamQualityInfoNonFlushable: true` is the presented-frame counter, and it is the only
@@ -67,7 +67,7 @@ const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","optio
 /// millisecond stamps ARE the presented cadence — the number the 5 Hz `vtick` and our GL `fps=`
 /// could never give. Whether this firmware's sink exposes the property is answered by the first
 /// run: libpf logs a pmlog error naming the property if it does not.
-const PAYLOAD_H265: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H265"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":3840,"maxHeight":2160,"maxFrameRate":60}}}]}"#;
+const PAYLOAD_H265: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H265"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"nativejelly"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":3840,"maxHeight":2160,"maxFrameRate":60}}}]}"#;
 
 // ACCEPTED AUs — what the pipeline took. This is what `app::diagnostics` reports, because a count of
 // attempts reads as healthy throughput through a stall: a full sink retains the AU and it is
@@ -343,7 +343,7 @@ pub(crate) fn reap_abandoned_load(pa: &mut super::adapter::PlayerAdapter) -> boo
     }
     let parked = pa.take_abandoned_load().expect("checked above");
     // The thread has already returned, so this join cannot block.
-    plx_base::task::join("media", parked.load_th);
+    nj_base::task::join("media", parked.load_th);
     log(&format!(
         "native lifecycle: abandoned Load epoch={} returned {}ms after teardown; releasing it",
         parked.epoch,
@@ -420,7 +420,7 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
 
 /// Bind the decoded video sink to the display plane, whichever way this television does it.
 ///
-/// **Boot-scoped.** Called once, from `plex_run`, and never again — which is why the webOS 5
+/// **Boot-scoped.** Called once, from `nj_run`, and never again — which is why the webOS 5
 /// exported window is NOT created here: that one is created per session in [`start_bufferfeed`],
 /// beside the payload it has to be spliced into, and destroyed by the matching `teardown`.
 ///
@@ -449,7 +449,7 @@ pub(crate) fn acb_init(mt: &MainThread) {
 
 /// The webOS 4.x half of [`acb_init`].
 fn acb_init_acb(mt: &MainThread) {
-    if let Some(s) = plx_base::devtrig::read("ptype") {
+    if let Some(s) = nj_base::devtrig::read("ptype") {
         if let Ok(p) = s.parse::<c_int>() {
             PTYPE.store(p, Ordering::Relaxed);
         }
@@ -469,7 +469,7 @@ fn acb_init_acb(mt: &MainThread) {
     // shipped app. `paths::app_id` reads the install directory instead, which is the id webOS
     // registered by definition. The environment is still logged, one line at boot, as the
     // independent witness for whether SAM sets it at all on this firmware.
-    let app_c = std::ffi::CString::new(plx_base::paths::app_id()).ok();
+    let app_c = std::ffi::CString::new(nj_base::paths::app_id()).ok();
     let app_ptr = app_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     let acb = unsafe { sink().plane_create(mt, app_ptr, pt) };
     ACB_OK.store(acb != 0, Ordering::Relaxed);
@@ -547,14 +547,14 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
 ///
 /// `maxFrameRate`: **H.264 declares the stream's own rate class** (24/25/30/50/60, never below
 /// the stream; 60 when the rate is unknown) — see the measurement inside; HEVC stays at 60, the
-/// value every Dolby Vision verification was taken under. `/tmp/plxnative-sinkmax=WxH@F`
+/// value every Dolby Vision verification was taken under. `/tmp/nativejelly-sinkmax=WxH@F`
 /// overrides the whole result so the remaining legs are an A/B with no rebuild. Pure; the
 /// wrappers feed it the route.
 fn sink_envelope(
     is_h265: bool,
     max_raster: (u16, u16),
     stream_fps: f64,
-    caps: &plx_platform::devcaps::Caps,
+    caps: &nj_platform::devcaps::Caps,
     measured: bool,
 ) -> SinkEnvelope {
     let fits_fhd = |w: u32, h: u32| w > 0 && h > 0 && w <= 1920 && h <= 1088;
@@ -568,7 +568,7 @@ fn sink_envelope(
     // On the dev set (webOS 4.10) a 4K H.264 24p direct play declared at 60 makes the pipeline
     // announce `frameRate:24` and then, about a second later, `frameRate:30` for the same stream
     // — a 24p picture on a 30 fps lattice, i.e. pulldown judder the viewer can see. Declared at
-    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `plxnative-sinkmax` A/B, three
+    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `nativejelly-sinkmax` A/B, three
     // legs; 4K HEVC under 60 announces 24 and holds it, and 1080p H.264 under 60 does too, so
     // the rate is left at 60 for HEVC and for an unknown stream rate). **And the sink's own
     // displayed-frame counter (callback type 47, see the payload note above) put a number on
@@ -593,7 +593,7 @@ fn sink_envelope(
 
 /// The sink envelope for THIS Load, from the route (main thread), with the dev override applied.
 /// **What the two STATIC payloads declare**, as the numbers written into their strings — used on
-/// every arm that sends one (the local-sample feeds and the streamed `/tmp/plxnative-noaudio`
+/// every arm that sends one (the local-sample feeds and the streamed `/tmp/nativejelly-noaudio`
 /// path), so the `load:` line's `max=` reports what was SENT rather than the streamed builder's
 /// initializer. The test below pins these to the strings themselves.
 fn static_envelope(hevc: bool) -> SinkEnvelope {
@@ -620,11 +620,11 @@ fn fps_class(fps: f64) -> u32 {
 }
 
 fn sink_envelope_now(ps: &crate::route::PlaybackSession, is_h265: bool) -> SinkEnvelope {
-    if let Some(spec) = plx_base::devtrig::read("sinkmax") {
+    if let Some(spec) = nj_base::devtrig::read("sinkmax") {
         if let Some(env) = parse_sinkmax(&spec) {
             #[cfg(feature = "devtriggers")]
             log(&format!(
-                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/plxnative-sinkmax",
+                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/nativejelly-sinkmax",
                 env.w, env.h, env.fps
             ));
             return env;
@@ -635,8 +635,8 @@ fn sink_envelope_now(ps: &crate::route::PlaybackSession, is_h265: bool) -> SinkE
         is_h265,
         crate::route::sink_max_raster(ps),
         crate::route::stream_fps(ps),
-        plx_platform::devcaps::caps(),
-        plx_platform::devcaps::measured() && !crate::route::forced_direct_play(ps),
+        nj_platform::devcaps::caps(),
+        nj_platform::devcaps::measured() && !crate::route::forced_direct_play(ps),
     )
 }
 
@@ -680,7 +680,7 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     // Real source frame rate (direct-play only; 0 on transcode → skip): give the pipeline the true
     // fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
     // the coded dims change. libpf parses videoFpsValue/videoFpsScale/adaptiveResolution (verified).
-    // `/tmp/plxnative-nofps` withholds the pair, for one experiment: the Dolby Vision display
+    // `/tmp/nativejelly-nofps` withholds the pair, for one experiment: the Dolby Vision display
     // -management lookup misses because the LUT ring is keyed ONE 90 kHz tick above what the
     // display firmware asks for (measured 2026-08-21 — 38 of 40 misses, written key == requested
     // + 1, with LG's own level-2 KADP logging armed mid-playback). Neither derivation is ours: the
@@ -688,9 +688,9 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     // misses regardless), and the pipeline timestamps by NEAREST-rounding on the 1001/24000 lattice
     // rather than passing ours through. This rational is the one input we hand it that could be
     // what it builds that lattice FROM, so it is the one remaining lever on our side.
-    if plx_base::devtrig::flag("nofps") {
+    if nj_base::devtrig::flag("nofps") {
         #[cfg(feature = "devtriggers")]
-        log("esInfo: videoFps WITHHELD by /tmp/plxnative-nofps");
+        log("esInfo: videoFps WITHHELD by /tmp/nativejelly-nofps");
     } else if let Some((num, den)) = fps_rational(crate::route::stream_fps(ps)) {
         p = p
             .replace(
@@ -747,7 +747,7 @@ fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
         ));
         return p.to_string();
     }
-    let anchor = r#""provider":"plxnative""#;
+    let anchor = r#""provider":"nativejelly""#;
     if !p.contains(anchor) {
         log("atmos: payload has no provider anchor — immersive NOT spliced");
         return p.to_string();
@@ -785,7 +785,7 @@ fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
 ///   the same public configd key independently and route policy requires an exact `true` before
 ///   this function can receive `Declare`.
 ///
-/// The anchor is `"provider":"plxnative"` — the last key of `contents` and, by the test below,
+/// The anchor is `"provider":"nativejelly"` — the last key of `contents` and, by the test below,
 /// present exactly once in `PAYLOAD_AV`. A `replace` that finds nothing is a silent no-node, which
 /// is why the miss is logged rather than assumed away.
 fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation) -> String {
@@ -795,7 +795,7 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
     if crate::metadata::dv_node_suppressed() {
         #[cfg(feature = "devtriggers")]
         log(&format!(
-            "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/plxnative-dvnonode (direct play kept)",
+            "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/nativejelly-dvnonode (direct play kept)",
             n.profile_id
         ));
         return p.to_string();
@@ -811,7 +811,7 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
         ));
         return p.to_string();
     }
-    let anchor = r#""provider":"plxnative""#;
+    let anchor = r#""provider":"nativejelly""#;
     if !p.contains(anchor) {
         log("dv: payload has no provider anchor — DolbyHdrInfo NOT spliced");
         return p.to_string();
@@ -833,7 +833,7 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
 ///
 /// One expression, called from both places, so the two cannot disagree.
 fn app_id_key() -> String {
-    format!(r#""appId":"{}""#, plx_base::paths::app_id())
+    format!(r#""appId":"{}""#, nj_base::paths::app_id())
 }
 
 /// Substitute the `@APPID@` placeholder with the id of the install this process actually is.
@@ -844,7 +844,7 @@ fn app_id_key() -> String {
 /// silent — the pipeline reports no error for either — which is why this is graded in the host
 /// suite rather than left to be noticed on a television.
 fn with_app_id(p: &str) -> String {
-    p.replace("@APPID@", plx_base::paths::app_id())
+    p.replace("@APPID@", nj_base::paths::app_id())
 }
 
 /// Create the exported window and splice its id into the Load payload — the webOS 5+ binding, in
@@ -934,7 +934,7 @@ pub(crate) fn start_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mut 
 /// Foreground recovery uses this to wait for the media-thread result instead of treating thread
 /// creation as proof that the television accepted the payload.
 pub(crate) fn start_bufferfeed_tracked(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> BufferfeedStartOutcome {
-    if plx_platform::tv::sandbox::blocks_native_video() {
+    if nj_platform::tv::sandbox::blocks_native_video() {
         ps.jail_load_blocked = true;
         log("start_bufferfeed: refusing native video; affected chassis cannot read /dev/rtkmem");
         if let Some(ticket) = crate::route::begin_route_start() {
@@ -977,7 +977,7 @@ pub(crate) fn start_bufferfeed_tracked(ps: &mut crate::route::PlaybackSession, p
 }
 
 /// Builds the "stream: <origin> path=<path>" diagnostic line for the freshly opened
-/// transcode/direct-stream URL. `plx_base::eventlog::log()` runs every line through
+/// transcode/direct-stream URL. `nj_base::eventlog::log()` runs every line through
 /// `eventlog::scrub::scrub_local()`, which already redacts `X-Plex-Token=` (and other
 /// credential query params) by value only, stopping at the next `&` — so the token,
 /// which `Client::with_token` always appends last, never reaches the log. Truncating
@@ -1026,13 +1026,13 @@ fn start_bufferfeed_inner(
     VATT.store(0, Ordering::Relaxed);
     AATT.store(0, Ordering::Relaxed);
     // resolve the URL, in precedence order: route (a selected movie) wins, then
-    // /tmp/plxnative-playurl (a URL + its declaration), then /tmp/plxnative-url (a URL
+    // /tmp/nativejelly-playurl (a URL + its declaration), then /tmp/nativejelly-url (a URL
     // alone), then a local sample.
     let mut url = crate::route::url(ps);
     if url.is_empty() {
-        // dev: /tmp/plxnative-playurl — a URL *and the Load declaration to play it with*, with no
+        // dev: /tmp/nativejelly-playurl — a URL *and the Load declaration to play it with*, with no
         // library item behind it. This is the player-PIPELINE test tier's entry (tests/README.md):
-        // `plxnative-url` below hands over a URL only, which leaves the payload describing
+        // `nativejelly-url` below hands over a URL only, which leaves the payload describing
         // whatever the route happened to hold — an empty string, i.e. H264 + "AC3" — so a 4K HEVC
         // or a Dolby file could never be declared honestly without Plex. Read HERE rather than at
         // the app.rs entry point because the declaration has to be in `route` before the payload
@@ -1070,7 +1070,7 @@ fn start_bufferfeed_inner(
         }
     }
     if url.is_empty() {
-        if let Some(t) = plx_base::devtrig::read("url") {
+        if let Some(t) = nj_base::devtrig::read("url") {
             if !t.is_empty() {
                 url = t;
                 crate::route::set_url(ps, &url);
@@ -1080,7 +1080,7 @@ fn start_bufferfeed_inner(
     let mut sample: Option<Box<SampleBuf>> = None;
     let mut is_h265 = false;
     if url.is_empty() {
-        if let Some(data) = plx_base::devtrig::read_sample("sample.h264") {
+        if let Some(data) = nj_base::devtrig::read_sample("sample.h264") {
             let au = bf_split(&data, 0x09);
             log(&format!(
                 "bf_split h264: {} AUs in {} bytes",
@@ -1096,7 +1096,7 @@ fn start_bufferfeed_inner(
                 next: 0,
                 loops: 0,
             }));
-        } else if let Some(data) = plx_base::devtrig::read_sample("sample.h265") {
+        } else if let Some(data) = nj_base::devtrig::read_sample("sample.h265") {
             // Phase 0 probe: feed a local HEVC Annex-B sample to test native HEVC decode.
             let au = bf_split(&data, 0x46);
             log(&format!(
@@ -1115,10 +1115,10 @@ fn start_bufferfeed_inner(
                 loops: 0,
             }));
         } else {
-            // nothing to play: no selected item, no /tmp/plxnative-url, no local sample. (The old
+            // nothing to play: no selected item, no /tmp/nativejelly-url, no local sample. (The old
             // baked-in demo-movie fallback is gone — the binary carries no URLs/credentials.)
             #[cfg(feature = "devtriggers")]
-            log("start_bufferfeed: no URL — select an item (or set /tmp/plxnative-url)");
+            log("start_bufferfeed: no URL — select an item (or set /tmp/nativejelly-url)");
             return Err(crate::route::RouteStartResult::NoRoute);
         }
     }
@@ -1130,9 +1130,9 @@ fn start_bufferfeed_inner(
     // For a streamed direct-play/transcode, pick the Load codecs from the item: video H264 vs
     // H265 (native HEVC direct-play), audio AC3/EAC3/AAC/DTS. (The local sample paths keep their
     // fixed payloads.)
-    // dev A/B: /tmp/plxnative-noaudio feeds video only (needAudio:false + skip es=2) to isolate
+    // dev A/B: /tmp/nativejelly-noaudio feeds video only (needAudio:false + skip es=2) to isolate
     // whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
-    let no_audio = plx_base::devtrig::flag("noaudio");
+    let no_audio = nj_base::devtrig::flag("noaudio");
     crate::ff::set_feed_audio(!no_audio);
     let stream_payload;
     // Every arm below assigns this — the static payloads through `static_envelope`, the streamed
@@ -1251,16 +1251,16 @@ fn start_bufferfeed_inner(
     };
 
     // fd = -1 (CLOSED) so a teardown before/without http_open doesn't close(0)
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aqv_box: Option<Box<AuQueue>> = None;
     let mut aqa_box: Option<Box<AuQueue>> = None;
     let mut stream_th = None;
     let source;
 
     if stream {
-        let su = crate::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
+        let su = crate::catalog::StreamUrl::parse(&url); // the typed layer's URL splitter
                                                       // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
-                                                      // transport**: `ff::demux` reads http through `plx_net::stream`'s cleartext socket and https
+                                                      // transport**: `ff::demux` reads http through `nj_net::stream`'s cleartext socket and https
                                                       // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
                                                       // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
                                                       // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
@@ -1268,7 +1268,7 @@ fn start_bufferfeed_inner(
                                                       // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
                                                       // behind it fails validation however well the packets flow (`net/origin.rs`).
         if !crate::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
-            plx_base::eventlog::log("stream: refused insecure credential transport");
+            nj_base::eventlog::log("stream: refused insecure credential transport");
             return Err(crate::route::RouteStartResult::StartFailed);
         }
         let path = su.path;
@@ -1297,7 +1297,7 @@ fn start_bufferfeed_inner(
             let acodec = crate::route::stream_acodec(ps);
             let abr = crate::route::hls_abr_control(ps);
             let auto_original = crate::route::auto_original_watch(ps);
-            stream_th = plx_base::task::spawn("demux", move || {
+            stream_th = nj_base::task::spawn("demux", move || {
                 crate::ff::demux(origin, path, acodec, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
@@ -1318,7 +1318,7 @@ fn start_bufferfeed_inner(
     // the media thread constructs + loads + runs the loop (owns the GMainContext)
     let payload_ptr = threads::SendPtr(payload_c.as_ptr() as *mut c_char);
     let native_epoch = native_start.epoch();
-    let load_th = plx_base::task::spawn("media", move || {
+    let load_th = nj_base::task::spawn("media", move || {
         threads::load_thread(payload_ptr, native_epoch, Some(route_attempt))
     });
     if load_th.is_none() {
@@ -1331,14 +1331,14 @@ fn start_bufferfeed_inner(
         }
         let p = SHARED.hs_ptr.swap(std::ptr::null_mut(), Ordering::AcqRel);
         if !p.is_null() {
-            plx_net::stream::http_shutdown(p);
+            nj_net::stream::http_shutdown(p);
         }
         crate::curlio::abort_active(); // the https demuxer's equivalent — see teardown
         if let Some(t) = stream_th.take() {
-            plx_base::task::join("demux", t);
+            nj_base::task::join("demux", t);
         }
         if !p.is_null() {
-            plx_net::stream::http_close(p); // sole owner now: the reader is joined
+            nj_net::stream::http_close(p); // sole owner now: the reader is joined
         }
         return Err(crate::route::RouteStartResult::StartFailed);
     }
@@ -1353,7 +1353,7 @@ fn start_bufferfeed_inner(
         if let Some(lease) = crate::route::begin_timeline_reporting(ps) {
             // best-effort: refused, the only loss is that the resume point stops being posted
             let st = report_stop.clone();
-            plx_base::task::spawn("timeline", move || threads::timeline_thread(lease, st))
+            nj_base::task::spawn("timeline", move || threads::timeline_thread(lease, st))
         } else {
             None
         }
@@ -1755,7 +1755,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
             // shutdown, not close: the demux thread is still inside recv here and is joined
             // below. Closing now would free the fd number for another thread to claim while
             // this one is still reading it. The real close happens after the join.
-            plx_net::stream::http_shutdown(p);
+            nj_net::stream::http_shutdown(p);
         }
         // …and the same interrupt for the OTHER transport. An https demux is parked in
         // `curl_multi_wait`, where no `shutdown(2)` of ours can reach it — this writes a byte to
@@ -1768,7 +1768,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // Through `task::join` so a stall leaves a number behind: this is the main thread, and every
     // teardown freeze the engine has had was one of these three.
     if let Some(t) = eng.stream_th.take() {
-        plx_base::task::join("demux", t);
+        nj_base::task::join("demux", t);
     }
     // A Load the D.1.4 budget already gave up on, still inside `sf_load`: do NOT join it here.
     // This is the main thread, and on the set where the budget fires the call may never return —
@@ -1779,7 +1779,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     let abandoned_load = match eng.load_th.take() {
         Some(t) if !t.is_finished() && SHARED.load_timed_out.load(Ordering::Acquire) => Some(t),
         Some(t) => {
-            plx_base::task::join("media", t);
+            nj_base::task::join("media", t);
             None
         }
         None => None,
@@ -1789,14 +1789,14 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     if stream {
         let p = SHARED.hs_ptr.load(Ordering::Acquire);
         if !p.is_null() {
-            plx_net::stream::http_close(p);
+            nj_net::stream::http_close(p);
         }
     }
     // Final position report (state=stopped, so the server commits the resume point) + the
     // server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
     // twelve lines below — two blocking PMS round trips on the SDL thread, ~17 s each worst case,
     // on 100% of real stops. `scrobble_stop` reads and clears route's session statics on THIS
-    // thread and hands the worker owned copies; `plex_run` drains it at exit so the report still
+    // thread and hands the worker owned copies; `nj_run` drains it at exit so the report still
     // lands. Skipped for a reload, which is not a stop.
     // The reporter is NOT joined here. Its handle rides out with the scrobble worker, which
     // joins it before posting `stopped` — so the last `playing` report still lands first, but the
@@ -2162,7 +2162,7 @@ impl FeedSlice {
 /// What is now open is why the slot the firmware asks for — using, we measured, dualsequencer's
 /// own key — is not in the ring. That points at pairing or at slot lifetime, not at rounding.
 ///
-/// `/tmp/plxnative-ptsnudge=<ns>` is kept because it is the instrument that produced that result
+/// `/tmp/nativejelly-ptsnudge=<ns>` is kept because it is the instrument that produced that result
 /// and the next candidate value is one run away. Anything from 1 to ~11110 is in range; beyond
 /// that an already-correct frame is pushed a tick the other way.
 fn pts_nudge_ns() -> i64 {
@@ -2174,7 +2174,7 @@ fn pts_nudge_ns() -> i64 {
     }
     // Latched at the first feed rather than read per AU: this is the hottest path in the app and
     // the trigger surface is a filesystem open. Same shape as every other `devtrig::` read here.
-    let v = plx_base::devtrig::read("ptsnudge")
+    let v = nj_base::devtrig::read("ptsnudge")
         .and_then(|s| s.trim().parse::<i64>().ok())
         .unwrap_or(DEFAULT);
     NUDGE.store(v, Ordering::Relaxed);
@@ -2546,7 +2546,7 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
         } else {
             false
         };
-        let r = plx_base::diag::spans::span("sfv", || unsafe { sink().feed(mt, data, len as u32, fp, es) });
+        let r = nj_base::diag::spans::span("sfv", || unsafe { sink().feed(mt, data, len as u32, fp, es) });
         if presentation_probe {
             if (r as u8) == b'O' {
                 if !SHARED.commit_native_presentation_probe(eng.native_epoch, |num| {
@@ -2663,7 +2663,7 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
         if slice.spent(fed, starved) {
             break;
         }
-        let r = plx_base::diag::spans::span("sfa", || unsafe { sink().feed(mt, data, len as u32, fp, es) });
+        let r = nj_base::diag::spans::span("sfa", || unsafe { sink().feed(mt, data, len as u32, fp, es) });
         // Accepted only — see the video lane's note.
         if (r as u8) == b'O' && fp > eng.max_fed_audio_pts {
             eng.max_fed_audio_pts = fp;
@@ -2823,7 +2823,7 @@ mod native_lifecycle_host_seam_tests {
 
     #[test]
     fn host_seam_destroys_only_with_evidence_and_latches_quarantine() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         SHARED.reset_session();
@@ -2897,7 +2897,7 @@ mod payload_tests {
             23.976,
             p8(),
             false,
-            plx_platform::devcaps::dv::DvCapability::Supported,
+            nj_platform::devcaps::dv::DvCapability::Supported,
         ));
         let payload = build_av_payload(
             &ps,
@@ -2915,7 +2915,7 @@ mod payload_tests {
             23.976,
             p8(),
             false,
-            plx_platform::devcaps::dv::DvCapability::Unsupported,
+            nj_platform::devcaps::dv::DvCapability::Unsupported,
         ));
         let payload = build_av_payload(
             &ps,
@@ -2936,11 +2936,11 @@ mod payload_tests {
             23.976,
             p8(),
             false,
-            plx_platform::devcaps::dv::DvCapability::Unknown,
+            nj_platform::devcaps::dv::DvCapability::Unknown,
         ));
         let fresh = p8().presentation(
             true,
-            plx_platform::devcaps::dv::DvCapability::Supported,
+            nj_platform::devcaps::dv::DvCapability::Supported,
             true,
         );
         assert!(fresh.declared().is_some(), "a subsequent decision sees Supported");
@@ -3032,7 +3032,7 @@ mod payload_tests {
             ("PAYLOAD_AV", PAYLOAD_AV),
             ("PAYLOAD_H265", PAYLOAD_H265),
         ] {
-            let composed = p.replace("@APPID@", plx_base::paths::STABLE_APP_ID);
+            let composed = p.replace("@APPID@", nj_base::paths::STABLE_APP_ID);
             assert!(
                 composed.contains(want),
                 "{name} no longer composes the shipped key"
@@ -3046,7 +3046,7 @@ mod payload_tests {
         // And the anchor the splice looks for is the composed key, not a restatement of it.
         assert_eq!(
             super::app_id_key(),
-            format!(r#""appId":"{}""#, plx_base::paths::app_id())
+            format!(r#""appId":"{}""#, nj_base::paths::app_id())
         );
         assert!(super::with_app_id(PAYLOAD_V).contains(&super::app_id_key()));
         assert!(!super::with_app_id(PAYLOAD_V).contains("@APPID@"));
@@ -3058,10 +3058,10 @@ mod payload_tests {
     /// `replace` would splice two nodes into one payload.
     #[test]
     fn the_av_payload_carries_exactly_one_dolby_hdr_info_anchor() {
-        assert_eq!(PAYLOAD_AV.matches(r#""provider":"plxnative""#).count(), 1);
+        assert_eq!(PAYLOAD_AV.matches(r#""provider":"nativejelly""#).count(), 1);
         // and it really is the last key of `contents` — the next character after it closes the
         // object, so appending a key there stays INSIDE `contents`
-        assert!(PAYLOAD_AV.contains(r#""provider":"plxnative"},"streamQualityInfo""#));
+        assert!(PAYLOAD_AV.contains(r#""provider":"nativejelly"},"streamQualityInfo""#));
     }
 
     /// **What we actually send for a Profile 5 direct play.** The three fields at the path the
@@ -3072,9 +3072,9 @@ mod payload_tests {
         // what `build_av_payload` hands it: the AV template with the codec already set to H265,
         // which is what a native HEVC direct play — the only kind that can be Dolby Vision — sends
         let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
-        let out = with_dolby_hdr_info(&base, "H265", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true));
+        let out = with_dolby_hdr_info(&base, "H265", p5().presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true));
         assert!(
-            out.contains(r#""provider":"plxnative","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#),
+            out.contains(r#""provider":"nativejelly","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#),
             "{out}"
         );
         // the trailing `}` above is `contents` closing: the node is the last key INSIDE it, not a
@@ -3098,7 +3098,7 @@ mod payload_tests {
     /// The three ways the node is NOT sent, each of which must leave the payload byte-identical:
     /// a file with no Dolby Vision, a Dolby Vision file we refuse (the dual-layer P7 — declaring a
     /// layer we cannot feed is worse than refusing it), and the disarmed trigger, which is what a
-    /// `RELEASE=1` build compiles in and what every boot without `/tmp/plxnative-dv` does today.
+    /// `RELEASE=1` build compiles in and what every boot without `/tmp/nativejelly-dv` does today.
     #[test]
     fn nothing_is_spliced_unless_the_stream_is_declared() {
         let p7 = Dovi {
@@ -3109,9 +3109,9 @@ mod payload_tests {
             ..Dovi::NONE
         };
         for dv in [
-            Dovi::NONE.presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true),
-            p7.presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true),
-            p5().presentation(false, plx_platform::devcaps::dv::DvCapability::Supported, true),
+            Dovi::NONE.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true),
+            p7.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true),
+            p5().presentation(false, nj_platform::devcaps::dv::DvCapability::Supported, true),
         ] {
             assert_eq!(with_dolby_hdr_info(PAYLOAD_AV, "H265", dv), PAYLOAD_AV);
         }
@@ -3125,7 +3125,7 @@ mod payload_tests {
     fn an_atmos_track_splices_immersive_into_contents() {
         let out = with_immersive(PAYLOAD_AV, "AC3 PLUS", true);
         assert!(
-            out.contains(r#""provider":"plxnative","immersive":"ATMOS"}"#),
+            out.contains(r#""provider":"nativejelly","immersive":"ATMOS"}"#),
             "{out}"
         );
         // the trailing `}` is `contents` closing — the node is INSIDE it, not a sibling of
@@ -3169,13 +3169,13 @@ mod payload_tests {
     fn dolby_vision_and_atmos_are_siblings_inside_contents() {
         let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
         let out = with_immersive(
-            &with_dolby_hdr_info(&base, "H265", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true)),
+            &with_dolby_hdr_info(&base, "H265", p5().presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true)),
             "AC3 PLUS",
             true,
         );
         assert!(
             out.contains(
-                r#""provider":"plxnative","immersive":"ATMOS","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#
+                r#""provider":"nativejelly","immersive":"ATMOS","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#
             ),
             "{out}"
         );
@@ -3194,7 +3194,7 @@ mod payload_tests {
     #[test]
     fn a_declaration_never_rides_a_non_hevc_payload() {
         assert_eq!(
-            with_dolby_hdr_info(PAYLOAD_AV, "H264", p5().presentation(true, plx_platform::devcaps::dv::DvCapability::Supported, true)),
+            with_dolby_hdr_info(PAYLOAD_AV, "H264", p5().presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true)),
             PAYLOAD_AV
         );
     }
@@ -3239,7 +3239,7 @@ mod stream_open_log_line_tests {
         );
     }
 
-    /// The un-truncated path still passes through `plx_base::eventlog::log`'s `scrub_local` pass, which is
+    /// The un-truncated path still passes through `nj_base::eventlog::log`'s `scrub_local` pass, which is
     /// the ONLY place a token may be redacted — so leaving the full path in is safe precisely
     /// because `Client::with_token` always appends `X-Plex-Token=` last and `scrub_local` already
     /// redacts it by value. This is the end-to-end check that removing the truncation did not
@@ -3248,7 +3248,7 @@ mod stream_open_log_line_tests {
     fn full_path_still_has_its_token_redacted_by_the_existing_scrub_pass() {
         let path = format!("{}&X-Plex-Token=aBcD1234xyzQ", burn_path());
         let line = stream_open_log_line("plex.direct:32400", &path);
-        let scrubbed = plx_base::eventlog::scrub::scrub_local(&line);
+        let scrubbed = nj_base::eventlog::scrub::scrub_local(&line);
         assert!(
             !scrubbed.contains("aBcD1234xyzQ"),
             "token leaked into the event log: {scrubbed}"
@@ -3320,7 +3320,7 @@ mod prime_livelock_tests {
             prime_play: true,
             aq_video: Some(crate::aq::aq_new(AQ_VIDEO_BYTES)),
             aq_audio: Some(crate::aq::aq_new(AQ_AUDIO_BYTES)),
-            hs: plx_net::stream::http_stream_boxed(),
+            hs: nj_net::stream::http_stream_boxed(),
             pending_video: None,
             pending_audio: None,
             payload: std::ffi::CString::new("").unwrap(),
@@ -3372,15 +3372,15 @@ mod prime_livelock_tests {
     /// calls would have restored the bug with this test still green. What actually enforces it is
     /// that [`feed_stream`] and [`feed_audio_lane`] are private — the revert no longer compiles.
     /// The test pins the BEHAVIOUR; the visibility pins the dispatch.
-    fn tick(mt: &plx_base::task::MainThread, eng: &mut Engine) {
+    fn tick(mt: &nj_base::task::MainThread, eng: &mut Engine) {
         feed_both_lanes(mt, eng);
     }
 
     #[test]
     fn a_segment_that_lands_whole_still_starts_the_picture() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         // Arm the host clock sink so `sf_feed` accepts AUs. See `ffi_host::FORCE_ENABLED` for why
-        // this is an explicit override and not the `plxnative-clocksink` trigger file. RESTORED on
+        // this is an explicit override and not the `nativejelly-clocksink` trigger file. RESTORED on
         // the way out, panic or not: it is a process-global, and leaving it armed would silently
         // change what every later test's `sf_feed` returns.
         struct DisarmSink;
@@ -3392,7 +3392,7 @@ mod prime_livelock_tests {
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _disarm = DisarmSink;
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
@@ -3459,7 +3459,7 @@ mod prime_livelock_tests {
     /// Ticks a freshly reloaded engine takes to start the clock on one whole segment.
     fn ticks_to_prime(step_us: u64) -> (u32, Engine) {
         let _slow = SlowFeed::arm(step_us);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
         let mut eng = engine_after_reload();
@@ -3478,7 +3478,7 @@ mod prime_livelock_tests {
     /// exempt, so the prime takes the same ticks as a greedy feed, and still on BOTH lanes.
     #[test]
     fn a_slow_feed_does_not_stretch_the_prime() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let (greedy, _) = ticks_to_prime(0);
         let (slow, eng) = ticks_to_prime(4_000);
         assert!(!eng.prime_play, "the prime never completed in {slow} ticks");
@@ -3501,9 +3501,9 @@ mod prime_livelock_tests {
     /// and the clock starts on both lanes, then the leftover backlog drains a slice a tick.
     #[test]
     fn a_post_prime_backlog_is_fed_a_slice_per_lane_per_tick() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let _slow = SlowFeed::arm(1_000);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
@@ -3549,9 +3549,9 @@ mod prime_livelock_tests {
     /// lead. Below [`FEED_LOW_WATER_NS`] the lane is topped up in one tick; above it, the slice.
     #[test]
     fn a_playing_lane_below_low_water_is_fed_past_its_slice() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let _slow = SlowFeed::arm(4_000);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         const PRES: i64 = 10_000_000_000;
         SHARED.pres_fed.store(PRES, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
@@ -3582,7 +3582,7 @@ mod prime_livelock_tests {
     /// The demuxer's runway is a measured duration, so it must raise the decoder-only prime floor.
     #[test]
     fn an_hls_clock_waits_for_the_observed_acquisition_runway() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
         }
@@ -3600,7 +3600,7 @@ mod prime_livelock_tests {
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         push_one_segment(&mut eng);
         tick(&mt, &mut eng);
@@ -3623,7 +3623,7 @@ mod prime_livelock_tests {
 
     #[test]
     fn automatic_rebuffer_cannot_resume_without_fresh_media() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             rebuffering: bool,
@@ -3649,7 +3649,7 @@ mod prime_livelock_tests {
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         push_one_segment(&mut eng);
         tick(&mt, &mut eng);
@@ -3683,7 +3683,7 @@ mod prime_livelock_tests {
     /// release an initial or internal prime; a running clock is never stopped by this marker.
     #[test]
     fn an_inflight_hls_trial_cannot_release_the_prime_hold() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             trial_reserve: i64,
@@ -3708,7 +3708,7 @@ mod prime_livelock_tests {
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         push_one_segment(&mut eng);
         tick(&mt, &mut eng);
@@ -3742,7 +3742,7 @@ mod prime_livelock_tests {
     /// rather than releasing from the mixed snapshot.
     #[test]
     fn a_downshift_candidate_cannot_release_an_old_recovery_epoch_mid_commit() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             trial_reserve: i64,
@@ -3820,7 +3820,7 @@ mod prime_livelock_tests {
         SHARED.begin_hls_recovery();
         SHARED.observe_hls_recovery(500_000, std::time::Duration::from_secs(2));
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         push_one_segment(&mut eng);
         tick(&mt, &mut eng);
@@ -3861,7 +3861,7 @@ mod prime_livelock_tests {
     /// buffer plus a full application queue can never release the hold.
     #[test]
     fn internal_rebuffer_certificate_counts_the_whole_playable_pipeline() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             rebuffering: bool,
@@ -3912,7 +3912,7 @@ mod prime_livelock_tests {
             paused: TX.paused.swap(false, Ordering::Relaxed),
         };
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         eng.max_fed_video_pts = PRIME_NS;
         eng.max_fed_audio_pts = PRIME_AUDIO_NS;
@@ -3933,7 +3933,7 @@ mod prime_livelock_tests {
     /// tails because a paused native source buffer is finite and cannot accept the whole runway.
     #[test]
     fn pause_to_fill_resume_primes_both_lanes_before_native_play() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             video_tail: i64,
@@ -3995,7 +3995,7 @@ mod prime_livelock_tests {
             Some(super::super::shared::HlsUserResume::Prime)
         );
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         eng.prime_play = false;
         arm_live_clock_prime(&mut eng);
@@ -4031,7 +4031,7 @@ mod prime_livelock_tests {
     /// clock is still stopped and leave no path that retries the command.
     #[test]
     fn a_refused_play_keeps_the_internal_rebuffer_hold_armed() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore {
             runway: i64,
             rebuffering: bool,
@@ -4059,7 +4059,7 @@ mod prime_livelock_tests {
         SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
         SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut eng = engine_after_reload();
         SHARED.begin_hls_recovery();
         SHARED.observe_hls_recovery(500_000, std::time::Duration::from_secs(2));
@@ -4084,9 +4084,9 @@ mod lifecycle_clock_tests {
     #[test]
     fn stop_without_an_engine_cannot_poison_the_next_initial_hold() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         assert!(
             !pa.is_live(),
@@ -4104,7 +4104,7 @@ mod lifecycle_clock_tests {
     }
 }
 
-/// **LG App Self Checklist #46 — replay after completion.** A `plxnative-playurl` stream that
+/// **LG App Self Checklist #46 — replay after completion.** A `nativejelly-playurl` stream that
 /// reaches EOS is started AGAIN, and that second start does not travel the UI's asynchronous
 /// request path: `app.rs` re-arms `auto_tried`, the fixture entry calls `start_playback`, and
 /// `start_bufferfeed_tracked` asks the reducer for a start owner directly. So the phase a
@@ -4126,9 +4126,9 @@ mod replay_after_stop_tests {
     #[test]
     fn a_completed_stop_grants_the_next_start_a_route_owner() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         crate::route::reset_player_control_for_test(&ps);
         assert!(
@@ -4225,7 +4225,7 @@ mod load_in_flight_tests {
     #[test]
     fn nothing_reaches_the_seam_while_load_is_still_in_flight() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4233,7 +4233,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         pa.install(engine_loading(epoch));
@@ -4339,7 +4339,7 @@ mod load_in_flight_tests {
     #[test]
     fn losing_the_active_phase_while_still_deferred_fires_the_budget_instead_of_hanging() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4347,7 +4347,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         pa.install(engine_loading(epoch));
@@ -4412,7 +4412,7 @@ mod load_in_flight_tests {
     #[test]
     fn native_load_budget_expiry_fires_load_failed() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4420,7 +4420,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         pa.install(engine_loading(epoch));
@@ -4480,7 +4480,7 @@ mod load_in_flight_tests {
     #[test]
     fn native_load_returned_loadcompleted_never_arrives_fires_load_failed() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4489,7 +4489,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         pa.install(engine_loading(epoch));
@@ -4559,7 +4559,7 @@ mod load_in_flight_tests {
     #[test]
     fn the_gate_is_epoch_scoped() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4567,7 +4567,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         pa.install(engine_loading(epoch));
@@ -4624,13 +4624,13 @@ mod load_in_flight_tests {
 
     #[test]
     fn native_source_correction_ctor_wait_has_an_issued_budget() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&crate::route::PlaybackSession::IDLE);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
-        let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
+        let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { nj_base::task::MainThread::assume() });
         let mut ps = crate::route::PlaybackSession::IDLE;
         let epoch = SHARED.begin_native_session().unwrap();
         pa.install(engine_loading(epoch));
@@ -4643,12 +4643,12 @@ mod load_in_flight_tests {
     }
     #[test]
     fn native_source_correction_stale_load_refusal_cannot_fail_new_epoch() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         let _cleanup = Cleanup;
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         unsafe { crate::player::sink().quarantine(&mt); }
         let old = SHARED.begin_native_session().unwrap();
         assert!(SHARED.retire_native_session(old));
@@ -4662,14 +4662,14 @@ mod load_in_flight_tests {
 
     #[test]
     fn native_ready_demux_failure_keeps_precedence_over_the_load_wait() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&crate::route::PlaybackSession::IDLE);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
         crate::player::ffi_host::force_clocksink_for_test(true);
         crate::player::ffi_host::force_object_ready_for_test(true);
         let _cleanup = Cleanup;
-        let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
+        let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { nj_base::task::MainThread::assume() });
         let mut ps = crate::route::PlaybackSession::IDLE;
         let epoch = SHARED.begin_native_session().unwrap();
         pa.install(engine_loading(epoch));
@@ -4691,7 +4691,7 @@ mod load_in_flight_tests {
     fn teardown_after_a_load_timeout_does_not_block_on_the_hung_load() {
         const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(3);
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         crate::player::ffi_host::reset_native_lifecycle_for_test();
@@ -4699,7 +4699,7 @@ mod load_in_flight_tests {
         let _cleanup = Cleanup;
 
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         let mut eng = engine_loading(epoch);
@@ -4821,8 +4821,8 @@ mod load_in_flight_tests {
 mod sink_envelope_tests {
     use super::*;
 
-    fn caps(h264: (u32, u32, u32), hevc: (u32, u32, u32)) -> plx_platform::devcaps::Caps {
-        let mut c = plx_platform::devcaps::Caps::assumed();
+    fn caps(h264: (u32, u32, u32), hevc: (u32, u32, u32)) -> nj_platform::devcaps::Caps {
+        let mut c = nj_platform::devcaps::Caps::assumed();
         c.h264_row = h264;
         c.hevc_row = hevc;
         c
@@ -4882,7 +4882,7 @@ mod sink_envelope_tests {
         assert_eq!(sink_envelope(true, (0, 0), 0.0, &c, true), ENVELOPE_FHD60);
         // the same rows, not measured: never a clamp
         assert_eq!(sink_envelope(true, (3840, 2160), 0.0, &c, false), ENVELOPE_UHD60);
-        assert_eq!(sink_envelope(true, (0, 0), 0.0, &plx_platform::devcaps::Caps::assumed(), true), ENVELOPE_UHD60);
+        assert_eq!(sink_envelope(true, (0, 0), 0.0, &nj_platform::devcaps::Caps::assumed(), true), ENVELOPE_UHD60);
         // a table stating a lower frame rate clamps it; a higher one never raises it
         let slow = caps((3840, 2160, 30), (3840, 2160, 120));
         assert_eq!(sink_envelope(false, (3840, 2160), 0.0, &slow, true).fps, 30);
@@ -4965,12 +4965,12 @@ mod load_refusal_tests {
     #[test]
     fn an_asynchronous_load_refusal_is_a_verdict_not_a_black_screen() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         crate::route::reset_player_control_for_test(&ps);
         let _cleanup = Cleanup;
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         let epoch = SHARED.begin_native_session().expect("native session");
         let mut eng = super::prime_livelock_tests::engine_after_reload();

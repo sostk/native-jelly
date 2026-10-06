@@ -9,17 +9,17 @@
 //!
 //! Stored Home, picker and explicit developer bootstrap use the same owner, with distinct typed
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
-use crate::plex::account::{AccountClient, CallEvidence, HomeUser, PinPoll, Resource, SwitchOutcome};
+use crate::catalog::account::{AccountClient, CallEvidence, HomeUser, PinPoll, Resource, SwitchOutcome};
 use crate::telemetry::incident::{
     CountBucket, DiscoveryClass, DiscoveryEvidence, DiscoveryTarget, DiscoveryTrigger,
     IncidentContext, IncidentKind, NoServersEvidence,
 };
-use crate::plex::grant::PlaintextAsk;
-use crate::plex::probe::{
+use crate::catalog::grant::PlaintextAsk;
+use crate::catalog::probe::{
     self, Candidate, HttpsRoutes, InsecureEvidence, Outcome, PlaintextEligibility, ProbePlan, RouteOutcome,
 };
-use crate::plex::session::{self, PlaintextChoice, ProfileCreds, ServerRef, Session, SourceRef, UserRef};
-use crate::plex::{CredentialPolicy, Origin, ServerId};
+use crate::catalog::session::{self, PlaintextChoice, ProfileCreds, ServerRef, Session, SourceRef, UserRef};
+use crate::catalog::{CredentialPolicy, Origin, ServerId};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -111,7 +111,8 @@ pub enum Phase {
     Deleted,
 }
 
-pub(crate) fn discovery_trouble() -> &'static str { plx_platform::i18n::msg::browse_auth_discovery_trouble() }
+#[allow(dead_code)]
+pub(crate) fn discovery_trouble() -> &'static str { nj_platform::i18n::msg::browse_auth_discovery_trouble() }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum DiscoveryRetryRun { Resources, HomeUsers }
@@ -171,7 +172,7 @@ pub enum Picker {
     /// default also covers Login's BACK before a picker is raised. "We cannot say who is asking"
     /// must not resolve to "hand
     /// over the credentials" — a permissive default is the shape of the bug this enum exists to
-    /// fix, and it is what left the dev-only `/tmp/plxnative-login` boot on the wrong side of it.
+    /// fix, and it is what left the dev-only `/tmp/nativejelly-login` boot on the wrong side of it.
     #[default]
     Boot,
     /// Home's *Change profile*: a profile WAS active, and raising this picker detaches it.
@@ -255,11 +256,11 @@ pub struct ReadyCreds {
     /// The origin's resolve pin, read off the same stored record ([`session::ServerRef::resolve_pin`])
     /// so the install this hands off dials the LAN name with no resolver, exactly as the boot
     /// gate does.
-    pub pin: Option<crate::plex::ResolvePin>,
+    pub pin: Option<crate::catalog::ResolvePin>,
 }
 
 /// Append a line to the shared on-device event log (never a token — only ids/counts/status).
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 
 /// Does restarting this flow begin a NEW sign-in attempt, as the diagnostics count them?
 ///
@@ -328,7 +329,7 @@ fn may_resume(from: Picker, stored_is_protected: bool) -> bool {
 /// So a RESTART re-attaches through the BOOT GATE rather than through this one, and what happens
 /// there is that gate's policy, not this one's: with a roster of more than one it raises a picker
 /// unless Automatically Sign In is on and a profile is already seated
-/// ([`crate::plex::session::Session::boot_shows_picker`]), and with a roster of one or none
+/// ([`crate::catalog::session::Session::boot_shows_picker`]), and with a roster of one or none
 /// `app.rs` installs the stored profile directly, PIN or no PIN. Two known staleness/policy gaps
 /// sit behind that sentence and are deliberately NOT closed here — the single-user boot restore,
 /// and the fact that `protected` is read from a CACHED roster that plex.tv may have moved on from.
@@ -443,10 +444,10 @@ fn grade_roster(answer: Result<Vec<HomeUser>, CallEvidence>) -> Option<Vec<UserT
         Err(evidence) => {
             // "roster refresh failed — keeping cached roster" is matched verbatim by
             // `tests/run.py`'s offline check: the evidence goes AFTER it.
-            let refused = crate::plex::account::refused_identity(&evidence).is_some();
+            let refused = crate::catalog::account::refused_identity(&evidence).is_some();
             log(&format!("auth: roster refresh {} — keeping cached roster ({}){}",
                 if refused { "refused" } else { "failed" },
-                crate::plex::account::describe_evidence(&evidence),
+                crate::catalog::account::describe_evidence(&evidence),
                 if refused { ": this account cannot list Home profiles" } else { "" }));
             refused.then(Vec::new)
         }
@@ -605,21 +606,21 @@ pub(crate) struct EndpointProgress {
 /// result still belongs to the client/token that launched it.
 #[derive(Clone, Copy)]
 pub(crate) struct ClientLifecycle {
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
 }
 
 impl ClientLifecycle {
     pub(crate) fn machine_id(self) -> &'static str { self.client.machine_id() }
 
-    pub(crate) fn capture(client: &'static crate::plex::Client) -> Self {
+    pub(crate) fn capture(client: &'static crate::catalog::Client) -> Self {
         Self { client, token_gen: client.token_gen() }
     }
     pub(crate) fn logical(self, sid: u16) -> owner::ServerLifecycle {
         owner::ServerLifecycle { sid, instance_gen: self.client.instance_gen(), token_gen: self.token_gen }
     }
     pub(crate) fn is_current(self, expected: owner::ServerLifecycle) -> bool {
-        self.logical(expected.sid) == expected && crate::plex::commit_if_current(
+        self.logical(expected.sid) == expected && crate::catalog::commit_if_current(
             ServerId::from_raw(expected.sid), self.client, self.token_gen, || ()).is_some()
     }
 }
@@ -636,18 +637,18 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
             // #95 step 8 / A2: carry the tier + address-derived IP into the same registration
             // write, rather than restoring them in a later separate call the boot picker's avatar
             // client used to skip.
-            let connection = crate::plex::ConnectionFacts::new(
+            let connection = crate::catalog::ConnectionFacts::new(
                 server.tier,
-                crate::plex::IpVersion::of_host(&server.address),
+                crate::catalog::IpVersion::of_host(&server.address),
             );
             let id = register_observed_origin("", &server.origin(), token, server.resolve_pin().as_ref(), connection, client_id);
-            crate::plex::set_current(id);
+            crate::catalog::set_current(id);
         }
         owner::RegistryPlan::Activate { source, ipv6, same_identity } => {
             let Some(origin) = source.origin() else { return false };
             let Some(location) = source.tier else { return false };
             if !*same_identity {
-                crate::plex::revoke_before_foreign_retoken(&source.machine_id, &source.token);
+                crate::catalog::revoke_before_foreign_retoken(&source.machine_id, &source.token);
             }
             apply_candidate_activation(CandidateActivation {
                 machine_id: source.machine_id.clone(), token: source.token.clone(),
@@ -666,21 +667,21 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
                 let installing: Vec<(String, Origin)> = sources.iter()
                     .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
                     .collect();
-                crate::plex::grant::roster_replaced(&installing);
+                crate::catalog::grant::roster_replaced(&installing);
             }
             // Only a switch changes WHO is asking, so only a switch revokes every live token first.
             // A refresh of the seated identity re-tokens in place (`RosterCommit::Refresh`).
             match commit {
-                RosterCommit::Switch => crate::plex::revoke_for_profile_switch(),
+                RosterCommit::Switch => crate::catalog::revoke_for_profile_switch(),
                 RosterCommit::Refresh { same_identity: false } => for s in sources {
-                    crate::plex::revoke_before_foreign_retoken(&s.machine_id, &s.token);
+                    crate::catalog::revoke_before_foreign_retoken(&s.machine_id, &s.token);
                 },
                 RosterCommit::Refresh { same_identity: true } | RosterCommit::Merge => {}
             }
             let installed = install_roster(sources, *primary, client_id);
             match commit {
-                RosterCommit::Switch => crate::plex::finish_profile_switch(&installed),
-                RosterCommit::Refresh { .. } => crate::plex::finish_roster_refresh(&installed),
+                RosterCommit::Switch => crate::catalog::finish_profile_switch(&installed),
+                RosterCommit::Refresh { .. } => crate::catalog::finish_roster_refresh(&installed),
                 RosterCommit::Merge => {}
             }
             for source in sources {
@@ -689,32 +690,32 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
         }
         owner::RegistryPlan::Endpoint { expected, source } => {
             let Some(origin) = source.origin() else { return false };
-            let connection = crate::plex::ConnectionFacts::new(
+            let connection = crate::catalog::ConnectionFacts::new(
                 source.tier,
-                crate::plex::IpVersion::of_host(&source.address),
+                crate::catalog::IpVersion::of_host(&source.address),
             );
             let id = register_observed_origin(&source.machine_id, &origin, &source.token,
                 source.resolve_pin().as_ref(), connection, client_id);
             if id.raw() != expected.sid { return false; }
-            crate::plex::describe_server(id, &source.name, &source.shared_by, grant_of(source));
-            crate::plex::publish_probe_result(id, Outcome::Reachable);
+            crate::catalog::describe_server(id, &source.name, &source.shared_by, grant_of(source));
+            crate::catalog::publish_probe_result(id, Outcome::Reachable);
             retire_grant_on_https(&source.machine_id, &origin);
         }
         owner::RegistryPlan::Probe(probe) => publish_settled_probe(probe),
-        owner::RegistryPlan::Revoke => crate::plex::revoke_all(),
+        owner::RegistryPlan::Revoke => crate::catalog::revoke_all(),
     }
     true
 }
 
-/// **The HTTPS upgrade lands.** A server on a plaintext grant (`crate::plex::grant`) whose
+/// **The HTTPS upgrade lands.** A server on a plaintext grant (`crate::catalog::grant`) whose
 /// endpoint just registered at a TLS origin needs plaintext no more: the grant is withdrawn, so
 /// nothing — a queued request, a cached URL, a reconnect — can put the credential back on the old
 /// origin. Called after the registration, outside the registry's write lock, which the grant's
 /// re-grade takes.
 fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
-    if origin.is_tls() && crate::plex::grant::granted_origin(machine_id).is_some() {
-        crate::plex::grant::revoke(machine_id);
-        plx_base::eventlog::log("security: server verified over HTTPS — plaintext upgrade complete");
+    if origin.is_tls() && crate::catalog::grant::granted_origin(machine_id).is_some() {
+        crate::catalog::grant::revoke(machine_id);
+        nj_base::eventlog::log("security: server verified over HTTPS — plaintext upgrade complete");
     }
 }
 
@@ -726,35 +727,35 @@ fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
 /// the IP family from it silently produced `None` on every real boot. The stored/advertised
 /// address is the one value that is actually a literal.
 pub(crate) fn install_captured_registry(origin: &Origin, address: &str, token: &str,
-    tier: Option<probe::Location>, pin: Option<&crate::plex::ResolvePin>, extras: &[SourceRef],
+    tier: Option<probe::Location>, pin: Option<&crate::catalog::ResolvePin>, extras: &[SourceRef],
     client_id: Option<&str>) {
     // Applies `connection` atomically, inside the same registration write, on whichever branch
     // runs (#95 step 8) — the primary and every extra used to register first and set the
     // connection facts in a SEPARATE call afterward, which is exactly the gap `ConnectionFacts`
     // exists to close.
     let register = |machine: &str, origin: &Origin, token: &str,
-        pin: Option<&crate::plex::ResolvePin>, connection: crate::plex::ConnectionFacts| {
+        pin: Option<&crate::catalog::ResolvePin>, connection: crate::catalog::ConnectionFacts| {
         if let Some(cid) = client_id {
-            crate::plex::register_captured_origin_with_connection(machine, origin, token, pin, cid,
+            crate::catalog::register_captured_origin_with_connection(machine, origin, token, pin, cid,
                 connection)
         } else {
             register_observed_origin(machine, origin, token, pin, connection, &session::peek().client_id)
         }
     };
     let primary_connection =
-        crate::plex::ConnectionFacts::new(tier, crate::plex::IpVersion::of_host(address));
+        crate::catalog::ConnectionFacts::new(tier, crate::catalog::IpVersion::of_host(address));
     let id = register("", origin, token, pin, primary_connection);
-    crate::plex::set_current(id);
+    crate::catalog::set_current(id);
     for source in extras {
         let Some(origin) = source.origin() else { continue };
         if source.token.is_empty() { continue; }
-        let connection = crate::plex::ConnectionFacts::new(
+        let connection = crate::catalog::ConnectionFacts::new(
             source.tier,
-            crate::plex::IpVersion::of_host(&source.address),
+            crate::catalog::IpVersion::of_host(&source.address),
         );
         let id = register(&source.machine_id, &origin, &source.token,
             source.resolve_pin().as_ref(), connection);
-        crate::plex::describe_server(id, &source.name, &source.shared_by, grant_of(source));
+        crate::catalog::describe_server(id, &source.name, &source.shared_by, grant_of(source));
     }
 }
 
@@ -874,22 +875,22 @@ fn register_observed_origin(
     machine_id: &str,
     origin: &Origin,
     token: &str,
-    pin: Option<&crate::plex::ResolvePin>,
-    connection: crate::plex::ConnectionFacts,
+    pin: Option<&crate::catalog::ResolvePin>,
+    connection: crate::catalog::ConnectionFacts,
     client_id: &str,
 ) -> ServerId {
-    crate::plex::register_captured_origin_with_connection(
+    crate::catalog::register_captured_origin_with_connection(
         machine_id, origin, token, pin, client_id, connection)
 }
 
 fn apply_candidate_activation(candidate: CandidateActivation, client_id: &str) {
-    let pin = crate::plex::ResolvePin::for_origin(&candidate.origin, &candidate.address);
-    let connection = crate::plex::ConnectionFacts::new(
+    let pin = crate::catalog::ResolvePin::for_origin(&candidate.origin, &candidate.address);
+    let connection = crate::catalog::ConnectionFacts::new(
         Some(candidate.location),
         Some(if candidate.ipv6 {
-            crate::plex::IpVersion::V6
+            crate::catalog::IpVersion::V6
         } else {
-            crate::plex::IpVersion::V4
+            crate::catalog::IpVersion::V4
         }),
     );
     let id = register_observed_origin(
@@ -900,10 +901,10 @@ fn apply_candidate_activation(candidate: CandidateActivation, client_id: &str) {
         connection,
         client_id,
     );
-    if crate::plex::client_for(id).is_some() {
-        crate::plex::publish_probe_result(id, Outcome::Reachable);
+    if crate::catalog::client_for(id).is_some() {
+        crate::catalog::publish_probe_result(id, Outcome::Reachable);
     }
-    crate::plex::describe_server(id, &candidate.name, &candidate.credit, crate::plex::GrantEvidence {
+    crate::catalog::describe_server(id, &candidate.name, &candidate.credit, crate::catalog::GrantEvidence {
         owned: candidate.owned, home: candidate.home, owner_id: candidate.owner_id,
     });
 }
@@ -943,7 +944,7 @@ fn output_failed_naming(output: &dyn owner::ObservationSink, epoch: u64, message
 }
 
 /// **Who signed in, when the answer is "no server yet"** — and only then. One `GET /api/v2/user`
-/// ([`crate::plex::account::DISPLAY_NAME_TIMEOUTS`], 5 s), made after discovery has already ended
+/// ([`crate::catalog::account::DISPLAY_NAME_TIMEOUTS`], 5 s), made after discovery has already ended
 /// in [`Discovery::NoServers`]: a successful sign-in never asks, and nothing asks before discovery.
 /// `None` for every other verdict, for a call that failed or timed out, and for an answer with no
 /// usable name — the read-out then says `browse.auth.no_servers` and shows nothing of the miss
@@ -955,7 +956,7 @@ fn output_failed_naming(output: &dyn owner::ObservationSink, epoch: u64, message
 fn no_servers_account(d: &Discovery, ac: &AccountClient, output: &dyn owner::ObservationSink)
     -> Option<String> {
     no_servers_account_with(d, output,
-        || ac.display_name_with(crate::plex::account::DISPLAY_NAME_TIMEOUTS))
+        || ac.display_name_with(crate::catalog::account::DISPLAY_NAME_TIMEOUTS))
 }
 
 /// [`no_servers_account`] with the user call injected, like `discover_and_store_with_resources`.
@@ -985,7 +986,7 @@ fn discovery_failure(d: &Discovery) -> Option<(std::borrow::Cow<'static, str>, I
         };
         if matches!(status, Some(401 | 403)) {
             return Some((
-                plx_platform::i18n::msg::browse_auth_signin_refused().into(),
+                nj_platform::i18n::msg::browse_auth_signin_refused().into(),
                 IncidentContext::new(IncidentKind::Authorization, Some(*last)),
             ));
         }
@@ -994,18 +995,18 @@ fn discovery_failure(d: &Discovery) -> Option<(std::borrow::Cow<'static, str>, I
         Discovery::Ok { .. } | Discovery::Cancelled => return None,
         Discovery::NoServers(evidence) => {
             return Some((
-                plx_platform::i18n::msg::browse_auth_no_servers().into(),
+                nj_platform::i18n::msg::browse_auth_no_servers().into(),
                 IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::NoServers), None)
                     .with_no_servers(*evidence),
             ));
         }
         Discovery::Refused => (
-            plx_platform::i18n::msg::browse_auth_refused(),
+            nj_platform::i18n::msg::browse_auth_refused(),
             DiscoveryClass::Refused,
             None,
         ),
         Discovery::ServersUnreachable { trigger } => return Some((
-            plx_platform::i18n::msg::browse_auth_servers_unreachable().into(),
+            nj_platform::i18n::msg::browse_auth_servers_unreachable().into(),
             IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::Silent), None)
                 .with_discovery(DiscoveryEvidence { trigger: *trigger,
                     target: Some(DiscoveryTarget::Servers) }),
@@ -1013,15 +1014,15 @@ fn discovery_failure(d: &Discovery) -> Option<(std::borrow::Cow<'static, str>, I
         Discovery::PlexTvFailed(run) => {
             let (link, _, _) = crate::telemetry::incident::classify(Some(run.last));
             let message = match link {
-                crate::telemetry::incident::LinkClass::Dns => plx_platform::i18n::msg::browse_auth_plex_dns_retry(i64::from(run.attempts)),
+                crate::telemetry::incident::LinkClass::Dns => nj_platform::i18n::msg::browse_auth_plex_dns_retry(i64::from(run.attempts)),
                 crate::telemetry::incident::LinkClass::Tls =>
-                    plx_platform::i18n::msg::browse_auth_plex_tls().into(),
+                    nj_platform::i18n::msg::browse_auth_plex_tls().into(),
                 crate::telemetry::incident::LinkClass::Answered2xx
                 | crate::telemetry::incident::LinkClass::Answered4xx
                 | crate::telemetry::incident::LinkClass::Answered5xx
                 | crate::telemetry::incident::LinkClass::AnsweredOther =>
-                    plx_platform::i18n::msg::browse_auth_plex_unavailable().into(),
-                _ => plx_platform::i18n::msg::browse_auth_plex_connect_retry(i64::from(run.attempts)),
+                    nj_platform::i18n::msg::browse_auth_plex_unavailable().into(),
+                _ => nj_platform::i18n::msg::browse_auth_plex_connect_retry(i64::from(run.attempts)),
             };
             let incident = IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::Silent), Some(run.last))
                 .with_retry_run(run.attempts, run.elapsed)
@@ -1058,7 +1059,7 @@ fn plaintext_offer(d: &Discovery) -> Option<PlaintextVerdict> {
 
 fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output: &dyn owner::ObservationSink) {
     if !output.live() { return; }
-    // dev: `/tmp/plxnative-readout=<case>` (paired with `/tmp/plxnative-login`, which already
+    // dev: `/tmp/nativejelly-readout=<case>` (paired with `/tmp/nativejelly-login`, which already
     // forces this screen with no session) — skip straight to the terminal failure a real run
     // would have reached, with no PIN minted and no call made. `readout_case` reads through
     // `devtrig::read`, which is compile-time `None` without `devtriggers` — no cfg needed here, per
@@ -1098,7 +1099,7 @@ fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output:
             PollEnd::Expired(tail) => {
                 log("auth: out of automatic sign-in codes — asking the user to start again");
                 let incident = expired_incident(&tail, generation);
-                return output_failed(output, epoch, plx_platform::i18n::msg::browse_auth_timeout(), incident, None);
+                return output_failed(output, epoch, nj_platform::i18n::msg::browse_auth_timeout(), incident, None);
             }
         }
     };
@@ -1192,7 +1193,7 @@ fn mint_pin(ac: &AccountClient, epoch: u64, generation: u32,
             // signed in. Drawn as the reason under "Couldn't sign in" (`screens/login.rs`).
             output_failed(output,
                 epoch,
-                plx_platform::i18n::msg::browse_auth_plex_unreachable(),
+                nj_platform::i18n::msg::browse_auth_plex_unreachable(),
                 IncidentContext::new(IncidentKind::PinCreate, Some(last))
                     .with_link_state(0, None, generation),
                 None,
@@ -1215,12 +1216,12 @@ fn mint_pin(ac: &AccountClient, epoch: u64, generation: u32,
     ));
     // fetch the server-rendered QR PNG (the exact QR the official apps display); public, no token.
     let qr_url = if pin.qr.is_empty() {
-        format!("{}/api/v2/pins/qr/{}", crate::plex::account::plex_tv(), pin.code)
+        format!("{}/api/v2/pins/qr/{}", crate::catalog::account::plex_tv(), pin.code)
     } else {
         pin.qr.clone()
     };
     if !output.live() { return None; }
-    let qr_png = plx_net::net::https_get_public(&qr_url)
+    let qr_png = nj_net::net::https_get_public(&qr_url)
         .filter(|r| r.ok())
         .map(|r| r.body)
         .unwrap_or_default();
@@ -1312,8 +1313,8 @@ fn sign_in_home_users_with_clock(ac: &AccountClient, epoch: u64,
         Ok(users) => users.iter().map(UserTile::of).collect(),
         Err(evidence) => {
             log(&format!("auth: home users {} ({})",
-                if crate::plex::account::refused_identity(&evidence).is_some() { "refused" } else { "unavailable" },
-                crate::plex::account::describe_evidence(&evidence)));
+                if crate::catalog::account::refused_identity(&evidence).is_some() { "refused" } else { "unavailable" },
+                crate::catalog::account::describe_evidence(&evidence)));
             Vec::<UserTile>::new()
         }
     };
@@ -1400,7 +1401,7 @@ fn pin_window(expires_in: i64) -> Duration {
 fn poll_delay(misses: u32) -> Duration {
     const BASE_MS: u64 = 2_000;
     const CEILING_MS: u64 = 16_000;
-    crate::plex::account::backoff(misses, Duration::from_millis(BASE_MS),
+    crate::catalog::account::backoff(misses, Duration::from_millis(BASE_MS),
         Duration::from_millis(CEILING_MS))
 }
 
@@ -1459,14 +1460,14 @@ fn retry_account_call<T>(policy: AccountRetryPolicy, clock: &mut impl RetryClock
                 let elapsed = clock.elapsed();
                 on_miss(attempts, elapsed, evidence);
                 let status = match evidence { Ok(status) => Some(status), Err(f) => f.status };
-                let can_retry = crate::plex::account::transient(&evidence)
+                let can_retry = crate::catalog::account::transient(&evidence)
                     && status != Some(429)
                     && attempts < policy.max_attempts
                     && elapsed < policy.budget;
                 if !can_retry {
                     return Retried { result: AccountCallEnd::Failed(evidence), attempts, elapsed };
                 }
-                let pause = crate::plex::account::backoff(attempts - 1,
+                let pause = crate::catalog::account::backoff(attempts - 1,
                     Duration::from_secs(2), Duration::from_secs(4))
                     .min(policy.budget.saturating_sub(elapsed));
                 if !clock.wait(pause) {
@@ -1487,11 +1488,11 @@ fn discovery_retry_progress(run: DiscoveryRetryRun, misses: u32,
     }
 }
 
-fn account_timeouts(remaining: Duration) -> plx_net::net::Timeouts {
+fn account_timeouts(remaining: Duration) -> nj_net::net::Timeouts {
     let capped = remaining.min(Duration::from_secs(8));
     let millis = capped.as_millis().max(1).min(i32::MAX as u128) as _;
-    plx_net::net::Timeouts { total_ms: millis, connect_s: capped.as_secs().max(1) as _,
-        ..plx_net::net::API }
+    nj_net::net::Timeouts { total_ms: millis, connect_s: capped.as_secs().max(1) as _,
+        ..nj_net::net::API }
 }
 
 fn cancellable_wait_while(duration: Duration, live: impl Fn() -> bool) -> bool {
@@ -1779,7 +1780,7 @@ struct PlexTvFailure {
 /// cannot say two different things about the same verdict (plan §4).
 ///
 /// The English catalog preserves the approved wording; translations retain its remedy.
-pub(crate) fn discovery_insecure_only_message() -> &'static str { plx_platform::i18n::msg::browse_auth_insecure() }
+pub(crate) fn discovery_insecure_only_message() -> &'static str { nj_platform::i18n::msg::browse_auth_insecure() }
 
 /// Which read-out a [`plaintext_copy`] is for: the two differ only in where an answered question
 /// can be changed.
@@ -1811,14 +1812,14 @@ pub(crate) enum ReadoutSurface {
 /// A SHARED server is named by its owner ([`PlaintextVerdict::shared_by`]) — on screen only; the
 /// report never carries it.
 pub(crate) fn plaintext_copy(verdict: Option<&PlaintextVerdict>, surface: ReadoutSurface) -> std::borrow::Cow<'static, str> {
-    plaintext_copy_in(verdict, surface, plx_platform::i18n::current())
+    plaintext_copy_in(verdict, surface, nj_platform::i18n::current())
 }
 
 // Explicit locale keeps the entire verdict testable without changing the process locale.
 // Each catalog sentence owns the server/owner grammar and the named action.
 pub(crate) fn plaintext_copy_in(verdict: Option<&PlaintextVerdict>, surface: ReadoutSurface,
-    locale: &plx_platform::i18n::LocaleContext) -> std::borrow::Cow<'static, str> {
-    use plx_platform::i18n::msg;
+    locale: &nj_platform::i18n::LocaleContext) -> std::borrow::Cow<'static, str> {
+    use nj_platform::i18n::msg;
     use std::borrow::Cow;
     let fallback = || Cow::Borrowed(msg::browse_auth_insecure_in(locale));
     let Some(v) = verdict else { return fallback() };
@@ -1991,7 +1992,7 @@ fn classify(status: i32, body: &[u8], want_machine_id: &str) -> Outcome {
 ///
 /// `pin`, when [`race_batch`] built one for this candidate, is forwarded to the probe request
 /// exactly as `apply_candidate_activation` forwards one to
-/// `register_origin` — the same [`crate::plex::ResolvePin`], used one step earlier: at the DIAL
+/// `register_origin` — the same [`crate::catalog::ResolvePin`], used one step earlier: at the DIAL
 /// that decides the winner, not only at the registration of one already decided.
 ///
 /// **A pin is also what makes a probe a learning one** (issue #380): a candidate with a
@@ -2004,7 +2005,7 @@ fn classify(status: i32, body: &[u8], want_machine_id: &str) -> Outcome {
 /// is `Some` exactly when it held.
 pub(crate) fn get_identity(
     origin: &Origin,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::catalog::ResolvePin>,
     budget: Duration,
 ) -> ProbeReply {
     let probe = if pin.is_some() {
@@ -2039,7 +2040,7 @@ pub(crate) enum ProbeReply {
     /// (`crate::http::Reply::peer_pin`); `None` over plaintext, for an origin without a
     /// `ResolvePin` (see [`get_identity`]) and on every test seam.
     Answered { status: i32, body: Vec<u8>, peer_pin: Option<String> },
-    Failed(Option<plx_net::net::RequestFailure>),
+    Failed(Option<nj_net::net::RequestFailure>),
 }
 
 impl ProbeReply {
@@ -2064,7 +2065,7 @@ impl ProbeReply {
         let graded = self.grade(want_machine_id);
         if let (Outcome::Reachable, Self::Answered { peer_pin: Some(pin), .. }) = (graded.0, self) {
             if location != probe::Location::Relay {
-                crate::plex::session::learn_server_key(want_machine_id, pin);
+                crate::catalog::session::learn_server_key(want_machine_id, pin);
             }
         }
         graded
@@ -2113,10 +2114,10 @@ impl AdmissionBudget {
 
     fn attempt(
         &mut self,
-        request: impl FnOnce(Instant) -> crate::plex::EndpointAdmission,
-    ) -> crate::plex::EndpointAdmission {
+        request: impl FnOnce(Instant) -> crate::catalog::EndpointAdmission,
+    ) -> crate::catalog::EndpointAdmission {
         if self.exhausted() {
-            return crate::plex::EndpointAdmission::Timeout;
+            return crate::catalog::EndpointAdmission::Timeout;
         }
         let started = Instant::now();
         let deadline = started.checked_add(self.remaining).unwrap_or(started);
@@ -2127,7 +2128,7 @@ impl AdmissionBudget {
 }
 
 type ProbeDial = Arc<
-    dyn Fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> ProbeReply + Send + Sync + 'static,
+    dyn Fn(&Origin, Option<&crate::catalog::ResolvePin>, Duration) -> ProbeReply + Send + Sync + 'static,
 >;
 type ProbeJob = Box<dyn FnOnce() + Send + 'static>;
 
@@ -2330,7 +2331,7 @@ fn race_batch(
         // which pins the same way after one already has. `None` for a plaintext candidate (a pin
         // belongs to a TLS name only) or an unmatched/undecodable label; the request then resolves
         // through DNS exactly as before.
-        let pin = crate::plex::ResolvePin::for_origin(&origin, &c.address);
+        let pin = crate::catalog::ResolvePin::for_origin(&origin, &c.address);
         let location = c.location;
         let job = Box::new(move || {
             let (outcome, route) =
@@ -2534,7 +2535,7 @@ fn candidate_activation(
     c: &Candidate,
     origin: &Origin,
     credit: &str,
-    evidence: crate::plex::GrantEvidence,
+    evidence: crate::catalog::GrantEvidence,
 ) -> CandidateActivation {
     CandidateActivation {
         machine_id: plan.machine_id.clone(),
@@ -2621,14 +2622,14 @@ fn publish_settled_probe(probe: &SettledProbe) {
     // one point every discovery path publishes through, so a token is never left standing for an
     // origin the latest probe did not re-prove.
     if probe.outcome != Outcome::Reachable {
-        crate::plex::grant::revoke(&probe.machine_id);
+        crate::catalog::grant::revoke(&probe.machine_id);
     }
     // …and an offer lives exactly as long as the latest verdict is still insecure-only.
     if probe.outcome != Outcome::InsecureOnly {
-        crate::plex::grant::withdraw_offer(&probe.machine_id);
+        crate::catalog::grant::withdraw_offer(&probe.machine_id);
     }
-    let Some((id, client)) = crate::plex::server_ids()
-        .filter_map(|id| crate::plex::client_for(id).map(|client| (id, client)))
+    let Some((id, client)) = crate::catalog::server_ids()
+        .filter_map(|id| crate::catalog::client_for(id).map(|client| (id, client)))
         .find(|(_, client)| client.machine_id() == probe.machine_id)
     else {
         return;
@@ -2640,10 +2641,10 @@ fn publish_settled_probe(probe: &SettledProbe) {
         // an unparseable address LEAVES a previously known ip alone (A1) rather than forcing it
         // back to unknown, since this function updates an ALREADY-registered client rather than
         // applying facts inside a fresh registration write.
-        let ip = probe.address.as_deref().and_then(crate::plex::IpVersion::of_host);
-        client.apply_connection(crate::plex::ConnectionFacts::new(Some(link), ip));
+        let ip = probe.address.as_deref().and_then(crate::catalog::IpVersion::of_host);
+        client.apply_connection(crate::catalog::ConnectionFacts::new(Some(link), ip));
     }
-    crate::plex::publish_probe_result(id, probe.outcome);
+    crate::catalog::publish_probe_result(id, probe.outcome);
 }
 
 #[cfg(test)]
@@ -2723,7 +2724,7 @@ fn probe_server(plan: &ProbePlan, dial: &dyn Fn(&Origin) -> (i32, Vec<u8>)) -> R
 
 /// One insecure-only server, as the read-out needs it — `plex::grant` owns the type, because the
 /// consent surfaces outside sign-in read it from the grant table's offers.
-pub(crate) use crate::plex::grant::PlaintextVerdict;
+pub(crate) use crate::catalog::grant::PlaintextVerdict;
 
 /// **A verified plaintext answer becomes usable only under a grant.** The race holds plaintext
 /// aside until every HTTPS route, the relay included, has settled ([`probe_server_racing`]); what
@@ -2762,7 +2763,7 @@ fn settle_plaintext(
             Reach::At(c, origin)
         }
         Err(_) => {
-            crate::plex::grant::offered(ask.scope(),
+            crate::catalog::grant::offered(ask.scope(),
                 plaintext_verdict(res, plan, &evidence, household, ask));
             Reach::InsecureOnly(c, routes)
         }
@@ -2831,7 +2832,7 @@ fn resolve_roster_using_admission(
     policy: CredentialPolicy,
     ask: &PlaintextAsk,
     probe_one: &mut dyn FnMut(&ProbePlan, &[String]) -> Reach,
-    admit: &mut dyn FnMut(&SourceRef) -> crate::plex::EndpointAdmission,
+    admit: &mut dyn FnMut(&SourceRef) -> crate::catalog::EndpointAdmission,
     activate: &mut dyn FnMut(&ProbePlan, &Candidate, &Origin),
     between_servers: &mut dyn FnMut(),
     observe: &mut dyn FnMut(&ProbePlan, Outcome, Option<probe::Location>, Option<String>),
@@ -2870,26 +2871,26 @@ fn resolve_roster_using_admission(
                 break reach;
             }
             match admit(&s) {
-                crate::plex::EndpointAdmission::Usable => {
+                crate::catalog::EndpointAdmission::Usable => {
                     admitted_machine_id = Some(s.machine_id.clone());
                     if let Reach::At(c, origin) = &reach { activate(&plan, c, origin); }
                     break reach;
                 }
-                crate::plex::EndpointAdmission::Refused(status) => {
+                crate::catalog::EndpointAdmission::Refused(status) => {
                     refused = true;
                     log(&format!("auth: {:?} refused its per-profile grant (HTTP {status})",
                         plan.name));
                 }
-                crate::plex::EndpointAdmission::InsecureOnly => insecure = true,
+                crate::catalog::EndpointAdmission::InsecureOnly => insecure = true,
                 evidence => log(&format!("auth: {:?} did not admit its grant ({evidence:?})",
                     plan.name)),
             }
             // A consented plaintext origin that did not admit served nothing: its grant goes with
             // it, so a token is not left standing for an origin this run rejected.
-            if crate::plex::grant::granted_origin(&s.machine_id)
+            if crate::catalog::grant::granted_origin(&s.machine_id)
                 .is_some_and(|granted| granted.base() == s.origin_url)
             {
-                crate::plex::grant::revoke(&s.machine_id);
+                crate::catalog::grant::revoke(&s.machine_id);
             }
             let origin = s.origin_url;
             if rejected_origins.contains(&origin) { break Reach::No; }
@@ -2958,7 +2959,7 @@ fn resolve_roster_using(
 ) -> Resolved {
     resolve_roster_using_admission(resources, household, policy, &PlaintextAsk::undecided(),
         &mut |plan, _| probe_one(plan),
-        &mut |_| crate::plex::EndpointAdmission::Usable, &mut |_, _, _| {},
+        &mut |_| crate::catalog::EndpointAdmission::Usable, &mut |_, _, _| {},
         between_servers,
         observe).outcome
 }
@@ -2975,9 +2976,9 @@ fn resolve_roster_using(
 /// `household` is [`session::Session::household_ids`], captured by the caller from the live session
 /// rather than read here: these functions are pure so the whole of discovery is host-gradeable, and
 /// a worker that read the session file mid-probe would be reading it under whoever switched profile
-/// meanwhile ([`crate::plex`]'s "capture the server at the spawn site" rule, one identity up).
+/// meanwhile ([`crate::catalog`]'s "capture the server at the spawn site" rule, one identity up).
 fn credit_of(res: &Resource, household: &[i64]) -> String {
-    crate::plex::owner_credit(res.grant(), household).to_string()
+    crate::catalog::owner_credit(res.grant(), household).to_string()
 }
 
 /// [`credit_of`] for a machine named by a [`ProbePlan`] rather than by the row itself — the early
@@ -3007,20 +3008,20 @@ fn credit_for_machine(resources: &[Resource], machine_id: &str, household: &[i64
 /// is a decided STRING, while this is raw wire evidence that outlives any particular roster and is
 /// re-graded downstream. An id that names no row carries no evidence, which degrades to exactly
 /// what raw `owned` already said — the same "absence is the safe direction" the credit rule takes.
-fn evidence_for_machine(resources: &[Resource], machine_id: &str) -> crate::plex::GrantEvidence {
+fn evidence_for_machine(resources: &[Resource], machine_id: &str) -> crate::catalog::GrantEvidence {
     if machine_id.is_empty() {
-        return crate::plex::GrantEvidence::default();
+        return crate::catalog::GrantEvidence::default();
     }
     resources
         .iter()
         .find(|r| r.is_server() && r.client_identifier == machine_id)
-        .map(|r| crate::plex::GrantEvidence::of(r.grant()))
+        .map(|r| crate::catalog::GrantEvidence::of(r.grant()))
         .unwrap_or_default()
 }
 
 /// The grant evidence a persisted [`SourceRef`] carries, for the registry describers.
-fn grant_of(source: &SourceRef) -> crate::plex::GrantEvidence {
-    crate::plex::GrantEvidence {
+fn grant_of(source: &SourceRef) -> crate::catalog::GrantEvidence {
+    crate::catalog::GrantEvidence {
         owned: source.owned,
         home: source.home,
         owner_id: source.owner_id,
@@ -3061,7 +3062,7 @@ fn resolve_roster_live_while(
 ) -> Resolution {
     let policy = CredentialPolicy::build();
     let dial: ProbeDial = Arc::new(get_identity);
-    let spawn = |_index: usize, job: ProbeJob| plx_base::task::spawn_small("probe", job);
+    let spawn = |_index: usize, job: ProbeJob| nj_base::task::spawn_small("probe", job);
     let mut probe_one = |plan: &ProbePlan, rejected: &[String]| {
         if !live() { return Reach::No; }
         probe_server_racing(&plan.without(rejected), Arc::clone(&dial), &spawn, PROBE_DEADLINES,
@@ -3069,9 +3070,9 @@ fn resolve_roster_live_while(
     };
     let mut admission_budget = AdmissionBudget::new(ADMISSION_BUDGET);
     let mut admit = |source: &SourceRef| {
-        if !live() { return crate::plex::EndpointAdmission::Transport; }
+        if !live() { return crate::catalog::EndpointAdmission::Transport; }
         admission_budget.attempt(|deadline|
-            crate::plex::admit_source_until(source, client_id, deadline))
+            crate::catalog::admit_source_until(source, client_id, deadline))
     };
     let mut between_servers = || {
         if !live() { return; }
@@ -3139,7 +3140,7 @@ fn probe_profile_resource_live_after(
 ) -> (Option<SourceRef>, SettledProbe) {
     let plan = probe::plan(resource, CredentialPolicy::build());
     let dial: ProbeDial = Arc::new(get_identity);
-    let spawn = |_index: usize, job: ProbeJob| plx_base::task::spawn_small("probe", job);
+    let spawn = |_index: usize, job: ProbeJob| nj_base::task::spawn_small("probe", job);
     let reach = probe_server_racing(&plan.without(rejected_origins), dial, &spawn, PROBE_DEADLINES,
         &mut |_, _, _| {});
     let reach = settle_plaintext(resource, &plan, rejected_origins, household, reach, ask);
@@ -3191,7 +3192,7 @@ fn resolved_without_roster(
 ///
 /// Each resource that `provides` a server is turned into ranked candidates by `plex::probe`, raced
 /// within that server, and accepted only when the answer's `machineIdentifier` matches. Each winner
-/// is registered with the [server registry](crate::plex::register) under its **real machine id** and
+/// is registered with the [server registry](crate::catalog::register) under its **real machine id** and
 /// its **own** per-(user, server) `accessToken` — a share is a separate authority and answers 401 to
 /// our own server's token. Our own server stays `current`: a share is browsable, never the default.
 ///
@@ -3517,7 +3518,7 @@ fn server_roster_worker_with_output(sess: Session, epoch: u64, expected: Session
         AccountCallEnd::Cancelled => return,
         AccountCallEnd::Failed(evidence) => {
             log(&format!("auth: server roster refresh could not list resources ({})",
-                crate::plex::account::describe_evidence(&evidence)));
+                crate::catalog::account::describe_evidence(&evidence)));
             output.terminal(AuthProgress::ServerRoster(ServerRosterProgress {
                 epoch,
                 expected,
@@ -3653,7 +3654,7 @@ fn probe_endpoint_work(
             log(&format!(
                 "auth: endpoint refresh for source {} could not list resources ({})",
                 id.raw(),
-                crate::plex::account::describe_evidence(&evidence)
+                crate::catalog::account::describe_evidence(&evidence)
             ));
             return (None, None);
         }
@@ -3744,7 +3745,7 @@ fn reconcile_primary(server: &mut ServerRef, found: &[SourceRef]) -> bool {
     true
 }
 
-/// Register a roster with the [server registry](crate::plex::register), optionally naming which
+/// Register a roster with the [server registry](crate::catalog::register), optionally naming which
 /// entry is the current server.
 ///
 /// The registry is keyed on `machineIdentifier`, so this is idempotent: re-running discovery
@@ -3765,7 +3766,7 @@ fn install_roster(sources: &[SourceRef], primary: Option<usize>, client_id: &str
         // Applied atomically inside the same write (#95 step 8) — a re-pointed slot's fresh
         // `Client` gets its connection facts from THIS call rather than a separate one after.
         let connection =
-            crate::plex::ConnectionFacts::new(s.tier, crate::plex::IpVersion::of_host(&s.address));
+            crate::catalog::ConnectionFacts::new(s.tier, crate::catalog::IpVersion::of_host(&s.address));
         let id = register_observed_origin(&s.machine_id, &origin, &s.token,
             s.resolve_pin().as_ref(), connection, client_id);
         if !id.is_set() {
@@ -3783,9 +3784,9 @@ fn install_roster(sources: &[SourceRef], primary: Option<usize>, client_id: &str
         //
         // `owned` comes from the roster rather than from an empty handle: a share whose
         // `sourceTitle` plex.tv did not send is still a share.
-        crate::plex::describe_server(id, &s.name, &s.shared_by, grant_of(s));
+        crate::catalog::describe_server(id, &s.name, &s.shared_by, grant_of(s));
         if primary == Some(i) {
-            crate::plex::set_current(id);
+            crate::catalog::set_current(id);
         }
     }
     installed
@@ -3890,7 +3891,7 @@ fn switch_failure(pin_submitted: bool) -> (String, bool) {
         (String::new(), true)
     } else {
         (
-            plx_platform::i18n::msg::browse_auth_switch_failed().into(),
+            nj_platform::i18n::msg::browse_auth_switch_failed().into(),
             false,
         )
     }
@@ -3902,7 +3903,7 @@ fn switch_failure(pin_submitted: bool) -> (String, bool) {
 /// it agrees or the roster has none. The first device run of the cache (2026-09-06) wrote NO
 /// record for a primed profile: the response's `uuid` came back empty, `remember_profile` refuses
 /// an empty key, and the pick that followed offline found "no cached credentials".
-fn seated_uuid(u: &crate::plex::account::SwitchedUser, tile: &UserTile) -> String {
+fn seated_uuid(u: &crate::catalog::account::SwitchedUser, tile: &UserTile) -> String {
     if tile.uuid.is_empty() {
         u.uuid.clone()
     } else {
@@ -3999,7 +4000,7 @@ fn offline_switch_outcome(
             // pick is needed first).
             ProfileSwitchOutcomeProgress::Failed {
                 error: String::from(
-                    plx_platform::i18n::msg::browse_auth_offline_profile(),
+                    nj_platform::i18n::msg::browse_auth_offline_profile(),
                 ),
                 pin_denied: false,
             }
@@ -4022,13 +4023,13 @@ pub(crate) trait ProfileWorkIo {
         None
     }
     #[cfg(not(test))]
-    fn admit(&mut self, source: &SourceRef, client_id: &str) -> crate::plex::EndpointAdmission;
+    fn admit(&mut self, source: &SourceRef, client_id: &str) -> crate::catalog::EndpointAdmission;
     #[cfg(test)]
-    fn admit(&mut self, _: &SourceRef, _: &str) -> crate::plex::EndpointAdmission {
-        crate::plex::EndpointAdmission::Usable
+    fn admit(&mut self, _: &SourceRef, _: &str) -> crate::catalog::EndpointAdmission {
+        crate::catalog::EndpointAdmission::Usable
     }
     fn admit_until(&mut self, source: &SourceRef, client_id: &str, _: Instant)
-        -> crate::plex::EndpointAdmission {
+        -> crate::catalog::EndpointAdmission {
         self.admit(source, client_id)
     }
     fn admission_budget(&self) -> Duration { ADMISSION_BUDGET }
@@ -4057,7 +4058,7 @@ impl<S: FnOnce(&AccountClient, &str, Option<&str>) -> SwitchOutcome> ProfileWork
         // policy does not credential is never re-credentialed here, grant or no grant
         // (`plex::grant::remembered_allowed`). The fresh probe above it already dialled every
         // granted origin; one it did not reach stays unreached.
-        if !crate::plex::grant::remembered_allowed(CredentialPolicy::build(), &origin) { return None; }
+        if !crate::catalog::grant::remembered_allowed(CredentialPolicy::build(), &origin) { return None; }
         let plan = probe::plan(resource, CredentialPolicy::build());
         let pin = cached.resolve_pin();
         let budget = if cached.tier == Some(probe::Location::Local) {
@@ -4080,12 +4081,12 @@ impl<S: FnOnce(&AccountClient, &str, Option<&str>) -> SwitchOutcome> ProfileWork
         Some((source, settled_probe(&plan, outcome, cached.tier,
             (outcome == Outcome::Reachable).then(|| cached.address.clone()))))
     }
-    fn admit(&mut self, source: &SourceRef, client_id: &str) -> crate::plex::EndpointAdmission {
-        crate::plex::admit_source(source, client_id)
+    fn admit(&mut self, source: &SourceRef, client_id: &str) -> crate::catalog::EndpointAdmission {
+        crate::catalog::admit_source(source, client_id)
     }
     fn admit_until(&mut self, source: &SourceRef, client_id: &str, deadline: Instant)
-        -> crate::plex::EndpointAdmission {
-        crate::plex::admit_source_until(source, client_id, deadline)
+        -> crate::catalog::EndpointAdmission {
+        crate::catalog::admit_source_until(source, client_id, deadline)
     }
     fn gap(&mut self) { std::thread::sleep(SERVER_GAP); }
 }
@@ -4162,14 +4163,14 @@ pub(crate) fn profile_switch_worker_with_io(
         AccountCallEnd::Cancelled => return,
         AccountCallEnd::Failed(evidence) => {
             log(&format!("auth: profile resources request failed ({})",
-                crate::plex::account::describe_evidence(&evidence)));
+                crate::catalog::account::describe_evidence(&evidence)));
             // A refusal is an answer, not a dead link: "check the connection" would send the
             // person to a router that is fine. The PIN was already accepted by this point, so
             // this is never the PIN flash either.
-            let error = if crate::plex::account::refused_identity(&evidence).is_some() {
-                plx_platform::i18n::msg::browse_auth_profile_signin_refused(&tile.title)
+            let error = if crate::catalog::account::refused_identity(&evidence).is_some() {
+                nj_platform::i18n::msg::browse_auth_profile_signin_refused(&tile.title)
             } else {
-                plx_platform::i18n::msg::browse_auth_switch_failed().into()
+                nj_platform::i18n::msg::browse_auth_switch_failed().into()
             };
             output.terminal(AuthProgress::ProfileSwitch(ProfileSwitchProgress {
                 epoch,
@@ -4188,7 +4189,7 @@ pub(crate) fn profile_switch_worker_with_io(
             epoch,
             expected,
             outcome: ProfileSwitchOutcomeProgress::Failed {
-                error: plx_platform::i18n::msg::browse_auth_no_access(&tile.title),
+                error: nj_platform::i18n::msg::browse_auth_no_access(&tile.title),
                 pin_denied: false,
             },
         }));
@@ -4241,7 +4242,7 @@ pub(crate) fn profile_switch_worker_with_io(
             if rejected_origins.contains(&origin) { break; }
             let admission = admission_budget.attempt(|deadline|
                 io.admit_until(&winner, &cid, deadline));
-            if admission == crate::plex::EndpointAdmission::Usable {
+            if admission == crate::catalog::EndpointAdmission::Usable {
                 selected_mid = Some(winner.machine_id.clone());
                 reached.push(winner);
                 break;
@@ -4266,13 +4267,13 @@ pub(crate) fn profile_switch_worker_with_io(
         // ordinary copy sends the user to ask their friend for access they already have.
         let insecure_only = probes.iter().any(|p| p.outcome == Outcome::InsecureOnly)
             || admission_failures.iter().any(|(_, evidence)|
-                *evidence == crate::plex::EndpointAdmission::InsecureOnly);
+                *evidence == crate::catalog::EndpointAdmission::InsecureOnly);
         let refusal = admission_failures.iter().find_map(|(name, evidence)| match evidence {
-            crate::plex::EndpointAdmission::Refused(status) => Some((name, *status)),
+            crate::catalog::EndpointAdmission::Refused(status) => Some((name, *status)),
             _ => None,
         });
         let malformed = admission_failures.iter().any(|(_, evidence)|
-            *evidence == crate::plex::EndpointAdmission::Malformed);
+            *evidence == crate::catalog::EndpointAdmission::Malformed);
         log(&format!(
             "auth: switch '{}' -> {}",
             tile.title,
@@ -4288,13 +4289,13 @@ pub(crate) fn profile_switch_worker_with_io(
                 error: if insecure_only {
                     discovery_insecure_only_message().to_owned()
                 } else if let Some((name, _)) = refusal {
-                    plx_platform::i18n::msg::browse_auth_server_profile_refused(&tile.title, &name)
+                    nj_platform::i18n::msg::browse_auth_server_profile_refused(&tile.title, &name)
                 } else if malformed {
-                    plx_platform::i18n::msg::browse_auth_switch_invalid().into()
+                    nj_platform::i18n::msg::browse_auth_switch_invalid().into()
                 } else if !admission_failures.is_empty() {
-                    plx_platform::i18n::msg::browse_auth_switch_failed().into()
+                    nj_platform::i18n::msg::browse_auth_switch_failed().into()
                 } else {
-                    plx_platform::i18n::msg::browse_auth_no_source_access(&tile.title)
+                    nj_platform::i18n::msg::browse_auth_no_source_access(&tile.title)
                 },
                 pin_denied: false,
             },

@@ -12,7 +12,7 @@ use super::test_support::*;
 /// directions, because a server that came back must stop being dimmed too.
 #[test]
 fn a_page_fetch_is_what_keeps_reachability_honest_after_discovery() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut browse = TestBrowse::default();
     browse.seed_sources(vec![
         a_source("mac-mini", "", true),
@@ -58,7 +58,7 @@ fn a_page_fetch_is_what_keeps_reachability_honest_after_discovery() {
 /// registration and the first probe, which is a visible flicker on every boot.
 #[test]
 fn not_probed_reads_as_reachable_and_only_a_failed_dial_dims_a_group() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut s = a_source("nas-home", "friend", true);
 
     s.state = SourceState::NotProbed;
@@ -96,9 +96,9 @@ fn not_probed_reads_as_reachable_and_only_a_failed_dial_dims_a_group() {
 /// on a server that would otherwise work.
 #[test]
 fn insecure_only_reads_unreachable_and_a_status_fold_cannot_erase_it() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     assert_eq!(
-        source_state(Some(crate::plex::probe::Outcome::InsecureOnly)),
+        source_state(Some(crate::catalog::probe::Outcome::InsecureOnly)),
         SourceState::InsecureOnly
     );
     let mut s = a_source("nas-home", "friend", true);
@@ -123,21 +123,21 @@ fn insecure_only_reads_unreachable_and_a_status_fold_cannot_erase_it() {
 
 #[test]
 fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let _cleanup = Cleanup;
     let mut browse = TestBrowse::default();
 
-    let sid = crate::plex::register_for_test("mach-A", "10.0.0.1", 32400, "tok", "cid");
-    crate::plex::client_for(sid)
+    let sid = crate::catalog::register_for_test("mach-A", "10.0.0.1", 32400, "tok", "cid");
+    crate::catalog::client_for(sid)
         .unwrap()
-        .set_link(crate::plex::probe::Location::Remote);
+        .set_link(crate::catalog::probe::Location::Remote);
     browse.sync_roster();
     assert_eq!(
         browse.state.sources()[0].state,
@@ -146,32 +146,32 @@ fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
     );
     assert_eq!(
         browse.state.sources()[0].tier,
-        Some(crate::plex::probe::Location::Remote)
+        Some(crate::catalog::probe::Location::Remote)
     );
 
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Unauthorized);
+    crate::catalog::publish_probe_result(sid, crate::catalog::probe::Outcome::Unauthorized);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Unauthorized);
     assert_eq!(
         browse.state.sources()[0].tier,
-        Some(crate::plex::probe::Location::Remote),
+        Some(crate::catalog::probe::Location::Remote),
         "cached route metadata is retained"
     );
 
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .unwrap()
-        .set_link(crate::plex::probe::Location::Relay);
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Reachable);
+        .set_link(crate::catalog::probe::Location::Relay);
+    crate::catalog::publish_probe_result(sid, crate::catalog::probe::Outcome::Reachable);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Reachable);
-    assert_eq!(browse.state.sources()[0].tier, Some(crate::plex::probe::Location::Relay));
+    assert_eq!(browse.state.sources()[0].tier, Some(crate::catalog::probe::Location::Relay));
 
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Unreachable);
+    crate::catalog::publish_probe_result(sid, crate::catalog::probe::Outcome::Unreachable);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Unreachable);
     assert_eq!(
         browse.state.sources()[0].tier,
-        Some(crate::plex::probe::Location::Relay),
+        Some(crate::catalog::probe::Location::Relay),
         "offline does not erase the last route"
     );
 }
@@ -179,7 +179,7 @@ fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
 /// its own copy of the question and two copies are how a widening drifts.
 #[test]
 fn the_source_group_projection_answers_reachability_the_same_way() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut browse = TestBrowse::default();
     browse.seed_sources(vec![
         a_source("mac-mini", "", true),
@@ -213,7 +213,7 @@ fn the_source_group_projection_answers_reachability_the_same_way() {
 /// counters and returns without dialling anything.
 #[test]
 fn a_refused_discovery_spawn_backs_off_instead_of_flooding_the_log() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut browse = TestBrowse::default();
     browse.seed_sources(vec![
         a_source("mac-mini", "", true),
@@ -268,7 +268,7 @@ fn a_refused_discovery_spawn_backs_off_instead_of_flooding_the_log() {
 /// (the single-flight flags were the first).
 #[test]
 fn an_empty_count_landing_does_not_latch_the_probe_off() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let (_cleanup, mut browse, _, client) = registered_source();
     browse.append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
     if let Some(s) = browse.state.source_mut(0) {
@@ -317,7 +317,7 @@ fn an_empty_count_landing_does_not_latch_the_probe_off() {
 /// destinations resolve directly to those rows — and the Source chip is absent, not empty.
 #[test]
 fn one_source_resolves_both_permanent_type_destinations() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     // The strip reads the favourite set, and the favourite set is resolved against the
     // RECORDED per-profile answer — so this test needs a session of its own, or it
     // grades whatever the host machine happens to have on disk.
@@ -348,7 +348,7 @@ fn one_source_resolves_both_permanent_type_destinations() {
 /// Failed would show a failure read-out over a listing that is still perfectly healthy.
 #[test]
 fn a_stale_failure_landing_does_not_blame_the_current_query() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let (_cleanup, mut browse, _, client) = registered_page_source();
     let stale = browse.state.query_gen();
     browse.state.bump_gen(); // the query moved on under the in-flight fetch
@@ -380,11 +380,11 @@ fn a_stale_failure_landing_does_not_blame_the_current_query() {
 /// is on no shelf (a Library-grid or Related item): nothing to redraw").
 #[test]
 fn a_watched_edit_reaches_every_section_and_only_the_right_server() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut browse = TestBrowse::default();
     seed_one_section(&mut browse);
-    let sid = crate::plex::ServerId::UNSET;
-    let other = crate::plex::ServerId::from_raw(1);
+    let sid = crate::catalog::ServerId::UNSET;
+    let other = crate::catalog::ServerId::from_raw(1);
     let row = |sid, rk: &str, resume: i64| {
         let mut m = PmsMovie::default();
         m.sid = sid;

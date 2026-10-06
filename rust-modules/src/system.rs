@@ -56,7 +56,7 @@ pub(crate) fn clear_opaque_region() {
         //
         // …and nothing to LINK against under `cargo test`. Since phase 9 this is reached through
         // `Rig::clear_opaque_region` (`app/bridge.rs`), which the host suite exercises, where
-        // before it was reachable only from `plex_run` and the dead-strip hid the missing
+        // before it was reachable only from `nj_run` and the dead-strip hid the missing
         // `libwayland-client`. The guard below is `G_WL_SURFACE`, which is null in a test, so
         // nothing is skipped that would have run.
         #[cfg(all(not(feature = "hostsim"), not(test)))]
@@ -179,10 +179,10 @@ pub(crate) fn sys_grab_wayland(winp: *mut c_void) {
     }
 }
 
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 
 // ------------------------------------------------------------------------------------------
-// EXPERIMENT (`/tmp/plxnative-opaque`): declare the UI surface OPAQUE where nothing is behind it
+// EXPERIMENT (`/tmp/nativejelly-opaque`): declare the UI surface OPAQUE where nothing is behind it
 // ------------------------------------------------------------------------------------------
 //
 // `docs/perf-damage-tracking-verdict.md` §5 is the design. The whole app has run with
@@ -251,7 +251,7 @@ struct RegistryListener {
 /// is already mapped; this only avoids naming these particular symbols in `DT_NEEDED`.
 #[cfg(not(feature = "hostsim"))]
 fn wl_sym(name: &str) -> Option<*mut c_void> {
-    plx_base::dynlib::Handle::self_handle()
+    nj_base::dynlib::Handle::self_handle()
         .sym(name)
         .filter(|p| !p.is_null())
 }
@@ -308,11 +308,11 @@ unsafe extern "C" fn on_global(
     ));
 }
 
-/// Build the full-surface opaque region, once, at boot. No-op unless `/tmp/plxnative-opaque` is
+/// Build the full-surface opaque region, once, at boot. No-op unless `/tmp/nativejelly-opaque` is
 /// armed; returns without touching the surface's current (NULL) region either way.
 #[cfg(not(feature = "hostsim"))]
 pub(crate) fn opaque_region_init() {
-    if !plx_base::devtrig::flag("opaque") {
+    if !nj_base::devtrig::flag("opaque") {
         return;
     }
     let (display, surface) = unsafe { (G_WL_DISPLAY, G_WL_SURFACE) };
@@ -380,7 +380,7 @@ pub(crate) fn opaque_region_init() {
     // Surface-local coordinates. `viewport()` is the rect the renderer actually draws into, which
     // is the whole 1920x1080 surface on every set seen so far and is the honest answer on a
     // letterboxed one, where the bars are not ours to claim.
-    let (vx, vy, vw, vh) = plx_base::surface::viewport();
+    let (vx, vy, vw, vh) = nj_base::surface::viewport();
     let region = unsafe {
         let r = ctor(
             compositor,
@@ -411,7 +411,7 @@ pub(crate) fn opaque_region_init() {}
 
 /// Assert the opaque region appropriate to this route, if the experiment is armed.
 ///
-/// A no-op — one read of a `static` and a return — whenever `/tmp/plxnative-opaque` is absent,
+/// A no-op — one read of a `static` and a return — whenever `/tmp/nativejelly-opaque` is absent,
 /// which is what keeps the default path byte-identical. Only sends a request when the answer
 /// CHANGES, because the opaque region is sticky server-side.
 #[cfg(not(feature = "hostsim"))]
@@ -455,7 +455,7 @@ pub(crate) fn opaque_route(player: bool) {
 #[cfg(feature = "hostsim")]
 pub(crate) fn opaque_route(_player: bool) {}
 
-// ---- The COMPOSITOR FRAME-CALLBACK PROBE (`/tmp/plxnative-framecb`) -----------------------------
+// ---- The COMPOSITOR FRAME-CALLBACK PROBE (`/tmp/nativejelly-framecb`) -----------------------------
 //
 // A present's wait for a free back buffer is paid inside the frame's first framebuffer-0 command
 // (the `clear` span), and from inside the app that wait reads the same whether the compositor
@@ -479,8 +479,8 @@ pub(crate) fn opaque_route(_player: bool) {}
 // compiled only with `devtriggers` (and not in the simulator); the shipping build has the empty
 // stubs at the end of this section.
 #[cfg(all(not(feature = "hostsim"), feature = "devtriggers"))]
-plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-framecb` — see the section comment above.
+nj_base::devtrig::latched_flag!(
+    /// `/tmp/nativejelly-framecb` — see the section comment above.
     pub(crate) fn frame_probe_armed = "framecb";
 );
 
@@ -750,7 +750,7 @@ mod wayland_tests {
 
     #[test]
     fn failed_refresh_cannot_reuse_a_previous_surface() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         unsafe {
             let mut display = 0u8;
             let mut surface = 0u8;
@@ -767,7 +767,7 @@ mod wayland_tests {
 
     #[test]
     fn background_release_and_foreground_refresh_replace_the_borrow() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         unsafe {
             let mut display = 0u8;
             let mut surface = 0u8;
@@ -802,7 +802,7 @@ mod wayland_tests {
 
     #[test]
     fn foreign_or_incomplete_wm_info_cannot_supply_wayland_handles() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         unsafe {
             for subsystem in [0i32, 4, 6] {
                 let mut info = [0u8; 512];

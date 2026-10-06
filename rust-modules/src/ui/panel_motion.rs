@@ -5,7 +5,7 @@
 //! that size changes (a page push or pop, a tab switch, a live row added) the card does not jump:
 //! a [`Spring`] per moving edge carries the TOP and LEFT edges to the new layout while the bottom
 //! and right edges stay on the anchor the panel family shares with the control row. Everything
-//! here is built from the app's one spring integrator, so the present gate ([`plx_machine::idle`]) knows
+//! here is built from the app's one spring integrator, so the present gate ([`nj_machine::idle`]) knows
 //! exactly when the panel is moving and an at-rest panel asks for no frame at all.
 //!
 //! A page transition additionally moves the OUTGOING and INCOMING pages sideways, both inside the
@@ -28,7 +28,7 @@
 
 use std::cell::Cell;
 
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use crate::ui::screen::ClipScope;
 use crate::ui::table::TableView;
 use crate::ui::{theme, Painter, Rect, Spring};
@@ -155,7 +155,7 @@ impl PanelMotion {
         self.warmed.set(Some(rev));
         // This walk's strings are the whole queue: a held modal's or a finished transition's
         // leftovers must not eat the drain's budget (`ui::dispatch` clears the same way).
-        plx_gfx::text::clear_prewarm();
+        nj_gfx::text::clear_prewarm();
         Self::record_text(natural, live, measure);
     }
 
@@ -170,7 +170,7 @@ impl PanelMotion {
     /// Queue `table`'s uncached strings: the recording walk `ui::dispatch` runs for a page's warm
     /// pass, speculative to the recorder, with no raw clear reaching the framebuffer.
     fn record_text(natural: Rect, table: &TableView, measure: &dyn Measure) {
-        plx_gfx::gfx::without_frame_clear(|| {
+        nj_gfx::gfx::without_frame_clear(|| {
             crate::ui::rec::speculative(|| {
                 crate::ui::record_walk(|| table.draw(Painter::recording(), natural, measure))
             })
@@ -181,11 +181,11 @@ impl PanelMotion {
     /// background queue rather than the live one: the draw empties the live queue every frame it
     /// has no page warm (`ui::dispatch`), and on the TV that left this warm one string deep, so the
     /// first switch to Audio still rasterised `textx9:8.0` cold. Called with the live queue empty.
-    /// Returns the queue's owner token ([`plx_gfx::text::park_prewarm_as_background`]).
+    /// Returns the queue's owner token ([`nj_gfx::text::park_prewarm_as_background`]).
     pub(crate) fn prewarm_background_text(natural: Rect, table: &TableView, measure: &dyn Measure) -> u64 {
-        debug_assert!(!plx_gfx::text::prewarm_pending(), "the live queue must not be parked with it");
+        debug_assert!(!nj_gfx::text::prewarm_pending(), "the live queue must not be parked with it");
         Self::record_text(natural, table, measure);
-        plx_gfx::text::park_prewarm_as_background()
+        nj_gfx::text::park_prewarm_as_background()
     }
 
     /// **Rasterise what [`Self::prewarm_text`] queued**, then what
@@ -198,20 +198,20 @@ impl PanelMotion {
     /// uploads nothing (nor may it reach EGL while the window is backgrounded). It still runs
     /// before the draw's first `glClear`, so the work overlaps the back-buffer wait. The wall clock
     /// makes how many frames a queue takes environmental, which is why a held surface reads its
-    /// readiness through the recorded latch ([`plx_gfx::text::latch_surface_text_pending`]).
+    /// readiness through the recorded latch ([`nj_gfx::text::latch_surface_text_pending`]).
     pub(crate) fn drain_queued_text(mut now_us: impl FnMut() -> u64) -> usize {
-        if !plx_gfx::text::prewarm_pending() && !plx_gfx::text::background_prewarm_pending() {
+        if !nj_gfx::text::prewarm_pending() && !nj_gfx::text::background_prewarm_pending() {
             return 0;
         }
-        plx_base::diag::spans::span("warmdrain", || {
+        nj_base::diag::spans::span("warmdrain", || {
             let start = now_us();
-            let mut done = plx_gfx::text::drain_prewarm(PREWARM_BUDGET_US, &mut now_us);
+            let mut done = nj_gfx::text::drain_prewarm(PREWARM_BUDGET_US, &mut now_us);
             // Live strings left over mean the budget is spent, and so does too small a remainder:
             // speculation waits its turn.
-            if !plx_gfx::text::prewarm_pending() {
+            if !nj_gfx::text::prewarm_pending() {
                 let left = PREWARM_BUDGET_US.saturating_sub(now_us().saturating_sub(start));
                 if left >= BACKGROUND_MIN_US {
-                    done += plx_gfx::text::drain_background_prewarm(left, &mut now_us);
+                    done += nj_gfx::text::drain_background_prewarm(left, &mut now_us);
                 }
             }
             done
@@ -247,7 +247,7 @@ impl PanelMotion {
             // land exactly: the analytic spring only approaches its target, and a panel that rests
             // a hair off its anchor would never be bit-identical to its own layout
             for (spring, target) in [(&mut self.left, natural.x), (&mut self.top, natural.y)] {
-                if plx_machine::idle::settled(spring.pos, target, spring.vel) {
+                if nj_machine::idle::settled(spring.pos, target, spring.vel) {
                     *spring = Spring::at(target);
                 }
             }
@@ -257,7 +257,7 @@ impl PanelMotion {
             for layer in &mut slide.leaving {
                 layer.alpha = (layer.alpha - dt / OUT_S).max(0.0);
                 layer.x.step(-slide.dir * shift, SLIDE_K, dt);
-                plx_machine::idle::note_spring(layer.alpha, 0.0, 1.0);
+                nj_machine::idle::note_spring(layer.alpha, 0.0, 1.0);
             }
             slide.leaving.retain(|l| l.alpha > 0.0);
             let loudest = slide.leaving.iter().fold(0.0_f32, |m, l| m.max(l.alpha));
@@ -266,9 +266,9 @@ impl PanelMotion {
             }
             slide.live_x.step(0.0, SLIDE_K, dt);
             if slide.live_alpha < 1.0 {
-                plx_machine::idle::note_spring(slide.live_alpha, 1.0, 1.0);
+                nj_machine::idle::note_spring(slide.live_alpha, 1.0, 1.0);
             }
-            let at_rest = plx_machine::idle::settled(slide.live_x.pos, 0.0, slide.live_x.vel);
+            let at_rest = nj_machine::idle::settled(slide.live_x.pos, 0.0, slide.live_x.vel);
             if slide.leaving.is_empty() && slide.live_alpha >= 1.0 && at_rest {
                 self.slide = None;
             }
@@ -403,7 +403,7 @@ impl PanelMotion {
     /// [`Self::drain_queued_text`] on the host's deterministic clock: one millisecond per string
     /// rasterised so far, so a drain's budget admits a countable number of strings.
     pub(crate) fn drain_queued_text_for_test() -> usize {
-        Self::drain_queued_text(|| plx_gfx::text::rasterised_for_test() * 1000)
+        Self::drain_queued_text(|| nj_gfx::text::rasterised_for_test() * 1000)
     }
 }
 
@@ -414,12 +414,12 @@ mod tests {
     fn queue(prefix: &str, n: usize) {
         for i in 0..n {
             let s = std::ffi::CString::new(format!("{prefix}{i}")).unwrap();
-            plx_gfx::text::queue_prewarm(s.as_ptr(), 20, 0);
+            nj_gfx::text::queue_prewarm(s.as_ptr(), 20, 0);
         }
     }
 
     fn resident(prefix: &str, n: usize) -> usize {
-        (0..n).filter(|i| plx_gfx::text::prewarm_resident_any_size_for_test(format!("{prefix}{i}").as_bytes())).count()
+        (0..n).filter(|i| nj_gfx::text::prewarm_resident_any_size_for_test(format!("{prefix}{i}").as_bytes())).count()
     }
 
     /// **One presenting frame spends a bounded time in the prewarm drain**, the rest carries to the
@@ -427,15 +427,15 @@ mod tests {
     /// was `warmdrain:22.7` in one frame and `warmdrain:9.8` on the menu's open frame.
     #[test]
     fn a_drain_stops_at_its_time_budget_and_the_rest_carries_over_live_first() {
-        let _g = plx_base::testlock::serial();
-        plx_gfx::text::reset_prewarm_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_gfx::text::reset_prewarm_for_test();
         queue("bg-", 5);
-        plx_gfx::text::park_prewarm_as_background();
+        nj_gfx::text::park_prewarm_as_background();
         queue("live-", 7);
         // The host clock charges 1 ms per string, so the budget admits `per_drain` of them.
         let per_drain = PREWARM_BUDGET_US.div_ceil(1000) as usize;
         let mut frames = 0;
-        while plx_gfx::text::prewarm_pending() || plx_gfx::text::background_prewarm_pending() {
+        while nj_gfx::text::prewarm_pending() || nj_gfx::text::background_prewarm_pending() {
             frames += 1;
             let done = PanelMotion::drain_queued_text_for_test();
             assert!((1..=per_drain).contains(&done), "frame {frames} rasterised {done}, budget admits {per_drain}");
@@ -448,7 +448,7 @@ mod tests {
         assert!(frames > 1, "twelve strings fit one frame's budget");
 
         // A string that alone overruns the budget still makes progress: exactly one, then stop.
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         queue("slow-", 4);
         let mut t = 0;
         let done = PanelMotion::drain_queued_text(|| {
@@ -456,7 +456,7 @@ mod tests {
             t
         });
         assert_eq!(done, 1, "the floor is one string per drain");
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
     }
 
     /// **A sliver of budget does not buy a parked string.** When the live drain ends just under the
@@ -465,21 +465,21 @@ mod tests {
     /// with a real remainder, and drains alone when nothing live is queued.
     #[test]
     fn a_sliver_of_budget_left_by_the_live_queue_skips_the_background() {
-        let _g = plx_base::testlock::serial();
-        plx_gfx::text::reset_prewarm_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_gfx::text::reset_prewarm_for_test();
         queue("bg-", 3);
-        plx_gfx::text::park_prewarm_as_background();
+        nj_gfx::text::park_prewarm_as_background();
         queue("live-", 1);
         // 2.4 ms a string: the one live string leaves 100 us of the 2.5 ms budget.
-        let done = PanelMotion::drain_queued_text(|| plx_gfx::text::rasterised_for_test() * 2_400);
+        let done = PanelMotion::drain_queued_text(|| nj_gfx::text::rasterised_for_test() * 2_400);
         assert_eq!(done, 1, "the background took a string with 100 us left");
         assert_eq!(resident("bg-", 3), 0);
-        assert!(plx_gfx::text::background_prewarm_pending(), "the parked queue stays for a later frame");
+        assert!(nj_gfx::text::background_prewarm_pending(), "the parked queue stays for a later frame");
         // Nothing live queued: the whole budget is the background's.
-        let done = PanelMotion::drain_queued_text(|| plx_gfx::text::rasterised_for_test() * 2_400);
+        let done = PanelMotion::drain_queued_text(|| nj_gfx::text::rasterised_for_test() * 2_400);
         // (2.4 ms is under the budget, so a second string is begun, and the third is not.)
         assert_eq!(done, 2, "the background did not drain on an empty live queue");
         assert_eq!(resident("bg-", 3), 2);
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
     }
 }

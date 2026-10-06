@@ -81,7 +81,7 @@ HOST=${HOST:-}
 # and every new lane paid the two-minute compile again to produce bytes that already existed
 # eleven times over.
 #
-# So it lives under $PLX_BUILD_CACHE (default ~/.cache/plxnative), machine-wide, KEYED BY THE
+# So it lives under $NJ_BUILD_CACHE (default ~/.cache/nativejelly), machine-wide, KEYED BY THE
 # CONFIGURE FLAGS. The key is the half that makes sharing safe, and it is precisely what the
 # manual `ln -s` workaround in fleet-plan could not express: RELEASE=1 drops swscale and the
 # mpeg1/mpegts pair, so a dev lane and a release lane MUST NOT share one build tree. Different
@@ -89,7 +89,7 @@ HOST=${HOST:-}
 # one configuration the other's libraries. The cross and host builds key apart for the same
 # reason, as do two different NDKs.
 #
-# Set PLX_BUILD_CACHE= (empty) to keep the build tree in the checkout as it was; CI does not need
+# Set NJ_BUILD_CACHE= (empty) to keep the build tree in the checkout as it was; CI does not need
 # to, because a runner is ephemeral and caches the prefix rather than the objects.
 #
 # The TARBALL is deliberately NOT in the cache. It is the LGPL corresponding source that
@@ -214,9 +214,9 @@ fi
 # end up on the configure line, and the flag list itself — which is what keeps a RELEASE tree and
 # a dev tree apart.
 if [ -n "$HOST" ]; then ARCHTAG=host; else ARCHTAG=arm; fi
-CACHE_ROOT=${PLX_BUILD_CACHE-$HOME/.cache/plxnative}
+CACHE_ROOT=${NJ_BUILD_CACHE-$HOME/.cache/nativejelly}
 # ABSOLUTE, because this script `cd`s into $SRC before it uses $WORK again. A relative root such
-# as `PLX_BUILD_CACHE=.plx-cache` would leave $WORK relative too, and after the `cd` every later
+# as `NJ_BUILD_CACHE=.plx-cache` would leave $WORK relative too, and after the `cd` every later
 # reference — the configure/build/install logs, $WORK/destdir — would resolve UNDER THE FFMPEG
 # SOURCE TREE instead, where the first redirection fails and takes the build with it.
 if [ -n "$CACHE_ROOT" ]; then

@@ -18,9 +18,9 @@
 //!   Sheet or PlayerPanel dismisses it; an Alert ignores the miss; an Opaque surface swallows it.
 //! - `host_policy()` folds bottom-to-top into the `(HostUpdate, HostRender)` pair the frame reads.
 
-use plx_machine::machine::{EntryId, Host, InputOwner, Leave, PresentHandle, Tick};
-use plx_machine::motion;
-use plx_machine::machine::GroupId;
+use nj_machine::machine::{EntryId, Host, InputOwner, Leave, PresentHandle, Tick};
+use nj_machine::motion;
+use nj_machine::machine::GroupId;
 use super::super::screen::{Enter, FocusTarget, ReturnState, ScreenEvent, UnderlaySource};
 use super::stack::{Entry, Instance};
 use super::{Life, Minter};
@@ -149,8 +149,8 @@ impl PopoverMotion {
         !self.holding && (self.appear - self.target).abs() < 0.002 && self.vel.abs() < 0.02
     }
     pub fn tick(&mut self, t: Tick, present: &mut PresentHandle<'_>) {
-        let text_pending = plx_gfx::text::surface_text_pending() && self.held_ms < SURFACE_TEXT_HOLD_MAX_MS;
-        self.tick_gated(t, present, plx_gfx::gfx::snapshot_pending() || text_pending);
+        let text_pending = nj_gfx::text::surface_text_pending() && self.held_ms < SURFACE_TEXT_HOLD_MAX_MS;
+        self.tick_gated(t, present, nj_gfx::gfx::snapshot_pending() || text_pending);
     }
     /// [`tick`](Self::tick) with the host snapshot's GPU state passed in: a HELD surface stays
     /// held while the snapshot its hold frame rendered is still in flight, because those frames
@@ -162,7 +162,7 @@ impl PopoverMotion {
             self.held_ms += t.dt() * 1000.0;
             self.held_ticks += 1;
             // Still moving: the next frame must present and take the first real step.
-            present.note(plx_machine::present::PresentEvent::Motion);
+            present.note(nj_machine::present::PresentEvent::Motion);
             return;
         }
         motion::spring(&mut self.appear, &mut self.vel, self.target, APPEAR_K, t, present);
@@ -173,7 +173,7 @@ impl PopoverMotion {
             // The generic spring's visual epsilon can stop requesting presents before this
             // exact endpoint. The surface must paint the snap, including its last closing frame.
             if changed {
-                present.note(plx_machine::present::PresentEvent::Motion);
+                present.note(nj_machine::present::PresentEvent::Motion);
             }
         }
     }
@@ -335,9 +335,9 @@ pub(crate) trait DimSink {
     fn captured(&self) -> bool;
     /// `gfx::field_kick`: queue the reduction of the page as it stands NOW — before any dim is on
     /// it — or `None` when it has no honest answer this frame.
-    fn kick(&mut self) -> Option<plx_gfx::gfx::FieldTicket>;
+    fn kick(&mut self) -> Option<nj_gfx::gfx::FieldTicket>;
     /// `gfx::field_collect`: the reduction `kick` queued, once the GPU has had a frame for it.
-    fn collect(&mut self, t: plx_gfx::gfx::FieldTicket) -> plx_gfx::gfx::FieldRead;
+    fn collect(&mut self, t: nj_gfx::gfx::FieldTicket) -> nj_gfx::gfx::FieldRead;
     /// A read is (or is no longer) in flight: keep the loop turning for it, and keep the host's
     /// ground stage — whose quad bakes the dim in — from being taken before it lands.
     fn in_flight(&mut self, pending: bool);
@@ -350,39 +350,39 @@ pub(crate) struct GlDims;
 
 impl DimSink for GlDims {
     fn video_plane(&self) -> bool {
-        plx_gfx::gfx::video_plane_frame()
+        nj_gfx::gfx::video_plane_frame()
     }
     fn page_epoch(&self) -> u32 {
         crate::ui::popover::host::page_epoch()
     }
     fn captured(&self) -> bool {
-        plx_gfx::gfx::snapshot_captured_this_frame()
+        nj_gfx::gfx::snapshot_captured_this_frame()
     }
-    fn kick(&mut self) -> Option<plx_gfx::gfx::FieldTicket> {
+    fn kick(&mut self) -> Option<nj_gfx::gfx::FieldTicket> {
         // A host test links GL but never creates a context — `underlay::upload`'s reason. A test
         // that wants a sample drives the seam with its own `DimSink`.
         #[cfg(not(test))]
         {
             // Reduce the host snapshot itself when it is the undimmed page — it was taken at this
             // same instant, so the chain's own full-screen copy would duplicate it.
-            plx_gfx::gfx::field_kick(crate::ui::popover::host::page_tex())
+            nj_gfx::gfx::field_kick(crate::ui::popover::host::page_tex())
         }
         #[cfg(test)]
         {
             None
         }
     }
-    fn collect(&mut self, t: plx_gfx::gfx::FieldTicket) -> plx_gfx::gfx::FieldRead {
+    fn collect(&mut self, t: nj_gfx::gfx::FieldTicket) -> nj_gfx::gfx::FieldRead {
         // No context-free guard needed: with no chain built (a host test never builds one) this
         // answers `Lost` before touching GL.
-        plx_gfx::gfx::field_collect(t)
+        nj_gfx::gfx::field_collect(t)
     }
     fn in_flight(&mut self, pending: bool) {
         crate::ui::popover::host::defer_ground(pending);
         if pending {
             // A frame for the read to land in, without claiming the page changed — which would
             // re-capture the host and restart the read it is waiting on.
-            plx_machine::idle::wake();
+            nj_machine::idle::wake();
         }
     }
     fn dim(&mut self, field: &crate::ui::underlay::UnderlayField, alpha: f32) {
@@ -425,7 +425,7 @@ pub struct ModalUnderlay {
     field: crate::ui::underlay::UnderlayField,
     held: Latched,
     /// A page read queued and not yet landed: the epoch it reads, and its ticket.
-    pending: Option<(u32, plx_gfx::gfx::FieldTicket)>,
+    pending: Option<(u32, nj_gfx::gfx::FieldTicket)>,
     /// The stack is empty but the field still holds a corner envelope — see
     /// [`retire`](Self::retire). It is a CACHE until something asks for it: the next sync, dim or
     /// presented surface either adopts it (the same envelope) or drops it first.
@@ -530,7 +530,7 @@ impl ModalUnderlay {
         if !self.dormant && (self.held != Latched::Nothing || self.pending.is_some()) {
             return;
         }
-        plx_base::diag::spans::span("upre", || self.latch_corners(c));
+        nj_base::diag::spans::span("upre", || self.latch_corners(c));
         self.dormant = true;
     }
 
@@ -607,15 +607,15 @@ impl ModalUnderlay {
         self.wake(source);
         if let Some((epoch, ticket)) = self.pending {
             match sink.collect(ticket) {
-                plx_gfx::gfx::FieldRead::Ready(raw) => {
+                nj_gfx::gfx::FieldRead::Ready(raw) => {
                     self.field
                         .latch_sampled(&raw, crate::ui::underlay::Grade::Dim);
                     self.held = Latched::Page(epoch);
                     self.pending = None;
                 }
-                plx_gfx::gfx::FieldRead::Pending => {}
+                nj_gfx::gfx::FieldRead::Pending => {}
                 // The targets were reused (another reader ran the chain): ask again below.
-                plx_gfx::gfx::FieldRead::Lost => self.pending = None,
+                nj_gfx::gfx::FieldRead::Lost => self.pending = None,
             }
         }
         let epoch = sink.page_epoch();
@@ -808,8 +808,8 @@ impl<H: Host> ModalStack<H> {
     /// One frame: EVERY surface's motion steps — Closing ones unconditionally, whatever the host
     /// fold says — and an Opening surface whose spring settled becomes Open.
     ///
-    /// **Each surface's step runs in its OWN [`MotionScope`](plx_machine::idle::MotionScope)** (§4.4),
-    /// the `plx_machine::idle` half of the `Present::set_scope(Surface)` the dispatcher already sets around
+    /// **Each surface's step runs in its OWN [`MotionScope`](nj_machine::idle::MotionScope)** (§4.4),
+    /// the `nj_machine::idle` half of the `Present::set_scope(Surface)` the dispatcher already sets around
     /// it: a panel's appear spring is the PANEL's motion, never the host page's. The scope merges
     /// back, so it changes who the motion is attributed to and never whether it counts.
     pub fn tick(&mut self, t: Tick, present: &mut PresentHandle<'_>) {
@@ -817,7 +817,7 @@ impl<H: Host> ModalStack<H> {
             if s.phase == Phase::Hidden {
                 continue;
             }
-            let _scope = plx_machine::idle::MotionScope::open();
+            let _scope = nj_machine::idle::MotionScope::open();
             s.motion.tick(t, present);
             if s.phase == Phase::Opening && s.motion.settled() {
                 s.phase = Phase::Open;
@@ -850,7 +850,7 @@ impl<H: Host> ModalStack<H> {
     }
 
     /// Drop retired entries whose `Unmount` was delivered.
-    pub fn drop_unmounted(&mut self, unmounted: &[plx_machine::machine::InstanceId]) {
+    pub fn drop_unmounted(&mut self, unmounted: &[nj_machine::machine::InstanceId]) {
         self.retired
             .retain(|e| !e.inst.as_ref().map_or(true, |i| unmounted.contains(&i.id)));
         for surface in &mut self.surfaces {
@@ -922,7 +922,7 @@ impl<H: Host> ModalStack<H> {
         if self.surfaces.is_empty() {
             return;
         }
-        if plx_gfx::gfx::blur_source_pass() {
+        if nj_gfx::gfx::blur_source_pass() {
             let source = self.underlay_source();
             self.underlay.wake(source);
             // Declaration/source traversals consume the published field. Only the visible
@@ -959,10 +959,10 @@ impl<H: Host> ModalStack<H> {
         // was the backlog the frame after that paid: 20–24 ms (television, 2026-09-19). A held
         // surface on a frame that captured nothing still queues nothing.
         if !dims.is_empty() || source != Some(UnderlaySource::Page) || sink.captured() || self.underlay.is_dormant() {
-            plx_base::diag::spans::span("ulatch", || self.underlay.sync(source, sink));
+            nj_base::diag::spans::span("ulatch", || self.underlay.sync(source, sink));
         }
         for (_, a, lift) in dims {
-            plx_base::diag::spans::span("udim", || sink.dim(self.underlay.field(), a));
+            nj_base::diag::spans::span("udim", || sink.dim(self.underlay.field(), a));
             (lift)(read);
         }
     }
@@ -1014,7 +1014,7 @@ impl<H: Host> ModalStack<H> {
         Some((s.entry.id, on_miss(s.style)))
     }
 
-    pub fn instance_mut(&mut self, id: plx_machine::machine::InstanceId) -> Option<&mut Instance<H>> {
+    pub fn instance_mut(&mut self, id: nj_machine::machine::InstanceId) -> Option<&mut Instance<H>> {
         self.surfaces
             .iter_mut()
             .map(|s| &mut s.entry)
@@ -1030,7 +1030,7 @@ impl<H: Host> ModalStack<H> {
 mod hide_tests {
     use super::*;
     use crate::ui::fixture::{tick, FixtureArg, FixtureHost};
-    use plx_machine::present::Present;
+    use nj_machine::present::Present;
 
     /// A surface presented and then stepped until its appear spring has settled: `Open`, with the
     /// motion at 1. Everything below starts here, because a JUST-presented surface is at 0 and
@@ -1138,9 +1138,9 @@ mod hide_tests {
     /// queue that never drains cannot hold a panel shut past [`SURFACE_TEXT_HOLD_MAX_MS`].
     #[test]
     fn a_held_surface_waits_for_its_text_but_not_forever() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let held_for = |pending_frames: u32| {
-            plx_gfx::text::reset_prewarm_for_test();
+            nj_gfx::text::reset_prewarm_for_test();
             let mut m = PopoverMotion::at(0.0);
             m.to(1.0);
             m.hold_one_frame();
@@ -1148,15 +1148,15 @@ mod hide_tests {
             let mut frames = 0u32;
             while m.appear == 0.0 && frames < 100 {
                 if frames < pending_frames {
-                    plx_gfx::text::queue_prewarm(c"surface text".as_ptr(), 24, 0);
+                    nj_gfx::text::queue_prewarm(c"surface text".as_ptr(), 24, 0);
                 } else {
-                    plx_gfx::text::reset_prewarm_for_test();
+                    nj_gfx::text::reset_prewarm_for_test();
                 }
                 let mut ph = PresentHandle::of(&mut present);
                 m.tick(tick(16 * (frames + 1)), &mut ph);
                 frames += 1;
             }
-            plx_gfx::text::reset_prewarm_for_test();
+            nj_gfx::text::reset_prewarm_for_test();
             frames
         };
         assert_eq!(held_for(0), 2, "a warm open: the one held frame, then the ramp");
@@ -1172,9 +1172,9 @@ mod hide_tests {
     /// two frames late) must open the surface on the recorded frame whatever its own queue holds.
     #[test]
     fn a_held_surface_waits_on_the_latched_text_readiness() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let held_for = |latched: &dyn Fn(u32) -> bool, queued: bool| {
-            plx_gfx::text::reset_prewarm_for_test();
+            nj_gfx::text::reset_prewarm_for_test();
             let mut m = PopoverMotion::at(0.0);
             m.to(1.0);
             m.hold_one_frame();
@@ -1182,14 +1182,14 @@ mod hide_tests {
             let mut frames = 0u32;
             while m.appear == 0.0 && frames < 100 {
                 if queued {
-                    plx_gfx::text::queue_prewarm(c"surface text".as_ptr(), 24, 0);
+                    nj_gfx::text::queue_prewarm(c"surface text".as_ptr(), 24, 0);
                 }
-                plx_gfx::text::latch_surface_text_pending(latched(frames));
+                nj_gfx::text::latch_surface_text_pending(latched(frames));
                 let mut ph = PresentHandle::of(&mut present);
                 m.tick(tick(16 * (frames + 1)), &mut ph);
                 frames += 1;
             }
-            plx_gfx::text::reset_prewarm_for_test();
+            nj_gfx::text::reset_prewarm_for_test();
             frames
         };
         assert_eq!(held_for(&|_| false, true), 2, "a live queue the latch calls ready does not hold");

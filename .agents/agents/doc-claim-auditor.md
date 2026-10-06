@@ -65,7 +65,7 @@ code. That is the job.
 **Report contradictions. Never report absence.**
 
 A doc that fails to mention the new thing is **not a finding**. "Consider documenting the new
-`plxnative-foo` trigger" is not a finding. "docs/agent-reference.md's trigger list does not include your new
+`nativejelly-foo` trigger" is not a finding. "docs/agent-reference.md's trigger list does not include your new
 gate" is not a finding — docs/agent-reference.md says of that very list, "There are ~40; this lists the ones
 worth knowing by name" and "**The catalog is the source, not this list**", so the omission is the
 design. Same for the per-module test bullets, which the file tells you to read as "what each module
@@ -95,7 +95,7 @@ Ranked by blast radius, which is also the order to report findings in:
 1. **`AGENTS.md`** (root). Loaded into every Codex session and imported by Claude, so a false claim
    here is repeated to every agent. A finding here outranks the identical finding anywhere else.
 2. **`docs/agent-reference.md` and the three nested `docs/agent-reference.md` guides** under
-   `rust-modules/src/ui/`, `rust-modules/src/plex/`, and `rust-modules/src/player/`. The long-form
+   `rust-modules/src/ui/`, `rust-modules/src/catalog/`, and `rust-modules/src/player/`. The long-form
    reference is imported by Claude and routed from `AGENTS.md`; each nested guide is the "read this
    before touching X" file for its directory,
    and the root file delegates whole subjects to them (the Starfish/ACB ABI and bind-order rules
@@ -112,7 +112,7 @@ Ranked by blast radius, which is also the order to report findings in:
    - **cited-as-live-authority**: the ones `AGENTS.md` and `docs/agent-reference.md` send you to.
      Derive the set, do not
      copy it — `git grep -oh 'docs/[a-z0-9-]*\.md' docs/agent-reference.md | sort -u` (13 files today). A false
-     claim in `docs/pms-api.md` ("The authoritative spec for the data layer") ranks with tier 2.
+     claim in `rust-modules/src/catalog/CLAUDE.md` ("the catalog facade") ranks with tier 2.
    - **dated investigation records**: everything else. Lower rank, and see the benign shapes below
      before reporting one at all.
 6. **`//!` module docs** on the touched Rust files. Prose, and they rot identically — `dev.rs`'s
@@ -148,7 +148,7 @@ recall, so be exhaustive rather than tidy:
   every sentence spelled `./tests/run.py` describe a different suite. Look for a new flag, mode or
   tier whose *existence* re-points a word that did not change.
 - **file paths** added, deleted or moved (a deleted `.rs` file is almost always named in prose).
-- **string literals with a life of their own**: trigger names (`plxnative-*`), event-log field
+- **string literals with a life of their own**: trigger names (`nativejelly-*`), event-log field
   names (`loop=`, `fps=`, `pos=`, `vgap=`), manifest gate keys (`loop_floor`, `fps_floor`,
   `fps_ceiling`), make goals and variables (`FLAVOR`, `RELEASE`, `RUN_SECS`), cargo features
   (`devtools`, `devtriggers`, `hostsim`), remote-FIFO tokens, JSON payload keys.
@@ -339,7 +339,7 @@ file no compiler reads.
 Note why it qualifies: a reader believing it would go looking for a file that is not there, and
 would carry away the false idea that this app has two demuxers.
 
-**A rejected non-finding**: the same change added `plxnative-playurl`, and docs/agent-reference.md's dev-trigger
+**A rejected non-finding**: the same change added `nativejelly-playurl`, and docs/agent-reference.md's dev-trigger
 bullet does not name every trigger. Rejected — the bullet says "There are ~40; this lists the ones
 worth knowing by name" and gives the shell one-liner that regenerates the real catalog. Nothing
 there is false. (Had the bullet instead said "the full list is below", the *same* omission would be

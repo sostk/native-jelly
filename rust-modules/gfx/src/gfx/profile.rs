@@ -1,10 +1,10 @@
 //! Draw-phase instrumentation with three intentionally separate measurement modes — arm exactly
 //! one per run.
 //!
-//! `/tmp/plxnative-profile` selects one phase for asynchronous
+//! `/tmp/nativejelly-profile` selects one phase for asynchronous
 //! `GL_EXT_disjoint_timer_query` timing. It does not call `glFinish`; results are read on later
-//! frames. `/tmp/plxnative-hwcnt` selects one phase for direct Mali Midgard vinstr attribution.
-//! An empty trigger selects `frame.ui` in either mode. `/tmp/plxnative-cpuprof` is the third and
+//! frames. `/tmp/nativejelly-hwcnt` selects one phase for direct Mali Midgard vinstr attribution.
+//! An empty trigger selects `frame.ui` in either mode. `/tmp/nativejelly-cpuprof` is the third and
 //! the only one that measures the CPU: the render thread's own inclusive wall time for EVERY
 //! phase at once, no filter, no `glFinish`, logged as `PROFILE CPU` lines (a `~src` suffix marks
 //! a phase met inside the blur source pass). It takes precedence in [`phase`] over the two GPU
@@ -19,7 +19,7 @@
 //! r12p0 vinstr resets the hardware blocks on a dump and accumulates them per reader client. The
 //! second buffer is therefore already the phase interval; it must **not** be subtracted from the
 //! first as if both were absolute snapshots. Both raw buffers are retained in
-//! `/tmp/plxnative-hwcnt.jsonl` so that assumption can be audited against the device data.
+//! `/tmp/nativejelly-hwcnt.jsonl` so that assumption can be audited against the device data.
 //!
 //! The HWCNT run's serialized wall duration is calibration metadata only. It is not reported as
 //! GPU time. GPU phase time comes from timer-query runs, while production p50/p95/worst-frame runs
@@ -68,7 +68,7 @@ pub fn dial_armed() -> bool {
 #[cfg(feature = "devtriggers")]
 mod imp {
     use crate::hwcnt::{self, Sample, COUNTERS};
-    use plx_base::eventlog::log;
+    use nj_base::eventlog::log;
     use std::cell::RefCell;
     use std::fs::{File, OpenOptions};
     use std::io::{BufWriter, Write};
@@ -138,7 +138,7 @@ mod imp {
     const NCOUNTERS: usize = COUNTERS.len();
     static ON: AtomicBool = AtomicBool::new(false);
 
-    /// `/tmp/plxnative-cpuprof` — the THIRD mode, and the only one that measures the CPU.
+    /// `/tmp/nativejelly-cpuprof` — the THIRD mode, and the only one that measures the CPU.
     ///
     /// The timer-query and HWCNT modes price GPU work, and both are blind to the case the
     /// frame-drop detector reports as `draw=24ms swap=0.3ms`: a frame whose time is spent on the
@@ -314,7 +314,7 @@ mod imp {
                 return;
             }
         };
-        let path = plx_base::paths::in_runtime_dir(plx_base::paths::runtime_file::HARDWARE_COUNTERS);
+        let path = nj_base::paths::in_runtime_dir(nj_base::paths::runtime_file::HARDWARE_COUNTERS);
         let file = match OpenOptions::new()
             .create(true)
             .truncate(true)

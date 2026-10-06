@@ -514,7 +514,7 @@ pub mod advances {
         })
     }
 
-    /// The text measure over the shipped faces' real advances: `plx_machine::machine::Measure` is
+    /// The text measure over the shipped faces' real advances: `nj_machine::machine::Measure` is
     /// implemented for it beside the trait, in `machine/src/machine.rs` (the lowest layer that names both
     /// the trait and this type), and the share of a column a line may fill under it is
     /// `ui::fit::HEADROOM`, which the callers name.

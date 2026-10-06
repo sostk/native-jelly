@@ -9,7 +9,7 @@ use std::borrow::Cow;
 use crate::ui::document_reader::DocumentReader;
 use crate::ui::frame::Budget;
 use crate::ui::form::{Form, FormId, FormSection, FormTable, RowKey, RowKind};
-use plx_machine::machine::{Canon, Cx, Effects, EntryId, GroupId, Handled, Key, LogicalState, Machine};
+use nj_machine::machine::{Canon, Cx, Effects, EntryId, GroupId, Handled, Key, LogicalState, Machine};
 use crate::ui::route_screen::RouteLayout;
 use crate::ui::screen::{DrawFrame, FocusSource, HitSource, Part, RenderStrategy, Screen, ScreenEvent};
 use crate::ui::table::Row;
@@ -47,22 +47,22 @@ impl Page {
     ];
     fn title(self) -> &'static str {
         match self {
-            Self::Privacy => plx_platform::i18n::msg::settings_legal_privacy_title(),
-            Self::OpenSource => plx_platform::i18n::msg::settings_legal_opensource_title(),
-            Self::Ffmpeg => plx_platform::i18n::msg::settings_legal_ffmpeg_title(),
-            Self::Source => plx_platform::i18n::msg::settings_legal_source_title(),
-            Self::Trademarks => plx_platform::i18n::msg::settings_legal_trademarks_title(),
-            Self::Contact => plx_platform::i18n::msg::settings_legal_contact_title(),
+            Self::Privacy => nj_platform::i18n::msg::settings_legal_privacy_title(),
+            Self::OpenSource => nj_platform::i18n::msg::settings_legal_opensource_title(),
+            Self::Ffmpeg => nj_platform::i18n::msg::settings_legal_ffmpeg_title(),
+            Self::Source => nj_platform::i18n::msg::settings_legal_source_title(),
+            Self::Trademarks => nj_platform::i18n::msg::settings_legal_trademarks_title(),
+            Self::Contact => nj_platform::i18n::msg::settings_legal_contact_title(),
         }
     }
     fn subtitle(self) -> &'static str {
         match self {
-            Self::Privacy => plx_platform::i18n::msg::settings_legal_privacy_subtitle(),
-            Self::OpenSource => plx_platform::i18n::msg::settings_legal_opensource_subtitle(),
-            Self::Ffmpeg => plx_platform::i18n::msg::settings_legal_ffmpeg_subtitle(),
-            Self::Source => plx_platform::i18n::msg::settings_legal_source_subtitle(),
-            Self::Trademarks => plx_platform::i18n::msg::settings_legal_trademarks_subtitle(),
-            Self::Contact => plx_platform::i18n::msg::settings_legal_contact_subtitle(),
+            Self::Privacy => nj_platform::i18n::msg::settings_legal_privacy_subtitle(),
+            Self::OpenSource => nj_platform::i18n::msg::settings_legal_opensource_subtitle(),
+            Self::Ffmpeg => nj_platform::i18n::msg::settings_legal_ffmpeg_subtitle(),
+            Self::Source => nj_platform::i18n::msg::settings_legal_source_subtitle(),
+            Self::Trademarks => nj_platform::i18n::msg::settings_legal_trademarks_subtitle(),
+            Self::Contact => nj_platform::i18n::msg::settings_legal_contact_subtitle(),
         }
     }
     pub(crate) fn body(self) -> &'static str {
@@ -84,37 +84,37 @@ pub(crate) fn privacy_policy() -> &'static str {
 }
 
 static PRIVACY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| [
-    plx_platform::i18n::msg::settings_legal_privacy_responsible(),
-    plx_platform::i18n::msg::settings_legal_privacy_responsible_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_servers(),
-    plx_platform::i18n::msg::settings_legal_privacy_servers_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_local(),
-    plx_platform::i18n::msg::settings_legal_privacy_local_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_plaintext_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_crashes(),
-    plx_platform::i18n::msg::settings_legal_privacy_crashes_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_signin_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_analytics(),
-    plx_platform::i18n::msg::settings_legal_privacy_analytics_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_excluded(),
-    plx_platform::i18n::msg::settings_legal_privacy_excluded_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_retention(),
-    plx_platform::i18n::msg::settings_legal_privacy_retention_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_choices(),
-    plx_platform::i18n::msg::settings_legal_privacy_choices_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_processing(),
-    plx_platform::i18n::msg::settings_legal_privacy_processing_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_uninstall(),
-    plx_platform::i18n::msg::settings_legal_privacy_uninstall_body(),
-    plx_platform::i18n::msg::settings_legal_privacy_contact(),
-    plx_platform::i18n::msg::settings_legal_privacy_contact_body()
+    nj_platform::i18n::msg::settings_legal_privacy_responsible(),
+    nj_platform::i18n::msg::settings_legal_privacy_responsible_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_servers(),
+    nj_platform::i18n::msg::settings_legal_privacy_servers_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_local(),
+    nj_platform::i18n::msg::settings_legal_privacy_local_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_plaintext_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_crashes(),
+    nj_platform::i18n::msg::settings_legal_privacy_crashes_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_signin_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_analytics(),
+    nj_platform::i18n::msg::settings_legal_privacy_analytics_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_excluded(),
+    nj_platform::i18n::msg::settings_legal_privacy_excluded_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_retention(),
+    nj_platform::i18n::msg::settings_legal_privacy_retention_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_choices(),
+    nj_platform::i18n::msg::settings_legal_privacy_choices_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_processing(),
+    nj_platform::i18n::msg::settings_legal_privacy_processing_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_uninstall(),
+    nj_platform::i18n::msg::settings_legal_privacy_uninstall_body(),
+    nj_platform::i18n::msg::settings_legal_privacy_contact(),
+    nj_platform::i18n::msg::settings_legal_privacy_contact_body()
 ].join("\n\n"));
-static OPEN_SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("{}\n\n{}", plx_platform::i18n::msg::settings_legal_opensource_body(), include_str!("../../../LICENSE")));
-static FFMPEG: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(plx_platform::i18n::msg::settings_legal_ffmpeg_body);
-static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| plx_platform::i18n::msg::settings_legal_source_body(env!("PLX_BUILD_SHA")));
-static TRADEMARKS: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(plx_platform::i18n::msg::settings_legal_trademarks_body);
-static CONTACT: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(plx_platform::i18n::msg::settings_legal_contact_body);
-static ABOUT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| plx_platform::i18n::msg::settings_about_body(env!("PLX_BUILD_SHA"), env!("PLX_VERSION")));
+static OPEN_SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("{}\n\n{}", nj_platform::i18n::msg::settings_legal_opensource_body(), include_str!("../../../LICENSE")));
+static FFMPEG: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(nj_platform::i18n::msg::settings_legal_ffmpeg_body);
+static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| nj_platform::i18n::msg::settings_legal_source_body(env!("NJ_BUILD_SHA")));
+static TRADEMARKS: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(nj_platform::i18n::msg::settings_legal_trademarks_body);
+static CONTACT: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(nj_platform::i18n::msg::settings_legal_contact_body);
+static ABOUT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| nj_platform::i18n::msg::settings_about_body(env!("NJ_BUILD_SHA"), env!("NJ_VERSION")));
 
 // ---------------------------------------------------------------------------------------------
 // the index
@@ -146,7 +146,7 @@ impl Page {
 
 /// The Legal index as a [`Form`]: every document is a `Nav` row pushing its `Document` page.
 fn legal_form() -> Form<Page, (), SettingsPage> {
-    let mut docs = FormSection::new(plx_platform::i18n::msg::settings_legal_section());
+    let mut docs = FormSection::new(nj_platform::i18n::msg::settings_legal_section());
     for page in Page::ALL {
         docs = docs.item(
             page,
@@ -197,9 +197,9 @@ impl LegalIndex {
         TableScreen::new(
             Header::new(
                 RouteLayout::screen(),
-                Some(plx_platform::i18n::msg::settings_title()),
-                plx_platform::i18n::msg::settings_legal_title(),
-                plx_platform::i18n::msg::settings_legal_copy(),
+                Some(nj_platform::i18n::msg::settings_title()),
+                nj_platform::i18n::msg::settings_legal_title(),
+                nj_platform::i18n::msg::settings_legal_copy(),
             ),
             &self.form.table,
             GroupId(0),
@@ -228,8 +228,8 @@ impl Machine<InnerHost> for LegalIndex {
                 form_activate(&self.form, *key, fx);
                 Handled::Yes
             }
-            ScreenEvent::Input(plx_machine::machine::InputEvent {
-                kind: plx_machine::machine::InputKind::Key { key: Key::Right, at_edge: true, .. },
+            ScreenEvent::Input(nj_machine::machine::InputEvent {
+                kind: nj_machine::machine::InputKind::Key { key: Key::Right, at_edge: true, .. },
                 ..
             }) => {
                 if let Some(key) = cx.focus.current.and_then(|k| form_right_target(&self.form, k.elem)) {
@@ -252,7 +252,7 @@ impl Screen<InnerHost> for LegalIndex {
         &self.state
     }
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed(plx_platform::i18n::msg::settings_title()))
+        Some(Cow::Borrowed(nj_platform::i18n::msg::settings_title()))
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
@@ -334,7 +334,7 @@ impl DocumentPage {
         Self {
             entry,
             reader: DocumentReader::new(),
-            crumb: plx_platform::i18n::msg::settings_legal_title(),
+            crumb: nj_platform::i18n::msg::settings_legal_title(),
             title: page.title(),
             subtitle: page.subtitle(),
             body: Cow::Borrowed(page.body()),
@@ -349,9 +349,9 @@ impl DocumentPage {
         Self {
             entry,
             reader: DocumentReader::new(),
-            crumb: plx_platform::i18n::msg::settings_title(),
-            title: plx_platform::i18n::msg::settings_about_title(),
-            subtitle: plx_platform::i18n::msg::settings_about_subtitle(),
+            crumb: nj_platform::i18n::msg::settings_title(),
+            title: nj_platform::i18n::msg::settings_about_title(),
+            subtitle: nj_platform::i18n::msg::settings_about_subtitle(),
             body: Cow::Borrowed(&ABOUT),
             qr: None,
             guide_caption: None,
@@ -364,12 +364,12 @@ impl DocumentPage {
         Self {
             entry,
             reader: DocumentReader::new(),
-            crumb: plx_platform::i18n::msg::settings_language_title(),
-            title: plx_platform::i18n::msg::settings_language_contribute(),
-            subtitle: plx_platform::i18n::msg::settings_language_contribute_copy(),
+            crumb: nj_platform::i18n::msg::settings_language_title(),
+            title: nj_platform::i18n::msg::settings_language_contribute(),
+            subtitle: nj_platform::i18n::msg::settings_language_contribute_copy(),
             body: Cow::Owned(contribution_address()),
-            qr: crate::ui::qr::QrCode::new(plx_platform::i18n::CONTRIBUTE_URL).ok(),
-            guide_caption: Some(plx_platform::i18n::msg::settings_language_contribute_body()),
+            qr: crate::ui::qr::QrCode::new(nj_platform::i18n::CONTRIBUTE_URL).ok(),
+            guide_caption: Some(nj_platform::i18n::msg::settings_language_contribute_body()),
             word: "contribute",
             state: DocState { which: 0xfe, pos: 0 },
         }
@@ -401,10 +401,10 @@ impl Machine<InnerHost> for DocumentPage {
                 self.reader.update(t.dt());
                 Handled::Yes
             }
-            ScreenEvent::Input(plx_machine::machine::InputEvent {
-                kind: plx_machine::machine::InputKind::Key { key: key @ (Key::Up | Key::Down), edge, .. },
+            ScreenEvent::Input(nj_machine::machine::InputEvent {
+                kind: nj_machine::machine::InputKind::Key { key: key @ (Key::Up | Key::Down), edge, .. },
                 ..
-            }) if *edge != plx_machine::machine::Edge::Up => {
+            }) if *edge != nj_machine::machine::Edge::Up => {
                 // a document scrolls INSIDE on UP/DOWN and leaves at its ends (spec §7.3 step 2):
                 // the one element cannot MOVE, so the scroll is the page's own arm, and at an end
                 // the key goes back to the engine, whose `neighbour` answers `Edge` there
@@ -488,7 +488,7 @@ impl Screen<InnerHost> for DocumentPage {
 /// A visual line break, not a different address. The path keeps its leading slash and all
 /// GitHub route segments so typing the two lines reaches the QR's exact destination.
 fn contribution_address() -> String {
-    plx_platform::i18n::CONTRIBUTE_URL.trim_start_matches("https://").replace("/blob/", "\n/blob/")
+    nj_platform::i18n::CONTRIBUTE_URL.trim_start_matches("https://").replace("/blob/", "\n/blob/")
 }
 
 /// The `(focus key, destination)` of every `Nav` row the index lists — the structural navigation
@@ -511,31 +511,31 @@ mod tests {
 
     use crate::ui::fixture::FixtureMeasure;
     use crate::ui::hit::{HitMap, PointerKind};
-    use plx_machine::machine::{
+    use nj_machine::machine::{
         Edge, FocusKey, FocusRead, Fx, InputEvent, InputKind, InputOwner, MachineId, NavOp, NavOpKind,
         PressRead, Source, Stamped, Tick,
     };
-    use plx_machine::present::Present;
+    use nj_machine::present::Present;
     use crate::ui::screen::{Activate, By, EdgeRule, Focusable, Hover, Stop};
 
     #[test]
     fn contribution_manual_address_is_the_complete_qr_destination() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let page = DocumentPage::contribute(EntryId(0));
-        assert_eq!(format!("https://{}", page.body.replace('\n', "")), plx_platform::i18n::CONTRIBUTE_URL,
+        assert_eq!(format!("https://{}", page.body.replace('\n', "")), nj_platform::i18n::CONTRIBUTE_URL,
             "a viewer who cannot scan the QR needs the same complete address in text");
         assert!(page.body.lines().nth(1).unwrap().starts_with('/'));
     }
 
     #[test]
     fn every_contribution_locale_preserves_the_canonical_address() {
-        use plx_platform::i18n::{LocaleContext, SHIPPED};
+        use nj_platform::i18n::{LocaleContext, SHIPPED};
         for preference in SHIPPED {
             let locale = LocaleContext::resolve(preference, None, None, None, None);
-            let caption = plx_platform::i18n::msg::settings_language_contribute_body_in(&locale);
+            let caption = nj_platform::i18n::msg::settings_language_contribute_body_in(&locale);
             assert!(!caption.contains("github.com"), "only the caption is translated");
             assert_eq!(format!("https://{}", contribution_address().replace('\n', "")),
-                plx_platform::i18n::CONTRIBUTE_URL);
+                nj_platform::i18n::CONTRIBUTE_URL);
         }
     }
 
@@ -543,7 +543,7 @@ mod tests {
     /// only some of the screens is worse than none, because the reader cannot tell which one is
     /// current. The contact is an issue tracker, so any `@` is a stray email address, and any
     /// other `/issues` link is a stray tracker — the NEXT stray contact fails too, not just the
-    /// upstream `support@plxnative.com` these pages used to carry.
+    /// upstream `support@nativejelly.com` these pages used to carry.
     #[test]
     fn every_document_prints_only_the_one_contact() {
         for page in Page::ALL {
@@ -648,14 +648,14 @@ mod tests {
     /// `env!` again so that re-typing a literal here fails: on any developer build the two differ.
     #[test]
     fn about_names_the_running_version() {
-        let v = crate::plex::identity::VERSION;
+        let v = crate::catalog::identity::VERSION;
         assert!(
             ABOUT.contains(&format!("Version {v}")),
             "About should name {v}, says: {ABOUT:?}"
         );
     }
 
-    /// The About page also names the exact COMMIT — `PLX_VERSION` alone cannot distinguish two
+    /// The About page also names the exact COMMIT — `NJ_VERSION` alone cannot distinguish two
     /// trunk builds cut minutes apart, since both report the same `X.Y.0-dev`.
     #[test]
     fn about_names_a_build_sha() {
@@ -664,8 +664,8 @@ mod tests {
             "About should carry a Build line, says: {ABOUT:?}"
         );
         assert!(
-            !env!("PLX_BUILD_SHA").is_empty(),
-            "PLX_BUILD_SHA must never be the empty string (build.rs falls back to \"unknown\")"
+            !env!("NJ_BUILD_SHA").is_empty(),
+            "NJ_BUILD_SHA must never be the empty string (build.rs falls back to \"unknown\")"
         );
     }
 
@@ -881,10 +881,10 @@ mod tests {
     /// is what decides it, and this is the contract `DocumentPage::step` has to honour against it).
     #[test]
     fn a_document_scrolls_on_up_down_and_leaves_only_at_its_ends() {
-        // `DocumentReader::move_by` reports to `plx_machine::idle`'s process-global gate, so — like that
+        // `DocumentReader::move_by` reports to `nj_machine::idle`'s process-global gate, so — like that
         // module's own scroll tests — this one takes the crate-wide lock rather than racing
         // another test's read of the same `DIRTY`/`DAMAGE_GEN` statics.
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut doc = DocumentPage::legal(EntryId(8), 0);
         doc.reader.set_extent_for_test(500.0);
         let m = FixtureMeasure;
@@ -946,7 +946,7 @@ mod tests {
     /// test that was RED against the broken behaviour, not just green against the fixed one.
     #[test]
     fn a_down_inside_a_document_changes_the_hashed_state() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut doc = DocumentPage::legal(EntryId(9), 1);
         // Long enough that five DOWNs (5 * `document_reader::STEP` = 960px) never reach the end,
         // so every one of them is a genuine mid-document scroll rather than a clamp at `at_end()`.
@@ -1167,7 +1167,7 @@ mod tests {
     /// device's whole-pixel advances (see `settings_text_fit_tests.rs` for the Settings root).
     #[test]
     fn every_legal_row_fits_its_column_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let frame_w = crate::ui::route_screen::RouteLayout::screen().sectioned_table().w;
         let mut out = Vec::new();
         for language in SHIPPED {

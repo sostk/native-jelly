@@ -17,7 +17,7 @@
 //! building it means changing the unit of work from a *string* to a **run**:
 //!
 //!   1. split the string into maximal runs, each entirely drawable by ONE face
-//!      ([`split_runs`], deciding per character through [`plx_base::fontcov`]),
+//!      ([`split_runs`], deciding per character through [`nj_base::fontcov`]),
 //!   2. render each run with its own face,
 //!   3. composite the run surfaces side by side, **aligned on the baseline**, into one buffer,
 //!   4. upload that buffer exactly as a single-run string was uploaded before.
@@ -77,14 +77,14 @@ use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::ptr::{addr_of, addr_of_mut};
 use std::rc::Rc;
 
-use plx_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
+use nj_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
 use crate::overdraw::{gate, Class};
 
 /// Last resort only. Reaching this is a DEFECT, not a graceful degradation — see `font_at`.
 const DROIDSANS: &CStr = c"/usr/share/fonts/DroidSans.ttf";
 
 /// The shipped fonts, addressed relative to wherever the ipk actually got installed
-/// (`plx_base::paths` explains why this cannot be a literal). Built once; `TTF_OpenFont` wants a
+/// (`nj_base::paths` explains why this cannot be a literal). Built once; `TTF_OpenFont` wants a
 /// `*const c_char` that outlives the call, so these are leaked `CString`s rather than temporaries.
 fn app_font(bold: bool) -> &'static CStr {
     static REG: std::sync::OnceLock<CString> = std::sync::OnceLock::new();
@@ -97,7 +97,7 @@ fn app_font(bold: bool) -> &'static CStr {
             "appfont.ttf"
         };
         CString::new(
-            plx_base::paths::in_app_dir(name)
+            nj_base::paths::in_app_dir(name)
                 .into_os_string()
                 .into_encoded_bytes(),
         )
@@ -174,7 +174,7 @@ extern "C" {
     /// `TTF_GlyphIsProvided` — takes a `Uint16`, so it cannot be asked about anything above
     /// U+FFFF; and `TTF_GlyphIsProvided32` is in the NDK header, exported by the NDK `.so`, and
     /// present on **none of the 14** (`--grep '32$'` returns zero matches on every release). So
-    /// `plx_base::fontcov` reads the cmap from the file instead, which also makes coverage a host
+    /// `nj_base::fontcov` reads the cmap from the file instead, which also makes coverage a host
     /// question rather than a device one.
     fn TTF_FontAscent(font: *mut TtfFont) -> c_int;
     fn TTF_FontHeight(font: *mut TtfFont) -> c_int;
@@ -712,7 +712,7 @@ unsafe fn take_slot(cache: &[TCacheEntry; TCACHE]) -> usize {
     slot
 }
 
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 
 /// One line per boot, not one per size — `font_at` is called for every rung of the size ladder,
 /// and 70-odd identical lines would bury the rest of the log.
@@ -722,7 +722,7 @@ fn log_font_fallback_once() {
         log(&format!(
             "FONT FALLBACK: shipped fonts missing at {} — rendering in system DroidSans; \
              the theme size ladder and the hinting contract are INVALID in this build",
-            plx_base::paths::app_dir().display()
+            nj_base::paths::app_dir().display()
         ));
     });
 }
@@ -802,7 +802,7 @@ static mut FONTS_CJK: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_S
 static mut FONTS_SYS: [*mut TtfFont; FONT_SLOTS] = [std::ptr::null_mut(); FONT_SLOTS];
 /// Per-link coverage, read from the file's cmap on FIRST NEED and never again. `None` after
 /// `COV_TRIED` means the file is absent or unreadable, i.e. the link is empty.
-static mut COV: [Option<plx_base::fontcov::Coverage>; 3] = [None, None, None];
+static mut COV: [Option<nj_base::fontcov::Coverage>; 3] = [None, None, None];
 static mut COV_TRIED: [bool; 3] = [false; 3];
 
 /// The ONE place a link's file is named — both the coverage read and the `TTF_OpenFont` go
@@ -812,8 +812,8 @@ fn link_file(link: Link) -> std::path::PathBuf {
         // Coverage is read from the REGULAR face only. That is sound because `fontcov`'s
         // `bold_face_covers_exactly_what_the_regular_one_does` asserts the two are identical in
         // `make check` — the gate is not decoration here, it is what makes one read enough.
-        Link::Base => plx_base::paths::in_app_dir("appfont.ttf"),
-        Link::Cjk => plx_base::paths::in_app_dir(CJK_FONT),
+        Link::Base => nj_base::paths::in_app_dir("appfont.ttf"),
+        Link::Cjk => nj_base::paths::in_app_dir(CJK_FONT),
         Link::Sys => std::path::PathBuf::from(DROIDSANS_FALLBACK),
     }
 }
@@ -832,7 +832,7 @@ unsafe fn link_covers(link: Link, cp: u32) -> bool {
         tried[i] = true;
         let path = link_file(link);
         let cov = &mut *addr_of_mut!(COV);
-        match plx_base::fontcov::of_file(&path) {
+        match nj_base::fontcov::of_file(&path) {
             Ok(c) => {
                 log(&format!(
                     "font chain: {link:?} {} codepoints={}",
@@ -1120,10 +1120,10 @@ pub fn init_text() {
 }
 
 fn entry_key(e: &TCacheEntry) -> &[u8] {
-    plx_base::cbuf::as_bytes(&e.s)
+    nj_base::cbuf::as_bytes(&e.s)
 }
 fn set_entry_key(e: &mut TCacheEntry, s: &[u8]) {
-    plx_base::cbuf::set_bytes_raw(&mut e.s, s);
+    nj_base::cbuf::set_bytes_raw(&mut e.s, s);
 }
 
 /// scan a freshly-rendered TTF surface for its vertical ink bounds — the first and last rows that
@@ -1189,7 +1189,7 @@ unsafe fn text_tex(
     // A miss rasterises, scans ink and allocates a fresh GL texture — the first-use cost a cold
     // screen pays per string. Timed as the frame's `text` span, so a `FRAMEDROP` line says how
     // many strings a slow frame rasterised and what they cost (`diag::spans`).
-    plx_base::diag::spans::span("text", || text_tex_miss(s_bytes, s_c, sz, bold, hash))
+    nj_base::diag::spans::span("text", || text_tex_miss(s_bytes, s_c, sz, bold, hash))
 }
 
 /// [`text_tex`]'s miss: render, upload and store one string.
@@ -1470,7 +1470,7 @@ pub fn take_measure_fault() -> bool {
 /// `FixtureMeasure` (host tests).
 pub struct TtfMeasure;
 
-impl plx_machine::machine::Measure for TtfMeasure {
+impl nj_machine::machine::Measure for TtfMeasure {
     fn fit_line(&self, s: &str, budget: f32, sz: i32, bold: bool) -> Rc<CStr> {
         if unsafe { addr_of!(TEXT_OK).read() } == 0 {
             return fit_line_by(self, s, budget, sz, bold);
@@ -1610,8 +1610,8 @@ mod measured_width_tests {
 }
 
 // `Measure::fit_line`'s default body and the supplied-metric elision under it are the machine
-// layer's (`plx_machine::machine`), which may not name this module; they stay reachable at these paths.
-pub use plx_machine::machine::{elide_by, fit_line_by};
+// layer's (`nj_machine::machine`), which may not name this module; they stay reachable at these paths.
+pub use nj_machine::machine::{elide_by, fit_line_by};
 
 #[derive(Default)]
 pub struct FittedLines {
@@ -1631,7 +1631,7 @@ thread_local! {
 }
 
 impl FittedLines {
-    pub fn fit(&mut self, measure: &impl plx_machine::machine::Measure, s: &str,
+    pub fn fit(&mut self, measure: &impl nj_machine::machine::Measure, s: &str,
         budget: f32, sz: i32, bold: bool) -> Rc<CStr> {
         let spec = (budget.to_bits(), sz, bold);
         let mut hash = DefaultHasher::new();
@@ -1655,7 +1655,7 @@ impl FittedLines {
 #[cfg(test)]
 mod fitted_line_tests {
     use super::*;
-    use plx_machine::machine::Measure;
+    use nj_machine::machine::Measure;
     use std::cell::Cell;
 
     #[derive(Default)]
@@ -1812,7 +1812,7 @@ pub fn elide_middle_by(s: &str, budget: f32, measure: impl Fn(&str) -> f32) -> S
 
 #[cfg(test)]
 mod supplied_elide_tests {
-    // `elide_by`'s own test is beside it in `plx_machine::machine`; this one grades the middle cut.
+    // `elide_by`'s own test is beside it in `nj_machine::machine`; this one grades the middle cut.
     #[test]
     fn middle_elision_keeps_both_ends_within_the_budget() {
         let width = |s: &str| s.chars().count() as f32;
@@ -1915,7 +1915,7 @@ unsafe fn drawn_tex(
 ) -> (c_uint, f32, f32) {
     #[cfg(feature = "hostsim")]
     {
-        let n = plx_base::surface::render_scale();
+        let n = nj_base::surface::render_scale();
         if n > 1 {
             let (t, w, h, _, _) = text_tex(s_bytes, s, sz * n, bold);
             if t != 0 {
@@ -2093,7 +2093,7 @@ mod tests {
     //! regression that named this unit was found by a photograph, not by a test.
 
     use super::*;
-    use plx_base::fontcov;
+    use nj_base::fontcov;
 
     /// The real shipped cmaps, parsed once for the whole test binary (see `fontcov::shipped`).
     /// `Link::Sys` is `None` on purpose: the television's DroidSansFallback does not exist on a
@@ -2384,7 +2384,7 @@ mod cache_policy_tests {
     /// (`evicted_while_hot`) instead of passing in silence.
     #[test]
     fn evicted_while_hot_counts_each_forced_eviction() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut c = full_cache();
         c[13].use_ = 1;
         let (slot, forced) = evict_slot(&c, 100, true);
@@ -2411,7 +2411,7 @@ mod cache_policy_tests {
     /// on both sides.
     #[test]
     fn the_live_count_counts_each_entry_once_per_frame() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         begin_frame();
         let mut a = TCacheEntry::ZERO;
         let mut b = TCacheEntry::ZERO;
@@ -2442,7 +2442,7 @@ mod cache_policy_tests {
     /// the ceiling it rasterises nothing and keeps the queue; below it, it proceeds.
     #[test]
     fn the_background_drain_stops_at_the_occupancy_bound() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         reset_prewarm_for_test();
         let key = |n: u8| WarmKey { bytes: vec![b'z', n], sz: 20, bold: 0 };
         BACKGROUND.with(|b| *b.borrow_mut() = (0..3).map(key).collect());
@@ -2458,7 +2458,7 @@ mod cache_policy_tests {
     /// a newer park queued.
     #[test]
     fn a_stale_owner_cannot_clear_a_newer_background_queue() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         reset_prewarm_for_test();
         PREWARM.with(|q| q.borrow_mut().push_back(WarmKey { bytes: b"old".to_vec(), sz: 20, bold: 0 }));
         let old = park_prewarm_as_background();

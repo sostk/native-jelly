@@ -97,7 +97,7 @@ impl ListingSnapshot {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_page(mut self, start: usize, items: Vec<crate::pms::PmsMovie>) -> Self {
+    pub(crate) fn with_page(mut self, start: usize, items: Vec<crate::catalog_fetch::PmsMovie>) -> Self {
         if let Some(data) = &mut self.data {
             for (offset, item) in items.into_iter().enumerate() {
                 data.items.set(start + offset, item);
@@ -118,7 +118,7 @@ impl ListingSnapshot {
     #[cfg(test)]
     pub(crate) fn fixture(
         sid: ServerId,
-        items: Vec<Option<crate::pms::PmsMovie>>,
+        items: Vec<Option<crate::catalog_fetch::PmsMovie>>,
         letters: Vec<(String, i64)>,
     ) -> Self {
         Self {
@@ -136,7 +136,7 @@ impl ListingSnapshot {
                 sorts: Arc::new(vec![SortEntry {
                     desc_key: String::new(),
                     key: "titleSort".into(),
-                    title: plx_platform::i18n::msg::browse_library_title().into(),
+                    title: nj_platform::i18n::msg::browse_library_title().into(),
                     default_desc: false,
                 }]),
                 genres: Arc::new(Vec::new()),
@@ -202,7 +202,7 @@ impl<'a> ListingView<'a> {
     }
     /// Missing pages and out-of-range indices are None. The reference is bounded by the
     /// retained snapshot, never a fictitious 'static lifetime ending at the next pump.
-    pub(crate) fn item(self, index: usize) -> Option<&'a crate::pms::PmsMovie> {
+    pub(crate) fn item(self, index: usize) -> Option<&'a crate::catalog_fetch::PmsMovie> {
         self.0.data.as_ref()?.items.get(index)
     }
     pub(crate) fn sorts(self) -> &'a [SortEntry] {
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn listing_page_delta_names_only_the_replaced_immutable_page() {
         let sid = ServerId::from_raw(0);
-        let movie = |i| crate::pms::PmsMovie {
+        let movie = |i| crate::catalog_fetch::PmsMovie {
             sid,
             rk: format!("{i}"),
             ..Default::default()
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn directory_retains_identity_and_refreshes_prose_only_on_change() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut state = super::super::BrowseState::default();
         super::super::seed_two_source_table_for_owner_test(&mut state);
         state.source_mut(0).unwrap().sid = ServerId::from_raw(0);
@@ -678,7 +678,7 @@ mod tests {
 
     #[test]
     fn query_and_menus_are_one_retained_publication() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut owner = super::super::BrowseState::default();
         super::super::seed_two_source_table_for_owner_test(&mut owner);
         owner.set_cur(0);
@@ -687,7 +687,7 @@ mod tests {
             section.sorts = Arc::new(vec![SortEntry {
                 desc_key: String::new(),
                 key: "titleSort".into(),
-                title: plx_platform::i18n::msg::browse_library_title().into(),
+                title: nj_platform::i18n::msg::browse_library_title().into(),
                 default_desc: false,
             }]);
             section.genres = Arc::new(vec![GenreEntry {
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn retained_listing_survives_edit_requery_and_reset() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut state = super::super::BrowseState::default();
         super::super::seed_two_source_table_for_owner_test(&mut state);
         super::super::seed_items_for_owner_test(&mut state, 2);

@@ -8,11 +8,11 @@
 //! Use a dedicated TEST account: the playback test writes progress and watched state. The tests
 //! print counts and verdicts only — never titles, paths or tokens (the library is private).
 use super::{auth, ids, seat};
-use crate::plex::{
+use crate::catalog::{
     Client, Origin, SectionQuery, TimelineReport, TimelineState, TranscodeOffset, TranscodeSpec,
 };
 
-const CLIENT_ID: &str = "plxnative-jf-live-test";
+const CLIENT_ID: &str = "nativejelly-jf-live-test";
 
 struct Live {
     client: Client,
@@ -25,7 +25,7 @@ fn live() -> Option<Live> {
     let origin = Origin::parse(&url)?;
     let s = auth::sign_in_with_password(&origin, CLIENT_ID, &user, &pass).expect("sign-in");
     seat::register_with(&origin, s.seat());
-    Some(Live { client: crate::plex::unregistered_client(origin, &s.token, CLIENT_ID) })
+    Some(Live { client: crate::catalog::unregistered_client(origin, &s.token, CLIENT_ID) })
 }
 
 macro_rules! need_live {
@@ -181,8 +181,8 @@ fn live_playback_decisions_reports_and_watched_state() {
 
     let spec = TranscodeSpec {
         rating_key: &rk, session: "live-test-encode", encoder_session: "live-test-encode",
-        contract: crate::plex::EncodeContract { remux: false, no_video_copy: true,
-            ceiling: Some(crate::plex::Ceiling { max_kbps: 3000, max_w: 1280, max_h: 720 }), ..Default::default() },
+        contract: crate::catalog::EncodeContract { remux: false, no_video_copy: true,
+            ceiling: Some(crate::catalog::Ceiling { max_kbps: 3000, max_w: 1280, max_h: 720 }), ..Default::default() },
         audio_stream_id: 0, subtitle_stream_id: 0, offset: TranscodeOffset::from_seconds(30),
     };
     let dec = c.transcode_decision(&spec).expect("transcode decision");

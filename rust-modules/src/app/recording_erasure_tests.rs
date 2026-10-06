@@ -1,12 +1,12 @@
 //! Real Session/Bridge erasure ACK and private files; unrelated host sweeps are substituted.
 use super::*;
 use crate::app::{bootstrap, recorder, run};
-use crate::plex::session::{self, Session};
+use crate::catalog::session::{self, Session};
 
 #[test]
 fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
-    let _serial = plx_base::testlock::serial();
-    let mt = unsafe { plx_base::task::MainThread::assume() };
+    let _serial = nj_base::testlock::serial();
+    let mt = unsafe { nj_base::task::MainThread::assume() };
     for partial in [false, true] {
         let temp = session::TempSession::new(if partial {
             "recording-erase-partial"
@@ -18,24 +18,24 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
         let outside = root.join("unrelated-recording");
         std::fs::create_dir(&outside).unwrap();
         std::fs::write(outside.join("sentinel"), b"synthetic sentinel").unwrap();
-        let recording = root.join("plxnative-recordings");
+        let recording = root.join("nativejelly-recordings");
         let sink = crate::ui::rec::DirSink::create(&recording.join("latest")).unwrap();
         let initial = bootstrap::Initial::synthetic_home(17, 32517, None).unwrap();
         let mut rec = recorder::Recplay::recording_with_sink(&initial, Box::new(sink)).unwrap();
         rec.tick(0, 0.0); // deliberately still buffered when the confirmed command arrives
         std::os::unix::fs::symlink(&outside, recording.join("external-link")).unwrap();
-        std::os::unix::fs::symlink(outside.join("sentinel"), root.join("plxnative-app-init"))
+        std::os::unix::fs::symlink(outside.join("sentinel"), root.join("nativejelly-app-init"))
             .unwrap();
-        std::fs::write(root.join("plxnative-recplay"), outside.to_str().unwrap()).unwrap();
+        std::fs::write(root.join("nativejelly-recplay"), outside.to_str().unwrap()).unwrap();
         if partial {
-            std::fs::create_dir(root.join("plxnative-rec")).unwrap();
+            std::fs::create_dir(root.join("nativejelly-rec")).unwrap();
             std::fs::write(
-                root.join("plxnative-rec/keep"),
+                root.join("nativejelly-rec/keep"),
                 b"unexpected control directory",
             )
             .unwrap();
         } else {
-            std::fs::write(root.join("plxnative-rec"), b"").unwrap();
+            std::fs::write(root.join("nativejelly-rec"), b"").unwrap();
         }
 
         let mut bridge = Bridge::for_session_test(crate::auth::SessionInit::captured(Session {
@@ -93,15 +93,15 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
         );
         assert!(!temp.path().exists());
         assert!(!recording.exists());
-        assert!(std::fs::symlink_metadata(root.join("plxnative-app-init")).is_err());
-        assert!(!root.join("plxnative-recplay").exists());
+        assert!(std::fs::symlink_metadata(root.join("nativejelly-app-init")).is_err());
+        assert!(!root.join("nativejelly-recplay").exists());
         assert_eq!(
             std::fs::read(outside.join("sentinel")).unwrap(),
             b"synthetic sentinel"
         );
         rec.tick(1, 0.016);
         rec.end_frame(&|| 0);
-        assert!(!rec.finish(plx_machine::landgate::fixture_gate()));
+        assert!(!rec.finish(nj_machine::landgate::fixture_gate()));
         assert!(
             !recording.exists(),
             "subsequent frames and shutdown cannot recreate erased data"
@@ -112,14 +112,14 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
             "missing files are idempotent; an unremoved control directory remains reported"
         );
         session::ProfilePublisher::new(&mt).publish(None, 0);
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 }
 
 #[test]
 fn replay_cannot_authorize_erasure_of_a_recording_target() {
-    let _serial = plx_base::testlock::serial();
-    let mt = unsafe { plx_base::task::MainThread::assume() };
+    let _serial = nj_base::testlock::serial();
+    let mt = unsafe { nj_base::task::MainThread::assume() };
     let temp = session::TempSession::new("replay-no-erasure");
     temp.assert_only_target();
     let before = std::fs::read(temp.path()).unwrap();

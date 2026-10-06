@@ -20,19 +20,19 @@ use super::test_support::{frame};
 /// for Compact all along.
 #[test]
 fn a_compact_library_menu_holds_a_frozen_host_and_gives_it_back_on_dismissal() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-host-freeze");
+    let session = crate::catalog::session::TempSession::new("library-host-freeze");
     session.watching("u-library-host-freeze");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("freeze-own", "127.0.0.1", 9, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("freeze-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let base = crate::ui::popover::host_users_for_test();
     let users = || crate::ui::popover::host_users_for_test() - base;
 
@@ -110,24 +110,24 @@ fn a_compact_library_menu_holds_a_frozen_host_and_gives_it_back_on_dismissal() {
 /// **It has to be the LIBRARY, and it has to be `idle`.** The dispatcher keeps a motion ledger of
 /// its own (`Present::page_moving`, reported as `FrameReport::underlay_moving`), but a screen only
 /// reaches it by calling `fx.note(PresentEvent::Motion)` — which `screens::library` never does. It
-/// animates through `crate::ui::Spring`, i.e. `gfx::spring`, which reports to `plx_machine::idle` and
+/// animates through `crate::ui::Spring`, i.e. `gfx::spring`, which reports to `nj_machine::idle` and
 /// nowhere else; `report.underlay_moving` is false on every frame below. `idle::page_moving()` is
 /// the only witness there is.
 #[test]
 fn a_host_page_spring_under_an_open_panel_is_host_motion() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-host-motion");
+    let session = crate::catalog::session::TempSession::new("library-host-motion");
     session.watching("u-library-host-motion");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("motion-own", "127.0.0.1", 9, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("motion-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
@@ -164,9 +164,9 @@ fn a_host_page_spring_under_an_open_panel_is_host_motion() {
 
     // a settled panel over a settled page: nothing moves, and in particular the panel's own
     // appear spring (`ModalStack::tick`, now in a scope of its own) is not the page's motion
-    plx_machine::idle::frame_begin(1.0 / 60.0);
+    nj_machine::idle::frame_begin(1.0 / 60.0);
     frame(&mut d, &mut rig, AppArg::Library, tick(120), vec![]);
-    assert!(!plx_machine::idle::page_moving(), "a settled host does not move");
+    assert!(!nj_machine::idle::page_moving(), "a settled host does not move");
 
     // dismiss: input returns to the page while the panel is still visible, and the page is driven
     d.request(MachineId::Nav, NavOp::Dismiss(menu));
@@ -174,9 +174,9 @@ fn a_host_page_spring_under_an_open_panel_is_host_motion() {
     Bridge::library_command(&mut d, crate::screens::registry::LibraryCmd::FocusGrid { row: 0, col: 0 });
     let mut moved = 0;
     for i in 122..136u32 {
-        plx_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
         let (_, report) = frame(&mut d, &mut rig, AppArg::Library, tick(i), vec![]);
-        if !plx_machine::idle::present_moving() {
+        if !nj_machine::idle::present_moving() {
             continue;
         }
         moved += 1;
@@ -185,13 +185,13 @@ fn a_host_page_spring_under_an_open_panel_is_host_motion() {
             "frame {i}: the reproduction needs the panel still up (fading) while the page moves"
         );
         assert!(
-            plx_machine::idle::page_moving(),
+            nj_machine::idle::page_moving(),
             "frame {i}: the page's own scroll spring is in flight and nothing else is — \
              it is the HOST that is moving (report.underlay_moving={})",
             report.underlay_moving
         );
         assert!(
-            crate::ui::popover::host_refresh(true, false, plx_machine::idle::page_moving()),
+            crate::ui::popover::host_refresh(true, false, nj_machine::idle::page_moving()),
             "frame {i}: …so the fading panel's frozen snapshot is re-taken"
         );
     }

@@ -5,7 +5,7 @@
 //! object per line, `{"f":<frame>,"t":"<kind>",…}`. Kinds per frame: `tick` (EVERY frame),
 //! `present` (the bit and WHY), `in` (an input), `eff` (an effect, `from`/`e`/`addr`), `async`
 //! (an adapter result's address and payload or blob hash), `land` (how many landings a STORE
-//! consumed on this frame — the schedule `plx_machine::landgate` holds a replay to), `life`, `timer`, `st`
+//! consumed on this frame — the schedule `nj_machine::landgate` holds a replay to), `life`, `timer`, `st`
 //! (the logical-state hash, on every EVENT frame), plus schema-3 `metrics` typed measurement
 //! records, pointwise `rs` Focus/Hit resolutions and exactly one final `fo` product-focus
 //! observation per frame. The
@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use plx_machine::machine::{Canon, LogicalState, Measure, Tick};
+use nj_machine::machine::{Canon, LogicalState, Measure, Tick};
 mod strict_json;
 #[cfg(test)]
 mod measurements_tests; // `Measurements` over a memoizing native source (moved from `text.rs`, module-layers step L5)
@@ -48,11 +48,11 @@ mod measurements_tests; // `Measurements` over a memoizing native source (moved 
 /// Schema 2's `{s,sz,b,w,h}` row cannot represent those three capabilities losslessly.
 ///
 /// **2 (phase 11): `land`.** A recording now carries the frame every STORE consumed a landing on
-/// — the schedule `plx_machine::landgate` holds a replay's live landings to (§3.3 step 3). Schema 1 could
+/// — the schedule `nj_machine::landgate` holds a replay's live landings to (§3.3 step 3). Schema 1 could
 /// not: the only per-frame arrival it recorded was the dispatcher's `async`, so every result the
 /// legacy pumps drain OUTSIDE that drain had no recorded frame at all, and a schema-1 recording
 /// replayed under the gate would silently grade nothing. Refusing it is the honest answer;
-/// `tools/plxnative-rec rerecord` is the verb (`tests/fixtures/replay/README.md`).
+/// `tools/nativejelly-rec rerecord` is the verb (`tests/fixtures/replay/README.md`).
 pub const SCHEMA: u32 = 3;
 /// Segment rotation.
 pub const SEGMENT_BYTES: usize = 2 * 1024 * 1024;
@@ -69,12 +69,12 @@ pub const CAP_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) fn erase_owned_artifacts(root: &Path,
     remove_file: fn(&Path) -> std::io::Result<()>) -> Vec<String> {
     let mut failures = Vec::new();
-    for name in ["plxnative-rec", "plxnative-recplay", "plxnative-app-init", "plxnative-recordings"] {
+    for name in ["nativejelly-rec", "nativejelly-recplay", "nativejelly-app-init", "nativejelly-recordings"] {
         let path = root.join(name);
         let result = match fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error),
-            Ok(metadata) if name == "plxnative-recordings" && metadata.is_dir() => fs::remove_dir_all(&path),
+            Ok(metadata) if name == "nativejelly-recordings" && metadata.is_dir() => fs::remove_dir_all(&path),
             Ok(_) => remove_file(&path),
         };
         if result.is_err() { failures.push(format!("{name}: could not remove owned recording artifact")); }
@@ -116,7 +116,7 @@ pub struct Header {
     /// application state; the host's state-shape fingerprint versions this payload.
     pub init_data: Value,
     pub clock_start_ms: u32,
-    /// `true` when blob capture was opted into (`plxnative-rec=blobs`).
+    /// `true` when blob capture was opted into (`nativejelly-rec=blobs`).
     pub blobs: bool,
 }
 
@@ -534,7 +534,7 @@ impl Writer {
     }
 
     /// One STORE's landings on this frame (schema 2): `n` is HOW MANY of its sites consumed a
-    /// mailbox, which is what `plx_machine::landgate`'s cursor is stepped by, one unit per arrival. The
+    /// mailbox, which is what `nj_machine::landgate`'s cursor is stepped by, one unit per arrival. The
     /// count and not a boolean, because a store with several sites (`person` has one per fetch)
     /// can take two answers on one frame and one on the next, and collapsing that to "it landed"
     /// lets a replay consume two arrivals for one cursor step — after which every later landing
@@ -875,7 +875,7 @@ impl Recording {
     }
 
     /// The LANDING SCHEDULE (§3.3 step 3): for each store ordinal, the `(frame, count)` pairs it
-    /// was recorded consuming landings on, oldest first. This is what `plx_machine::landgate::arm_replay`
+    /// was recorded consuming landings on, oldest first. This is what `nj_machine::landgate::arm_replay`
     /// holds a replay's live landings to; an empty inner list means "this store never landed",
     /// which the gate reads as "deliver at once and grade it `extra`", never as "hold forever".
     pub fn land_schedule(&self) -> std::collections::BTreeMap<u32,Vec<(u64, u32)>> {
@@ -1077,7 +1077,7 @@ impl Measurements {
 impl Measure for Measurements {
     fn fit_line(&self, s: &str, budget: f32, sz: i32, bold: bool) -> std::rc::Rc<CStr> {
         if let Self::Live(source) = self { return source.fit_line(s, budget, sz, bold); }
-        plx_gfx::text::fit_line_by(self, s, budget, sz, bold)
+        nj_gfx::text::fit_line_by(self, s, budget, sz, bold)
     }
     fn width(&self,s:&CStr,sz:i32,bold:bool)->f32 {
         if let Self::Live(source)=self { return source.width(s,sz,bold); }
@@ -1106,11 +1106,11 @@ impl Measure for Measurements {
 pub(crate) fn assert_measured_geometry(mut geometry: impl FnMut(&dyn Measure) -> Vec<u32>) {
     static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
     let _no_live_font = crate::ui::text_view::ForbidLive::enter();
-    plx_gfx::text::take_measure_fault();
+    nj_gfx::text::take_measure_fault();
     let capture = Measurements::record(&FIXTURE);
     let expected = geometry(&capture);
     assert!(
-        !plx_gfx::text::take_measure_fault(),
+        !nj_gfx::text::take_measure_fault(),
         "product geometry bypassed Measure through a live font"
     );
     let metrics: HashMap<_, _> = capture.drain().unwrap().into_iter().collect();
@@ -1124,7 +1124,7 @@ pub(crate) fn assert_measured_geometry(mut geometry: impl FnMut(&dyn Measure) ->
     );
     replay.drain().unwrap();
     assert!(
-        !plx_gfx::text::take_measure_fault(),
+        !nj_gfx::text::take_measure_fault(),
         "table replay touched a live font"
     );
 
@@ -1287,7 +1287,7 @@ mod tests {
     struct LoadRoot(PathBuf);
     impl LoadRoot {
         fn new(tag: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("plxnative-record-load-{}-{tag}",std::process::id()));
+            let path = std::env::temp_dir().join(format!("nativejelly-record-load-{}-{tag}",std::process::id()));
             fs::create_dir(&path).expect("unique recording test directory");
             let root = Self(path);
             fs::write(root.0.join("manifest.json"),serde_json::to_vec(&Header::new(17,&Init).to_json()).unwrap()).unwrap();
@@ -1398,10 +1398,10 @@ mod tests {
         let schedule = record.land_schedule();
         assert_eq!(schedule.len(),1);
         assert_eq!(schedule[&u32::MAX],vec![(0,u32::MAX)]);
-        let _serial = plx_base::testlock::serial();
-        let _gate = plx_machine::landgate::Armed;
-        plx_machine::landgate::arm_sparse_replay(schedule);
-        assert_eq!(plx_machine::landgate::unmatched_counts(),vec![(u32::MAX,0,u32::MAX)]);
+        let _serial = nj_base::testlock::serial();
+        let _gate = nj_machine::landgate::Armed;
+        nj_machine::landgate::arm_sparse_replay(schedule);
+        assert_eq!(nj_machine::landgate::unmatched_counts(),vec![(u32::MAX,0,u32::MAX)]);
     }
 
     #[test]

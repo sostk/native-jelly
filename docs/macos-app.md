@@ -65,7 +65,7 @@ Four things, and three of them were bugs that had been sitting in the tree unrea
    A bundled app also gets `~/Library/Application Support/PlxNative` as its runtime root instead of
    `/tmp`, because that root is where `auth.json` lives and `/tmp` is swept: the friend would be
    re-doing the QR sign-in every few days with nothing to explain why. Both are structural probes
-   (is there a `Contents/MacOS` above me?), so the dev loop and every `PLXNATIVE_RUNTIME_DIR`
+   (is there a `Contents/MacOS` above me?), so the dev loop and every `NJ_RUNTIME_DIR`
    recipe are untouched.
 
 The window changed too, though that is taste rather than a bug: it opens at an exact integer

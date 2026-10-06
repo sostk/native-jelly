@@ -28,7 +28,7 @@ fn crew_credits_fold_both_job_arrays_into_one_deduplicated_shelf_list() {
             { "id": 164, "filter": "writer=164", "tag": "Sam Scribe" }
         ]
     }"#;
-    let it: crate::plex::Metadata =
+    let it: crate::catalog::Metadata =
         serde_json::from_slice(body).expect("the live crew shape parses");
     assert_eq!(it.director.len(), 2, "Director[] is on the DTO");
     assert_eq!(it.writer.len(), 2, "and so is Writer[]");
@@ -119,7 +119,7 @@ fn the_credit_index_space_runs_every_actor_then_every_crew_member() {
 
 #[test]
 fn crew_display_translates_owned_roles_without_changing_identity_or_character_names() {
-    use plx_platform::i18n::{LocaleContext, Preference};
+    use nj_platform::i18n::{LocaleContext, Preference};
     let person = |name: &str, role: &str| Cast {
         tag: name.into(), role: role.into(), thumb: String::new(), id: 1, tag_key: String::new(),
     };

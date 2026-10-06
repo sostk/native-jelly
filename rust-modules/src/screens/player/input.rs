@@ -2,7 +2,7 @@
 //! spec §9, phase 9): the held-key timer, the repeat gate, the scrub gesture, the HUD's focus
 //! cursor and the HUD's own timer/dismissal state.
 //!
-//! Every type here was a `plex_run` loop local through phase 1b-i and an `App` field from 1b-ii
+//! Every type here was a `nj_run` loop local through phase 1b-i and an `App` field from 1b-ii
 //! on; phase 9 moves them into the player's `Screen` instance unchanged, which is what §2.2 means
 //! by "HUD/scrub/held/up_next/overlays belong to `PlayerScreen`". Two fields are NEW here and were
 //! `player::TX` atomics before — [`HudState::until`] and [`Scrub::ns`] — because a decision read
@@ -153,7 +153,7 @@ impl Scrub {
 /// frame (`draw_hud`), moved together by UP/DOWN, and, the reason they are bundled here,
 /// must be RESET together when a new playback session begins.
 ///
-/// As three loose `plex_run` locals they were never reset at all: `start_playback` sets the
+/// As three loose `nj_run` locals they were never reset at all: `start_playback` sets the
 /// route, the resume point and the HUD timer, but the focus cursor survived from the
 /// PREVIOUS session — leave one movie with the Subtitles button focused (`focus == 1`),
 /// start another, and the first OK opened the track menu instead of pausing. Bundling makes
@@ -423,7 +423,7 @@ mod hud_visibility_tests {
     /// Drive the derived playback state through the field the pump owns. Crate-global, so the whole
     /// body holds `testlock::serial()` — `state()` is read by other modules' tests too.
     fn with_state<T>(s: PlaybackState, f: impl FnOnce() -> T) -> T {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let prev = crate::player::swap_state_for_test(s);
         let out = f();
         crate::player::restore_state_for_test(prev);

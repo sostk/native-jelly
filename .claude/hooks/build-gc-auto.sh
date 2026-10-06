@@ -2,7 +2,7 @@
 # SessionEnd hook: kick off `tools/build-gc.sh --auto` in the background and return immediately.
 #
 # WHY A HOOK, AND WHY IT CANNOT JUST RUN THE RECLAIM. `tools/build-gc.sh --auto` reclaims
-# derived build trees when free space on this volume drops under `PLX_GC_MIN_FREE_GIB` — see that
+# derived build trees when free space on this volume drops under `NJ_GC_MIN_FREE_GIB` — see that
 # script's own header for the incident that motivated it (a volume at 0 bytes free, every writing
 # tool dead). Nothing ran it automatically before this hook; a human had to remember `make disk`.
 # SessionEnd is the natural trigger (a session ending is exactly when a lane's build tree stops
@@ -48,14 +48,14 @@ script="$main/tools/build-gc.sh"
 # before that function is ever reached. Mirrors that function's own path resolution (macOS vs.
 # XDG vs. plain ~/.cache) rather than importing it, since this hook must not depend on sourcing
 # the script it is about to detach.
-if [ -n "${PLX_GC_LOG-}" ]; then
-  log=$PLX_GC_LOG
+if [ -n "${NJ_GC_LOG-}" ]; then
+  log=$NJ_GC_LOG
 elif [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
-  log="$HOME/Library/Logs/plxnative-build-gc.log"
+  log="$HOME/Library/Logs/nativejelly-build-gc.log"
 elif [ -n "${XDG_STATE_HOME-}" ]; then
-  log="$XDG_STATE_HOME/plxnative/build-gc.log"
+  log="$XDG_STATE_HOME/nativejelly/build-gc.log"
 else
-  log="$HOME/.cache/plxnative/build-gc.log"
+  log="$HOME/.cache/nativejelly/build-gc.log"
 fi
 mkdir -p "$(dirname "$log")" 2>/dev/null || true
 

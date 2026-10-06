@@ -7,21 +7,21 @@ use super::test_support::{frame, frame_with_tap};
 
 #[test]
 fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-rail-key-return");
+    let session = crate::catalog::session::TempSession::new("library-rail-key-return");
     session.watching("u-library-rail-key-return");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("rail-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("rail-own", "127.0.0.1", 9, "synthetic", "fixture");
     let shared =
-        crate::plex::register_for_test("rail-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+        crate::catalog::register_for_test("rail-shared", "127.0.0.1", 10, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
@@ -61,7 +61,7 @@ fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
     #[derive(Default)]
     struct PressTap(usize);
     impl crate::ui::dispatch::Tap<AppHost> for PressTap {
-        fn effect(&mut self, _: u64, effect: &plx_machine::machine::Stamped<AppHost>) {
+        fn effect(&mut self, _: u64, effect: &nj_machine::machine::Stamped<AppHost>) {
             if matches!(effect.fx, Fx::Press(_)) {
                 self.0 += 1;
             }
@@ -107,7 +107,7 @@ fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
 #[test]
 fn library_switch_menu_steps_drive_the_input_owning_menu_and_genre_return() {
     use crate::screens::registry::{LibraryCmd, LibraryMenuArg, LibraryMenuKind};
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Library, tick(0), vec![]);
@@ -121,7 +121,7 @@ fn library_switch_menu_steps_drive_the_input_owning_menu_and_genre_return() {
             anchor: [0; 4],
             target: crate::stores::browse::SectionAddress {
                 epoch: 1,
-                sid: crate::plex::ServerId::from_raw(0),
+                sid: crate::catalog::ServerId::from_raw(0),
                 section: 1,
             },
         })),
@@ -150,7 +150,7 @@ fn library_switch_menu_steps_drive_the_input_owning_menu_and_genre_return() {
         let parts = CxParts {
             tick: tick(85),
             press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: d.focus(), ..Default::default() },
+            focus: nj_machine::machine::FocusRead { current: d.focus(), ..Default::default() },
             owner: InputOwner::Entry(menu_entry),
         };
         let split = rig.split();
@@ -183,21 +183,21 @@ fn library_switch_menu_steps_drive_the_input_owning_menu_and_genre_return() {
 
 #[test]
 fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-diagnostic-sweep");
+    let session = crate::catalog::session::TempSession::new("library-diagnostic-sweep");
     session.watching("u-library-diagnostic-sweep");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("sweep-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("sweep-own", "127.0.0.1", 9, "synthetic", "fixture");
     let shared =
-        crate::plex::register_for_test("sweep-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+        crate::catalog::register_for_test("sweep-shared", "127.0.0.1", 10, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);

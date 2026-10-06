@@ -1,7 +1,7 @@
 //! Link configuration for everything cargo itself LINKS on the developer's own machine, shared by
 //! the build scripts of the application crate (`build.rs`) and the gfx layer crate
 //! (`gfx/build.rs`): both produce a host executable (the simulator, a `--test` binary) that
-//! reaches the `extern "C"` GL/SDL_ttf/nanosvg declarations in `plx_gfx`, and a `cargo:rustc-link-*`
+//! reaches the `extern "C"` GL/SDL_ttf/nanosvg declarations in `nj_gfx`, and a `cargo:rustc-link-*`
 //! line reaches only the package whose build script prints it (`rustc-link-lib` also flows to the
 //! packages that depend on it; `rustc-link-arg`, which carries the nanosvg object, does not).
 //!

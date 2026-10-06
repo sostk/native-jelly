@@ -12,8 +12,8 @@ Two halves, both reading cargo's own `--message-format=json` records (only lines
 objects with a `reason` are looked at; `cargo test` also prints harness text on stdout):
 
 * `SecondBuildIsFreshTests` builds the real crate twice from `rust-modules/` and demands that the
-  second run recompiled nothing of the crate: every `plxnative_modules` (and `plx_platform`, the
-  layer crate whose own build script generates the catalog, and `plx_gfx`, whose build script
+  second run recompiled nothing of the crate: every `nativejelly_modules` (and `nj_platform`, the
+  layer crate whose own build script generates the catalog, and `nj_gfx`, whose build script
   compiles the nanosvg object for its own test binary) compiler-artifact is `fresh`, and the
   crate's build script did not write its output again (cargo replays a
   `build-script-executed` record even for a fresh script, so the mtime of the script's output file
@@ -28,10 +28,10 @@ objects with a `reason` are looked at; `cargo test` also prints harness text on 
   the lab line's, whatever the caller exports.
 
 * `MakeAndBareCargoShareAFingerprintTests` builds the real crate the way `make` does (the
-  environment `make -s print-cargo-env` reports: every `PLX_*` variable a cargo recipe would see)
+  environment `make -s print-cargo-env` reports: every `NJ_*` variable a cargo recipe would see)
   and the way a bare `cargo` does (none), in both orders, and demands the second recompiles
   nothing. Cargo fingerprints an environment variable as an Option, so a variable make exports
-  SET-BUT-EMPTY (`PLX_RELEASE=`, `PLX_CHANNEL=`, `PLX_SENTRY_DSN=''`) is a different input from one
+  SET-BUT-EMPTY (`NJ_RELEASE=`, `NJ_CHANNEL=`, `NJ_SENTRY_DSN=''`) is a different input from one
   that is unset, and every bare `cargo` (a CI step, rust-analyzer, an agent's `cargo test`) after a
   `make`, and vice versa, recompiled the whole app crate.
 
@@ -57,18 +57,18 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
 RUST = ROOT / "rust-modules"
-CRATE = "plxnative_modules"  # the lib target's name (underscored)
-PACKAGE = "plxnative-modules"  # the package's name, as it appears in a package_id
+CRATE = "nativejelly_modules"  # the lib target's name (underscored)
+PACKAGE = "nativejelly-modules"  # the package's name, as it appears in a package_id
 # The layer crate that owns a build script of its own (catalog + install identities): it must not be
 # always-dirty either, or every crate above it would rebuild with it.
-PLATFORM_CRATE = "plx_platform"
-GFX_CRATE = "plx_gfx"
+PLATFORM_CRATE = "nj_platform"
+GFX_CRATE = "nj_gfx"
 NIGHTLY = os.environ.get("RUST_NIGHTLY", "nightly")
 
 
-# The invocation `make check`'s lab line runs (Makefile, "cargo check --lib --tests -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net --features
+# The invocation `make check`'s lab line runs (Makefile, "cargo check --lib --tests -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net --features
 # lab-diagnostics"); identical arguments and CARGO_INCREMENTAL make the first run here a reuse.
-LIB_ARGS = ["check", "--lib", "--tests", "-p", "plxnative-modules", "-p", "plx_base", "-p", "plx_machine", "-p", "plx_platform", "-p", "plx_gfx", "-p", "plx_net", "--features", "lab-diagnostics"]
+LIB_ARGS = ["check", "--lib", "--tests", "-p", "nativejelly-modules", "-p", "nj_base", "-p", "nj_machine", "-p", "nj_platform", "-p", "nj_gfx", "-p", "nj_net", "--features", "lab-diagnostics"]
 
 
 def cargo_env():
@@ -99,7 +99,7 @@ def json_records(stdout):
 def package_of(record):
     """The package name inside a record's `package_id`, for both the old and the new id spelling."""
     pid = record.get("package_id") or ""
-    if "#" in pid:  # `path+file:///…/rust-modules#plxnative-modules@0.7.0` or `…/name#0.7.0`
+    if "#" in pid:  # `path+file:///…/rust-modules#nativejelly-modules@0.7.0` or `…/name#0.7.0`
         head, tail = pid.rsplit("#", 1)
         if "@" in tail:
             return tail.split("@", 1)[0]
@@ -220,16 +220,16 @@ class SecondBuildIsFreshTests(unittest.TestCase):
 
 
 def hermetic_env():
-    """`cargo_env()` without any `PLX_*`: the baseline a bare `cargo` in a clean shell sees."""
-    return {k: v for k, v in cargo_env().items() if not k.startswith("PLX_")}
+    """`cargo_env()` without any `NJ_*`: the baseline a bare `cargo` in a clean shell sees."""
+    return {k: v for k, v in cargo_env().items() if not k.startswith("NJ_")}
 
 
 def make_cargo_env():
-    """The `PLX_*` environment `make` hands a cargo recipe, as `{name: value}`.
+    """The `NJ_*` environment `make` hands a cargo recipe, as `{name: value}`.
 
     Asked of the Makefile itself (`print-cargo-env`: its exported variables plus the telemetry words
     the recipes put in front of `cargo`) rather than restated here, so this follows the recipes.
-    Run from a `PLX_*`-free environment, and with the telemetry file pointed at nothing, so what
+    Run from a `NJ_*`-free environment, and with the telemetry file pointed at nothing, so what
     comes back is the Makefile's own construction and not this machine's credentials.
     """
     proc = subprocess.run(["make", "-s", "print-cargo-env", "TELEMETRY_JSON=/dev/null"], cwd=ROOT,
@@ -264,7 +264,7 @@ class MakeAndBareCargoShareAFingerprintTests(unittest.TestCase):
 
 STUB_MANIFEST = """\
 [package]
-name = "plxnative-modules"
+name = "nativejelly-modules"
 version = "0.7.0"
 edition = "2021"
 build = "build.rs"
@@ -307,9 +307,9 @@ class MarkerStillTriggersTests(unittest.TestCase):
         vcs(repo, "add", ".gitignore", "rust-modules")
         vcs(repo, "commit", "-q", "-m", "trunk")
         # A throwaway target directory of its own: no multi-gigabyte incremental cache for it.
-        # Hermetic against the caller: `PLX_*` (PLX_RELEASE, PLX_CHANNEL, ...) would change the
+        # Hermetic against the caller: `NJ_*` (NJ_RELEASE, NJ_CHANNEL, ...) would change the
         # version the script publishes, `GIT_*` would redirect the repository it asks.
-        self.env = {k: v for k, v in cargo_env().items() if not k.startswith(("PLX_", "GIT_"))}
+        self.env = {k: v for k, v in cargo_env().items() if not k.startswith(("NJ_", "GIT_"))}
         self.env.update(CARGO_TARGET_DIR=str(self.tmp / "target"), CARGO_INCREMENTAL="0")
         self.last = []
 
@@ -320,7 +320,7 @@ class MarkerStillTriggersTests(unittest.TestCase):
         return records
 
     def version(self):
-        """The PLX_VERSION the script published on the latest build.
+        """The NJ_VERSION the script published on the latest build.
 
         Found through the `out_dir` of cargo's own `build-script-executed` record rather than by
         globbing `target/debug/build/<package>-*/`: newer cargo lays the build directory out as
@@ -328,9 +328,9 @@ class MarkerStillTriggersTests(unittest.TestCase):
         """
         for output in script_stamp(self.last):
             for line in Path(output).read_text().splitlines():
-                if line.startswith(("cargo:rustc-env=PLX_VERSION=", "cargo::rustc-env=PLX_VERSION=")):
+                if line.startswith(("cargo:rustc-env=NJ_VERSION=", "cargo::rustc-env=NJ_VERSION=")):
                     return line.split("=", 2)[2]
-        self.fail("no PLX_VERSION in the build script output of the latest build")
+        self.fail("no NJ_VERSION in the build script output of the latest build")
 
     def assertFresh(self, before, after, why):
         self.assertTrue(saw_crate(after), why)

@@ -82,7 +82,7 @@ enum WorkKind { AcquirePixels, RefreshAvatarFile }
 
 #[derive(Clone, PartialEq, Eq)]
 struct ImageIdentity {
-    server: crate::plex::ServerId,
+    server: crate::catalog::ServerId,
     path: Box<str>,                // validated full path, <= existing KEY_MAX
 }
 struct ImageRequest {
@@ -209,7 +209,7 @@ impl PosterQueue {
 }
 
 // Main-loop bridge, outside the pure queue implementation:
-fn drain_to_cache(mt: &plx_base::task::MainThread);
+fn drain_to_cache(mt: &nj_base::task::MainThread);
 ```
 
 These are pure state operations under one mutex; no network, disk, decode, joins, GL calls, or app-clock reads while holding it. `now_ms` is supplied by the main-loop caller. `claim_next` is private poster-queue arbitration used by the existing sleeping workers, not a second application scheduler: workers can take admitted image work and report results, but cannot schedule screen actions, run continuations, or advance app state. The SDL loop remains the only application scheduler; this preserves the current worker-pull mechanism without adding a frame of dispatch latency.

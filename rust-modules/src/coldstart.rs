@@ -21,12 +21,12 @@ struct RetireResult {
 /// Discard every obsolete bookmark location. Failure is soft: a stale convenience file must never
 /// prevent the app from reaching Home.
 pub(crate) fn retire() {
-    let result = retire_paths(&plx_base::paths::obsolete_last_place_candidates());
+    let result = retire_paths(&nj_base::paths::obsolete_last_place_candidates());
     if result.removed != 0 {
-        plx_base::eventlog::log("coldstart: discarded obsolete last-page bookmark");
+        nj_base::eventlog::log("coldstart: discarded obsolete last-page bookmark");
     }
     if result.failed != 0 {
-        plx_base::eventlog::log("coldstart: could not remove every obsolete last-page bookmark");
+        nj_base::eventlog::log("coldstart: could not remove every obsolete last-page bookmark");
     }
 }
 
@@ -66,7 +66,7 @@ mod tests {
     fn cold_boot_discards_previous_route_and_stays_home() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!(
-            "plxnative-retired-coldstart-{}.json",
+            "nativejelly-retired-coldstart-{}.json",
             std::process::id()
         ));
         let tmp = tmp_sibling(&path).unwrap();

@@ -8,8 +8,8 @@
 //! but as of this split it still contains none: the one wall-clock field this module owned
 //! (`PlaybackSession::auto_last_switch`) is now a frame-tick millisecond stamp, not an `Instant`.
 
-use crate::plex::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::ServerId;
+use crate::catalog_fetch::PmsMovie;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::Mutex;
@@ -83,7 +83,7 @@ pub(crate) struct PlaybackSession {
     /// Cleared with the playback verdict on exit/reset, never a process-global error latch.
     pub(crate) jail_load_blocked: bool,
     /// Read-only publication of Player.repair for the HUD. Never authorizes a resource effect.
-    pub(crate) repair_status: plx_platform::tv::sandbox::State,
+    pub(crate) repair_status: nj_platform::tv::sandbox::State,
     /// The request which produced this attempt, retained for terminal Retry / Choose quality.
     /// Written synchronously by [`request_play`] rather than by [`apply_plan`], because the
     /// server can refuse before a playable plan exists.
@@ -131,7 +131,7 @@ pub(crate) struct PlaybackSession {
     /// a seek is not, so a seek rebuilds from what is stored here and a pick replaces it (and asks
     /// the pump for a fresh transcode when the answer actually changed). Nothing measures a link
     /// or moves a rung on its own — the adaptive switch is not here.
-    cur_contract: crate::plex::EncodeContract,
+    cur_contract: crate::catalog::EncodeContract,
     /// What the last successful transcode decision actually did with the Plex Pass audio DSP
     /// (issue #266) — distinct from `cur_contract.audio`, which is what the accepted decision
     /// carried. Installed by `apply_plan` from `Plan::enhancement`; reset to `Off` by a new
@@ -332,7 +332,7 @@ pub(crate) struct PlaybackSession {
     /// so even a whole show is tens of KB. The capping that matters is the DRAWING (a still per row
     /// is a GL texture); that belongs to the overlay, and `apply_plan` deliberately warms only
     /// `up_next`'s.
-    queue: Vec<crate::plex::QueueRow>,
+    queue: Vec<crate::catalog::QueueRow>,
     /// **This frame's millisecond stamp, mirrored from [`crate::player::machine::Player::now_ms`]**
     /// (spec §4.1), whose `set_now` is its ONLY writer — the loop calls it once per iteration from
     /// the same `fr.now` every other phase of the frame reads.
@@ -384,14 +384,14 @@ impl PlaybackSession {
     pub(crate) const IDLE: PlaybackSession = PlaybackSession {
         direct_play_mode: DirectPlayMode::Auto,
         jail_load_blocked: false,
-        repair_status: plx_platform::tv::sandbox::State::Idle,
+        repair_status: nj_platform::tv::sandbox::State::Idle,
         request: None,
         requested_resume_ns: 0,
         url: String::new(),
         tsession: String::new(),
         play_verdict: None,
         resolve_failed: false,
-        cur_contract: crate::plex::EncodeContract::original(false, crate::plex::AudioEnhancements::NONE),
+        cur_contract: crate::catalog::EncodeContract::original(false, crate::catalog::AudioEnhancements::NONE),
         cur_enhancement: EnhancementOutcome::Off,
         cur_src: (0, 0, 0),
         cur_transport_kbps: 0,
@@ -822,7 +822,7 @@ pub(crate) enum RouteApplyResult {
 struct AppliedRouteProjection {
     url: String,
     tsession: String,
-    contract: crate::plex::EncodeContract,
+    contract: crate::catalog::EncodeContract,
     enhancement: EnhancementOutcome,
     auto_original_watched: bool,
     auto_original: Option<AutoOriginalCandidate>,
@@ -948,7 +948,7 @@ pub(crate) struct TimelineLease {
 struct TimelineSnapshot {
     sid: ServerId,
     rating_key: String,
-    state: crate::plex::TimelineState,
+    state: crate::catalog::TimelineState,
     time_ms: i64,
     duration_ms: i64,
     session: String,
@@ -2016,7 +2016,7 @@ pub(crate) fn claim_is_applying(serial: u64) -> bool {
 /// began cannot publish into the route it is destroying — so leaving it latched afterwards
 /// describes a teardown which never finishes.
 ///
-/// It cost LG App Self Checklist #46: a replayed `plxnative-playurl` stream asks
+/// It cost LG App Self Checklist #46: a replayed `nativejelly-playurl` stream asks
 /// [`begin_route_start`] for an owner directly (no [`begin_playback_request`] resolve in front of
 /// it, because there is no library item behind the fixture), and a latched `Stopping` refused it —
 /// `start_bufferfeed: route reducer refused a start owner`, one Load where the case needs two.
@@ -2249,7 +2249,7 @@ fn finish_encoder_cleanup_check(
 }
 
 fn run_encoder_cleanup_check(check: EncoderCleanupCheck) {
-    let Some(client) = crate::plex::client_for(check.sid) else {
+    let Some(client) = crate::catalog::client_for(check.sid) else {
         let stop_accepted = check.stop_needed.then_some(false);
         finish_encoder_cleanup_check(check, None, stop_accepted, None);
         return;
@@ -2282,9 +2282,9 @@ fn drive_encoder_cleanup(sid: ServerId) -> bool {
         .take_unchecked(sid);
     for check in checks {
         let fallback = check.clone();
-        if !plx_base::task::spawn_small("abr-cleanup", move || run_encoder_cleanup_check(check)) {
-            let _block = plx_base::task::allow_blocking(
-                const { &plx_base::task::BlockingLabel::new("encoder cleanup check (worker thread refused)") },
+        if !nj_base::task::spawn_small("abr-cleanup", move || run_encoder_cleanup_check(check)) {
+            let _block = nj_base::task::allow_blocking(
+                const { &nj_base::task::BlockingLabel::new("encoder cleanup check (worker thread refused)") },
             );
             run_encoder_cleanup_check(fallback);
         }
@@ -2732,7 +2732,7 @@ impl HlsAbrControl {
             return OriginalProbeResult::Stale;
         }
         let url = if self.fixture_base.is_empty() {
-            let Some(client) = crate::plex::client_for(self.sid) else {
+            let Some(client) = crate::catalog::client_for(self.sid) else {
                 return OriginalProbeResult::Failed {
                     outcome: Outcome::Inconclusive,
                     failure: OriginalProbeFailure::Other,
@@ -2863,7 +2863,7 @@ impl HlsAbrControl {
                 encoder_session,
             });
         }
-        let Some(client) = crate::plex::client_for(self.sid) else {
+        let Some(client) = crate::catalog::client_for(self.sid) else {
             return Err(PrimeRefusal::Session);
         };
         // PMS exposes the two session fields separately, but the overlap TV spike proved it
@@ -2873,17 +2873,17 @@ impl HlsAbrControl {
             &self.rating_key,
             &encoder_session,
             &encoder_session,
-            crate::plex::TranscodeOffset::from_micros(offset_micros),
+            crate::catalog::TranscodeOffset::from_micros(offset_micros),
             self.audio_stream_id,
             self.subtitle_stream_id,
-            crate::plex::EncodeContract {
+            crate::catalog::EncodeContract {
                 remux: false,
                 no_video_copy: true,
                 ceiling: Some(rung.ceiling()),
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                     seconds_per_segment: self.seconds_per_segment,
                 },
-                audio: crate::plex::AudioEnhancements::NONE,
+                audio: crate::catalog::AudioEnhancements::NONE,
             },
         );
         // The deadline-bearing path preserves the cause where it is issued. A completed HTTP
@@ -2940,7 +2940,7 @@ impl HlsAbrControl {
         observed: (crate::abr::ObservedHlsVariant, u32),
         transition: impl FnOnce() -> Option<T>,
     ) -> Result<(T, WorkerTicket), HlsCommitRefusal> {
-        if self.fixture_base.is_empty() && crate::plex::client_for(self.sid).is_none() {
+        if self.fixture_base.is_empty() && crate::catalog::client_for(self.sid).is_none() {
             return Err(HlsCommitRefusal::Session);
         }
         replace_active_hls_with(
@@ -2995,7 +2995,7 @@ impl HlsAbrControl {
 /// what raster the source actually has. Neither is a preference and neither belongs in a utility
 /// weight — a candidate outside these bounds is removed before anything is scored.
 fn auto_catalog(ps: &PlaybackSession) -> crate::abr::HlsActuatorCatalog {
-    let caps = plx_platform::devcaps::caps();
+    let caps = nj_platform::devcaps::caps();
     let device = (
         u16::try_from(caps.hevc_max.0).unwrap_or(u16::MAX),
         u16::try_from(caps.hevc_max.1).unwrap_or(u16::MAX),
@@ -3080,10 +3080,10 @@ fn auto_original_features(ps: &PlaybackSession) -> crate::abr::SourceFeatures {
 pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, WorkerTicket)> {
     if forced_direct_play(ps) { return None; }
     let seconds_per_segment = match cur_delivery(ps) {
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment,
         } => seconds_per_segment,
-        crate::plex::TranscodeDelivery::ProgressiveMkv => return None,
+        crate::catalog::TranscodeDelivery::ProgressiveMkv => return None,
     };
     let live = active_hls();
     let ticket = live
@@ -3190,7 +3190,7 @@ pub(crate) fn auto_original_watch(ps: &PlaybackSession) -> Option<AutoOriginalWa
         || !s.cur_auto_original_watched
         || !matches!(
             s.cur_contract.delivery,
-            crate::plex::TranscodeDelivery::ProgressiveMkv
+            crate::catalog::TranscodeDelivery::ProgressiveMkv
         )
     {
         return None;
@@ -3233,7 +3233,7 @@ pub(crate) fn arm_auto_fixture(
         s.url = original_url.to_owned();
         s.cur_rk = "__auto_fixture__".into();
         s.sess = "auto-fixture".into();
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::ProgressiveMkv;
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::ProgressiveMkv;
         s.cur_contract.ceiling = None;
         // **Saying the source raster out loud is load-bearing rather than cosmetic**: an unknown
         // one is treated as unbounded (`HlsActuatorCatalog::limited_to`), which makes the 4K
@@ -3299,7 +3299,7 @@ pub(crate) fn arm_auto_fixture(
         // grade. Original recovery has its own end-to-end fixture with `start_hls == false`.
         s.auto_original = None;
         s.cur_contract.remux = false;
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.cur_contract.ceiling = Some(rung.ceiling());
@@ -3458,7 +3458,7 @@ fn install_auto_hls(
     { let s = &mut *ps; {
         s.cur_auto_original_watched = false;
         s.cur_contract.remux = false;
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.cur_contract.ceiling = Some(rung.ceiling());
@@ -3533,7 +3533,7 @@ pub(crate) fn recover_auto_to_original(ps: &mut PlaybackSession, offset_secs: i6
 pub(super) enum RecoveryFlavour {
     Direct,
     /// A codec-preserving remux carrying these enhancement params (`NONE` for a plain remux).
-    Remux(crate::plex::AudioEnhancements),
+    Remux(crate::catalog::AudioEnhancements),
 }
 
 /// The enhancement a recovery to `candidate` should carry: the offer is evaluated against the
@@ -3556,7 +3556,7 @@ fn recovery_route(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> Op
     enhancement_route(&facts, family)
 }
 
-fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> crate::plex::AudioEnhancements {
+fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> crate::catalog::AudioEnhancements {
     desired_audio(crate::player::audio_enhancements(), recovery_route(ps, candidate).is_some())
 }
 
@@ -3565,7 +3565,7 @@ fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> cra
 /// the codec-preserving remux carrying the params — the same shape the resolve would have built.
 pub(super) fn recovery_flavour(
     candidate: &AutoOriginalCandidate,
-    want: crate::plex::AudioEnhancements,
+    want: crate::catalog::AudioEnhancements,
 ) -> RecoveryFlavour {
     if candidate.direct && !want.any() {
         RecoveryFlavour::Direct
@@ -3613,7 +3613,7 @@ pub(crate) fn recover_auto_to_original_for(
         || (cause == RecoveryCause::EnhancementReleased && applied_quality() == Quality::Auto);
     let candidate = ps.auto_original.clone()?;
     let route = recovery_route(ps, &candidate);
-    let force_burn_for = |audio: crate::plex::AudioEnhancements| {
+    let force_burn_for = |audio: crate::catalog::AudioEnhancements| {
         audio.any() && matches!(route, Some(EnhancementRoute::Burn))
     };
     let flavour = recovery_flavour(&candidate, recovery_want(ps, &candidate));
@@ -3643,7 +3643,7 @@ pub(crate) fn recover_auto_to_original_for(
         RecoveryFlavour::Direct => match admit_or_plain_remux(ps, &candidate, expected, cause) {
             AdmitOrPlainRemux::Admitted => RecoveryFlavour::Direct,
             AdmitOrPlainRemux::PlainRemux => {
-                RecoveryFlavour::Remux(crate::plex::AudioEnhancements::NONE)
+                RecoveryFlavour::Remux(crate::catalog::AudioEnhancements::NONE)
             }
         },
         remux => remux,
@@ -3691,7 +3691,7 @@ pub(crate) fn recover_auto_to_original_for(
                 );
             }
             AdmitOrPlainRemux::PlainRemux => {
-                let none = crate::plex::AudioEnhancements::NONE;
+                let none = crate::catalog::AudioEnhancements::NONE;
                 match prepare_original_remux(ps, &candidate, expected, offset_secs, watched, none, false, true)?
                 {
                     OriginalRemux::Prepared(replacement, _outcome) => replacement,
@@ -3863,7 +3863,7 @@ fn recover_original_direct(
     { let s = &mut *ps; {
         s.url = source_url;
         s.tsession.clear();
-        s.cur_contract = crate::plex::EncodeContract::original(false, crate::plex::AudioEnhancements::NONE);
+        s.cur_contract = crate::catalog::EncodeContract::original(false, crate::catalog::AudioEnhancements::NONE);
         s.cur_enhancement = outcome;
         s.cur_auto_original_watched = watched;
         s.cur_audio = candidate.audio.clone();
@@ -4165,7 +4165,7 @@ pub(crate) fn rollback_original_recovery(ps: &mut PlaybackSession) -> Option<Ori
             .ceiling
             .and_then(crate::abr::Rung::from_ceiling),
     ) {
-        (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) => Some(rung),
+        (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) => Some(rung),
         _ => None,
     };
     // `subtitle_sid`/`auto_original` are not part of what a rollback undoes (see the doc comment
@@ -4240,7 +4240,7 @@ fn retire_replaced_encoder(ps: &PlaybackSession, encoder: String) {
     let Some(client) = cur_client(ps) else { return };
     stop_encoder_off_thread(
         "abr-original-stop",
-        const { &plx_base::task::BlockingLabel::new("encoder stop (worker thread refused)") },
+        const { &nj_base::task::BlockingLabel::new("encoder stop (worker thread refused)") },
         move || {
             let ok = client.transcode_stop(&encoder);
             crate::player::log(&format!(
@@ -4261,7 +4261,7 @@ fn retire_hls_encoder_keep_source(ps: &PlaybackSession, encoder: String) {
     let Some(client) = cur_client(ps) else { return };
     stop_encoder_off_thread(
         "abr-original-physical-stop",
-        const { &plx_base::task::BlockingLabel::new("encoder physical stop (worker thread refused)") },
+        const { &nj_base::task::BlockingLabel::new("encoder physical stop (worker thread refused)") },
         move || {
             let ok = client.transcode_stop_physical(&encoder);
             crate::player::log(&format!(
@@ -4324,7 +4324,7 @@ fn clear_play_verdict(ps: &mut PlaybackSession) {
 }
 /// Test-only twin of [`clear_play_verdict`], for a test whose assertion presumes "no session":
 /// `player::state()` derives `Error` from these fields, and a test that exercised a refusal on the
-/// SAME session value may have left one standing. It no longer needs `plx_base::testlock::serial()`
+/// SAME session value may have left one standing. It no longer needs `nj_base::testlock::serial()`
 /// for this reason — since phase 9 a test owns its session outright and cannot leave a refusal in
 /// anybody else's.
 #[cfg(test)]
@@ -4354,9 +4354,9 @@ pub(crate) fn refuse_by_server_for_test(
     ps.play_verdict = Some(PlayVerdict::Server(sentence.to_owned(), codes));
     ps.cur_contract.remux = remux;
     ps.cur_contract.delivery = if hls {
-        crate::plex::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
+        crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
     } else {
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     };
     ps.src_vcodec = src_vcodec.to_owned();
     ps.src_acodec = src_acodec.to_owned();
@@ -4368,9 +4368,9 @@ pub(crate) fn install_transcode_for_test(ps: &mut PlaybackSession, remux: bool, 
     ps.tsession = "test-encoder".to_owned();
     ps.cur_contract.remux = remux;
     ps.cur_contract.delivery = if hls {
-        crate::plex::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
+        crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
     } else {
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     };
 }
 /// select the subtitle to BURN into any transcode of the current item (0 = none). This
@@ -4416,8 +4416,8 @@ pub(crate) fn swap_cur_sid_for_test(ps: &mut PlaybackSession, sid: ServerId) -> 
 /// plan that never resolved). The main-thread twin of `client_for(env.sid)` on the resolve worker
 /// — every in-playback PMS call in this file goes through one of the two, and none through
 /// `client_opt()`, which answers with whatever server is CURRENT rather than the one playing.
-fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::plex::Client> {
-    crate::plex::client_for(cur_sid(ps))
+fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::catalog::Client> {
+    crate::catalog::client_for(cur_sid(ps))
 }
 /// Projection: the wire id of the carried audio track, `0` for "server default / none" — the
 /// pre-#266 shape of this accessor, kept so every existing caller that only ever wanted the id
@@ -4516,7 +4516,7 @@ pub(crate) fn set_stream_codecs(ps: &mut PlaybackSession, vc: &str, ac: &str) {
 ///
 /// * direct play / remux (`ProgressiveMkv`): the SOURCE's own coded size (`cur_src`), since the
 ///   file's elementary stream is what gets fed;
-/// * a fixed quality's HLS: the source capped by that quality's [`crate::plex::Ceiling`] — PMS
+/// * a fixed quality's HLS: the source capped by that quality's [`crate::catalog::Ceiling`] — PMS
 ///   never upscales, so the smaller of the two is the largest picture it can send;
 /// * Auto: the bounding box of every FEASIBLE actuator (`HlsActuatorCatalog::widest_feasible_raster`),
 ///   because a rung commit never re-issues `Load` and the controller may climb to the 4K point
@@ -4529,8 +4529,8 @@ pub(crate) fn sink_max_raster(ps: &PlaybackSession) -> (u16, u16) {
     let clamp = |v: i64| u16::try_from(v).unwrap_or(u16::MAX);
     let source = (clamp(s.cur_src.1), clamp(s.cur_src.2));
     match s.cur_contract.delivery {
-        crate::plex::TranscodeDelivery::ProgressiveMkv => source,
-        crate::plex::TranscodeDelivery::FixedHls { .. } => {
+        crate::catalog::TranscodeDelivery::ProgressiveMkv => source,
+        crate::catalog::TranscodeDelivery::FixedHls { .. } => {
             if applied_quality() == Quality::Auto {
                 auto_catalog(ps).widest_feasible_raster()
             } else {
@@ -4552,7 +4552,7 @@ pub(crate) fn sink_max_raster(ps: &PlaybackSession) -> (u16, u16) {
 }
 
 /// The SOURCE raster for a stream the app did not select — the pipeline tier's
-/// `plxnative-playurl` carries it as `source_raster`, the same field its Auto fixtures already
+/// `nativejelly-playurl` carries it as `source_raster`, the same field its Auto fixtures already
 /// used to size the actuator catalog. One fact, one field: [`sink_max_raster`] reads it from the
 /// same place a PMS-chosen item's dimensions land, so the synthetic tier declares exactly what the
 /// production route would for a file of that size.
@@ -4564,7 +4564,7 @@ pub(crate) fn set_stream_source_raster(ps: &mut PlaybackSession, w: u16, h: u16)
 }
 
 /// The whole Load-payload DECLARATION for a stream the app did not SELECT — the pipeline test
-/// tier's `/tmp/plxnative-playurl` ([`crate::player::playurl::PlayUrl`]), whose entire point is that no PMS
+/// tier's `/tmp/nativejelly-playurl` ([`crate::player::playurl::PlayUrl`]), whose entire point is that no PMS
 /// chose anything and so `apply_plan` never runs.
 ///
 /// ONE write for the same reason [`set_server_output_declaration`] is one write and [`apply_plan`]
@@ -4592,7 +4592,7 @@ pub(crate) fn set_stream_declaration(
         fps,
         dovi,
         immersive,
-        plx_platform::devcaps::dv::capability(),
+        nj_platform::devcaps::dv::capability(),
     )
 }
 
@@ -4603,7 +4603,7 @@ fn set_stream_declaration_with_capability(
     fps: f64,
     dovi: crate::metadata::Dovi,
     immersive: bool,
-    capability: plx_platform::devcaps::dv::DvCapability,
+    capability: nj_platform::devcaps::dv::DvCapability,
 ) -> bool {
     let decision = crate::metadata::DvDecision {
         capability,
@@ -4640,7 +4640,7 @@ pub(crate) fn set_stream_declaration_for_test(
     fps: f64,
     dovi: crate::metadata::Dovi,
     immersive: bool,
-    capability: plx_platform::devcaps::dv::DvCapability,
+    capability: nj_platform::devcaps::dv::DvCapability,
 ) -> bool {
     set_stream_declaration_with_capability(ps, vc, ac, fps, dovi, immersive, capability)
 }
@@ -4663,11 +4663,11 @@ pub(crate) fn is_remux(ps: &PlaybackSession) -> bool {
 /// (`Unverified`/`Refused`/`Off` say nothing was provably added to this stream, so a caller
 /// quoting the params must not claim them). Read by the diagnostics Audio row's suffix, which used
 /// to read the unfiltered ask and gate it on `cur_enhancement_label(ps) == Some("applied")` itself.
-pub(crate) fn applied_audio_enhancements(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+pub(crate) fn applied_audio_enhancements(ps: &PlaybackSession) -> crate::catalog::AudioEnhancements {
     if ps.cur_enhancement == EnhancementOutcome::Applied {
         ps.cur_contract.audio
     } else {
-        crate::plex::AudioEnhancements::NONE
+        crate::catalog::AudioEnhancements::NONE
     }
 }
 /// **Narrow diagnostics accessor** — deliberately not `pub(crate) fn cur_enhancement`, which would
@@ -4690,10 +4690,10 @@ fn is_no_video_copy(ps: &PlaybackSession) -> bool {
 /// The quality ceiling THIS playback was resolved under — read by the two query rebuilds
 /// ([`transcode_seek`], [`retranscode`]) so a rung picked mid-film cannot reshape the encode
 /// already on screen. See [`PlaybackSession::cur_contract`].
-fn cur_ceiling(ps: &PlaybackSession) -> Option<crate::plex::Ceiling> {
+fn cur_ceiling(ps: &PlaybackSession) -> Option<crate::catalog::Ceiling> {
     ps.cur_contract.ceiling
 }
-fn cur_delivery(ps: &PlaybackSession) -> crate::plex::TranscodeDelivery {
+fn cur_delivery(ps: &PlaybackSession) -> crate::catalog::TranscodeDelivery {
     ps.cur_contract.delivery
 }
 
@@ -4703,7 +4703,7 @@ fn cur_delivery(ps: &PlaybackSession) -> crate::plex::TranscodeDelivery {
 pub(crate) fn is_segmented_hls(ps: &PlaybackSession) -> bool {
     matches!(
         cur_delivery(ps),
-        crate::plex::TranscodeDelivery::FixedHls { .. }
+        crate::catalog::TranscodeDelivery::FixedHls { .. }
     )
 }
 pub(crate) fn source_vcodec(ps: &PlaybackSession) -> String {
@@ -4730,7 +4730,7 @@ pub(crate) fn ctxline_cptr(ps: &PlaybackSession) -> *const c_char {
     ps.ctxline.as_ptr()
 }
 struct ScrobbleWork {
-    client: Option<&'static crate::plex::Client>,
+    client: Option<&'static crate::catalog::Client>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
     session: String,
@@ -4749,15 +4749,15 @@ impl ScrobbleWork {
         // was announced before this worker was spawned, so a replacement reporter waits without
         // blocking the old one.
         if let Some(t) = self.report_th.take() {
-            plx_base::task::join("timeline", t);
+            nj_base::task::join("timeline", t);
         }
         if let Some((rk, t_ms, d_ms)) = self.final_report.take() {
             let ok = {
                 let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
                 self.client.is_some_and(|c| {
-                    c.timeline(&crate::plex::TimelineReport {
+                    c.timeline(&crate::catalog::TimelineReport {
                         rating_key: &rk,
-                        state: crate::plex::TimelineState::Stopped,
+                        state: crate::catalog::TimelineState::Stopped,
                         time_ms: t_ms,
                         duration_ms: d_ms,
                         session: &self.session,
@@ -4768,7 +4768,7 @@ impl ScrobbleWork {
                     })
                 })
             };
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "timeline stopped t={}s/{}s ok={}",
                 t_ms / 1000,
                 d_ms / 1000,
@@ -4785,7 +4785,7 @@ impl ScrobbleWork {
             let ok = self
                 .client
                 .is_some_and(|c| c.transcode_stop(&self.transcode_session));
-            plx_base::eventlog::log(&format!("transcode stopped ok={}", ok as i32));
+            nj_base::eventlog::log(&format!("transcode stopped ok={}", ok as i32));
         }
     }
 }
@@ -4854,7 +4854,7 @@ pub(crate) fn scrobble_stop(
     })));
     let worker = work.clone();
     let join_generation = SCROBBLE_JOIN.reserve();
-    let h = plx_base::task::spawn_small_keeping("scrobble", move || {
+    let h = nj_base::task::spawn_small_keeping("scrobble", move || {
         let work = { worker.lock().unwrap_or_else(|e| e.into_inner()).take() };
         if let Some(work) = work {
             work.run();
@@ -4866,8 +4866,8 @@ pub(crate) fn scrobble_stop(
         // Thread refusal is extraordinarily rare, but dropping the old reporter handle and
         // opening the stop fence would recreate the exact new-before-old race. Pay the old
         // synchronous cost on this failure path and preserve ordering.
-        let _block = plx_base::task::allow_blocking(
-            const { &plx_base::task::BlockingLabel::new("scrobble stop (worker thread refused)") },
+        let _block = nj_base::task::allow_blocking(
+            const { &nj_base::task::BlockingLabel::new("scrobble stop (worker thread refused)") },
         );
         let work = { work.lock().unwrap_or_else(|e| e.into_inner()).take() };
         if let Some(work) = work {
@@ -4952,7 +4952,7 @@ impl ScrobbleJoin {
                     state = self.changed.wait(state).unwrap_or_else(|e| e.into_inner());
                 }
             };
-            plx_base::task::join("scrobble", handle);
+            nj_base::task::join("scrobble", handle);
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.completed = state.completed.max(generation);
             state.joining = false;
@@ -5054,7 +5054,7 @@ impl Drop for TimelineStopCompletion {
 /// Wait for pending [`scrobble_stop`] work to finish its ordered timeline/transcode attempts.
 ///
 /// Production uses this before another stop, before Retry starts a replacement encoder, and at
-/// `plex_run` exit. The exit wait matters because the process is about to die and a detached worker
+/// `nj_run` exit. The exit wait matters because the process is about to die and a detached worker
 /// dies with it; the other waits preserve ordering without putting routine BACK teardown on the
 /// SDL thread.
 pub(crate) fn drain_scrobble() {
@@ -5118,7 +5118,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         &rk,
         &replacement,
         &replacement,
-        crate::plex::TranscodeOffset::from_seconds(offset_secs.max(0)),
+        crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
         cur_audio_sid(ps),
         cur_sub_sid(ps),
         ps.cur_contract,
@@ -5168,7 +5168,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     // and reopen this URL. Retire the old exact PMS key off the main thread, just like an ABR
     // commit, so a slow `/stop` cannot freeze the seek UI.
     let old = previous.clone();
-    if plx_base::task::spawn_small_keeping("seek-stop", move || {
+    if nj_base::task::spawn_small_keeping("seek-stop", move || {
         let ok = c.transcode_stop(&old);
         crate::player::log(&format!("seek: retired previous encoder ok={}", ok as i32));
     })
@@ -5183,14 +5183,14 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     Some(url)
 }
 
-use plx_base::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD title/ctxline)
+use nj_base::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD title/ctxline)
 
 // ---- the QUALITY ceiling: what the USER has asked this playback to come in under -------------
 
 /// The playback-quality ladder: **Auto, Original, and a few fixed rungs**, and every rung is a ROUTING POLICY
 /// before it is a parameter.
 ///
-/// # Why this is not a bitrate field on [`crate::plex::TranscodeSpec`]
+/// # Why this is not a bitrate field on [`crate::catalog::TranscodeSpec`]
 ///
 /// That is the shape this began as, and it does nothing for the one file it exists for.
 /// [`build_stream`] picks direct play → remux → re-encode BEFORE any spec is built, and only the
@@ -5202,10 +5202,10 @@ use plx_base::cbuf::set as set_c; // shared fixed-C-buffer write (the session's 
 /// whatsoever. `plex::params`' own doc argued this out for a LINK ceiling long before there was a
 /// user-chosen one, and the argument transfers unchanged.
 ///
-/// So a rung is spent the way [`crate::plex::link_policy`] spends the relay tier: **deny the two
+/// So a rung is spent the way [`crate::catalog::link_policy`] spends the relay tier: **deny the two
 /// flavors that ship the file at its own rate, leaving the one flavor whose whole point is that
 /// the server picks the rate** ([`quality_policy`]). Only then does the rung's number reach the
-/// wire, as [`crate::plex::Ceiling`] on the re-encode query.
+/// wire, as [`crate::catalog::Ceiling`] on the re-encode query.
 ///
 /// # The ladder, and why these rungs
 ///
@@ -5244,7 +5244,7 @@ pub(crate) fn available_quality_ladder() -> &'static [Quality] {
 impl Quality {
     /// The bound this rung imposes. Original has none; Auto also has no fixed ceiling because its
     /// adaptive owner selects one dynamically once that path is ready.
-    pub(crate) fn ceiling(self) -> Option<crate::plex::Ceiling> {
+    pub(crate) fn ceiling(self) -> Option<crate::catalog::Ceiling> {
         let (max_kbps, max_w, max_h) = match self {
             Quality::Auto | Quality::Original => return None,
             Quality::P1080High => (20000, 1920, 1080),
@@ -5253,7 +5253,7 @@ impl Quality {
             Quality::P720Low => (2000, 1280, 720),
             Quality::P480 => (720, 854, 480),
         };
-        Some(crate::plex::Ceiling {
+        Some(crate::catalog::Ceiling {
             max_kbps,
             max_w,
             max_h,
@@ -5267,7 +5267,7 @@ impl Quality {
     /// Display text in the UI language with its regional digits; a log line names the rung by
     /// `{:?}` instead, so the log does not depend on the viewer's language.
     pub(crate) fn label(self) -> String {
-        use plx_platform::i18n::{current, msg};
+        use nj_platform::i18n::{current, msg};
         let (lines, kbps): (i64, i64) = match self {
             Quality::Auto => return msg::settings_playback_auto().to_owned(),
             Quality::Original => return msg::widgets_quality_original().to_owned(),
@@ -5313,7 +5313,7 @@ pub(crate) fn direct_play_mode() -> DirectPlayMode {
 
 pub(crate) fn restore_direct_play_mode(mode: DirectPlayMode) {
     #[cfg(test)]
-    plx_base::testlock::assert_held("direct-play preference");
+    nj_base::testlock::assert_held("direct-play preference");
     DIRECT_PLAY_MODE.store(match mode {
         DirectPlayMode::Auto => 0, DirectPlayMode::Forced => 1, DirectPlayMode::Disabled => 2,
     }, Ordering::Relaxed);
@@ -5321,10 +5321,10 @@ pub(crate) fn restore_direct_play_mode(mode: DirectPlayMode) {
 
 /// Blocking persistence seam; Settings dispatches it on the storage worker.
 pub(crate) fn set_direct_play_mode(mode: DirectPlayMode) -> bool {
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_direct_play_mode(mode)))
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_direct_play_mode(mode)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
-    if saved { restore_direct_play_mode(mode); plx_machine::idle::invalidate(); }
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_direct_play_mode(mode); nj_machine::idle::invalidate(); }
     saved
 }
 
@@ -5339,19 +5339,19 @@ pub(crate) fn next_episode_mode() -> NextEpisodeMode {
 
 pub(crate) fn restore_next_episode_mode(mode: NextEpisodeMode) {
     #[cfg(test)]
-    plx_base::testlock::assert_held("next episode preference");
+    nj_base::testlock::assert_held("next episode preference");
     NEXT_EPISODE_MODE.store(mode.index(), Ordering::Relaxed);
 }
 
 /// Blocking persistence seam; Settings dispatches it on the storage worker. The live value changes
 /// only once the write is durable, so a failed save claims nothing.
 pub(crate) fn set_next_episode_mode(mode: NextEpisodeMode) -> bool {
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_next_episode_mode(mode)))
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_next_episode_mode(mode)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved {
         restore_next_episode_mode(mode);
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
             feature: crate::diag::schema::Feature::NextEpisode(mode),
         });
@@ -5369,19 +5369,19 @@ pub(crate) fn skip_interval() -> SkipInterval {
 
 pub(crate) fn restore_skip_interval(interval: SkipInterval) {
     #[cfg(test)]
-    plx_base::testlock::assert_held("skip interval preference");
+    nj_base::testlock::assert_held("skip interval preference");
     SKIP_INTERVAL.store(interval.index(), Ordering::Relaxed);
 }
 
 /// Blocking persistence seam; Settings dispatches it on the storage worker. The live value changes
 /// only once the write is durable, so a failed save claims nothing.
 pub(crate) fn set_skip_interval(interval: SkipInterval) -> bool {
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_skip_interval(interval)))
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_skip_interval(interval)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved {
         restore_skip_interval(interval);
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
             feature: crate::diag::schema::Feature::SkipInterval(interval),
         });
@@ -5391,10 +5391,10 @@ pub(crate) fn set_skip_interval(interval: SkipInterval) -> bool {
 
 pub(crate) fn set_default_quality(q: Quality) -> bool {
     let q = supported_quality(q);
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
-    if saved { restore_quality(q); plx_machine::idle::invalidate(); }
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_quality(q); nj_machine::idle::invalidate(); }
     saved
 }
 
@@ -5407,7 +5407,7 @@ pub(crate) fn subtitle_size() -> SubtitleSize {
 
 pub(crate) fn restore_subtitle_size(size: SubtitleSize) {
     #[cfg(test)]
-    plx_base::testlock::assert_held("subtitle size preference");
+    nj_base::testlock::assert_held("subtitle size preference");
     SUBTITLE_SIZE.store(size.index(), Ordering::Relaxed);
 }
 
@@ -5420,18 +5420,18 @@ pub(crate) fn restore_subtitle_size(size: SubtitleSize) {
 /// failure claims nothing about the next boot and republishes nothing.
 pub(crate) fn select_subtitle_size(size: SubtitleSize, reply: Option<std::sync::mpsc::Sender<bool>>) {
     restore_subtitle_size(size);
-    plx_machine::idle::invalidate();
-    let _ = plx_base::storage_worker::submit_retained(move || {
-        let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_subtitle_size(size)))
+    nj_machine::idle::invalidate();
+    let _ = nj_base::storage_worker::submit_retained(move || {
+        let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_subtitle_size(size)))
             .is_some_and(|write| matches!(write.classify(),
-                crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+                crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
         if !saved {
-            plx_base::eventlog::log("subtitle size: durable write failed (live value kept for this session)");
+            nj_base::eventlog::log("subtitle size: durable write failed (live value kept for this session)");
         }
         if let Some(reply) = reply {
             let _ = reply.send(saved);
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     });
 }
 
@@ -5446,25 +5446,25 @@ pub(crate) fn subtitle_position() -> SubtitlePosition {
 
 pub(crate) fn restore_subtitle_position(position: SubtitlePosition) {
     #[cfg(test)]
-    plx_base::testlock::assert_held("subtitle position preference");
+    nj_base::testlock::assert_held("subtitle position preference");
     SUBTITLE_POSITION.store(position.index(), Ordering::Relaxed);
 }
 
 /// [`select_subtitle_size`] for the caption's vertical placement.
 pub(crate) fn select_subtitle_position(position: SubtitlePosition, reply: Option<std::sync::mpsc::Sender<bool>>) {
     restore_subtitle_position(position);
-    plx_machine::idle::invalidate();
-    let _ = plx_base::storage_worker::submit_retained(move || {
-        let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_subtitle_position(position)))
+    nj_machine::idle::invalidate();
+    let _ = nj_base::storage_worker::submit_retained(move || {
+        let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_subtitle_position(position)))
             .is_some_and(|write| matches!(write.classify(),
-                crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+                crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
         if !saved {
-            plx_base::eventlog::log("subtitle position: durable write failed (live value kept for this session)");
+            nj_base::eventlog::log("subtitle position: durable write failed (live value kept for this session)");
         }
         if let Some(reply) = reply {
             let _ = reply.send(saved);
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     });
 }
 
@@ -5499,7 +5499,7 @@ pub(crate) fn restore_quality(q: Quality) {
     // `on_deck_hevc_p5_preview_uses_the_selected_episodes_codec` flaked exactly this way. Same
     // guard as the plex server registry (`plex::servers::register_with_client_id`).
     #[cfg(test)]
-    plx_base::testlock::assert_held("the playback quality ceiling (restore_quality)");
+    nj_base::testlock::assert_held("the playback quality ceiling (restore_quality)");
     QUALITY.store(supported_quality(q).index(), Ordering::Relaxed);
 }
 
@@ -5529,11 +5529,11 @@ fn persist_quality_choice(q: Quality) -> Quality {
     crate::player::report::note_quality_selected_for(playback_trace_generation(), q);
     // See `restore_quality`: the same process global, the same lock requirement in tests.
     #[cfg(test)]
-    plx_base::testlock::assert_held("the playback quality ceiling (persist_quality_choice)");
+    nj_base::testlock::assert_held("the playback quality ceiling (persist_quality_choice)");
     QUALITY.store(q.index(), Ordering::Relaxed);
     // A session write is a read-modify-write under the session lock: changing this preference
     // must not overwrite a roster refresh, a profile switch, or another profile's recents.
-    let _ = crate::plex::session::queue_update(move |s| {
+    let _ = crate::catalog::session::queue_update(move |s| {
         if s.playback_quality == Some(q) {
             None
         } else {
@@ -5542,7 +5542,7 @@ fn persist_quality_choice(q: Quality) -> Quality {
     });
     // The picker's checkmark moves on this and on nothing else — a settled popover presents no
     // frames, so without this the row would still read as the old rung until the next keypress.
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     q
 }
 
@@ -5628,7 +5628,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         crate::player::request_adaptive_reload(ps);
         return;
     }
-    let location = crate::plex::client_for(cur_sid(ps)).and_then(|client| client.link());
+    let location = crate::catalog::client_for(cur_sid(ps)).and_then(|client| client.link());
     // A direct Remote already on screen is itself stronger evidence than a second prefix fetch:
     // selecting Auto must not start an encoder under a movie which is currently arriving as
     // Original. A fresh Remote play is measured in `build_stream`; an existing transcode has no
@@ -5642,16 +5642,16 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
     let original_feasible = ps.auto_original.is_some();
     let auto_original = q == Quality::Auto
         && original_feasible
-        && (location == Some(crate::plex::probe::Location::Local)
-            || (location == Some(crate::plex::probe::Location::Remote)
+        && (location == Some(crate::catalog::probe::Location::Local)
+            || (location == Some(crate::catalog::probe::Location::Remote)
                 && (!is_transcoding(ps) || is_remux(ps))));
     let adaptive = auto_uses_hls(q, auto_original);
     let delivery = if adaptive {
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         }
     } else {
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     };
     let starting_rung = adaptive.then(|| {
         crate::abr::hls_reentry_rung(
@@ -5680,7 +5680,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         // the right-hand side did not already say — a leftover from the `auto_remote_original`
         // refactor, where the two really were different.
         s.cur_auto_original_watched = auto_original;
-        if matches!(delivery, crate::plex::TranscodeDelivery::FixedHls { .. }) {
+        if matches!(delivery, crate::catalog::TranscodeDelivery::FixedHls { .. }) {
             s.cur_contract.remux = false;
         }
     } };
@@ -5788,7 +5788,7 @@ pub(super) fn measure_remote_original(url: &str, source_kbps: i64) -> Option<cra
 /// before any enhanced `start.mkv` is fetched — samples that plain remux, and reports
 /// [`RemuxProbe::enhancement_refused`] so the play is built without the params and records it.
 pub(super) fn measure_remote_remux(
-    client: &crate::plex::Client,
+    client: &crate::catalog::Client,
     rk: &str,
     session: &str,
     audio_stream_id: i64,
@@ -5796,7 +5796,7 @@ pub(super) fn measure_remote_remux(
     source_kbps: i64,
     // Issue #266: the DSP the play-path decision will carry on this same session, so the sample
     // is the remux that plays (`build_stream`'s `pre_audio`); `NONE` without Plex Pass.
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::catalog::AudioEnhancements,
 ) -> RemuxProbe {
     // Never samples the Burn shape (M7): the bandwidth this probe measures is the uncapped remux's,
     // and `build_stream`'s own flavor decision (which reads `enhancement_route` directly) is what
@@ -5806,7 +5806,7 @@ pub(super) fn measure_remote_remux(
             rk,
             session,
             session,
-            crate::plex::TranscodeOffset::Fresh,
+            crate::catalog::TranscodeOffset::Fresh,
             audio_stream_id,
             subtitle_stream_id,
             enhanced_remux_contract(audio, false),
@@ -5820,7 +5820,7 @@ pub(super) fn measure_remote_remux(
         // enhanced registration, exactly as the play path's own fallback does.
         note_enhancement_refused(" in remote remux preflight; fell back", audio);
         enhancement_refused = true;
-        spec = spec_for(crate::plex::AudioEnhancements::NONE);
+        spec = spec_for(crate::catalog::AudioEnhancements::NONE);
         decision = client.transcode_decision(&spec);
     }
     let Some(decision) = decision else {
@@ -5850,7 +5850,7 @@ pub(super) struct RemuxProbe {
 
 /// MDE handshake result. `None` from [`server_decision`] means the body was missing or unusable:
 /// the caller must not Original, but remux is still allowed. `Part.decision=transcode` is a
-/// container change, not a video-copy veto — see [`crate::plex::MediaPart::video_forbids_copy`].
+/// container change, not a video-copy veto — see [`crate::catalog::MediaPart::video_forbids_copy`].
 pub(super) struct MdeVerdict {
     pub(super) original: bool,
     pub(super) video_forbids_copy: bool,
@@ -5864,7 +5864,7 @@ pub(super) struct MdeVerdict {
 /// Takes the `Client` rather than looking one up: this runs on the resolve worker, and `rk` is only
 /// an item on the server the caller resolved from this playback's captured `ServerId`.
 pub(super) fn server_decision(
-    c: &crate::plex::Client,
+    c: &crate::catalog::Client,
     rk: &str,
     session: &str,
     audio_stream_id: i64,
@@ -5881,7 +5881,7 @@ pub(super) fn server_decision(
     mde_verdict(&mc)
 }
 
-fn mde_verdict(mc: &crate::plex::MediaContainer) -> Option<MdeVerdict> {
+fn mde_verdict(mc: &crate::catalog::MediaContainer) -> Option<MdeVerdict> {
     if refusal(mc).is_some() { return None; }
     // Part.decision is the Original-vs-not verdict (Media/container carry none). Video copy
     // is the VIDEO stream's own decision — Part=transcode + video=copy is a remux.
@@ -5928,7 +5928,7 @@ fn mde_verdict(mc: &crate::plex::MediaContainer) -> Option<MdeVerdict> {
 }
 
 pub(super) fn forced_server_decision(
-    c: &crate::plex::Client, rk: &str, session: &str, audio: i64, sub: i64,
+    c: &crate::catalog::Client, rk: &str, session: &str, audio: i64, sub: i64,
 ) -> Option<MdeVerdict> {
     mde_verdict(&c.mde_decision_forced(rk, session, audio, sub)?)
 }
@@ -5949,11 +5949,11 @@ pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
     if part <= 0 {
         return;
     }
-    let c = match crate::plex::client_for(sid) {
+    let c = match crate::catalog::client_for(sid) {
         Some(c) => c,
         None => return,
     };
-    let st = c.select_streams(&crate::plex::StreamSelection {
+    let st = c.select_streams(&crate::catalog::StreamSelection {
         part_id: part,
         audio_stream_id: aud,
         subtitle_stream_id: sub,
@@ -6015,7 +6015,7 @@ pub(super) fn queue_put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) 
 }
 
 fn spawn_selection_worker() {
-    let spawned = plx_base::task::spawn_small("put-selection", || loop {
+    let spawned = nj_base::task::spawn_small("put-selection", || loop {
         let req = {
             let mut queue = selection_queue();
             let Some(req) = queue.pending.pop_front() else {
@@ -6044,7 +6044,7 @@ pub(super) struct QueueInfo {
     pub(super) id: String,
     pub(super) item_id: String,
     pub(super) up_next: Option<UpNext>,
-    pub(super) rows: Vec<crate::plex::QueueRow>,
+    pub(super) rows: Vec<crate::catalog::QueueRow>,
 }
 
 /// The queued next episode. Main-thread only, and — like `metadata::playing()` (via
@@ -6068,7 +6068,7 @@ pub(crate) fn up_next(ps: &PlaybackSession) -> Option<&UpNext> {
 /// to keep a row past the call clones it out (`with_queue(|q| q.get(i).cloned())`); the borrow
 /// checker cannot police a `&'static`, but it does police this.
 #[allow(dead_code)] // nothing reads the rows yet — the queue overlay that draws them is its own batch
-pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::plex::QueueRow]) -> R) -> R {
+pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::catalog::QueueRow]) -> R) -> R {
     f(&ps.queue)
 }
 
@@ -6089,7 +6089,7 @@ pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::plex::
 ///   3. `GET /identity`, whose answer travels back in `QueueInfo::machine_id` for `apply_plan` to
 ///      cache against this server.
 pub(super) fn resolve_playqueue(
-    c: &crate::plex::Client,
+    c: &crate::catalog::Client,
     rk: &str,
     session: &str,
     cached: &str,
@@ -6162,7 +6162,7 @@ impl ResolveEnv {
     pub(super) fn set_preview(&mut self, preview: bool) {
         self.preview = preview;
         if preview {
-            self.audio_enhancements = crate::plex::AudioEnhancements::NONE;
+            self.audio_enhancements = crate::catalog::AudioEnhancements::NONE;
         }
     }
 
@@ -6191,7 +6191,7 @@ impl ResolveEnv {
             omit_queue_continuous: false,
             preview: false,
             audio_enhancements: crate::player::audio_enhancements(),
-            pass: crate::plex::serverinfo::subscription_of(sid),
+            pass: crate::catalog::serverinfo::subscription_of(sid),
             #[cfg(test)]
             dv_capability: None,
         }
@@ -6204,7 +6204,7 @@ pub(crate) fn playback_preview(d: &crate::metadata::Detail) -> Option<Preview> {
 
 fn playback_preview_with_capability(
     d: &crate::metadata::Detail,
-    capability: Option<plx_platform::devcaps::dv::DvCapability>,
+    capability: Option<nj_platform::devcaps::dv::DvCapability>,
 ) -> Option<Preview> {
     // A SHOW's container carries no file of its own, so the page answers for the episode its Play
     // button would start — the one the hero is already about. Its frame size and audio list are
@@ -6241,12 +6241,12 @@ fn playback_preview_with_capability(
     // promise "Direct Play" for a source the rung is about to send to an encoder, which is the
     // exact mismatch this preview's doc says it exists to avoid. `d.bitrate`/`width`/`height` are
     // `Media[0]`'s, i.e. the same numbers `ResolveEnv` hands the resolve.
-    let location = crate::plex::client_for(d.sid).and_then(|client| client.link());
+    let location = crate::catalog::client_for(d.sid).and_then(|client| client.link());
     // A detail page has not downloaded the file yet, so it reports what can preserve the source,
     // not a fictitious failed bandwidth result. Remote Auto is measured at Play. Relay remains a
     // conversion because its independent link policy refuses both original-rate flavors.
     let policy = direct_play_policy(mode, flavors_allowed(
-        crate::plex::link_policy(location),
+        crate::catalog::link_policy(location),
         quality_policy(quality(), true, d.bitrate, d.width, d.height),
     ));
     Some(match p {
@@ -6260,7 +6260,7 @@ fn playback_preview_with_capability(
 #[cfg(test)]
 pub(crate) fn playback_preview_with_capability_for_test(
     d: &crate::metadata::Detail,
-    capability: plx_platform::devcaps::dv::DvCapability,
+    capability: nj_platform::devcaps::dv::DvCapability,
 ) -> Option<Preview> {
     playback_preview_with_capability(d, Some(capability))
 }
@@ -6281,19 +6281,19 @@ static PLAY_SLOT: Mutex<Option<PlayLanding>> = Mutex::new(None);
 static PLAY_RESUME: Mutex<Option<(u32, i64)>> = Mutex::new(None);
 
 fn retire_plan_resources(resources: AbandonedPlanResources) {
-    let Some(client) = crate::plex::client_for(resources.sid) else {
+    let Some(client) = crate::catalog::client_for(resources.sid) else {
         return;
     };
     let worker_ids = resources.identities.clone();
-    if !plx_base::task::spawn_small("resolve-abandoned-stop", move || {
+    if !nj_base::task::spawn_small("resolve-abandoned-stop", move || {
         for identity in worker_ids {
             let _ = client.transcode_stop(&identity);
         }
     }) {
         // Thread creation failure is rarer than cancellation and must not turn into a permanent
         // server allocation. The normal path above keeps this network work off the main thread.
-        let _block = plx_base::task::allow_blocking(
-            const { &plx_base::task::BlockingLabel::new("abandoned plan stop (worker thread refused)") },
+        let _block = nj_base::task::allow_blocking(
+            const { &nj_base::task::BlockingLabel::new("abandoned plan stop (worker thread refused)") },
         );
         for identity in resources.identities {
             let _ = client.transcode_stop(&identity);
@@ -6371,7 +6371,7 @@ pub(crate) fn arm_play_resume(ps: &mut PlaybackSession, resume_ns: i64) -> bool 
 /// rows carry their own server (the shared-server data-model step), each call site passes `m.sid` /
 /// `d.sid` instead and this helper goes away; it exists so there is exactly ONE line to change.
 pub(crate) fn surface_sid() -> ServerId {
-    crate::plex::current_server()
+    crate::catalog::current_server()
 }
 
 /// MAIN THREAD, NON-BLOCKING. On acceptance, publishes the HUD strings immediately, supersedes an
@@ -6548,7 +6548,7 @@ fn request_play_inner(
     }
     PLAY_BUSY.store(true, Ordering::SeqCst);
     let (rk, part, vc, ac) = (request.rk, request.part, request.vcodec, request.acodec);
-    let spawned = plx_base::task::spawn_small("resolve", move || {
+    let spawned = nj_base::task::spawn_small("resolve", move || {
         if drain_previous {
             // The old attempt's `state=stopped` and transcode `/stop` were intentionally moved off
             // the SDL thread.  A user Retry must nevertheless preserve their ordering relative to
@@ -6625,11 +6625,11 @@ fn reset_track_selection(sid: ServerId, rk: &str, retry: Option<RetryContext>) {
 /// server is not (yet) registered, which a resolve about to fail for the same reason would find
 /// out anyway.
 fn remembered_subtitle_offset(sid: ServerId, rk: &str) -> Option<i64> {
-    let machine_id = crate::plex::client_for(sid)?.machine_id();
+    let machine_id = crate::catalog::client_for(sid)?.machine_id();
     if machine_id.is_empty() {
         return None;
     }
-    crate::plex::session::peek().subtitle_offset_for(&crate::plex::session::current_profile_key(), machine_id, rk)
+    crate::catalog::session::peek().subtitle_offset_for(&crate::catalog::session::current_profile_key(), machine_id, rk)
 }
 
 /// Persist the viewer's subtitle sync-timing correction for the CURRENTLY PLAYING item, so the
@@ -6639,16 +6639,16 @@ fn remembered_subtitle_offset(sid: ServerId, rk: &str) -> Option<i64> {
 /// already applied by the time this queues, so a slow or lost write costs only the NEXT resume,
 /// never this one.
 pub(crate) fn persist_subtitle_offset(ps: &PlaybackSession, offset_ms: i64) {
-    let Some(machine_id) = crate::plex::client_for(cur_sid(ps)).map(|c| c.machine_id().to_string()) else {
+    let Some(machine_id) = crate::catalog::client_for(cur_sid(ps)).map(|c| c.machine_id().to_string()) else {
         return;
     };
     if machine_id.is_empty() {
         return;
     }
     let rk = cur_rk(ps);
-    let user = crate::plex::session::current_profile_key();
+    let user = crate::catalog::session::current_profile_key();
     let wanted = (offset_ms != 0).then_some(offset_ms);
-    crate::plex::session::queue_update(move |current| {
+    crate::catalog::session::queue_update(move |current| {
         if current.subtitle_offset_for(&user, &machine_id, &rk) == wanted {
             return None;
         }
@@ -6706,7 +6706,7 @@ fn rescue_retry_context(ps: &PlaybackSession, resume_ns: i64) -> RetryContext {
 /// Apply a retry's enhancement decision to the resolve environment it is about to hand the worker.
 fn apply_retry_enhancement(env: &mut ResolveEnv, retry: RetryContext) {
     if retry.suppress_enhancement {
-        env.audio_enhancements = crate::plex::AudioEnhancements::NONE;
+        env.audio_enhancements = crate::catalog::AudioEnhancements::NONE;
     }
 }
 
@@ -6999,7 +6999,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
         *s = PlaybackSession {
             direct_play_mode: plan.direct_play_mode,
             jail_load_blocked: false,
-            repair_status: plx_platform::tv::sandbox::State::Idle,
+            repair_status: nj_platform::tv::sandbox::State::Idle,
             request,
             requested_resume_ns,
             url: plan.url,
@@ -7066,7 +7066,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             resolved_as_preview: preview,
         };
     } };
-    if let (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) = (
+    if let (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) = (
         ps.cur_contract.delivery,
         ps
             .cur_contract
@@ -7104,12 +7104,12 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
     // advance never outlives its sidecar.
     crate::player::reclamp_subtitle_offset();
     // A landing is a DISCRETE change to what is on screen, so it owes the present gate a poke —
-    // `plx_machine::idle::invalidate`'s call-site list is that module's correctness argument. The caller
+    // `nj_machine::idle::invalidate`'s call-site list is that module's correctness argument. The caller
     // (`app.rs`'s pump) invalidates only when `pump_play` returns TRUE, and a REFUSING plan returns
     // false by construction (empty url) while flipping the player from Resolving to Error. That it
     // still repainted was an accident of the player route bypassing the gate entirely; here it is
     // the rule instead.
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     start
 }
 
@@ -7139,7 +7139,7 @@ fn prepare_original_remux(
     expected: &WorkerTicket,
     offset_secs: i64,
     watched: bool,
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::catalog::AudioEnhancements,
     force_burn: bool,
     known_refused: bool,
 ) -> Option<OriginalRemux> {
@@ -7167,7 +7167,7 @@ fn prepare_original_remux(
             &rk,
             &replacement,
             &replacement,
-            crate::plex::TranscodeOffset::from_seconds(offset_secs.max(0)),
+            crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
             candidate_audio_sid,
             subtitle,
             enhanced_remux_contract(audio, force_burn),
@@ -7190,7 +7190,7 @@ fn prepare_original_remux(
             return Some(OriginalRemux::RefusedToDirect);
         }
         enhancement_refused = true;
-        audio = crate::plex::AudioEnhancements::NONE;
+        audio = crate::catalog::AudioEnhancements::NONE;
         force_burn = false;
         spec = spec_for(audio, force_burn);
         decision = c.transcode_decision(&spec);
@@ -7263,15 +7263,15 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
 
 /// The ticket/HLS-sync check `retranscode_for` runs before building the "rebuild today's route"
 /// contract — split out so the async claim worker (which never touches `PlaybackSession`) can run
-/// it on the main thread once, up front, and hand the resulting [`crate::plex::EncodeContract`]
+/// it on the main thread once, up front, and hand the resulting [`crate::catalog::EncodeContract`]
 /// into whichever attempt (primary or Legacy fallback) actually needs it.
-fn plain_rebuild_precheck(ps: &mut PlaybackSession, expected: &WorkerTicket) -> Option<crate::plex::EncodeContract> {
+fn plain_rebuild_precheck(ps: &mut PlaybackSession, expected: &WorkerTicket) -> Option<crate::catalog::EncodeContract> {
     if !is_worker_ticket_current(expected) {
         return None;
     }
     if matches!(
         cur_delivery(ps),
-        crate::plex::TranscodeDelivery::FixedHls { .. }
+        crate::catalog::TranscodeDelivery::FixedHls { .. }
     ) {
         let live = sync_active_hls_to_session(ps);
         if live.as_ref().is_some_and(|(ticket, _)| ticket != expected) {
@@ -7290,7 +7290,7 @@ fn plain_rebuild_precheck(ps: &mut PlaybackSession, expected: &WorkerTicket) -> 
 /// (another capable track the candidate can carry) makes [`enhancement_step`] `NotInvolved`
 /// because the params already match, and its legacy reload lands here; rebuilding that as a
 /// re-encode would silently drop the enhancement the viewer still has switched on.
-fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
+fn retranscode_contract(ps: &PlaybackSession) -> crate::catalog::EncodeContract {
     // A ceiling means a fixed rung was picked, and an enhanced remux is uncapped by definition:
     // keeping it would erase the cap the picker shows (I5).
     let route = enhancement_route(&facts(ps), enhancement_family(ps));
@@ -7301,7 +7301,7 @@ fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
     if keep_enhanced {
         return enhanced_remux_contract(want_live(ps), matches!(route, Some(EnhancementRoute::Burn)));
     }
-    crate::plex::EncodeContract {
+    crate::catalog::EncodeContract {
         remux: false,
         delivery: cur_delivery(ps),
         no_video_copy: is_no_video_copy(ps),
@@ -7325,7 +7325,7 @@ fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
 pub(super) fn log_enhancement_outcome(
     output_codecs: Option<(&str, &str)>,
     outcome: EnhancementOutcome,
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::catalog::AudioEnhancements,
 ) {
     if let Some((v, a)) = output_codecs {
         crate::player::log(&format!("decision output: v={v} a={a}"));
@@ -7344,7 +7344,7 @@ pub(super) fn log_enhancement_outcome(
 /// Captured once, on the main thread, from a `PlaybackSession` the worker never sees again.
 #[derive(Clone)]
 struct RetranscodeClaimInputs {
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     sid: ServerId,
     rk: String,
     part_id: i64,
@@ -7365,7 +7365,7 @@ struct AppliedRetranscode {
     url: String,
     vcodec: String,
     acodec: String,
-    contract: crate::plex::EncodeContract,
+    contract: crate::catalog::EncodeContract,
     enhancement: EnhancementOutcome,
     /// Returned by `replace_active_encoder_for`/`replace_active_hls_for` at the moment this
     /// worker actually committed the route. `take_ready_retranscode_claim` re-checks it against
@@ -7375,7 +7375,7 @@ struct AppliedRetranscode {
     ticket: WorkerTicket,
     /// The server that owns `qsess`, so a landing discarded as stale
     /// ([`discard_retranscode_claim_slot`]) can stop the session it just started.
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     /// The encoder session the route was playing before this attempt replaced it (empty when
     /// there was none). NOT stopped by the attempt: the stream it feeds is still the one on
     /// screen until the landing reloads, so the caller retires it only after that reload
@@ -7395,7 +7395,7 @@ enum RetranscodeWorkerOutcome {
 /// rather than a one-shot local.
 fn retranscode_fallback_codecs(
     inputs: &RetranscodeClaimInputs,
-    contract: &crate::plex::EncodeContract,
+    contract: &crate::catalog::EncodeContract,
 ) -> (String, String) {
     if contract.remux {
         (
@@ -7413,11 +7413,11 @@ fn retranscode_fallback_codecs(
                     .map_or_else(|| inputs.src_acodec.clone(), |a| a.codec.clone())
             },
         )
-    } else if matches!(contract.delivery, crate::plex::TranscodeDelivery::FixedHls { .. }) {
+    } else if matches!(contract.delivery, crate::catalog::TranscodeDelivery::FixedHls { .. }) {
         ("h264".to_owned(), "aac".to_owned())
     } else {
         (
-            plx_platform::devcaps::caps().encode_vcodec().to_owned(),
+            nj_platform::devcaps::caps().encode_vcodec().to_owned(),
             "ac3".to_owned(),
         )
     }
@@ -7438,15 +7438,15 @@ fn select_streams_for_encode(inputs: &RetranscodeClaimInputs) {
 /// ([`select_streams_for_encode`]). Pure with respect to
 /// `PlaybackSession` (never sees one): everything it needs is in `inputs`/`contract`, and
 /// everything it decides is returned rather than written, so it may run on
-/// [`plx_base::task::spawn_small`] as well as synchronously.
+/// [`nj_base::task::spawn_small`] as well as synchronously.
 fn try_retranscode(
     inputs: &RetranscodeClaimInputs,
-    contract: crate::plex::EncodeContract,
+    contract: crate::catalog::EncodeContract,
 ) -> RetranscodeWorkerOutcome {
     if !is_worker_ticket_current(&inputs.expected) {
         return RetranscodeWorkerOutcome::Refused;
     }
-    let crate::plex::EncodeContract {
+    let crate::catalog::EncodeContract {
         delivery, ceiling, audio, ..
     } = contract;
     let (fallback_vcodec, fallback_acodec) = retranscode_fallback_codecs(inputs, &contract);
@@ -7455,7 +7455,7 @@ fn try_retranscode(
         &inputs.rk,
         &qsess,
         &qsess,
-        crate::plex::TranscodeOffset::from_seconds(inputs.offset_secs.max(0)),
+        crate::catalog::TranscodeOffset::from_seconds(inputs.offset_secs.max(0)),
         inputs.audio_sid,
         inputs.subtitle_sid,
         contract,
@@ -7486,7 +7486,7 @@ fn try_retranscode(
     let output_codecs = decision_codecs(&decision).unwrap_or((fallback_vcodec, fallback_acodec));
     let url = inputs.client.transcode_start_url(&sp).to_url();
     let replacement_ticket = match (delivery, ceiling.and_then(crate::abr::Rung::from_ceiling)) {
-        (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
+        (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
             replace_active_hls_for(&inputs.expected, &qsess, &url, rung, None)
         }
         _ => replace_active_encoder_for(&inputs.expected, &qsess),
@@ -7508,7 +7508,7 @@ fn try_retranscode(
     let enhancement = classify_outcome(Some(&decision), inputs.carried_audio.as_ref(), audio);
     // NEVER log the URL. `transcode_start_url` ends in `X-Plex-Token=…`, and this line is reached
     // by an ordinary audio-track switch — so the app's own support channel ("send us
-    // /tmp/plxnative-events.log") was asking users to paste a live PMS credential into a public
+    // /tmp/nativejelly-events.log") was asking users to paste a live PMS credential into a public
     // issue thread. The rk, the track ids and the offset are the whole diagnostic value here; the
     // URL added nothing that is not derivable from them.
     crate::player::log(&format!(
@@ -7545,7 +7545,7 @@ fn prepare_retranscode_inputs(
     }
     let logical = sess(ps);
     let namespace = if logical.is_empty() {
-        format!("plxnative-{rk}")
+        format!("nativejelly-{rk}")
     } else {
         logical
     };
@@ -7605,9 +7605,9 @@ fn install_retranscode_outcome(ps: &mut PlaybackSession, applied: &AppliedRetran
 /// rebuild, a seek during a transcode, the Original recovery's admission probe. A deliberate,
 /// labelled exception to the frame-thread blocking guard, not a fresh regression; see
 /// [`execute_retranscode_claim`]'s doc for what did move.
-fn pending_split_block() -> plx_base::task::AllowBlocking {
-    plx_base::task::allow_blocking(
-        const { &plx_base::task::BlockingLabel::new("route PMS call (frame thread; pending split)") },
+fn pending_split_block() -> nj_base::task::AllowBlocking {
+    nj_base::task::allow_blocking(
+        const { &nj_base::task::BlockingLabel::new("route PMS call (frame thread; pending split)") },
     )
 }
 
@@ -7620,7 +7620,7 @@ fn retranscode_as(
     ps: &mut PlaybackSession,
     expected: &WorkerTicket,
     offset_secs: i64,
-    contract: crate::plex::EncodeContract,
+    contract: crate::catalog::EncodeContract,
 ) -> Option<String> {
     let inputs = prepare_retranscode_inputs(ps, expected, offset_secs)?;
     let outcome = {
@@ -7656,7 +7656,7 @@ pub(super) fn live_family(ps: &PlaybackSession) -> RouteFamily {
     if !is_transcoding(ps) {
         RouteFamily::Direct
     } else if ps.cur_contract.remux
-        && ps.cur_contract.delivery == crate::plex::TranscodeDelivery::ProgressiveMkv
+        && ps.cur_contract.delivery == crate::catalog::TranscodeDelivery::ProgressiveMkv
     {
         RouteFamily::Remux
     } else {
@@ -7669,7 +7669,7 @@ pub(super) fn live_family(ps: &PlaybackSession) -> RouteFamily {
 /// DV facts.
 pub(super) fn facts(ps: &PlaybackSession) -> EnhancementFacts<'_> {
     EnhancementFacts {
-        pass: crate::plex::serverinfo::subscription_of(cur_sid(ps)),
+        pass: crate::catalog::serverinfo::subscription_of(cur_sid(ps)),
         base: ps.auto_original.as_ref(),
         carried: ps.cur_audio.as_ref(),
         subtitle_effect: subtitle_effect_of(ps),
@@ -7728,9 +7728,9 @@ fn enhancement_family(ps: &PlaybackSession) -> RouteFamily {
 /// Under a fixed rung nothing is: the enhanced route is an uncapped remux, so wanting it there
 /// would override the bitrate cap the viewer picked (I5) — the quality refresh already queued
 /// rebuilds that route as a capped re-encode without the params.
-fn want_live(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+fn want_live(ps: &PlaybackSession) -> crate::catalog::AudioEnhancements {
     if !enhancement_quality() {
-        return crate::plex::AudioEnhancements::NONE;
+        return crate::catalog::AudioEnhancements::NONE;
     }
     desired_audio(crate::player::audio_enhancements(), audio_enhancements_offered_live(ps))
 }
@@ -7759,12 +7759,12 @@ fn enhancement_quality() -> bool {
 /// declared-DV source (the one `no_video_copy` reason) out of the offer entirely before this is
 /// ever reached.
 fn enhanced_remux_contract(
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::catalog::AudioEnhancements,
     force_burn: bool,
-) -> crate::plex::EncodeContract {
-    crate::plex::EncodeContract {
+) -> crate::catalog::EncodeContract {
+    crate::catalog::EncodeContract {
         remux: !force_burn,
-        delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+        delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
         no_video_copy: false,
         ceiling: None,
         audio,
@@ -7778,7 +7778,7 @@ pub(crate) enum EnhancementStep {
     /// legacy reload) runs.
     NotInvolved,
     /// Rebuild as this remux — on with new params, or a remux candidate's plain remux.
-    Remux(crate::plex::EncodeContract),
+    Remux(crate::catalog::EncodeContract),
     /// The enhancement is no longer wanted and the candidate direct-plays: return to it.
     ReleaseToDirect,
 }
@@ -7808,7 +7808,7 @@ pub(crate) fn enhancement_step(ps: &PlaybackSession) -> EnhancementStep {
         return match ps.auto_original.as_ref() {
             Some(candidate) if candidate.direct => EnhancementStep::ReleaseToDirect,
             Some(_) => EnhancementStep::Remux(enhanced_remux_contract(
-                crate::plex::AudioEnhancements::NONE,
+                crate::catalog::AudioEnhancements::NONE,
                 false,
             )),
             None => EnhancementStep::NotInvolved,
@@ -7868,7 +7868,7 @@ pub(crate) fn legacy_action(ps: &PlaybackSession) -> LegacyAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClaimPrimary {
     ReleaseToDirect,
-    Remux(crate::plex::EncodeContract),
+    Remux(crate::catalog::EncodeContract),
     /// The displaced pick's own legacy reload ([`legacy_action`]).
     Legacy,
     /// Today's rebuild, exactly: [`retranscode_for`].
@@ -7987,7 +7987,7 @@ enum RetranscodeFallback {
     /// No PMS I/O — `run_legacy`'s own `LegacyAction::Native`. Staged on the main thread once the
     /// worker lands, since `stage_native_audio` writes `PlaybackSession`.
     Native { ordinal: i32, codec: String },
-    Retranscode(crate::plex::EncodeContract),
+    Retranscode(crate::catalog::EncodeContract),
 }
 
 /// The worker's verdict, applied to `PlaybackSession` by [`take_ready_retranscode_claim`].
@@ -8038,7 +8038,7 @@ fn take_claim_landing() -> Option<RetranscodeClaimLanding> {
 /// — all off the frame thread, all before anything reaches [`RETRANSCODE_CLAIM_SLOT`].
 fn run_retranscode_claim_worker(
     inputs: &RetranscodeClaimInputs,
-    primary_contract: crate::plex::EncodeContract,
+    primary_contract: crate::catalog::EncodeContract,
     fallback: RetranscodeFallback,
 ) -> RetranscodeClaimResult {
     select_streams_for_encode(inputs);
@@ -8107,14 +8107,14 @@ fn spawn_retranscode_claim(
     pending_seek: i64,
     user_target: i64,
     inputs: RetranscodeClaimInputs,
-    primary_contract: crate::plex::EncodeContract,
+    primary_contract: crate::catalog::EncodeContract,
     fallback: RetranscodeFallback,
 ) -> bool {
     #[cfg(test)]
     if take_fault(Fault::SpawnRefusal) {
         return false;
     }
-    plx_base::task::spawn_small("retranscode-claim", move || {
+    nj_base::task::spawn_small("retranscode-claim", move || {
         // catch_unwind OUTSIDE the mailbox write, like the resolve worker: a panicking attempt must
         // still land (as a `Rejected`) or `ControlPhase::Applying` waits forever for a mailbox
         // entry that will now never arrive.
@@ -8147,12 +8147,12 @@ fn discard_retranscode_claim_slot() {
 /// because a session left running is a leak on the server. `stop` runs at most once.
 fn stop_encoder_off_thread(
     thread: &str,
-    refused: &'static plx_base::task::BlockingLabel,
+    refused: &'static nj_base::task::BlockingLabel,
     stop: impl Fn() + Clone + Send + 'static,
 ) {
     let inline = stop.clone();
-    if plx_base::task::spawn_small_keeping(thread, move || stop()).is_none() {
-        let _block = plx_base::task::allow_blocking(refused);
+    if nj_base::task::spawn_small_keeping(thread, move || stop()).is_none() {
+        let _block = nj_base::task::allow_blocking(refused);
         inline();
     }
 }
@@ -8160,13 +8160,13 @@ fn stop_encoder_off_thread(
 /// Stop an encoder session without waiting on PMS: the frame thread reaches every caller of this
 /// (a teardown, a fresh playback request, a stale drain, the reload's retirement), and
 /// `transcode_stop` is a blocking round trip.
-fn stop_encoder_session(client: &'static crate::plex::Client, session: String) {
+fn stop_encoder_session(client: &'static crate::catalog::Client, session: String) {
     if session.is_empty() {
         return;
     }
     stop_encoder_off_thread(
         "retranscode-stop",
-        const { &plx_base::task::BlockingLabel::new("encoder stop (worker thread refused)") },
+        const { &nj_base::task::BlockingLabel::new("encoder stop (worker thread refused)") },
         move || {
             let _ = client.transcode_stop(&session);
         },
@@ -8184,7 +8184,7 @@ fn stop_discarded_landing(applied: AppliedRetranscode) {
 /// The encoder an ACCEPTED landing replaced, waiting for the reload that moves the Engine off it.
 /// Written by [`take_ready_retranscode_claim`] once the landing is installed; read by
 /// [`retire_superseded_encoder`] after the pump has run the claim's tail.
-static SUPERSEDED_ENCODER: std::sync::Mutex<Option<(&'static crate::plex::Client, String)>> =
+static SUPERSEDED_ENCODER: std::sync::Mutex<Option<(&'static crate::catalog::Client, String)>> =
     std::sync::Mutex::new(None);
 
 /// Stop the encoder an accepted claim replaced. The pump calls this AFTER the claim's reload, not
@@ -8415,7 +8415,8 @@ pub(crate) fn honour_displaced_pick(ps: &mut PlaybackSession, displaced_pick: bo
 /// **Menu display truth.** While a user action is queued or in flight the rows show what the
 /// preference is asking of the live route; once settled they show what the server APPLIED. A
 /// claim-time rejection therefore shows what actually plays, and pressing the row again retries.
-pub(crate) fn displayed_audio_enhancements(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn displayed_audio_enhancements(ps: &PlaybackSession) -> crate::catalog::AudioEnhancements {
     let in_flight = {
         let control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
         control.pending_user.is_some() || control.phase != ControlPhase::Stable
@@ -8453,10 +8454,10 @@ pub(crate) fn audio_enhancements_offered_live(ps: &PlaybackSession) -> bool {
 /// This is the one door: it drives every input `audio_enhancements_offered_live`/
 /// `displayed_audio_enhancements` read (I1-I7), registers a throwaway server carrying the given
 /// Plex Pass tristate, and returns the session plus that server's id so the caller can
-/// `crate::plex::reset_servers_for_test()` when done. Caller holds `plx_base::testlock::serial()`.
+/// `crate::catalog::reset_servers_for_test()` when done. Caller holds `nj_base::testlock::serial()`.
 #[cfg(test)]
 pub(crate) struct EnhTestFixture {
-    pub(crate) pass: crate::plex::serverinfo::Subscription,
+    pub(crate) pass: crate::catalog::serverinfo::Subscription,
     /// `None` = still direct-playing (Direct family). `Some(true)` = a progressive-MKV remux
     /// (Remux family — a plain Original remux, or an already-applied enhancement). `Some(false)`
     /// = any other transcode shape (Other family — HLS, a fixed rung, a relay: I5 excludes all of
@@ -8484,7 +8485,7 @@ pub(crate) struct EnhTestFixture {
     /// Takes precedence over `applied.any()` alone, but `refused` wins if both are set.
     pub(crate) unverified: bool,
     /// The contract's own `audio` — what the live route has actually applied.
-    pub(crate) applied: crate::plex::AudioEnhancements,
+    pub(crate) applied: crate::catalog::AudioEnhancements,
     /// The applied route is a Burn (M7) — `cur_contract.remux` is `false` even though this is the
     /// enhancement's OWN route, exactly as [`live_is_own_burn`] reads it. Ignored unless `applied`
     /// carries a preference and `remux` is `Some(true)` (a Burn is still `ProgressiveMkv`).
@@ -8498,7 +8499,7 @@ pub(crate) struct EnhTestFixture {
 impl Default for EnhTestFixture {
     fn default() -> Self {
         Self {
-            pass: crate::plex::serverinfo::Subscription::Yes,
+            pass: crate::catalog::serverinfo::Subscription::Yes,
             remux: Some(true),
             base_present: true,
             dv_declared: false,
@@ -8507,7 +8508,7 @@ impl Default for EnhTestFixture {
             subtitle_effect: SubtitleEffect::None,
             refused: false,
             unverified: false,
-            applied: crate::plex::AudioEnhancements::NONE,
+            applied: crate::catalog::AudioEnhancements::NONE,
             applied_burn: false,
             in_flight: false,
         }
@@ -8516,8 +8517,8 @@ impl Default for EnhTestFixture {
 
 #[cfg(test)]
 pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSession, ServerId) {
-    let sid = crate::plex::register_for_test("enh-menu-test", "127.0.0.1", 1, "token", "enh-menu-client");
-    crate::plex::serverinfo::store_for_test(sid, route.pass, "1.43.4");
+    let sid = crate::catalog::register_for_test("enh-menu-test", "127.0.0.1", 1, "token", "enh-menu-client");
+    crate::catalog::serverinfo::store_for_test(sid, route.pass, "1.43.4");
 
     let mut ps = PlaybackSession::IDLE;
     ps.cur_sid = sid;
@@ -8532,9 +8533,9 @@ pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSessio
     } else {
         EnhancementOutcome::Off
     };
-    ps.cur_contract = crate::plex::EncodeContract {
+    ps.cur_contract = crate::catalog::EncodeContract {
         remux: matches!(route.remux, Some(true)) && !(route.applied_burn && route.applied.any()),
-        delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+        delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
         no_video_copy: false,
         ceiling: None,
         audio: route.applied,
@@ -8557,7 +8558,7 @@ pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSessio
         },
         dv_decision: if route.dv_declared {
             crate::metadata::DvDecision {
-                capability: plx_platform::devcaps::dv::DvCapability::Supported,
+                capability: nj_platform::devcaps::dv::DvCapability::Supported,
                 presentation: crate::metadata::DvPresentation::Declare(crate::metadata::DolbyHdrInfo {
                     profile_id: 8,
                     track_type: "single",
@@ -8619,7 +8620,7 @@ pub(crate) fn commit_audio_selection(ps: &mut PlaybackSession, audio: CarriedAud
         RouteFamily::Other => {
             if matches!(
                 cur_delivery(ps),
-                crate::plex::TranscodeDelivery::FixedHls { .. }
+                crate::catalog::TranscodeDelivery::FixedHls { .. }
             ) {
                 ps.auto_original = None;
             }
@@ -8700,7 +8701,7 @@ pub(crate) fn commit_subtitle_selection(
         RouteFamily::Other => {
             if matches!(
                 cur_delivery(ps),
-                crate::plex::TranscodeDelivery::FixedHls { .. }
+                crate::catalog::TranscodeDelivery::FixedHls { .. }
             ) {
                 let s = &mut *ps;
                 if stream_id == 0 {
@@ -8792,7 +8793,7 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
 /// retired; transient Applying/Resolving phases skip a hybrid report without borrowing Session.
 fn timeline_snapshot(
     lease: &TimelineLease,
-    state: crate::plex::TimelineState,
+    state: crate::catalog::TimelineState,
     time_ms: i64,
     duration_ms: i64,
 ) -> Option<TimelineSnapshot> {
@@ -8833,7 +8834,7 @@ fn timeline_snapshot(
 /// snapshot.
 pub(crate) fn report_timeline(
     lease: &TimelineLease,
-    state: crate::plex::TimelineState,
+    state: crate::catalog::TimelineState,
     t_ms: i64,
     d_ms: i64,
 ) -> bool {
@@ -8845,11 +8846,11 @@ pub(crate) fn report_timeline(
     let Some(report) = timeline_snapshot(lease, state, t_ms, d_ms) else {
         return false;
     };
-    let c = match crate::plex::client_for(report.sid) {
+    let c = match crate::catalog::client_for(report.sid) {
         Some(c) => c,
         None => return true,
     };
-    let ok = c.timeline(&crate::plex::TimelineReport {
+    let ok = c.timeline(&crate::catalog::TimelineReport {
         rating_key: &report.rating_key,
         state: report.state,
         time_ms: report.time_ms,
@@ -8865,7 +8866,7 @@ pub(crate) fn report_timeline(
     // one it did — for the whole length of a film, ten seconds at a time. The success half is
     // already on that line and this runs at 0.1 Hz, so only the silence needs a line of its own.
     if !ok {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "timeline post failed rk={} state={} t={}s",
             report.rating_key,
             report.state.as_str(),

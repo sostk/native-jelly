@@ -1,4 +1,4 @@
-//! **The simulator's sound** (`plxnative-simaudio`, with the clock sink armed): the audio access
+//! **The simulator's sound** (`nativejelly-simaudio`, with the clock sink armed): the audio access
 //! units the clock sink already accepts are ALSO piped to a system `ffmpeg` child that decodes them
 //! and plays them on this machine's sound server — the audio twin of [`super::sim_video`].
 //!
@@ -21,9 +21,9 @@ use std::sync::{Mutex, OnceLock};
 fn armed() -> bool {
     static ONCE: OnceLock<bool> = OnceLock::new();
     *ONCE.get_or_init(|| {
-        let on = plx_base::devtrig::flag("simaudio");
+        let on = nj_base::devtrig::flag("simaudio");
         if on {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "simaudio: ARMED — audio AUs are also decoded by a system ffmpeg and played on this \
                  machine. Nothing here measures the television.",
             );
@@ -33,11 +33,11 @@ fn armed() -> bool {
 }
 
 /// How far ahead of the clock an AU is written: the child's decode plus the sound server's buffer,
-/// so what is heard lines up with the frame on screen. `PLXNATIVE_SIM_AUDIO_LEAD_MS` overrides it.
+/// so what is heard lines up with the frame on screen. `NJ_SIM_AUDIO_LEAD_MS` overrides it.
 fn lead_ns() -> i64 {
     static ONCE: OnceLock<i64> = OnceLock::new();
     *ONCE.get_or_init(|| {
-        std::env::var("PLXNATIVE_SIM_AUDIO_LEAD_MS")
+        std::env::var("NJ_SIM_AUDIO_LEAD_MS")
             .ok()
             .and_then(|v| v.trim().parse::<i64>().ok())
             .unwrap_or(120)
@@ -115,13 +115,13 @@ pub(crate) fn feed(au: &[u8], pts: i64) {
 }
 
 fn ffmpeg_path() -> std::ffi::OsString {
-    std::env::var_os("PLXNATIVE_SIM_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
+    std::env::var_os("NJ_SIM_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
 }
 
-/// `-f pulse` by default (PulseAudio and PipeWire both answer it); `PLXNATIVE_SIM_AUDIO_OUT=alsa`
+/// `-f pulse` by default (PulseAudio and PipeWire both answer it); `NJ_SIM_AUDIO_OUT=alsa`
 /// for a machine with neither.
 fn output_args() -> Vec<String> {
-    match std::env::var("PLXNATIVE_SIM_AUDIO_OUT").ok().as_deref() {
+    match std::env::var("NJ_SIM_AUDIO_OUT").ok().as_deref() {
         Some("alsa") => vec!["-f".into(), "alsa".into(), "default".into()],
         _ => vec!["-f".into(), "pulse".into(), "-buffer_duration".into(), "60".into(), "Native Jelly simulator".into()],
     }
@@ -140,7 +140,7 @@ fn spawn(demuxer: &'static str) -> Option<Session> {
     let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
-            plx_base::eventlog::log(&format!("simaudio: could not start ffmpeg ({e}); no sound this session"));
+            nj_base::eventlog::log(&format!("simaudio: could not start ffmpeg ({e}); no sound this session"));
             return None;
         }
     };
@@ -161,12 +161,12 @@ fn spawn(demuxer: &'static str) -> Option<Session> {
             }
             written += 1;
             if written == 1 {
-                plx_base::eventlog::log(&format!("simaudio: first {demuxer} frame playing"));
+                nj_base::eventlog::log(&format!("simaudio: first {demuxer} frame playing"));
             }
         }
     });
     if writer.is_err() {
-        plx_base::eventlog::log("simaudio: could not spawn the pipe thread; no sound this session");
+        nj_base::eventlog::log("simaudio: could not spawn the pipe thread; no sound this session");
         let _ = child.kill();
         let _ = child.wait();
         return None;

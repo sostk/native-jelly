@@ -172,9 +172,9 @@ impl Rung {
         LADDER.into_iter().find(|r| r.kbps() == kbps)
     }
 
-    pub(crate) fn ceiling(self) -> crate::plex::Ceiling {
+    pub(crate) fn ceiling(self) -> crate::catalog::Ceiling {
         let (width, height) = self.raster();
-        crate::plex::Ceiling {
+        crate::catalog::Ceiling {
             max_kbps: i64::from(self.kbps()),
             max_w: i64::from(width),
             max_h: i64::from(height),
@@ -203,7 +203,7 @@ impl Rung {
     /// Recover the controller's starting rung from the exact ceiling stored in the playback
     /// route. Auto owns only these canonical values; an arbitrary/manual ceiling is not an ABR
     /// state and therefore has no answer here.
-    pub(crate) fn from_ceiling(ceiling: crate::plex::Ceiling) -> Option<Self> {
+    pub(crate) fn from_ceiling(ceiling: crate::catalog::Ceiling) -> Option<Self> {
         LADDER
             .iter()
             .copied()
@@ -211,13 +211,13 @@ impl Rung {
     }
 }
 
-/// **Pin Auto's HLS ladder to one actuator, by request rate** — `plxnative-abrpin=<kbps>`.
+/// **Pin Auto's HLS ladder to one actuator, by request rate** — `nativejelly-abrpin=<kbps>`.
 ///
 /// Measurement-only, for step M4 of `docs/adaptive-playback-plan.md`: reading a settled reserve at
 /// a given rung means holding that rung for minutes, and nothing in the app could do that.
 /// `crate::dev::playback_quality_override` cannot serve, for two independent reasons — a non-Auto
 /// quality returns `None` from `route::hls_abr_control` before a controller is ever constructed,
-/// so it measures a different transport path entirely; and [`crate::plex::session::PlaybackQuality`]
+/// so it measures a different transport path entirely; and [`crate::catalog::session::PlaybackQuality`]
 /// has no mid-1080p points, while the ladder this pins has eight of them.
 ///
 /// The value is the actuator's REQUEST rate (`Rung::kbps`) — 320, 720, 2000, 4000, 6000, 8000,
@@ -228,9 +228,9 @@ impl Rung {
 ///
 /// Compiled out with `devtriggers`, so a release build cannot be pinned at all. A typed trigger
 /// (its value is a [`Rung`]), so it is parsed here, beside the one consumer, from the base-layer
-/// `plx_base::devtrig::read` rather than living with the primitives.
+/// `nj_base::devtrig::read` rather than living with the primitives.
 pub(crate) fn abr_pin() -> Option<Rung> {
-    let raw = plx_base::devtrig::read("abrpin")?;
+    let raw = nj_base::devtrig::read("abrpin")?;
     let kbps: u32 = raw.trim().parse().ok()?;
     Rung::from_request_kbps(kbps)
 }

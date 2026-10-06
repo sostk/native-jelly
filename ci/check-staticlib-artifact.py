@@ -16,7 +16,7 @@ import json
 import os
 import sys
 
-CRATE = "plxnative_modules"
+CRATE = "nativejelly_modules"
 
 
 def artifacts(lines):

@@ -5,15 +5,15 @@
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
-use plx_machine::present::Present;
+use nj_machine::present::Present;
 use crate::ui::screen::By;
 
 #[test]
 fn only_current_inner_instance_can_project_remembered_selection() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("inner-remember-owner");
     let mut s = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
     step(&mut s, ScreenEvent::Mount, None);
     let covered = s.inner.top().unwrap().inst.as_ref().unwrap().id;
     forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Legal)));
@@ -37,16 +37,16 @@ fn only_current_inner_instance_can_project_remembered_selection() {
 
 /// **A Pop that would empty the inner stack is the surface's dismissal, not a surface left up
 /// with no page in it.** The configuration is the real one:
-/// `/tmp/plxnative-settings=privacy` roots the surface AT Privacy & data, and that page's
+/// `/tmp/nativejelly-settings=privacy` roots the surface AT Privacy & data, and that page's
 /// Done (`consent::band_commit`'s Settings arm) emits a bare `Fx::Nav(NavOp::Pop)` — correct
 /// when Privacy sits over the Settings root, and one entry too many here. `NavStack` has no
 /// depth guard of its own, so before the fix this retired the only entry and left `top_mut()`
 /// at `None` while `at_rest()` stayed true: scrim and ground still drawn, input still owned,
 /// no page, no hit stops, and no key that could reach it. `onboard::leave`'s settings arm and
-/// `/tmp/plxnative-settings=home` are the same pair.
+/// `/tmp/nativejelly-settings=home` are the same pair.
 #[test]
 fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("surface-pop-empty");
     let mut s = RouteSurface::new(
         EntryId(7),
@@ -54,7 +54,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
         Family::Settings,
         SettingsPage::Privacy,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     assert_eq!(
@@ -86,7 +86,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
 /// Done straight out of Settings instead of back to its root.
 #[test]
 fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("surface-pop-inner");
     let mut s = RouteSurface::new(
         EntryId(7),
@@ -94,7 +94,7 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     let legal_row = FocusKey {
@@ -142,7 +142,7 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
 /// record able to say why.
 #[test]
 fn the_remembered_seats_are_part_of_the_hash() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = scratch_session("surface-seat-hash");
     let legal_row = FocusKey {
         entry: EntryId(0),
@@ -155,7 +155,7 @@ fn the_remembered_seats_are_part_of_the_hash() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut seated, ScreenEvent::Mount, None);
     step(
@@ -179,7 +179,7 @@ fn the_remembered_seats_are_part_of_the_hash() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut unseated, ScreenEvent::Mount, None);
     step(

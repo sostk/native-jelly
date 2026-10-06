@@ -2,7 +2,7 @@
 //! Home, Settings and the typed filmography-detail-return scenario have controlled inputs.
 //! Other initial domains fail closed at preflight.
 
-use plx_machine::machine::{Canon, LogicalState};
+use nj_machine::machine::{Canon, LogicalState};
 use crate::ui::rec::Recording;
 use serde::{Deserialize, Serialize};
 pub(crate) const CONTENT_SHAPE: &str = "ContentInitialV1{detail:str,detailsec:u32,detailok:bool,filmography:bool,personcredits:u32,nowan:bool};ContentResourcesV2{admission:Metadata(sid,rk,gen,client)|MetadataCancel(boundary,retired:DetailBatch)|Person(slot,gen,arg,guid,local?,client?,sid?),admitted:bool;result:DetailBatch(seq,req,terminal,Data(key,Option<Detail>)|Dropped(req)|Refused(req))|Person(slot,Mail(gen,Resolve|Media|Profile|Credits|Roles));PersonTerminal:slot+gen+kind-bound;DetailFloats:bits;ContentEffectsV1:complete_nav_store_request_return_memory}";
@@ -16,11 +16,11 @@ mod attachment_tests;
 /// admission answer (including refusal); only recorded ingress completes admitted work.
 pub(crate) struct HomeIo {
     pub replay: bool,
-    pub preferences: crate::plex::session::Session,
+    pub preferences: crate::catalog::session::Session,
     pub requests: Vec<serde_json::Value>,
     pub admissions: std::collections::VecDeque<serde_json::Value>,
     pub failure: Option<&'static str>,
-    pub profile: std::sync::Arc<crate::plex::session::CurrentProfile>,
+    pub profile: std::sync::Arc<crate::catalog::session::CurrentProfile>,
 }
 
 impl HomeIo {
@@ -44,12 +44,12 @@ impl HomeIo {
     pub fn hubs(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32) -> crate::stores::StoreOutcome {
         let adapter = hubs.adapter();
-        self.hubs_with(hubs, cmd, dt, &mut |request| crate::pms::spawn_fetch(&adapter, request))
+        self.hubs_with(hubs, cmd, dt, &mut |request| crate::catalog_fetch::spawn_fetch(&adapter, request))
     }
     #[cfg(test)]
     fn hubs_with(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
-        launch: &mut dyn FnMut(crate::pms::HubRequest) -> bool) -> crate::stores::StoreOutcome {
+        launch: &mut dyn FnMut(crate::catalog_fetch::HubRequest) -> bool) -> crate::stores::StoreOutcome {
         hubs.controlled(cmd, dt, &mut |request| {
             let (epoch, req, sid, client, token_gen) = request.descriptor();
             self.admit(serde_json::json!({"kind":"hubs", "epoch":epoch,
@@ -61,12 +61,12 @@ impl HomeIo {
         directory: crate::stores::browse::DirectoryView<'_>) -> crate::stores::StoreOutcome {
         let adapter = hubs.adapter();
         self.hubs_with_directory_and_launch(hubs, cmd, dt, directory,
-            &mut |request| crate::pms::spawn_fetch(&adapter, request))
+            &mut |request| crate::catalog_fetch::spawn_fetch(&adapter, request))
     }
     fn hubs_with_directory_and_launch(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
         directory: crate::stores::browse::DirectoryView<'_>,
-        launch: &mut dyn FnMut(crate::pms::HubRequest) -> bool) -> crate::stores::StoreOutcome {
+        launch: &mut dyn FnMut(crate::catalog_fetch::HubRequest) -> bool) -> crate::stores::StoreOutcome {
         hubs.controlled_with_directory(cmd, dt, directory, &mut |request| {
             let (epoch, req, sid, client, token_gen) = request.descriptor();
             self.admit(serde_json::json!({"kind":"hubs", "epoch":epoch,
@@ -155,7 +155,7 @@ pub(crate) struct Initial {
     pub version: u32,
     pub session: crate::auth::SessionInit,
     pub consent: crate::telemetry::consent::Consent,
-    pub home: crate::pms::initial::Initial,
+    pub home: crate::catalog_fetch::initial::Initial,
     pub clock_start: u32,
     pub entropy: Entropy,
     pub primary_client: u32,
@@ -188,40 +188,40 @@ impl Initial {
     pub(crate) fn synthetic_home(seed: u32, port: u16, settings: Option<String>)
         -> Result<Self, &'static str> {
         if port == 0 { return Err("invalid synthetic port"); }
-        let saved = crate::plex::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
-        let origin = crate::plex::Origin::http("127.0.0.1", i32::from(port));
-        let primary = crate::plex::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
+        let saved = crate::catalog::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
+        let origin = crate::catalog::Origin::http("127.0.0.1", i32::from(port));
+        let primary = crate::catalog::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
             origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
-            tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
+            tier:Some(crate::catalog::probe::Location::Local), ..Default::default() };
         let initial = Self { version:1, session:crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new()),
-            consent:Default::default(),home:crate::pms::initial::Initial::fresh(),clock_start:0,
+            consent:Default::default(),home:crate::catalog_fetch::initial::Initial::fresh(),clock_start:0,
             entropy:Entropy::Seeded(seed),primary_client:1,automated:true,settings:settings.clone(),
-            content:None, triggers:vec!["plxnative-app-init".into(),"plxnative-rec".into(),
-                "plxnative-focus".into(),"plxnative-noidle".into()] };
+            content:None, triggers:vec!["nativejelly-app-init".into(),"nativejelly-rec".into(),
+                "nativejelly-focus".into(),"nativejelly-noidle".into()] };
         let mut initial = initial;
-        if settings.is_some() { initial.triggers.push("plxnative-settings".into()); }
+        if settings.is_some() { initial.triggers.push("nativejelly-settings".into()); }
         initial.validate()?;
         Ok(initial)
     }
-    pub(crate) fn capture_home(host: &str, port: i32) -> Result<(Self, Option<crate::plex::session::DeferredLoad>), &'static str> {
+    pub(crate) fn capture_home(host: &str, port: i32) -> Result<(Self, Option<crate::catalog::session::DeferredLoad>), &'static str> {
         if let Some(value) = crate::dev::scenarios::app_init_value() {
             return Self::from_value(value?).map(|initial| (initial, None));
         }
         let token = crate::dev::scenarios::dev_token();
-        let (saved, entropy, deferred) = crate::plex::session::load_capturing_entropy();
-        let primary = (!token.is_empty()).then(|| crate::plex::session::ServerRef {
+        let (saved, entropy, deferred) = crate::catalog::session::load_capturing_entropy();
+        let primary = (!token.is_empty()).then(|| crate::catalog::session::ServerRef {
             address: host.into(), port: i64::from(port),
-            origin_url: crate::plex::Origin::http(host, port).base(), token,
-            tier: Some(crate::plex::probe::configured_tier(host)), ..Default::default()
+            origin_url: crate::catalog::Origin::http(host, port).base(), token,
+            tier: Some(crate::catalog::probe::configured_tier(host)), ..Default::default()
         });
         let initial = Self { version: 1,
             session: crate::auth::SessionInit::captured_boot(saved, primary, Vec::new()),
             consent: crate::telemetry::capture_initial(), clock_start: 0, entropy: Entropy::Captured(entropy),
-            primary_client: crate::plex::Client::capture_generation_seed(),
+            primary_client: crate::catalog::Client::capture_generation_seed(),
             automated: crate::dev::any_trigger_present(),
             settings: crate::dev::scenarios::settings_boot_value(),
             content: None,
-            home: crate::pms::initial::Initial::fresh(),
+            home: crate::catalog_fetch::initial::Initial::fresh(),
             triggers: crate::dev::armed_triggers(),
         };
         initial.validate()?;
@@ -250,7 +250,7 @@ impl Initial {
             != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
             return Err("incoherent initial Session");
         }
-        if crate::plex::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
+        if crate::catalog::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
             return Err("unsupported Home server binding");
         }
         if s.persisted.client_id.is_empty() { return Err("missing initial identity"); }
@@ -259,7 +259,7 @@ impl Initial {
             return Err("unsupported initial Settings input");
         }
         if self.settings.is_some()
-            != plx_base::devtrig::listed(&self.triggers, "settings") {
+            != nj_base::devtrig::listed(&self.triggers, "settings") {
             return Err("incoherent initial Settings input");
         }
         let content_triggers = ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"];
@@ -271,18 +271,18 @@ impl Initial {
             }
         }
         for name in content_triggers {
-            if self.content.is_some() != plx_base::devtrig::listed(&self.triggers, name) {
+            if self.content.is_some() != nj_base::devtrig::listed(&self.triggers, name) {
                 return Err("incoherent initial content input");
             }
         }
         match self.entropy {
-            Entropy::Captured(Some(bytes)) if crate::plex::session::client_id_from_entropy(bytes) != s.persisted.client_id =>
+            Entropy::Captured(Some(bytes)) if crate::catalog::session::client_id_from_entropy(bytes) != s.persisted.client_id =>
                 return Err("initial entropy mismatch"),
             Entropy::Seeded(seed) if format!("s{seed:08x}") != s.persisted.client_id =>
                 return Err("initial seed mismatch"),
             _ => {}
         }
-        if !self.triggers.iter().all(|trigger| plx_base::devtrig::controlled_trigger(trigger)) {
+        if !self.triggers.iter().all(|trigger| nj_base::devtrig::controlled_trigger(trigger)) {
             return Err("unsupported initial developer input");
         }
         Ok(())

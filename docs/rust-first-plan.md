@@ -8,11 +8,11 @@ design workflow (incremental-safety / target-structure / build-toolchain).
 
 Keep the final link as the **existing byte-identical `zig cc` invocation** and keep the
 Rust device crate a **`staticlib`**. Invert ownership by having a **thin C `main()` call
-a Rust `plex_run()`** — *not* by making cargo own the link, and *not* by defining `main`
+a Rust `nj_run()`** — *not* by making cargo own the link, and *not* by defining `main`
 in Rust. This preserves the stub-SONAME `DT_NEEDED` trick, `-Z build-std`, the
 CP15/`-neon` flags, and `-lunwind` placement untouched, so the video pipeline stays
 bit-identical while entry ownership flips. A real C `main` also means the crash tracer /
-log / `freopen(stderr)` / `setenv` run *before* any Rust — a Rust panic in `plex_run` is
+log / `freopen(stderr)` / `setenv` run *before* any Rust — a Rust panic in `nj_run` is
 still traced.
 
 ## End state
@@ -23,8 +23,8 @@ still traced.
     3-arg `taskId` ABI), behind flat `sf_*` / `acb_*` verbs. Two `sf_on_event`/`acb_on_event`
     edges call back into panic-guarded Rust.
   - `src/main.c` — a ~40-line boot shim (log, `freopen` stderr, install the async-signal-safe
-    crash tracer, `setenv`, then `return plex_run()`).
-- **Rust:** everything else — `plex_run` + the SDL event loop, input decode, tick, draw
+    crash tracer, `setenv`, then `return nj_run()`).
+- **Rust:** everything else — `nj_run` + the SDL event loop, input decode, tick, draw
   orchestration, lifecycle, dev triggers, `play_movie` routing, the HUD, and the whole
   buffer-feed engine (pump + demux/cue/load threads + seek/rebase) driving the C seam — plus
   the 10 already-ported modules. (Optional end-state: split the portable logic into a
@@ -35,9 +35,9 @@ still traced.
 1. **Isolate the C++/ACB seam** into `src/starfish.c` behind `sf_*`/`acb_*` verbs (pure-C
    refactor, zero behavior change; `playback.c` calls the seam). *Verify:* movie plays, full
    bind sequence in the log, seek/pause/bg-fg identical. **← safe first move.**
-2. **Invert the entry point:** `main.c` body → Rust `plex_run()`; `main.c` → the boot shim.
+2. **Invert the entry point:** `main.c` body → Rust `nj_run()`; `main.c` → the boot shim.
    Port the LG raw-key decode (over-allocated event buffer + `read_unaligned` at +16/+20/+24).
-   *Verify:* full remote smoke; `nm` shows `plex_run` in the `.a`. **"Rust owns main."**
+   *Verify:* full remote smoke; `nm` shows `nj_run` in the `.a`. **"Rust owns main."**
 3. **Port `play_movie` routing** (direct-play vs `/decision`+`start.mkv` transcode) → Rust.
 4. **Port `draw_hud`** → `ui::player_hud` (a View over a Hud snapshot). *Verify:* capture-diff.
 5. **Port the buffer-feed engine** → Rust (**highest risk**): pump, threads, seek/rebase, cue

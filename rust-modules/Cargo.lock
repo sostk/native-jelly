@@ -497,6 +497,85 @@ dependencies = [
 ]
 
 [[package]]
+name = "nativejelly-modules"
+version = "0.7.0"
+dependencies = [
+ "image",
+ "libc",
+ "nj_base",
+ "nj_gfx",
+ "nj_machine",
+ "nj_net",
+ "nj_platform",
+ "qrcodegen",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nativejelly-storage"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nj_base"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "rcgen",
+]
+
+[[package]]
+name = "nj_gfx"
+version = "0.0.0"
+dependencies = [
+ "image",
+ "libc",
+ "nj_base",
+ "nj_machine",
+]
+
+[[package]]
+name = "nj_machine"
+version = "0.0.0"
+dependencies = [
+ "nj_base",
+]
+
+[[package]]
+name = "nj_net"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "nj_base",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nj_platform"
+version = "0.0.0"
+dependencies = [
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale",
+ "icu_plurals",
+ "icu_provider",
+ "libc",
+ "nj_base",
+ "nj_machine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -563,85 +642,6 @@ checksum = "d354a98a3d1251555de99e8fdd8afda05573c31b82f59063a7b0a29b5527f120"
 dependencies = [
  "base64",
  "serde_core",
-]
-
-[[package]]
-name = "plx_base"
-version = "0.0.0"
-dependencies = [
- "libc",
- "rcgen",
-]
-
-[[package]]
-name = "plx_gfx"
-version = "0.0.0"
-dependencies = [
- "image",
- "libc",
- "plx_base",
- "plx_machine",
-]
-
-[[package]]
-name = "plx_machine"
-version = "0.0.0"
-dependencies = [
- "plx_base",
-]
-
-[[package]]
-name = "plx_net"
-version = "0.0.0"
-dependencies = [
- "libc",
- "plx_base",
- "rcgen",
- "rustls",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "plx_platform"
-version = "0.0.0"
-dependencies = [
- "icu_calendar",
- "icu_datetime",
- "icu_decimal",
- "icu_locale",
- "icu_plurals",
- "icu_provider",
- "libc",
- "plx_base",
- "plx_machine",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "plxnative-modules"
-version = "0.7.0"
-dependencies = [
- "image",
- "libc",
- "plx_base",
- "plx_gfx",
- "plx_machine",
- "plx_net",
- "plx_platform",
- "qrcodegen",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "plxnative-storage"
-version = "0.0.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
 ]
 
 [[package]]

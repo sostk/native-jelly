@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render site/og/card.html to site/media/og-card.jpg, the 1200x630 link-preview image that
-# plxnative.com advertises through its og:image / twitter:image tags.
+# nativejelly.com advertises through its og:image / twitter:image tags.
 #
 #   tools/render-og-card.sh                           # the card as committed (docs/screenshots/home.jpg)
 #   tools/render-og-card.sh --shot IMG --out FILE     # another screenshot, somewhere else

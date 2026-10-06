@@ -51,7 +51,7 @@ impl Resources {
             self.query = q.into();
             self.caret = caret;
             self.run = if q.trim().is_empty() {
-                plx_platform::i18n::msg::browse_search_placeholder_c().into()
+                nj_platform::i18n::msg::browse_search_placeholder_c().into()
             } else {
                 cstring(q)
             };
@@ -135,7 +135,7 @@ fn count_keys(shelves: &[crate::search::Shelf]) -> [Option<(Kind, usize)>; 5] {
 }
 
 pub(super) fn draw<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>) {
-    plx_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+    nj_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
     let p = f.painter.alpha(f.page_alpha);
     screen.ground.draw(p, Rect::FULL);
     field(screen, f, p);
@@ -221,10 +221,10 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         rect.w,
         screen.editing,
     );
-    let (cap_top, cap_base) = plx_gfx::text::text_cap_band(theme::size::HERO, 1);
+    let (cap_top, cap_base) = nj_gfx::text::text_cap_band(theme::size::HERO, 1);
     let pad = descent_pad(
         rect.h,
-        plx_gfx::text::text_height(theme::size::HERO, 1),
+        nj_gfx::text::text_height(theme::size::HERO, 1),
         cap_top,
         cap_base,
     );
@@ -233,7 +233,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
         Label::new(data.run.as_ptr(), theme::size::HERO, ink)
             .bold()
             .draw(p, Rect::new(rect.x + run_dx, rect.y, rect.w, rect.h));
-        let text_y = plx_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
+        let text_y = nj_gfx::text::text_vcenter_y(theme::size::HERO, 1, rect.cy());
         if caret_shown(screen.editing, screen.blink_us < super::BLINK_US) {
             p.rect(
                 Rect::new(
@@ -249,9 +249,9 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
         if ghost_shown(&data.query) {
-            let y = plx_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
+            let y = nj_gfx::text::baseline_y(theme::size::BODY, 0, theme::size::HERO, 1, text_y);
             p.text(
-                plx_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
+                nj_platform::i18n::msg::browse_search_one_more_c().as_ptr(),
                 rect.x + caret_dx + CARET_W + GHOST_GAP,
                 y,
                 theme::size::BODY,
@@ -278,7 +278,7 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
 fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let env = Env::inert();
     Label::new(
-        plx_platform::i18n::msg::browse_search_recents_c().as_ptr(),
+        nj_platform::i18n::msg::browse_search_recents_c().as_ptr(),
         theme::size::CAPTION,
         theme::TEXT_TERTIARY,
     )
@@ -334,7 +334,7 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
         stop(screen, *elem, ElemKind::Bare, f, p);
     }
     let rect = layout::clear(shown, screen.scroll.pos, f.cx.measure);
-    Button::new(plx_platform::i18n::msg::browse_search_clear_c().as_ptr(), theme::size::BODY, rect)
+    Button::new(nj_platform::i18n::msg::browse_search_clear_c().as_ptr(), theme::size::BODY, rect)
         .focused(f.cx.focus.current == Some(screen.key(CLEAR)))
         .draw(&env, p);
     stop(screen, CLEAR, ElemKind::Control, f, p);
@@ -351,8 +351,8 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
     let mut rect = layout::empty_band(screen.editing);
     rect.y -= screen.scroll.pos;
     if empty == EmptyState::Fault {
-        StatusOverlay::new(rect, plx_platform::i18n::msg::browse_search_failed_c(), StatusKind::Failed)
-            .reason(plx_platform::i18n::msg::browse_search_failed_detail_c())
+        StatusOverlay::new(rect, nj_platform::i18n::msg::browse_search_failed_c(), StatusKind::Failed)
+            .reason(nj_platform::i18n::msg::browse_search_failed_detail_c())
             .draw(&Env::inert(), p);
         return;
     }
@@ -360,7 +360,7 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
     let statement = if empty == EmptyState::NoResults {
         let shell =
             f.cx.measure
-                .width_str(&plx_platform::i18n::msg::browse_search_no_results(""), theme::size::TITLE, true);
+                .width_str(&nj_platform::i18n::msg::browse_search_no_results(""), theme::size::TITLE, true);
         no_results_line(&elide(
             screen.draft.query().trim(),
             1200.0 - shell,
@@ -369,7 +369,7 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
             f.cx.measure,
         ))
     } else {
-        plx_platform::i18n::msg::browse_search_not_yet().into()
+        nj_platform::i18n::msg::browse_search_not_yet().into()
     };
     let statement = cstring(&statement);
     let hh = f.cx.measure.cap_h(theme::size::CAPTION);
@@ -530,9 +530,9 @@ fn elide(
     width: f32,
     size: i32,
     bold: bool,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) -> String {
-    plx_gfx::text::elide_by(text, width, false, |s| {
+    nj_gfx::text::elide_by(text, width, false, |s| {
         measure.width(&cstring(s), size, bold)
     })
 }
@@ -602,13 +602,13 @@ fn empty_state(state: crate::search::State, has_shelves: bool) -> Option<EmptySt
 
 fn header_of(state: EmptyState) -> &'static CStr {
     match state {
-        EmptyState::NoResults => plx_platform::i18n::msg::browse_search_results_c(),
-        _ => plx_platform::i18n::msg::browse_search_recents_c(),
+        EmptyState::NoResults => nj_platform::i18n::msg::browse_search_results_c(),
+        _ => nj_platform::i18n::msg::browse_search_recents_c(),
     }
 }
 
 fn no_results_line(q: &str) -> String {
-    plx_platform::i18n::msg::browse_search_no_results(q)
+    nj_platform::i18n::msg::browse_search_no_results(q)
 }
 
 fn heading_flow(
@@ -662,7 +662,7 @@ fn subtitle(kind: Kind, item: &Item, handle: &str) -> String {
 fn source_label(source: &ScopeSource) -> String {
     if source.household {
         return if source.name.is_empty() {
-            plx_platform::i18n::msg::browse_search_your_server().into()
+            nj_platform::i18n::msg::browse_search_your_server().into()
         } else {
             source.name.clone()
         };
@@ -677,15 +677,15 @@ fn source_label(source: &ScopeSource) -> String {
     } else if !source.handle.is_empty() {
         source.handle.clone()
     } else {
-        plx_platform::i18n::msg::browse_search_shared_server().into()
+        nj_platform::i18n::msg::browse_search_shared_server().into()
     }
 }
 fn join(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [one] => one.clone(),
-        [a, b] => plx_platform::i18n::msg::browse_search_join(a, b),
-        _ => plx_platform::i18n::msg::browse_search_join(&names[..names.len() - 1].join(", "), names.last().unwrap()),
+        [a, b] => nj_platform::i18n::msg::browse_search_join(a, b),
+        _ => nj_platform::i18n::msg::browse_search_join(&names[..names.len() - 1].join(", "), names.last().unwrap()),
     }
 }
 fn name_set(sources: &[&ScopeSource]) -> String {
@@ -714,9 +714,9 @@ fn name_set(sources: &[&ScopeSource]) -> String {
         .map(|source| source_label(source))
         .collect();
     names.push(if libraries > 0 {
-        plx_platform::i18n::msg::browse_search_shared_libraries(libraries as i64)
+        nj_platform::i18n::msg::browse_search_shared_libraries(libraries as i64)
     } else {
-        plx_platform::i18n::msg::browse_search_shared_sources(shares.len() as i64)
+        nj_platform::i18n::msg::browse_search_shared_sources(shares.len() as i64)
     });
     join(&names)
 }
@@ -726,7 +726,7 @@ fn scope_text(sources: &[ScopeSource]) -> Option<String> {
     }
     let (live, down): (Vec<_>, Vec<_>) = sources.iter().partition(|source| source.live);
     if down.is_empty() {
-        let mut line = plx_platform::i18n::msg::browse_search_searching(&name_set(&live));
+        let mut line = nj_platform::i18n::msg::browse_search_searching(&name_set(&live));
         let mut shares = live
             .iter()
             .filter(|source| !source.household && !source.handle.is_empty());
@@ -738,9 +738,9 @@ fn scope_text(sources: &[ScopeSource]) -> Option<String> {
         }
         Some(line)
     } else if live.is_empty() {
-        Some(plx_platform::i18n::msg::browse_search_unreachable(&name_set(&down)))
+        Some(nj_platform::i18n::msg::browse_search_unreachable(&name_set(&down)))
     } else {
-        Some(plx_platform::i18n::msg::browse_search_partial(&name_set(&live), &name_set(&down)))
+        Some(nj_platform::i18n::msg::browse_search_partial(&name_set(&live), &name_set(&down)))
     }
 }
 
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn translated_count_messages_follow_belarusian_grammar_with_separate_number_formatting() {
-        use plx_platform::i18n::{LocaleContext, Preference, msg};
+        use nj_platform::i18n::{LocaleContext, Preference, msg};
         let be = LocaleContext::resolve(Preference::Be, None, Some("en-US"), None, None);
         for (count, expected) in [(0, "0 вынікаў"), (1, "1 вынік"), (2, "2 вынікі"),
             (11, "11 вынікаў"), (21, "21 вынік"), (22, "22 вынікі"), (12345, "12,345 вынікаў")] {
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn translated_search_templates_preserve_user_values_and_sentence_order() {
-        use plx_platform::i18n::{LocaleContext, Preference, msg};
+        use nj_platform::i18n::{LocaleContext, Preference, msg};
         let be = LocaleContext::resolve(Preference::Be, None, None, None, None);
         assert_eq!(msg::browse_search_no_results_in(&be, "Кіна {query}"), "Няма вынікаў для «Кіна {query}»");
         let es = LocaleContext::resolve(Preference::Es, None, None, None, None);
@@ -778,7 +778,7 @@ mod tests {
 
     fn own(name: &str) -> ScopeSource {
         ScopeSource {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             name: name.into(),
             libraries: Vec::new(),
             handle: String::new(),
@@ -791,7 +791,7 @@ mod tests {
     }
     fn share(lib: &str, handle: &str) -> ScopeSource {
         ScopeSource {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             name: "a-hostname".into(),
             libraries: vec![lib.into()],
             handle: handle.into(),
@@ -809,7 +809,7 @@ mod tests {
     /// does: named when it has a name, "your server" when it does not.
     fn household(name: &str) -> ScopeSource {
         ScopeSource {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             name: name.into(),
             libraries: Vec::new(),
             handle: String::new(),
@@ -1271,14 +1271,14 @@ mod tests {
 
     #[test]
     fn a_caption_identifies_the_result_and_names_a_borrowed_source_last() {
-        let film = Item::Media(crate::pms::PmsMovie {
+        let film = Item::Media(crate::catalog_fetch::PmsMovie {
             title: "Wallace & Gromit".into(),
             year: 2005,
             ..Default::default()
         });
         assert_eq!(subtitle(Kind::Movie, &film, ""), "2005");
         assert_eq!(subtitle(Kind::Movie, &film, "friend"), "2005 · friend");
-        let ep = Item::Media(crate::pms::PmsMovie {
+        let ep = Item::Media(crate::catalog_fetch::PmsMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
             show_title: "Wallace & Gromit".into(),
@@ -1292,7 +1292,7 @@ mod tests {
             subtitle(Kind::Episode, &ep, "friend"),
             "11/4/1989 · friend"
         );
-        let undated = Item::Media(crate::pms::PmsMovie {
+        let undated = Item::Media(crate::catalog_fetch::PmsMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
             season_index: 1,
@@ -1301,7 +1301,7 @@ mod tests {
         });
         assert_eq!(subtitle(Kind::Episode, &undated, ""), "");
         assert_eq!(subtitle(Kind::Episode, &undated, "friend"), "friend");
-        let bare = Item::Media(crate::pms::PmsMovie {
+        let bare = Item::Media(crate::catalog_fetch::PmsMovie {
             title: "Untitled".into(),
             ..Default::default()
         });
@@ -1323,7 +1323,7 @@ mod tests {
         // a collection that arrived as a full row reads its childCount through the shared
         // formatter — an empty collection is "0 items", as on its own page
         let full = |child_count| Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { child_count, kind: crate::pms::KIND_COLLECTION, ..Default::default() },
+            item: crate::catalog_fetch::PmsMovie { child_count, kind: crate::catalog_fetch::KIND_COLLECTION, ..Default::default() },
             ..Default::default()
         });
         assert_eq!(subtitle(Kind::Collection, &full(12), ""), "12 items");
@@ -1338,7 +1338,7 @@ mod tests {
     #[test]
     fn a_thumbless_collection_hit_reaches_the_card_as_a_neutral_collection_row() {
         let full = Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { title: "Shorts".into(), kind: crate::pms::KIND_COLLECTION,
+            item: crate::catalog_fetch::PmsMovie { title: "Shorts".into(), kind: crate::catalog_fetch::KIND_COLLECTION,
                 ..Default::default() },
             tag: 7,
         });
@@ -1346,8 +1346,8 @@ mod tests {
             Art::Poster(Some(m)) if m.kind == crate::ui::tile::TileKind::Collection && m.thumb.is_empty()
                 && m.title == "Shorts"));
         let with_art = Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { thumb: "/library/metadata/50007/thumb/1".into(),
-                kind: crate::pms::KIND_COLLECTION, ..Default::default() },
+            item: crate::catalog_fetch::PmsMovie { thumb: "/library/metadata/50007/thumb/1".into(),
+                kind: crate::catalog_fetch::KIND_COLLECTION, ..Default::default() },
             tag: 7,
         });
         assert!(matches!(tile_art(Kind::Collection, &with_art),

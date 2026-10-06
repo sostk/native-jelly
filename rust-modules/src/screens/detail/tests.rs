@@ -5,7 +5,7 @@
 //! package, either in this module or beside the factored helper it exercises.
 
 use super::*;
-use plx_machine::machine::{Chrome, Host, InputEvent, PressRead, ScreenId};
+use nj_machine::machine::{Chrome, Host, InputEvent, PressRead, ScreenId};
 use crate::ui::screen::{At, Focusable, ScreenArg};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -68,25 +68,25 @@ impl crate::screens::registry::MetadataLike for TestHost {
     }
 }
 
-fn cx<'a>(measure: &'a dyn plx_machine::machine::Measure, elem: Option<u32>) -> Cx<'a, TestHost> {
+fn cx<'a>(measure: &'a dyn nj_machine::machine::Measure, elem: Option<u32>) -> Cx<'a, TestHost> {
     Cx {
         views: (),
         tick: Default::default(),
         measure,
         press: PressRead::default(),
-        focus: plx_machine::machine::FocusRead {
+        focus: nj_machine::machine::FocusRead {
             current: elem.map(|elem| FocusKey {
                 entry: EntryId(7),
                 elem,
             }),
         ..Default::default() },
-        owner: plx_machine::machine::InputOwner::Entry(EntryId(7)),
+        owner: nj_machine::machine::InputOwner::Entry(EntryId(7)),
     }
 }
 
 // Synchronizing the identity registry and querying/hash-writing a screen read shared stores
 // and legacy panels. Require the caller's guard; acquiring one here would deadlock install().
-fn bare(_guard: &plx_base::testlock::Serial, sid: ServerId, rk: &str) -> DetailScreen {
+fn bare(_guard: &nj_base::testlock::Serial, sid: ServerId, rk: &str) -> DetailScreen {
     let mut screen = DetailScreen {
         entry: EntryId(7),
         sid,
@@ -132,13 +132,13 @@ fn bare(_guard: &plx_base::testlock::Serial, sid: ServerId, rk: &str) -> DetailS
         about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
-            let pms_state = crate::pms::PmsState::default();
-            crate::pms::movie(&pms_state, crate::pms::index_of_rk(&pms_state, sid, rk).max(0) as usize)
-                .filter(|_| crate::pms::index_of_rk(&pms_state, sid, rk) >= 0)
+            let pms_state = crate::catalog_fetch::PmsState::default();
+            crate::catalog_fetch::movie(&pms_state, crate::catalog_fetch::index_of_rk(&pms_state, sid, rk).max(0) as usize)
+                .filter(|_| crate::catalog_fetch::index_of_rk(&pms_state, sid, rk) >= 0)
                 .cloned()
         },
         spin_ms: 0.0,
-        spin_phase: plx_machine::motion::Phase::default(),
+        spin_phase: nj_machine::motion::Phase::default(),
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
@@ -180,8 +180,8 @@ fn detail(sid: ServerId, rk: &str) -> Detail {
     }
 }
 
-fn install(d: Detail) -> plx_base::testlock::Serial {
-    let guard = plx_base::testlock::serial();
+fn install(d: Detail) -> nj_base::testlock::Serial {
+    let guard = nj_base::testlock::serial();
     crate::metadata::set_current_for_test(test_store().state_mut(), Some(d));
     guard
 }
@@ -192,7 +192,7 @@ fn clear() {
     // empty one — the addressed store cannot MIS-answer, but it can answer for an item a later
     // test happens to reuse the pair of.
     test_store().run(crate::stores::metadata::MetadataCmd::AltInstall {
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::catalog::ServerId::UNSET,
         rk: String::new(),
         copies: Vec::new(),
     });
@@ -202,7 +202,7 @@ fn step(
     screen: &mut DetailScreen,
     event: &ScreenEvent<TestHost>,
     focus: Option<u32>,
-) -> (Handled, Vec<plx_machine::machine::Stamped<TestHost>>) {
+) -> (Handled, Vec<nj_machine::machine::Stamped<TestHost>>) {
     screen.sync_keys(test_store().view());
     let focus = focus.and_then(|key| screen.engine_key(key).or(Some(key)));
     let translated;
@@ -221,11 +221,11 @@ fn step(
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, focus);
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let handled = {
         let mut sink = Effects::new(
             &mut effects,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
             &mut present,
         );
         Machine::<TestHost>::step(screen, event, &context, &mut sink)
@@ -238,10 +238,10 @@ fn step(
 /// scaffold, since none of the call sites below inspect the pushed effects.
 fn pump_restore(screen: &mut DetailScreen) {
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut sink = Effects::new(
         &mut effects,
-        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
         &mut present,
     );
     screen.pump_restore::<TestHost>(test_store().view(), &mut sink);
@@ -249,7 +249,7 @@ fn pump_restore(screen: &mut DetailScreen) {
 
 #[test]
 fn logical_hash_names_the_mounted_item() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     assert_ne!(
         bare(&_guard, ServerId::UNSET, "a").hash(),
         bare(&_guard, ServerId::UNSET, "b").hash()
@@ -258,7 +258,7 @@ fn logical_hash_names_the_mounted_item() {
 
 #[test]
 fn logical_hash_names_the_full_restore_target() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut a = bare(&_guard, ServerId::UNSET, "show");
     let mut b = bare(&_guard, ServerId::UNSET, "show");
     let mut left = Spot {
@@ -280,7 +280,7 @@ fn logical_hash_names_the_full_restore_target() {
 
 #[test]
 fn logical_hash_names_the_debounce_deadline() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut a = bare(&_guard, ServerId::UNSET, "show");
     let mut b = bare(&_guard, ServerId::UNSET, "show");
     a.pending_season = Some(1);
@@ -292,7 +292,7 @@ fn logical_hash_names_the_debounce_deadline() {
 
 #[test]
 fn refresh_obligation_is_logical_state_without_a_restore_intent() {
-    let guard = plx_base::testlock::serial();
+    let guard = nj_base::testlock::serial();
     let mut screen = bare(&guard, ServerId::UNSET, "show");
     let none = screen.hash();
     screen.refresh = DetailRefreshPhase::Deferred;
@@ -309,7 +309,7 @@ fn refresh_obligation_is_logical_state_without_a_restore_intent() {
 
 #[test]
 fn detail_enter_preserves_the_refresh_truth_table_without_focus_restoration() {
-    let guard = plx_base::testlock::serial();
+    let guard = nj_base::testlock::serial();
     let sid = ServerId::UNSET;
     for cached in [false, true] {
         for phase in [DetailRefreshPhase::None, DetailRefreshPhase::Deferred, DetailRefreshPhase::Requested] {
@@ -459,7 +459,7 @@ fn restore_memory_cannot_rewind_a_newer_refresh_obligation() {
 /// not labelled as the T1 pin the contract calls for until now.
 #[test]
 fn cancelled_focus_restoration_still_terminates_reconciliation_on_success_or_failure() {
-    let guard = plx_base::testlock::serial();
+    let guard = nj_base::testlock::serial();
     let sid = ServerId::UNSET;
     for success in [false, true] {
         test_store().run(MetadataCmd::Clear);
@@ -468,8 +468,8 @@ fn cancelled_focus_restoration_still_terminates_reconciliation_on_success_or_fai
         let mut screen = bare(&guard, sid, "show");
         screen.restore_episode(&Spot::default(), Some("e2"), test_store().view());
         screen.refresh = DetailRefreshPhase::Requested;
-        step(&mut screen, &ScreenEvent::Input(plx_machine::machine::InputEvent {
-            at: Default::default(), source: plx_machine::machine::Source::Script,
+        step(&mut screen, &ScreenEvent::Input(nj_machine::machine::InputEvent {
+            at: Default::default(), source: nj_machine::machine::Source::Script,
             kind: InputKind::Key { key: Key::Down, edge: Edge::Down, sym: 0, wcode: 0, at_edge: false },
         }), None);
         assert!(screen.restore_intent.is_none());
@@ -493,7 +493,7 @@ fn a_spot_round_trips_through_the_page_it_describes() {
     let mut d = detail(sid, "show");
     d.cur_season = 1;
     d.related = (0..6)
-        .map(|i| crate::pms::PmsMovie {
+        .map(|i| crate::catalog_fetch::PmsMovie {
             sid,
             rk: format!("r{i}"),
             ..Default::default()
@@ -553,7 +553,7 @@ fn a_spot_round_trips_through_the_page_it_describes() {
 #[test]
 fn a_restored_spot_clamps_onto_an_item_whose_lists_shrank() {
     let sid = ServerId::UNSET;
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     crate::metadata::set_current_for_test(test_store().state_mut(), None);
     let mut screen = bare(&_guard, sid, "show");
     let measure = crate::ui::fixture::FixtureMeasure;
@@ -639,7 +639,7 @@ fn the_filmstrips_text_row_opens_that_episodes_own_page() {
     let mut screen = bare(&_guard, ServerId::UNSET, "show");
     let (_, effects) = step(
         &mut screen,
-        &ScreenEvent::PressCommit(plx_machine::machine::PressId(1)),
+        &ScreenEvent::PressCommit(nj_machine::machine::PressId(1)),
         Some(key),
     );
     assert!(effects.iter().any(|effect| matches!(
@@ -659,7 +659,7 @@ fn the_related_shelf_raises_the_same_open_request() {
         "a row with no ratingKey is not a destination"
     );
     let mut d = detail(ServerId::UNSET, "show");
-    d.related = vec![crate::pms::PmsMovie {
+    d.related = vec![crate::catalog_fetch::PmsMovie {
         sid: ServerId::UNSET,
         rk: "related".into(),
         ..Default::default()
@@ -672,7 +672,7 @@ fn the_related_shelf_raises_the_same_open_request() {
     let mut screen = bare(&_guard, ServerId::UNSET, "show");
     let (_, effects) = step(
         &mut screen,
-        &ScreenEvent::PressCommit(plx_machine::machine::PressId(1)),
+        &ScreenEvent::PressCommit(nj_machine::machine::PressId(1)),
         Some(related::elem(0).unwrap()),
     );
     assert!(effects.iter().any(|effect| matches!(
@@ -686,14 +686,14 @@ fn the_related_shelf_raises_the_same_open_request() {
 fn an_open_request_does_not_outlive_its_page() {
     let sid = ServerId::UNSET;
     let mut d = detail(sid, "show");
-    d.related = vec![crate::pms::PmsMovie {
+    d.related = vec![crate::catalog_fetch::PmsMovie {
         sid,
         rk: "related".into(),
         ..Default::default()
     }];
     let _guard = install(d);
     let mut screen = bare(&_guard, sid, "show");
-    let press = ScreenEvent::PressCommit(plx_machine::machine::PressId(1));
+    let press = ScreenEvent::PressCommit(nj_machine::machine::PressId(1));
     let (_, first) = step(&mut screen, &press, Some(related::elem(0).unwrap()));
     assert!(first
         .iter()
@@ -722,7 +722,7 @@ fn an_open_request_does_not_outlive_its_page() {
 /// Applies every `AppFx::Store(StoreId::Metadata, ..)` effect in `effects` to `test_store()` —
 /// the store-side half of what a real `Bridge` does on its next dispatch turn, for tests that
 /// drive a screen with no dispatcher around it (see `step`'s own module doc).
-fn apply_metadata_effects(effects: &[plx_machine::machine::Stamped<TestHost>]) {
+fn apply_metadata_effects(effects: &[nj_machine::machine::Stamped<TestHost>]) {
     for effect in effects {
         if let Fx::App(AppFx::Store(StoreId::Metadata, StoreCmd::Metadata(cmd))) = &effect.fx {
             test_store().run(cmd.clone());
@@ -764,7 +764,7 @@ fn tracks_availability_is_detail_state_not_surface_state() {
 
     // This page is standing on a different item and its own fetch has not landed.
     let screen = DetailScreen::new(EntryId(7), ServerId::UNSET, "here".into(),
-        crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
     assert!(
         !screen.tracks_available(test_store().view()),
         "the page has no item of its own yet, so there is no file it can describe"
@@ -797,14 +797,14 @@ fn tracks_availability_is_detail_state_not_surface_state() {
 
 #[test]
 fn opening_a_catalog_row_mounts_on_it_without_blocking_on_the_fetch() {
-    let _guard = plx_base::testlock::serial();
-    let mut pms_state = crate::pms::PmsState::default();
-    let pms_adapter = std::sync::Arc::new(crate::pms::PmsAdapter::default());
-    crate::pms::seed_for_test(&mut pms_state, &pms_adapter, 3, crate::pms::HubState::Ready);
+    let _guard = nj_base::testlock::serial();
+    let mut pms_state = crate::catalog_fetch::PmsState::default();
+    let pms_adapter = std::sync::Arc::new(crate::catalog_fetch::PmsAdapter::default());
+    crate::catalog_fetch::seed_for_test(&mut pms_state, &pms_adapter, 3, crate::catalog_fetch::HubState::Ready);
     test_store().run(MetadataCmd::Clear);
-    let row = crate::pms::movie(&pms_state, 1).expect("seeded catalog row");
+    let row = crate::catalog_fetch::movie(&pms_state, 1).expect("seeded catalog row");
     let (sid, rk) = (row.sid, row.rk.clone());
-    let hubs_snap = crate::pms::hubs_snapshot(&pms_state);
+    let hubs_snap = crate::catalog_fetch::hubs_snapshot(&pms_state);
     let mut screen = DetailScreen::new(EntryId(7), sid, rk.clone(), hubs_snap.view());
     assert_eq!((screen.sid, screen.rk.as_str()), (sid, rk.as_str()));
     assert!(
@@ -816,7 +816,7 @@ fn opening_a_catalog_row_mounts_on_it_without_blocking_on_the_fetch() {
     // Enter right after the Push this test simulates by driving both directly.
     step(&mut screen, &ScreenEvent::Mount, None);
     let (_, entered) = step(&mut screen, &ScreenEvent::Enter(crate::ui::screen::Enter::Fresh {
-        focus: crate::ui::screen::FocusTarget::ContainerGroup(plx_machine::machine::GroupId(0)),
+        focus: crate::ui::screen::FocusTarget::ContainerGroup(nj_machine::machine::GroupId(0)),
     }), None);
     apply_metadata_effects(&entered);
     assert!(
@@ -828,7 +828,7 @@ fn opening_a_catalog_row_mounts_on_it_without_blocking_on_the_fetch() {
 
 #[test]
 fn a_crew_only_item_still_gets_the_cast_and_crew_shelf() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut d = detail(ServerId::UNSET, "show");
     d.cast.clear();
     d.crew.push(crate::metadata::Cast {
@@ -1079,11 +1079,11 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
 
 #[test]
 fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::ui::hit::{HitMap, PointerKind};
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("hero-hit-own", "127.0.0.1", 1, "t", "c1");
-    let other = crate::plex::register_for_test("hero-hit-other", "127.0.0.1", 2, "t", "c2");
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("hero-hit-own", "127.0.0.1", 1, "t", "c1");
+    let other = crate::catalog::register_for_test("hero-hit-other", "127.0.0.1", 2, "t", "c2");
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, None);
     let mut sizes = std::collections::BTreeSet::new();
@@ -1187,7 +1187,7 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
     assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![2, 3, 4]);
     assert_eq!(cases, 192);
     clear();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **A pointer click must not be able to reach the hero row — Play included — while full-trailer
@@ -1239,10 +1239,10 @@ fn preview_chrome_drives_the_below_hero_sections_to_zero_in_full_trailer_mode_an
     assert!(screen.full_trailer(), "the fixture must land in full-trailer mode for this test to mean anything");
 
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut sink = Effects::new(
         &mut effects,
-        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
         &mut present,
     );
     let hero_focus = Some(Located::Hero(hero::HeroCtl::Play));
@@ -1297,10 +1297,10 @@ fn background_autoplay_recedes_identity_and_ratings_but_holds_the_facts_row_and_
     );
 
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut sink = Effects::new(
         &mut effects,
-        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
         &mut present,
     );
     let hero_focus = Some(Located::Hero(hero::HeroCtl::Play));
@@ -1365,29 +1365,29 @@ fn preview_tick_does_not_read_the_session_file_every_frame() {
 
     // A readable session, so `preview::enabled()`'s `peek()` call has real Ready bytes behind it,
     // rather than the trivially-cheap Missing/default path.
-    let _session = crate::plex::session::TempSession::new("detail-preview-fps");
-    crate::plex::session::save(&crate::plex::session::Session {
+    let _session = crate::catalog::session::TempSession::new("detail-preview-fps");
+    crate::catalog::session::save(&crate::catalog::session::Session {
         client_id: "cid-detail-preview-fps".into(),
         trailer_autoplay: true,
         ..Default::default()
     });
 
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut sink = Effects::new(
         &mut effects,
-        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
         &mut present,
     );
     let hero_focus = Some(Located::Hero(hero::HeroCtl::Play));
 
-    crate::plex::session::reset_reads_for_test();
+    crate::catalog::session::reset_reads_for_test();
     let mut now = 0u32;
     for _ in 0..30 {
         now += 16;
         screen.preview_tick::<TestHost>(now, 0.016, hero_focus, &mut sink, test_store().view());
     }
-    let reads = crate::plex::session::reads_for_test();
+    let reads = crate::catalog::session::reads_for_test();
     assert_eq!(
         reads, 0,
         "preview_tick must not re-read the session file every frame -- {reads} session reads over \
@@ -1519,7 +1519,7 @@ fn only_holdable_media_and_season_cards_request_the_item_menu() {
         tag_key: String::new(),
     });
     let _guard = install(d);
-    let event = ScreenEvent::PressHold(plx_machine::machine::PressId(9));
+    let event = ScreenEvent::PressHold(nj_machine::machine::PressId(9));
     for (elem, expected) in [
         (season::elem(0).unwrap(), true),
         (episodes::elem(0, episodes::Row::Still).unwrap(), true),
@@ -1549,7 +1549,7 @@ fn episode_text_ok_activates_on_down_without_arming_a_holdable_press() {
     let elem = episodes::elem(1, episodes::Row::Text).unwrap();
     let event = ScreenEvent::Input(InputEvent {
         at: Default::default(),
-        source: plx_machine::machine::Source::Script,
+        source: nj_machine::machine::Source::Script,
         kind: InputKind::Key {
             key: Key::Ok,
             sym: 0,
@@ -1578,7 +1578,7 @@ fn back_and_down_both_collapse_full_trailer_mode_and_are_a_no_op_otherwise() {
     fn key_event(key: Key) -> ScreenEvent<TestHost> {
         ScreenEvent::Input(InputEvent {
             at: Default::default(),
-            source: plx_machine::machine::Source::Script,
+            source: nj_machine::machine::Source::Script,
             kind: InputKind::Key { key, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
         })
     }
@@ -1621,7 +1621,7 @@ fn full_trailer_mode_swallows_every_edge_of_an_owned_key_but_acts_only_on_the_do
     fn key_event(key: Key, edge: Edge) -> ScreenEvent<TestHost> {
         ScreenEvent::Input(InputEvent {
             at: Default::default(),
-            source: plx_machine::machine::Source::Script,
+            source: nj_machine::machine::Source::Script,
             kind: InputKind::Key { key, sym: 0, wcode: 0, edge, at_edge: false },
         })
     }
@@ -1651,7 +1651,7 @@ fn full_trailer_mode_swallows_every_edge_of_an_owned_key_but_acts_only_on_the_do
 fn trailer_act(
     screen: &mut DetailScreen,
     act: trailer::TrailerKey,
-) -> Vec<plx_machine::machine::Stamped<TestHost>> {
+) -> Vec<nj_machine::machine::Stamped<TestHost>> {
     trailer_act_edge(screen, act, Edge::Down, 0)
 }
 
@@ -1662,12 +1662,12 @@ fn trailer_act_edge(
     act: trailer::TrailerKey,
     edge: Edge,
     now: u32,
-) -> Vec<plx_machine::machine::Stamped<TestHost>> {
+) -> Vec<nj_machine::machine::Stamped<TestHost>> {
     let mut effects = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut sink = Effects::new(
         &mut effects,
-        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
         &mut present,
     );
     screen.trailer_act::<TestHost>(act, edge, now, &mut sink);
@@ -1676,7 +1676,7 @@ fn trailer_act_edge(
 }
 
 fn transport_reqs(
-    effects: &[plx_machine::machine::Stamped<TestHost>],
+    effects: &[nj_machine::machine::Stamped<TestHost>],
 ) -> Vec<Option<bool>> {
     effects
         .iter()
@@ -1687,7 +1687,7 @@ fn transport_reqs(
         .collect()
 }
 
-fn seek_reqs(effects: &[plx_machine::machine::Stamped<TestHost>]) -> Vec<i64> {
+fn seek_reqs(effects: &[nj_machine::machine::Stamped<TestHost>]) -> Vec<i64> {
     effects
         .iter()
         .filter_map(|effect| match &effect.fx {
@@ -1878,7 +1878,7 @@ fn back_falls_through_to_navigation_when_no_background_preview_is_up() {
     let mut screen = bare(&_guard, sid, "show");
     let event = ScreenEvent::Input(InputEvent {
         at: Default::default(),
-        source: plx_machine::machine::Source::Script,
+        source: nj_machine::machine::Source::Script,
         kind: InputKind::Key { key: Key::Back, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
     });
     let (handled, effects) = step(&mut screen, &event, None);
@@ -2014,9 +2014,9 @@ fn leaving_the_page_resets_play_once_state_alongside_the_existing_preview_fields
 
 #[test]
 fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("detail-watch", "127.0.0.1", 1, "t", "c");
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("detail-watch", "127.0.0.1", 1, "t", "c");
     crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
         sid,
         rk: "movie".into(),
@@ -2027,7 +2027,7 @@ fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply()
     let mut screen = bare(&_guard, sid, "movie");
     let (_, effects) = step(
         &mut screen,
-        &ScreenEvent::PressCommit(plx_machine::machine::PressId(1)),
+        &ScreenEvent::PressCommit(nj_machine::machine::PressId(1)),
         Some(hero::ELEM_MARK_WATCHED),
     );
     let addressed: Vec<_> = effects.iter().filter_map(|effect| match &effect.fx {
@@ -2045,7 +2045,7 @@ fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply()
     assert!(!test_store().view().current().unwrap().watched,
         "the screen must not call the process-global compatibility facade itself");
     clear();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
@@ -2074,7 +2074,7 @@ fn season_focus_debounces_the_load_without_storing_a_focus_cursor() {
     let first_hash = screen.hash();
     step(
         &mut screen,
-        &ScreenEvent::Tick(plx_machine::machine::Tick {
+        &ScreenEvent::Tick(nj_machine::machine::Tick {
             ms: 100,
             dt_us: 100_000,
         }),
@@ -2119,18 +2119,18 @@ fn a_pending_season_settle_reports_motion_from_inside_advance() {
     assert_eq!(screen.pending_season, Some(1));
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, Some(to.elem));
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let _ = present.take(0);
     let mut effects = Vec::new();
     for ms in [50, 100, 150] {
         let mut sink = Effects::new(
             &mut effects,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
             &mut present,
         );
         Machine::<TestHost>::step(
             &mut screen,
-            &ScreenEvent::Tick(plx_machine::machine::Tick { ms, dt_us: 50_000 }),
+            &ScreenEvent::Tick(nj_machine::machine::Tick { ms, dt_us: 50_000 }),
             &context,
             &mut sink,
         );
@@ -2150,23 +2150,23 @@ fn a_pending_season_settle_reports_motion_from_inside_advance() {
 #[test]
 fn the_loading_spinner_reports_motion_on_every_tick_while_unloaded() {
     let sid = ServerId::UNSET;
-    let guard = plx_base::testlock::serial();
+    let guard = nj_base::testlock::serial();
     let mut screen = bare(&guard, sid, "show");
     assert!(screen.detail(test_store().view()).is_none(), "no metadata installed for this test");
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, None);
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let _ = present.take(0);
     let mut effects = Vec::new();
     for ms in [16, 32, 48] {
         let mut sink = Effects::new(
             &mut effects,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
             &mut present,
         );
         Machine::<TestHost>::step(
             &mut screen,
-            &ScreenEvent::Tick(plx_machine::machine::Tick { ms, dt_us: 16_667 }),
+            &ScreenEvent::Tick(nj_machine::machine::Tick { ms, dt_us: 16_667 }),
             &context,
             &mut sink,
         );
@@ -2192,7 +2192,7 @@ fn trailer_extra() -> crate::metadata::Extra {
     }
 }
 
-fn play_item(effects: &[plx_machine::machine::Stamped<TestHost>]) -> Option<(&PlayIntent, i64)> {
+fn play_item(effects: &[nj_machine::machine::Stamped<TestHost>]) -> Option<(&PlayIntent, i64)> {
     effects.iter().find_map(|effect| match &effect.fx {
         Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns })) => Some((play, *resume_ns)),
         _ => None,
@@ -2328,7 +2328,7 @@ fn a_movie_without_extras_does_not_offer_a_trailer_disc() {
 
 #[test]
 fn a_trailer_disc_requires_both_rk_and_part() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let cases = [
         crate::metadata::Extra {
             rk: String::new(),
@@ -2426,7 +2426,7 @@ fn section_tops_do_not_remeasure_per_credit() {
     struct CountMeasure {
         widths: Cell<u32>,
     }
-    impl plx_machine::machine::Measure for CountMeasure {
+    impl nj_machine::machine::Measure for CountMeasure {
         fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
             self.widths.set(self.widths.get() + 1);
             crate::ui::fixture::FixtureMeasure.width(s, sz, bold)
@@ -2640,7 +2640,7 @@ fn ticking_the_page_allows_layout_to_remeasure() {
     struct CountMeasure {
         widths: Cell<u32>,
     }
-    impl plx_machine::machine::Measure for CountMeasure {
+    impl nj_machine::machine::Measure for CountMeasure {
         fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
             self.widths.set(self.widths.get() + 1);
             crate::ui::fixture::FixtureMeasure.width(s, sz, bold)
@@ -2669,7 +2669,7 @@ fn ticking_the_page_allows_layout_to_remeasure() {
     assert_eq!(measure.widths.get(), after_first, "still cached before tick");
     step(
         &mut screen,
-        &ScreenEvent::Tick(plx_machine::machine::Tick {
+        &ScreenEvent::Tick(nj_machine::machine::Tick {
             ms: 16,
             dt_us: 16_667,
         }),
@@ -3127,8 +3127,8 @@ fn legacy_detail_inventory_has_73_unique_source_names() {
 
 // ---- The collection shelf (a member movie's collection, split out of Related) ----
 
-fn collection_member(sid: ServerId, rk: &str) -> crate::pms::PmsMovie {
-    crate::pms::PmsMovie { sid, rk: rk.into(), title: format!("Film {rk}"), sec: 1, ..Default::default() }
+fn collection_member(sid: ServerId, rk: &str) -> crate::catalog_fetch::PmsMovie {
+    crate::catalog_fetch::PmsMovie { sid, rk: rk.into(), title: format!("Film {rk}"), sec: 1, ..Default::default() }
 }
 
 fn collection_movie(sid: ServerId) -> Detail {
@@ -3154,7 +3154,7 @@ fn collection_move(
     engine: &mut crate::ui::focus::FocusEngine<u32>,
     dir: Dir,
 ) -> crate::ui::focus::Outcome<u32> {
-    let owner = plx_machine::machine::InputOwner::Entry(EntryId(7));
+    let owner = nj_machine::machine::InputOwner::Entry(EntryId(7));
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = Cx { focus: engine.read(owner), ..cx(&measure, None) };
     let mut links = Vec::new();
@@ -3226,7 +3226,7 @@ fn up_from_a_member_reaches_the_heading_and_down_returns_to_that_member() {
     let sid = ServerId::UNSET;
     let _guard = install(collection_movie(sid));
     let screen = bare(&_guard, sid, "m1");
-    let owner = plx_machine::machine::InputOwner::Entry(EntryId(7));
+    let owner = nj_machine::machine::InputOwner::Entry(EntryId(7));
     let mut engine = FocusEngine::new();
     let member = |i| screen.engine_key(collection::elem(i).unwrap()).unwrap();
     let key = |elem| FocusKey { entry: EntryId(7), elem };
@@ -3371,7 +3371,7 @@ fn a_show_walk_derives_the_layout_identity_once_not_once_per_stop() {
 
     let full_walk = stamped(&mut || {
         let mut f = DrawFrame::new(&context, crate::ui::Painter::recording());
-        plx_gfx::gfx::without_frame_clear(|| Screen::<TestHost>::draw(&mut screen, &mut f));
+        nj_gfx::gfx::without_frame_clear(|| Screen::<TestHost>::draw(&mut screen, &mut f));
     });
     assert!(full_walk <= EPISODES, "one draw hashed {full_walk} episodes for a {EPISODES}-episode season");
     clear();

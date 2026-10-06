@@ -4,7 +4,7 @@
 //! `std::thread::spawn` **panics** when the OS refuses the thread — it unwraps `Builder::spawn`,
 //! whose `Err` is `pthread_create`'s EAGAIN (glibc returns it when `allocate_stack` cannot `mmap`
 //! the stack, or `clone(2)` hits `RLIMIT_NPROC`/`threads-max`). Almost every worker here is
-//! started from the SDL loop, so that panic unwinds out of `plex_run` through the C shim and
+//! started from the SDL loop, so that panic unwinds out of `nj_run` through the C shim and
 //! takes the app down. It would also fail at the worst possible moment: the caller has just armed
 //! an in-flight flag, so had the app survived, the screen would sit on a spinner that can never
 //! resolve.
@@ -43,8 +43,8 @@
 //! `#[cfg(test)] mod` block excluded (a unit test's own mock TCP/HTTP peer stands in for a real
 //! peer and is not a worker). Verified 2026-09-10: it is already empty, i.e. every real worker
 //! this crate spawns — the demux/media threads, `aq`, `stream`, `imgcache`, `ff`, `http`, `auth`,
-//! `curlio`/`route::decision`, the Plex client/transcoder, `browse`, `player`, `plx_machine::present`,
-//! `plx_machine::landgate` — already calls [`spawn`]/[`spawn_small`], not `std::thread::spawn` directly.
+//! `curlio`/`route::decision`, the Plex client/transcoder, `browse`, `player`, `nj_machine::present`,
+//! `nj_machine::landgate` — already calls [`spawn`]/[`spawn_small`], not `std::thread::spawn` directly.
 //! `ci/allow/threads.txt` is that gate's allowlist and it, too, is empty for the same reason; a
 //! new production `thread::spawn` outside this file fails CI rather than waiting for a review.
 
@@ -85,7 +85,7 @@ pub use blocking::{assert_may_block, BlockingGuard, BlockingLabel, FrameScope};
 pub struct MainThread(PhantomData<*const ()>);
 
 impl MainThread {
-    /// Mint the token. `plex_run` calls this once, at the top, and nothing else should.
+    /// Mint the token. `nj_run` calls this once, at the top, and nothing else should.
     ///
     /// # Safety
     /// The caller asserts this is the SDL main thread. It is not a memory-safety obligation in
@@ -154,7 +154,7 @@ const STALL_MS: u64 = 250;
 /// Join a worker and report what THIS thread paid for it.
 ///
 /// The counterpart to [`spawn`], and the reason it exists rather than a bare `let _ = h.join();`:
-/// the frame loop has an FPS heartbeat, `/tmp/plxnative-framedrop` catches the frames that blow the
+/// the frame loop has an FPS heartbeat, `/tmp/nativejelly-framedrop` catches the frames that blow the
 /// budget, and `ui::profile` splits a frame by draw phase — but none of them can see a worker, and
 /// every teardown stall this engine has had was the main thread parked in one of these joins with
 /// no number left behind. Unconditional: an `Instant` pair around a call whose whole purpose is to

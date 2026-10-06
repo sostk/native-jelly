@@ -31,11 +31,11 @@ use std::borrow::Cow;
 
 use std::convert::Infallible;
 
-use crate::plex::session::Account;
+use crate::catalog::session::Account;
 use crate::screens::registry::{AppFx, AppLike, AuthLike, LoopReq};
 use crate::ui::form::{Activation, Form, FormId, FormSection, FormTable, RowKey, RowKind};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
     LogicalState, Machine, NavOp,
 };
@@ -64,7 +64,7 @@ pub(crate) enum Action {
     /// button (BLUE, `wcode` 489 on the dev set), and an LG Cloud Test Lab virtual remote may not
     /// offer colour buttons at all — nor is that code guaranteed on a set nobody here has touched
     /// (`docs/lab-diagnostics.md` §7). Never offered in any other build —
-    /// [`plx_platform::labcfg::menu_row_enabled`] is `false` at compile time.
+    /// [`nj_platform::labcfg::menu_row_enabled`] is `false` at compile time.
     SendDiagnostics,
 }
 
@@ -105,7 +105,7 @@ struct AccountInputs {
     /// *Change profile* is on offer: plex.tv can serve a roster and the Session has not refused this
     /// identity one (`switch_refused`, [`crate::auth::owner::SessionSnapshot::switch_refused`]).
     can_switch: bool,
-    /// The lab-only *Send diagnostics* row ([`plx_platform::labcfg::menu_row_enabled`], compile-time `false`
+    /// The lab-only *Send diagnostics* row ([`nj_platform::labcfg::menu_row_enabled`], compile-time `false`
     /// outside lab builds).
     lab: bool,
 }
@@ -125,7 +125,7 @@ impl AccountInputs {
             name: acc.name.clone(),
             signed_in: acc.signed_in,
             can_switch: acc.can_switch && !switch_refused,
-            lab: plx_platform::labcfg::menu_row_enabled(),
+            lab: nj_platform::labcfg::menu_row_enabled(),
         }
     }
 }
@@ -149,18 +149,18 @@ impl AccountInputs {
 pub(crate) fn chip_label(acc: &Account) -> String {
     match (&acc.name, acc.signed_in) {
         (Some(n), _) => n.clone(),
-        (None, true) => plx_platform::i18n::msg::settings_account_title().to_string(),
+        (None, true) => nj_platform::i18n::msg::settings_account_title().to_string(),
         (None, false) => label(Action::SignIn).to_string(),
     }
 }
 
 fn label(a: Action) -> &'static str {
     match a {
-        Action::ChangeProfile => plx_platform::i18n::msg::settings_account_change_profile(),
-        Action::SignIn => plx_platform::i18n::msg::settings_account_sign_in(),
-        Action::SignOut => plx_platform::i18n::msg::settings_account_sign_out(),
-        Action::Settings => plx_platform::i18n::msg::settings_account_settings(),
-        Action::SendDiagnostics => plx_platform::i18n::msg::settings_account_diagnostics(),
+        Action::ChangeProfile => nj_platform::i18n::msg::settings_account_change_profile(),
+        Action::SignIn => nj_platform::i18n::msg::settings_account_sign_in(),
+        Action::SignOut => nj_platform::i18n::msg::settings_account_sign_out(),
+        Action::Settings => nj_platform::i18n::msg::settings_account_settings(),
+        Action::SendDiagnostics => nj_platform::i18n::msg::settings_account_diagnostics(),
     }
 }
 
@@ -172,7 +172,7 @@ fn account_form(inputs: &AccountInputs) -> (String, Form<Action, Action, Infalli
     let header = inputs
         .name
         .clone()
-        .unwrap_or_else(|| plx_platform::i18n::msg::settings_account_title().to_string());
+        .unwrap_or_else(|| nj_platform::i18n::msg::settings_account_title().to_string());
     let mut head = Section::new(header.clone());
     if inputs.name.is_some() {
         head = head.server_header();
@@ -208,7 +208,7 @@ fn action_row(a: Action) -> Row {
 /// `px` is the app's own side margin: it was a literal 80, which sat 16px outside the 5% overscan
 /// frame — and the chip it hangs off is at `MARGIN_X`, so aligning the two is what the design meant
 /// anyway. `py` clears `widgets::TOP_BAR_BOTTOM` (130) by a `space::MD`.
-fn panel_rect(table: &TableView, measure: &dyn plx_machine::machine::Measure) -> Rect {
+fn panel_rect(table: &TableView, measure: &dyn nj_machine::machine::Measure) -> Rect {
     let pw = table.menu_panel_width(measure);
     let px = crate::ui::consts::MARGIN_X;
     let py = 154.0f32;
@@ -234,7 +234,7 @@ pub(crate) struct AccountMenuScreen {
     form: FormTable<Action, Action, Infallible>,
     /// Rebuild on visible session landings as well as the initial mount. Focus keys name
     /// actions, not row positions, so a landing cannot turn an armed Settings press into Sign out.
-    session_watch: crate::plex::session::VisibleSessionWatch,
+    session_watch: crate::catalog::session::VisibleSessionWatch,
     /// The Session's published switch verdict the rows were built on
     /// ([`crate::auth::owner::SessionSnapshot::switch_refused`]) — a change rebuilds them.
     switch_refused: bool,
@@ -245,7 +245,7 @@ impl AccountMenuScreen {
     pub(crate) fn new(entry: EntryId) -> Self {
         Self {
             entry,
-            header: plx_platform::i18n::msg::settings_account_title().to_string(),
+            header: nj_platform::i18n::msg::settings_account_title().to_string(),
             form: FormTable::new(crate::screens::registry::BAND),
             built: false,
             session_watch: Default::default(),
@@ -258,10 +258,10 @@ impl AccountMenuScreen {
         if self.built {
             return;
         }
-        let Some(sess) = crate::plex::session::peek_settled() else { return };
+        let Some(sess) = crate::catalog::session::peek_settled() else { return };
         self.built = true;
         let keep = self.form.selected_id().copied();
-        let cur = crate::plex::session::current();
+        let cur = crate::catalog::session::current();
         let acc = sess.account(cur.as_ref());
         self.switch_refused = switch_refused;
         let (header, form) = account_form(&AccountInputs::of(&acc, switch_refused));
@@ -274,7 +274,7 @@ impl AccountMenuScreen {
         self.form.set_or_open(form, keep.as_ref());
     }
 
-    fn frame(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    fn frame(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         panel_rect(&self.form.table, measure)
     }
 
@@ -324,7 +324,7 @@ impl<H: AuthLike> Machine<H> for AccountMenuScreen {
                 }
                 if !self.built {
                     self.build(switch_refused);
-                    if self.built { fx.invalidate(plx_machine::present::Provenance::Landing(plx_machine::machine::MachineId::Session)); }
+                    if self.built { fx.invalidate(nj_machine::present::Provenance::Landing(nj_machine::machine::MachineId::Session)); }
                 }
                 self.form.table.sel = cx
                     .focus
@@ -493,11 +493,11 @@ impl LogicalState for AccountMenuScreen {
 /// All eleven moved by NAME from `ui/account_menu.rs` (restructure phase 10). They drive the pure
 /// functions — `Session::account`, [`account_form`] and the [`FormTable`] lookups over it (a press resolves by row identity, never by position) — with sessions built in the test,
 /// so they touch no global and need no lock; the seventh drives the live `session::set_current`
-/// and takes `plx_base::testlock::serial()` for its whole body.
+/// and takes `nj_base::testlock::serial()` for its whole body.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::session::{HomeUserRef, ServerRef, Session, UserRef};
+    use crate::catalog::session::{HomeUserRef, ServerRef, Session, UserRef};
 
     /// The action of every row, in order — read back off the built form, the one place row order lives.
     fn ids(form: Form<Action, Action, Infallible>) -> Vec<Action> {
@@ -514,7 +514,7 @@ mod tests {
 
     /// A host whose only view is the Session publication — the one fact the menu reads off it.
     struct MenuHost;
-    impl plx_machine::machine::Host for MenuHost {
+    impl nj_machine::machine::Host for MenuHost {
         type Arg = super::super::family::SettingsPage;
         type Fx = AppFx;
         type Msg = crate::screens::registry::AppMsg;
@@ -543,7 +543,7 @@ mod tests {
     }
 
     fn tick(menu: &mut AccountMenuScreen, read: &crate::auth::owner::SessionSnapshot) {
-        use plx_machine::machine::{InputOwner, MachineId, Tick};
+        use nj_machine::machine::{InputOwner, MachineId, Tick};
         let cx = Cx::<MenuHost> {
             views: read.read(),
             tick: Tick::default(), measure: &crate::ui::fixture::FixtureMeasure,
@@ -551,7 +551,7 @@ mod tests {
             owner: InputOwner::Entry(EntryId(0)),
         };
         let mut out = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
         menu.step(&ScreenEvent::Tick(Tick::default()), &cx, &mut fx);
     }
@@ -569,9 +569,9 @@ mod tests {
             vec!["Sign out", "Settings"]);
         assert_eq!(rows_of(&acc, false)[0], Action::ChangeProfile);
 
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-verdict");
-        crate::plex::session::save(&s);
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("account-menu-verdict");
+        crate::catalog::session::save(&s);
         let mut menu = AccountMenuScreen::new(EntryId(0));
         tick(&mut menu, &published(false));
         assert!(menu_rows(&menu).contains(&Action::ChangeProfile), "rig: switching is offered");
@@ -588,9 +588,9 @@ mod tests {
     /// menu (the verdict landing while *Change profile* is focused).
     #[test]
     fn a_refused_roster_never_opens_the_menu_on_sign_out() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-safe-open");
-        crate::plex::session::save(&local(Session { account_token: "acct".into(),
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("account-menu-safe-open");
+        crate::catalog::session::save(&local(Session { account_token: "acct".into(),
             ..Default::default() }));
 
         let mut menu = AccountMenuScreen::new(EntryId(0));
@@ -627,17 +627,17 @@ mod tests {
     }
     #[test]
     fn session_refresh_rebuilds_an_open_account_menu() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-refresh");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("account-menu-refresh");
         let mut saved = local(Session { client_id: "synthetic-client".into(),
             account_token: "synthetic-token".into(), ..Default::default() });
         saved.home_users = vec![HomeUserRef { title: "Synthetic owner".into(), admin: true,
             ..Default::default() }];
-        crate::plex::session::install_transient_for_test(true);
+        crate::catalog::session::install_transient_for_test(true);
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build(false);
         assert!(!menu_rows(&menu).contains(&Action::SignOut));
-        crate::plex::session::save(&saved);
+        crate::catalog::session::save(&saved);
         tick(&mut menu, &published(false));
         assert!(menu_rows(&menu).contains(&Action::SignOut));
         assert!(!menu_rows(&menu).contains(&Action::SignIn));
@@ -646,13 +646,13 @@ mod tests {
 
     #[test]
     fn session_refresh_preserves_action_identity_when_rows_move() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-action-identity");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("account-action-identity");
         let mut menu = AccountMenuScreen::new(EntryId(0));
         menu.build(false);
         let settings_key = Action::Settings.focus_key();
         assert_eq!(menu.form.index_of_key(RowKey(settings_key)), Some(1));
-        crate::plex::session::save(&local(Session { client_id: "synthetic-client".into(),
+        crate::catalog::session::save(&local(Session { client_id: "synthetic-client".into(),
             account_token: "synthetic-token".into(), ..Default::default() }));
         menu.built = false;
         menu.build(false);
@@ -675,7 +675,7 @@ mod tests {
         let acc = s.account(active);
         let rows = rows_of(&acc, false);
         (
-            acc.name.unwrap_or_else(|| plx_platform::i18n::msg::settings_account_title().to_string()),
+            acc.name.unwrap_or_else(|| nj_platform::i18n::msg::settings_account_title().to_string()),
             rows.iter().map(|a| label(*a)).collect(),
         )
     }
@@ -770,21 +770,21 @@ mod tests {
     /// Takes `testlock::serial()` for the whole test — the publication resource is process-global.
     #[test]
     fn the_live_profile_global_feeds_the_header() {
-        let _serial = plx_base::testlock::serial();
-        let restore = crate::plex::session::current_snapshot();
+        let _serial = nj_base::testlock::serial();
+        let restore = crate::catalog::session::current_snapshot();
         let s = local(Session {
             account_token: "acct".into(),
             home_users: vec![owner("Gleb"), managed("Kid")],
             ..Default::default()
         });
-        crate::plex::session::publish_profile_for_test(Some(UserRef {
+        crate::catalog::session::publish_profile_for_test(Some(UserRef {
             title: "Kid".into(),
             ..Default::default()
         }), 41);
-        let picked = menu(&s, crate::plex::session::current().as_ref()).0;
-        crate::plex::session::publish_profile_for_test(None, 42);
-        let cleared = menu(&s, crate::plex::session::current().as_ref()).0;
-        crate::plex::session::publish_profile_for_test(restore.user.clone(), restore.generation);
+        let picked = menu(&s, crate::catalog::session::current().as_ref()).0;
+        crate::catalog::session::publish_profile_for_test(None, 42);
+        let cleared = menu(&s, crate::catalog::session::current().as_ref()).0;
+        crate::catalog::session::publish_profile_for_test(restore.user.clone(), restore.generation);
         assert_eq!(picked, "Kid");
         assert_eq!(cleared, "Gleb");
     }
@@ -819,7 +819,7 @@ mod tests {
             ..Default::default()
         })
         .account(None);
-        assert_eq!(chip_label(&nameless), plx_platform::i18n::msg::settings_account_title());
+        assert_eq!(chip_label(&nameless), nj_platform::i18n::msg::settings_account_title());
 
         // Signed out: the chip says exactly what the ACCOUNT row behind it says. That row is
         // first, and the assertion is on `[0]` rather than on the whole set — the set also carries
@@ -923,7 +923,7 @@ mod tests {
     /// compact table `build` draws, at the shared menu cap.
     #[test]
     fn every_app_owned_run_fits_the_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let mut out = Vec::new();
         for language in SHIPPED {
             let _guard = language_on_this_thread_for_test(language);
@@ -944,7 +944,7 @@ mod tests {
                 // Only the nameless menu is app text end to end; a real profile name is server
                 // text that may push the hug to the cap, where it ellipsizes.
                 if name.is_none() {
-                    out.extend(table.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, &what));
+                    out.extend(table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, &what));
                 }
                 out.extend(table.app_fit_failures(crate::ui::table::MENU_MAX_W, &what));
                 out.extend(table.app_fit_failures_hugged(&what));

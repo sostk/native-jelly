@@ -1,17 +1,17 @@
 //! The `/tmp` developer-trigger surface, behind one door.
 //!
-//! This app is driven headlessly by ~44 files under `/tmp/plxnative-*`: which screen to boot to,
+//! This app is driven headlessly by ~44 files under `/tmp/nativejelly-*`: which screen to boot to,
 //! which item to play, which URL to stream, whether to auto-press OK, which PMS token to use.
 //! That is how `tests/run.py` and every capture scene work, and it is not going away.
 //!
 //! It must not exist in a public build. `/tmp` is the SHARED system `/tmp` in the production jail
 //! too (mode 1777, both jail profiles), so on an ordinary user's TV every one of those files is a
 //! behaviour switch any co-resident process can throw. Three are outright takeovers:
-//! `plxnative-token` beats the signed-in session (`app.rs`'s boot gate), `plxnative-servers` hands
+//! `nativejelly-token` beats the signed-in session (`app.rs`'s boot gate), `nativejelly-servers` hands
 //! the app a whole additional server — an address AND the token to trust it with (see [`servers`])
-//! — and `plxnative-url` replaces the stream the player feeds.
+//! — and `nativejelly-url` replaces the stream the player feeds.
 //!
-//! So every read goes through [`plx_base::devtrig`] — the primitives (`flag`, `read`, `latched_flag!`,
+//! So every read goes through [`nj_base::devtrig`] — the primitives (`flag`, `read`, `latched_flag!`,
 //! `read_sample`, `no_wan`, …), a base-layer module no application type can leak into — and that
 //! door is `#[cfg]`-gated on the `devtriggers` feature. In a `--no-default-features` build
 //! `devtrig::flag` is `false` and `devtrig::read` is `None` at COMPILE time, so no trigger can be
@@ -24,13 +24,13 @@
 //! `nobudget` flag on `DevFlags`), the optimizer may keep the branch and its string literals
 //! in a release build, and `ci/check-package.py` fails the package because it greps the shipped
 //! bytes for every trigger name this module's [`DIAG`] and `devtrig`'s `CONTROLLED` list. So every
-//! statement whose literal names a trigger (a log line saying `/tmp/plxnative-…`) carries its own
+//! statement whose literal names a trigger (a log line saying `/tmp/nativejelly-…`) carries its own
 //! `#[cfg(feature = "devtriggers")]`. Never rely on constant folding for this.
 //!
 //! Two rules for anything added later:
 //!
-//! 1. **Never open a `/tmp` path directly.** Read through `plx_base::devtrig`. The grep that audits
-//!    this (`/tmp/plxnative-` outside this module and the unconditional log sinks) is the only
+//! 1. **Never open a `/tmp` path directly.** Read through `nj_base::devtrig`. The grep that audits
+//!    this (`/tmp/nativejelly-` outside this module and the unconditional log sinks) is the only
 //!    thing keeping the property true. The two profiler logs are dev-only and listed in [`DIAG`]
 //!    below.
 //! 2. **A gate is not always a path.** `any_trigger_present` scans the whole directory and names
@@ -44,7 +44,7 @@
 //! another process to steer this one.
 //!
 //! **Since UI restructure phase 10, [`scenarios`] is where a read gets ACTED on.** Both modules
-//! reach `/tmp` only through the one door, [`plx_base::devtrig`] (`flag`/`read`); `dev::scenarios`
+//! reach `/tmp` only through the one door, [`nj_base::devtrig`] (`flag`/`read`); `dev::scenarios`
 //! gathers every ARM — the app-core code that calls through this door and reacts — that used to be scattered
 //! across `app/boot.rs`, `app/run.rs`, `app/content.rs` and `app/mod.rs`, plus the per-arm state
 //! (oscillator phases, retry latches) those arms used to keep on `App` itself. Read that module's
@@ -54,8 +54,8 @@ pub(crate) mod scenarios;
 
 /// Files that are pure diagnostics rather than automation — see [`any_trigger_present`].
 ///
-/// Every log this app writes belongs here, not just its trigger. `plxnative-anim` was listed and
-/// `plxnative-anim.log` was not, while arming the overlay creates exactly that file and nothing
+/// Every log this app writes belongs here, not just its trigger. `nativejelly-anim` was listed and
+/// `nativejelly-anim.log` was not, while arming the overlay creates exactly that file and nothing
 /// ever removes it (`make run` clears only the event log; `tests/run.py` spares every `*.log` by
 /// design) — so a single historical anim session skipped the who's-watching picker on every later
 /// boot, interactive ones included.
@@ -63,93 +63,93 @@ pub(crate) mod scenarios;
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
 const DIAG: [&str; 35] = [
-    "plxnative-diag.log",
-    "plxnative-events.log",
-    "plxnative-stderr.log",
-    "plxnative-crash.log",
-    "plxnative-anim.log",
-    "plxnative-profile",
-    "plxnative-gputime.jsonl",
-    "plxnative-hwcnt",
-    "plxnative-hwcnt.jsonl",
+    "nativejelly-diag.log",
+    "nativejelly-events.log",
+    "nativejelly-stderr.log",
+    "nativejelly-crash.log",
+    "nativejelly-anim.log",
+    "nativejelly-profile",
+    "nativejelly-gputime.jsonl",
+    "nativejelly-hwcnt",
+    "nativejelly-hwcnt.jsonl",
     // The render thread's own per-phase clock ([`crate::ui::profile`]'s CPU mode). DIAG for the
     // reason the two GPU profilers are: it observes a screen, and must not move the boot away
     // from the screen it was armed to observe.
-    "plxnative-cpuprof",
-    "plxnative-anim",
-    "plxnative-remote",
-    "plxnative-capture",
-    "plxnative-noidle",
+    "nativejelly-cpuprof",
+    "nativejelly-anim",
+    "nativejelly-remote",
+    "nativejelly-capture",
+    "nativejelly-noidle",
     // The focus fingerprint ([`crate::focusprobe`]). Diagnostic for `noidle`'s reason and one of
     // its own: it only READS focus and writes a log line, and a (route × key) characterization
     // harness has to be able to observe the who's-watching picker, which a non-DIAG trigger would
     // suppress — the observer would remove the screen it was armed to watch.
-    "plxnative-focus",
-    // The two OVERDRAW surfaces and the hero-ground fold ([`plx_gfx::overdraw`],
+    "nativejelly-focus",
+    // The two OVERDRAW surfaces and the hero-ground fold ([`nj_gfx::overdraw`],
     // `docs/backdrop-blur-profiling.md` Part 5). All three are measurement knobs whose whole
     // method is an A/B against an unmasked control leg — and a non-DIAG trigger suppresses the
     // who's-watching picker, so the control leg and the masked leg would boot to DIFFERENT
     // SCREENS and the difference between them would be the screen, not the class being priced.
     // That is the exact failure this list exists to stop, and it is invisible in the numbers.
-    "plxnative-overdraw",
-    "plxnative-drawmask",
-    "plxnative-heroground",
+    "nativejelly-overdraw",
+    "nativejelly-drawmask",
+    "nativejelly-heroground",
     // The FRAME BUDGET's A/B control leg (`ui/frame/budget.rs`, spec §8.1): admission as it was
     // before phase 11 — quota only, no time ceiling, no solo rule. DIAG for exactly the argument
     // the three above make: its whole method is an A/B against an unmasked control leg, and a
     // non-DIAG trigger would boot the two legs to DIFFERENT SCREENS, so what the numbers measured
     // would be the screen and not the admission rule.
-    "plxnative-nobudget",
+    "nativejelly-nobudget",
     // LG's own GStreamer logging ([`arm_gst_logging`]) and the file it writes. Both are DIAG for
-    // the same reason `plxnative-profile` is: the whole point is to observe a playback that would
+    // the same reason `nativejelly-profile` is: the whole point is to observe a playback that would
     // otherwise be unobservable, and a non-DIAG trigger would silently move the boot screen out
     // from under the very session being measured.
-    "plxnative-gstlog",
-    "plxnative-gst.log",
+    "nativejelly-gstlog",
+    "nativejelly-gst.log",
     // The forced Stats-for-nerds overlay. It only changes presentation, and grading a playback
     // case without the read-out risks a failure whose evidence was never put on screen.
-    "plxnative-stats",
+    "nativejelly-stats",
     // A deliberate crash happens before the picker could ever be reached, so whether it suppresses
     // one is moot — but leaving it out of this list would be a silent inconsistency for the next
     // reader, and the honest reading is that it changes no screen.
-    "plxnative-crashtest",
+    "nativejelly-crashtest",
     // The FRAME-DROP DETECTOR (`app.rs`, the `FRAMEDROP` line and `worstframe=`). It observes the
     // frame it is armed on and changes no screen; the harness's `worst_ceiling_ms` /
     // `stall_ceiling_ms` gates arm it under every fps scene, and a scene whose gate moved the boot
     // away from the screen it grades would fail as "never entered this screen".
-    "plxnative-framedrop",
+    "nativejelly-framedrop",
     // The compositor frame-callback probe (`system.rs`): extra fields on that same line, from one
     // `wl_surface.frame` request per present. An observer for the reason `framedrop` is.
-    "plxnative-framecb",
+    "nativejelly-framecb",
     // The detector's context ring: which of the same lines are written, never which screen they
     // are written about.
-    "plxnative-framering",
+    "nativejelly-framering",
     // libwayland's own protocol log ([`arm_wayland_debug`]): an observer of the present path.
-    "plxnative-wldebug",
+    "nativejelly-wldebug",
     // The poster pipeline's observers: the cache counters and the per-image timeline
     // (`app/adapters/poster/trace.rs`). Both only READ the store and write log lines, and the boot
     // they exist to trace is the owner's everyday one — who's-watching picker, then Home. A
     // non-DIAG trigger suppresses that picker, so the trace would observe a different boot from
     // the one it was armed to explain.
-    "plxnative-imagecache-stats",
-    "plxnative-imgtrace",
-    "plxnative-imagecache-bypass",
+    "nativejelly-imagecache-stats",
+    "nativejelly-imgtrace",
+    "nativejelly-imagecache-bypass",
     // The deterministic RECORDER and its replay trigger (`ui/rec.rs`, NOT YET IN THE TREE — reserved
     // here first so the recorder cannot land as a non-DIAG trigger and move the boot screen out
     // from under the session it records; restructure spec §5.3). Both observe or reproduce a session and must not decide
     // which screen it starts on — a recording of the who's-watching picker has to be possible.
-    // `recplay` is a NEW name: `plxnative-replay[=N]` is the EOS replay COUNTER, non-DIAG, and
+    // `recplay` is a NEW name: `nativejelly-replay[=N]` is the EOS replay COUNTER, non-DIAG, and
     // stays exactly as it is.
-    "plxnative-rec",
-    "plxnative-recplay",
-    "plxnative-guard", // diagnostic policy only; never changes the boot screen
+    "nativejelly-rec",
+    "nativejelly-recplay",
+    "nativejelly-guard", // diagnostic policy only; never changes the boot screen
     // Boot-latched Dolby Vision capability A/B. They alter only the platform answer used by the
     // route policy, so an experiment must not independently replace Home with the profile picker.
-    "plxnative-dvcaps0",
-    "plxnative-dvcaps1",
+    "nativejelly-dvcaps0",
+    "nativejelly-dvcaps1",
 ];
 
-/// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/plxnative-gstlog`.
+/// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/nativejelly-gstlog`.
 ///
 /// This is the only instrument that can see inside LG's Dolby Vision chain. That chain is
 /// `dvbin` → `h265parse` → `dvsplitter` → {`lxvideodec`, `dvmdparse`} → `dualsequencer`, all of it
@@ -160,7 +160,7 @@ const DIAG: [&str; 35] = [
 ///
 /// **Timing is the whole reason this is here and not later.** Neither `libpf` nor `libplayerAPIs`
 /// imports `gst_init`; they use LG's lazy `gst_cool_init_check`, which does not run until a player
-/// is created. `plex_run` is therefore comfortably early — but anything that arms this AFTER the
+/// is created. `nj_run` is therefore comfortably early — but anything that arms this AFTER the
 /// first `Load` would be setting variables nobody reads again.
 ///
 /// An empty trigger takes the five Dolby categories at level 6; content overrides the whole
@@ -171,28 +171,28 @@ const DIAG: [&str; 35] = [
 /// setting to leave armed while measuring anything about frame pacing.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn arm_gst_logging() {
-    let Some(spec) = plx_base::devtrig::read("gstlog") else { return };
+    let Some(spec) = nj_base::devtrig::read("gstlog") else { return };
     let spec = if spec.is_empty() {
         "dvbin:6,dvsplitter:6,dvsplitter_algo:6,dvmdparse:6,dualsequencer:6".to_string()
     } else {
         spec
     };
-    let log = plx_base::paths::in_runtime_dir(plx_base::paths::runtime_file::GST);
-    // SAFETY: single-threaded here by construction — `plex_run` has not yet minted a worker, and
+    let log = nj_base::paths::in_runtime_dir(nj_base::paths::runtime_file::GST);
+    // SAFETY: single-threaded here by construction — `nj_run` has not yet minted a worker, and
     // this runs before SDL init. `set_var` is only unsound against a concurrent reader.
     std::env::set_var("GST_DEBUG", &spec);
     std::env::set_var("GST_DEBUG_FILE", &log);
     std::env::set_var("GST_DEBUG_FILE_OVERWRITE", "enable");
     std::env::set_var("GST_DEBUG_NO_COLOR", "1");
-    plx_base::eventlog::log(&format!("gstlog: GST_DEBUG={spec} -> {}", log.display()));
+    nj_base::eventlog::log(&format!("gstlog: GST_DEBUG={spec} -> {}", log.display()));
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn arm_gst_logging() {}
 
-/// **Turn on libwayland-client's protocol log** — `/tmp/plxnative-wldebug`.
+/// **Turn on libwayland-client's protocol log** — `/tmp/nativejelly-wldebug`.
 ///
 /// `WAYLAND_DEBUG` makes the client library print every request it sends and every event it
-/// dispatches, each with a microsecond wall-clock stamp, to stderr (`plxnative-stderr.log`). It is
+/// dispatches, each with a microsecond wall-clock stamp, to stderr (`nativejelly-stderr.log`). It is
 /// the one place the compositor's side of a present is visible from inside the app: when
 /// `wl_buffer.release` and `wl_callback.done` actually arrive, against when the driver's
 /// `attach`/`commit` went out. libwayland reads the variable in `wl_display_connect`, so this has
@@ -203,7 +203,7 @@ pub(crate) fn arm_gst_logging() {}
 /// pacing from another.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn arm_wayland_debug() {
-    if !plx_base::devtrig::flag("wldebug") {
+    if !nj_base::devtrig::flag("wldebug") {
         return;
     }
     // SAFETY (of the environment write): the caller (`app::pre_boot_diagnostics`) runs this before
@@ -219,14 +219,14 @@ pub(crate) fn arm_wayland_debug() {
         ts.tv_sec as i64 * 1_000_000 + ts.tv_nsec as i64 / 1000
     };
     let (real, mono) = (stamp(libc::CLOCK_REALTIME), stamp(libc::CLOCK_MONOTONIC));
-    plx_base::eventlog::log(&format!("wldebug: WAYLAND_DEBUG=client realtime_us={real} mono_us={mono} offset_us={}", real - mono));
+    nj_base::eventlog::log(&format!("wldebug: WAYLAND_DEBUG=client realtime_us={real} mono_us={mono} offset_us={}", real - mono));
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn arm_wayland_debug() {}
 
-/// Parse `/tmp/plxnative-server=<slot>`, the optional server half of a direct-screen trigger.
+/// Parse `/tmp/nativejelly-server=<slot>`, the optional server half of a direct-screen trigger.
 ///
-/// A Plex `ratingKey` is only unique together with its server.  The original `plxnative-play`
+/// A Plex `ratingKey` is only unique together with its server.  The original `nativejelly-play`
 /// trigger predated the multi-server registry and therefore meant "that key on the current
 /// server".  Keeping the slot in a separate trigger preserves that wire format for the regression
 /// harness while allowing `tv-session --server N` to name the other half explicitly.
@@ -240,10 +240,10 @@ fn parse_server_slot(s: &str) -> Result<u16, String> {
         .trim()
         .parse::<u16>()
         .map_err(|_| format!("{s:?} is not a server slot"))?;
-    if (slot as usize) >= crate::plex::MAX_SERVERS {
+    if (slot as usize) >= crate::catalog::MAX_SERVERS {
         return Err(format!(
             "server slot {slot} is outside 0..{}",
-            crate::plex::MAX_SERVERS
+            crate::catalog::MAX_SERVERS
         ));
     }
     Ok(slot)
@@ -256,14 +256,14 @@ fn parse_server_slot(s: &str) -> Result<u16, String> {
 /// server happens to be current.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn server_slot() -> Option<Result<u16, String>> {
-    plx_base::devtrig::read("server").map(|s| parse_server_slot(&s))
+    nj_base::devtrig::read("server").map(|s| parse_server_slot(&s))
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn server_slot() -> Option<Result<u16, String>> {
     None
 }
 
-/// **Crash the app on purpose** — `plxnative-crashtest=<segv|abrt|bus|ill|trap|panic|unwind>`.
+/// **Crash the app on purpose** — `nativejelly-crashtest=<segv|abrt|bus|ill|trap|panic|unwind>`.
 ///
 /// Not a feature. An INSTRUMENT for the instrument, and it exists because of the rule this repo
 /// keeps re-learning: prove the instrument can see the thing before you read its silence, and
@@ -281,11 +281,11 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
 ///
 /// `panic` is a Rust panic inside an `extern "C"` CALLBACK — the shape of `ff::read_cb` under
 /// libav: the hook writes its `*** RUST PANIC` line, the unwind stops at the callback's own
-/// boundary, and the process aborts with `plex_run`'s frame intact. That leaves BOTH a panic
+/// boundary, and the process aborts with `nj_run`'s frame intact. That leaves BOTH a panic
 /// record and a native SIGABRT envelope, the pair `telemetry::crashreport` must send as the one
 /// panic.
 ///
-/// `unwind` panics straight in here instead, so the unwind crosses `plex_run`'s own frame before
+/// `unwind` panics straight in here instead, so the unwind crosses `nj_run`'s own frame before
 /// aborting at its `extern "C"` boundary. That used to drop the telemetry `Guard` on the way past
 /// and stop the native backend before the abort landed (dev set, 2026-09-19), so no envelope was
 /// written. `Drop for Guard` (`telemetry::native`) now checks `std::thread::panicking()` and
@@ -299,20 +299,20 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
 /// or any screen is created, so it remains reachable when the fault being chased prevents UI boot.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn crash_on_purpose() {
-    let Some(kind) = plx_base::devtrig::read("crashtest") else {
+    let Some(kind) = nj_base::devtrig::read("crashtest") else {
         return;
     };
     if kind == "panic" {
         extern "C" fn callback() {
             panic!("crashtest: deliberate panic");
         }
-        plx_base::eventlog::log("crashtest: DELIBERATE crash, kind=panic (aborts at an extern \"C\" callback)");
+        nj_base::eventlog::log("crashtest: DELIBERATE crash, kind=panic (aborts at an extern \"C\" callback)");
         callback();
         return;
     }
     if kind == "unwind" {
-        plx_base::eventlog::log(
-            "crashtest: DELIBERATE crash, kind=unwind (unwinds plex_run to its extern \"C\" boundary)",
+        nj_base::eventlog::log(
+            "crashtest: DELIBERATE crash, kind=unwind (unwinds nj_run to its extern \"C\" boundary)",
         );
         panic!("crashtest: deliberate unwinding panic");
     }
@@ -325,14 +325,14 @@ pub(crate) fn crash_on_purpose() {
         "ill" => 4,
         "trap" => 5,
         other => {
-            plx_base::eventlog::log(&format!("crashtest: unknown kind {other:?} — not crashing"));
+            nj_base::eventlog::log(&format!("crashtest: unknown kind {other:?} — not crashing"));
             return;
         }
     };
-    // Logged BEFORE the fault, and flushed by `plx_base::eventlog::log`'s own O_APPEND write, so the event log
+    // Logged BEFORE the fault, and flushed by `nj_base::eventlog::log`'s own O_APPEND write, so the event log
     // says the death was deliberate. Without this line a deliberate crash is indistinguishable
     // from the real one somebody is hunting.
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "crashtest: DELIBERATE crash, kind={kind} signal={sig}"
     ));
     if sig == 11 {
@@ -348,42 +348,42 @@ pub(crate) fn crash_on_purpose() {
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn crash_on_purpose() {}
 
-/// `plxnative-softfloat`: the ARM half of `plx_machine::motion`'s differential claim (spec §4.2). Runs the
+/// `nativejelly-softfloat`: the ARM half of `nj_machine::motion`'s differential claim (spec §4.2). Runs the
 /// 4,096-operand table through this binary's own arithmetic, logs its hash beside the host's
-/// pinned one, and writes the words to `plxnative-softfloat.tbl` in the runtime root so a
+/// pinned one, and writes the words to `nativejelly-softfloat.tbl` in the runtime root so a
 /// divergence can be diffed word by word. `make softfloat-probe` is the recipe.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn softfloat_probe() {
-    if !plx_base::devtrig::flag("softfloat") {
+    if !nj_base::devtrig::flag("softfloat") {
         return;
     }
-    let host = plx_machine::motion::DIFFERENTIAL_HASH_HOST;
-    let here = plx_machine::motion::differential_hash();
-    plx_base::eventlog::log(&format!(
+    let host = nj_machine::motion::DIFFERENTIAL_HASH_HOST;
+    let here = nj_machine::motion::differential_hash();
+    nj_base::eventlog::log(&format!(
         "softfloat: n={} hash={here:#018x} host={host:#018x} {}",
-        plx_machine::motion::DIFFERENTIAL_N,
+        nj_machine::motion::DIFFERENTIAL_N,
         if here == host { "MATCH" } else { "DIVERGE" }
     ));
     let mut t = Vec::new();
-    plx_machine::motion::differential_table(&mut t);
+    nj_machine::motion::differential_table(&mut t);
     let body: String = t.iter().map(|w| format!("{w:08x}\n")).collect();
-    let path = plx_base::paths::runtime_dir().join("plxnative-softfloat.tbl");
+    let path = nj_base::paths::runtime_dir().join("nativejelly-softfloat.tbl");
     if let Err(e) = std::fs::write(&path, body) {
-        plx_base::eventlog::log(&format!("softfloat: table write failed: {e}"));
+        nj_base::eventlog::log(&format!("softfloat: table write failed: {e}"));
     }
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn softfloat_probe() {}
 
-/// A test-only playback policy override from `plxnative-quality`.
+/// A test-only playback policy override from `nativejelly-quality`.
 ///
 /// The server matrix grades established direct-play/remux/transcode routes. It must not silently
 /// become an Auto-HLS matrix because the television happened to persist that user preference in
 /// an earlier run. This is deliberately an in-memory boot override: writing the session would
 /// make a test change the owner's real preference. Unknown and empty values fail closed by
 /// producing no override.
-pub(crate) fn playback_quality_override() -> Option<crate::plex::session::PlaybackQuality> {
-    let value = plx_base::devtrig::read("quality")?;
+pub(crate) fn playback_quality_override() -> Option<crate::catalog::session::PlaybackQuality> {
+    let value = nj_base::devtrig::read("quality")?;
     parse_playback_quality(&value)
 }
 
@@ -392,8 +392,8 @@ pub(crate) fn playback_quality_override() -> Option<crate::plex::session::Playba
 /// The log line a test greps must carry the SAME string the trigger accepts. `Quality::label()`
 /// is display text ("1080p \u{b7} 8 Mbps") and would make a case state its rung twice, in two
 /// spellings, with nothing keeping them in step — which is the shape that rots.
-pub(crate) fn quality_wire_name(q: crate::plex::session::PlaybackQuality) -> &'static str {
-    use crate::plex::session::PlaybackQuality as Q;
+pub(crate) fn quality_wire_name(q: crate::catalog::session::PlaybackQuality) -> &'static str {
+    use crate::catalog::session::PlaybackQuality as Q;
     match q {
         Q::Auto => "auto",
         Q::Original => "original",
@@ -405,8 +405,8 @@ pub(crate) fn quality_wire_name(q: crate::plex::session::PlaybackQuality) -> &'s
     }
 }
 
-fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQuality> {
-    use crate::plex::session::PlaybackQuality;
+fn parse_playback_quality(value: &str) -> Option<crate::catalog::session::PlaybackQuality> {
+    use crate::catalog::session::PlaybackQuality;
     match value {
         "auto" => Some(PlaybackQuality::Auto),
         "original" => Some(PlaybackQuality::Original),
@@ -419,7 +419,7 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
     }
 }
 
-/// **Switch the playback quality MID-PLAYBACK** — `plxnative-qualityswitch=[gap=<ms>,]<q>[,<q>…]`.
+/// **Switch the playback quality MID-PLAYBACK** — `nativejelly-qualityswitch=[gap=<ms>,]<q>[,<q>…]`.
 ///
 /// The one thing [`playback_quality_override`] above cannot do. That is a BOOT override: it decides
 /// what the playback starts as and is read once. What a person actually does at the television is
@@ -428,9 +428,9 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
 /// way out of Auto) tears down a running ABR controller. None of that is reachable from a boot
 /// value, and none of it was reachable from a test at all.
 ///
-/// Same vocabulary as `plxnative-quality`, deliberately — one spelling of a rung across both
+/// Same vocabulary as `nativejelly-quality`, deliberately — one spelling of a rung across both
 /// triggers, so a case cannot name a quality one of them accepts and the other silently ignores.
-/// Same grammar as `plxnative-autoseek`: an optional leading `gap=<ms>` then comma-separated steps
+/// Same grammar as `nativejelly-autoseek`: an optional leading `gap=<ms>` then comma-separated steps
 /// fired one per gap. There is no default gap and none is invented: with a single step no cadence
 /// exists to state, and a case wanting several states its own, in the manifest, where a reader can
 /// see it beside the assertions it enables.
@@ -438,11 +438,11 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
 /// **This writes the stored preference, and that is not incidental.** `route::set_quality` persists
 /// through `plex::session::update`, because a person picking a rung means it. A test therefore
 /// leaves the value behind — on the `debug` flavour's own session, never the install you watch
-/// with, and `tests/run.py` writes `plxnative-quality` on every server case, so the next boot
+/// with, and `tests/run.py` writes `nativejelly-quality` on every server case, so the next boot
 /// overrides whatever this left. Both halves are load-bearing; neither alone would make it safe.
 fn parse_quality_switch_script(
     raw: &str,
-) -> Option<(u32, Vec<crate::plex::session::PlaybackQuality>)> {
+) -> Option<(u32, Vec<crate::catalog::session::PlaybackQuality>)> {
     let mut steps: Vec<&str> = raw
         .split(',')
         .map(str::trim)
@@ -472,12 +472,12 @@ fn parse_quality_switch_script(
     }
 }
 
-pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::plex::session::PlaybackQuality>)> {
-    parse_quality_switch_script(&plx_base::devtrig::read("qualityswitch")?)
+pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::catalog::session::PlaybackQuality>)> {
+    parse_quality_switch_script(&nj_base::devtrig::read("qualityswitch")?)
 }
 
 /// One synchronized user Pause, optionally followed by Resume —
-/// `plxnative-autopause=[delay=<ms>,][at=<ms>,][hold=<ms>]`.
+/// `nativejelly-autopause=[delay=<ms>,][at=<ms>,][hold=<ms>]`.
 ///
 /// An empty file preserves the original paused-HUD capture contract: pause at the player's
 /// ordinary six-second dev gate and stay paused. A non-empty script may delay that edge and name a
@@ -541,7 +541,7 @@ fn parse_pause_script(raw: &str) -> Option<PauseScript> {
 }
 
 pub(crate) fn pause_script() -> Option<PauseScript> {
-    parse_pause_script(&plx_base::devtrig::read("autopause")?)
+    parse_pause_script(&nj_base::devtrig::read("autopause")?)
 }
 
 /// One ADDITIONAL server's credentials, injected for an automated run — see [`servers`].
@@ -578,7 +578,7 @@ pub(crate) struct DevServer {
     /// deliberately: a typo'd scheme that quietly meant `http` would be a run grading the thing it
     /// was armed to test as working.
     #[serde(default)]
-    pub(crate) scheme: crate::plex::Scheme,
+    pub(crate) scheme: crate::catalog::Scheme,
     /// Proven connection class for a conditioned test origin.
     ///
     /// A LAN proxy can stand in front of a remote PMS so the harness can shape the whole media
@@ -586,10 +586,10 @@ pub(crate) struct DevServer {
     /// original `remote` classification disables the cold source probe the experiment exists to
     /// exercise.  Omitted stays `None`: naming an address is never enough to invent a tier.
     #[serde(default)]
-    pub(crate) tier: Option<crate::plex::probe::Location>,
+    pub(crate) tier: Option<crate::catalog::probe::Location>,
     /// This identity's per-(user,server) access token **for this server**. A shared server is a
     /// separate authority: the account token gets a 401 from it, which is the whole reason one
-    /// `plxnative-token` cannot express two servers. A SECRET — never logged.
+    /// `nativejelly-token` cannot express two servers. A SECRET — never logged.
     #[serde(default)]
     pub(crate) token: String,
     /// The owner's plex.tv handle (`sourceTitle` on the wire) — "friend". EMPTY means **your own
@@ -600,9 +600,9 @@ pub(crate) struct DevServer {
     pub(crate) handle: String,
     /// The literal to dial `host` at WITHOUT resolving it — the `Connection.address` plex.tv
     /// advertises beside a `plex.direct` `uri`, which is what a stored session persists. This is
-    /// how a headless run puts a pinned TLS origin through the registry (`/tmp/plxnative-nowan`
+    /// how a headless run puts a pinned TLS origin through the registry (`/tmp/nativejelly-nowan`
     /// beside it is the offline reproduction). It is validated exactly as a session's address is
-    /// ([`crate::plex::ResolvePin::for_origin`]): a value the `host` label does not encode pins
+    /// ([`crate::catalog::ResolvePin::for_origin`]): a value the `host` label does not encode pins
     /// nothing. Omitted: no pin, unchanged behaviour for every overlay written before it existed.
     #[serde(default, alias = "address_pin", alias = "resolve")]
     pub(crate) pin: String,
@@ -616,7 +616,7 @@ impl DevServer {
     /// Everything about this server except the token, for the event log.
     pub(crate) fn describe(&self) -> String {
         // A SHARED server is someone else's machine, and this line goes to
-        // `/tmp/plxnative-events.log` — the file that gets pasted into issues and PR bodies. Four
+        // `/tmp/nativejelly-events.log` — the file that gets pasted into issues and PR bodies. Four
         // PR bodies leaked exactly these fields on 2026-08-14 and had to be redacted after the
         // fact, which a public repository does not really allow. So a share names NOTHING that
         // identifies it or its owner: not the server's name, not the plex.tv handle, not the
@@ -667,32 +667,32 @@ impl DevServer {
     }
     /// Are these credentials complete enough to reach the server at all?
     ///
-    /// The port is judged by [`crate::plex::probe::dial_port`], not by `> 0`: `app.rs` registers
+    /// The port is judged by [`crate::catalog::probe::dial_port`], not by `> 0`: `app.rs` registers
     /// every server that passes this with `s.port as c_int`, and this file is a hand-written JSON
     /// blob under `/tmp` — an out-of-range `i64` wraps in that cast into a port nobody wrote down.
     pub(crate) fn usable(&self) -> bool {
         !self.token.is_empty() && self.origin().is_some()
     }
 
-    /// **Where this server is** — the [`crate::plex::Origin`] to register it at, `None` when the
+    /// **Where this server is** — the [`crate::catalog::Origin`] to register it at, `None` when the
     /// trigger did not write enough to dial.
     ///
     /// The port goes through `probe::dial_port` for the reason [`DevServer::usable`] gives: this
     /// is a hand-written JSON blob under `/tmp`, and `port as i32` wraps an out-of-range `i64`
     /// into a plausible-looking one.
-    pub(crate) fn origin(&self) -> Option<crate::plex::Origin> {
+    pub(crate) fn origin(&self) -> Option<crate::catalog::Origin> {
         if self.host.is_empty() {
             return None;
         }
-        crate::plex::probe::dial_port(self.port)
-            .map(|p| crate::plex::Origin::new(self.scheme, &self.host, p))
+        crate::catalog::probe::dial_port(self.port)
+            .map(|p| crate::catalog::Origin::new(self.scheme, &self.host, p))
     }
 
     /// The resolve pin for [`DevServer::origin`], from the `pin` field — `None` when absent or
     /// when the label does not encode it.
-    pub(crate) fn resolve_pin(&self) -> Option<crate::plex::ResolvePin> {
+    pub(crate) fn resolve_pin(&self) -> Option<crate::catalog::ResolvePin> {
         let origin = self.origin()?;
-        crate::plex::ResolvePin::for_origin(&origin, &self.pin)
+        crate::catalog::ResolvePin::for_origin(&origin, &self.pin)
     }
 }
 
@@ -722,21 +722,21 @@ fn parse_servers(s: &str) -> Result<Vec<DevServer>, String> {
     }
 }
 
-/// The EXTRA servers this boot was given credentials for — `/tmp/plxnative-servers`.
+/// The EXTRA servers this boot was given credentials for — `/tmp/nativejelly-servers`.
 ///
-/// Purely ADDITIVE: the primary server is still the compiled-in host plus `plxnative-token` (or the
+/// Purely ADDITIVE: the primary server is still the compiled-in host plus `nativejelly-token` (or the
 /// signed-in session), untouched, so a run that names one server behaves exactly as it always has.
 /// This is the channel for the *second* authority — a friend's shared server, which has its own
 /// `machineIdentifier` and its own access token and answers 401 to anybody else's.
 ///
-/// Read and parsed **once**. `tests/run.py` wipes `/tmp/plxnative-*` between cases and again on
+/// Read and parsed **once**. `tests/run.py` wipes `/tmp/nativejelly-*` between cases and again on
 /// exit (pass, fail or Ctrl-C — that is how a live token stops surviving in world-readable `/tmp`),
 /// so a second read could legitimately see the file gone. The credentials a boot was handed are a
 /// property of that boot, not of what `/tmp` happens to hold when someone asks.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn servers() -> Result<Vec<DevServer>, String> {
     static ONCE: std::sync::OnceLock<Result<Vec<DevServer>, String>> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| match plx_base::devtrig::read("servers") {
+    ONCE.get_or_init(|| match nj_base::devtrig::read("servers") {
         Some(s) => parse_servers(&s),
         None => Ok(Vec::new()),
     })
@@ -755,26 +755,26 @@ pub(crate) fn servers() -> Result<Vec<DevServer>, String> {
 /// screen from a squatted file — after every named read had been compiled out.
 ///
 /// **A trigger is a FILE.** Nothing else here names a path, so nothing else could have caught a
-/// non-file entry whose name happens to match: a directory called `plxnative-anything` sitting in
+/// non-file entry whose name happens to match: a directory called `nativejelly-anything` sitting in
 /// the runtime root would read as an armed trigger and permanently suppress the boot picker,
 /// silently changing which screen this install comes up on with no line in any log. That became
 /// reachable the moment two installs could share `/tmp` — the obvious name for a second install's
-/// runtime root is exactly `plxnative-<flavour>`, which is why `paths::resolve_runtime_dir` spells
+/// runtime root is exactly `nativejelly-<flavour>`, which is why `paths::resolve_runtime_dir` spells
 /// it with a DOT instead. Two independent reasons is the right number for a failure this quiet.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn any_trigger_present() -> bool {
-    std::fs::read_dir(plx_base::paths::runtime_dir())
+    std::fs::read_dir(nj_base::paths::runtime_dir())
         .ok()
         .map(|rd| rd.filter_map(|e| e.ok()).any(|e| is_armed_trigger(&e)))
         .unwrap_or(false)
 }
 
-/// Every `plxnative-*` FILE in the runtime root, by name (DIAG entries included), sorted — the
+/// Every `nativejelly-*` FILE in the runtime root, by name (DIAG entries included), sorted — the
 /// recorder's header lists them so a replay can say what the recording boot had armed. Names
 /// only: a trigger's CONTENT can be a query or a path and never enters a recording.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn armed_triggers() -> Vec<String> {
-    armed_triggers_in(plx_base::paths::runtime_dir())
+    armed_triggers_in(nj_base::paths::runtime_dir())
 }
 #[cfg(feature = "devtriggers")]
 fn armed_triggers_in(root: &std::path::Path) -> Vec<String> {
@@ -786,7 +786,7 @@ fn armed_triggers_in(root: &std::path::Path) -> Vec<String> {
                 .filter_map(|e| {
                     let n = e.file_name().to_string_lossy().into_owned();
                     // Runtime logs share the prefix and are not triggers
-                    (n.starts_with("plxnative-") && !n.ends_with(".log")).then_some(n)
+                    (n.starts_with("nativejelly-") && !n.ends_with(".log")).then_some(n)
                 })
                 .collect()
         })
@@ -806,7 +806,7 @@ fn is_armed_trigger(entry: &std::fs::DirEntry) -> bool {
     }
     let name = entry.file_name();
     let name = name.to_string_lossy();
-    name.starts_with("plxnative-") && !DIAG.contains(&name.as_ref())
+    name.starts_with("nativejelly-") && !DIAG.contains(&name.as_ref())
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn any_trigger_present() -> bool {
@@ -829,7 +829,7 @@ mod tests {
 
     #[test]
     fn quality_trigger_accepts_only_persisted_policy_spellings() {
-        use crate::plex::session::PlaybackQuality;
+        use crate::catalog::session::PlaybackQuality;
 
         assert_eq!(
             super::parse_playback_quality("auto"),
@@ -853,7 +853,7 @@ mod tests {
     /// than against a copy of the list, so adding another log sink without listing it fails here.
     #[test]
     fn diag_names_every_log_this_app_writes() {
-        for log in plx_base::paths::runtime_file::LOGS {
+        for log in nj_base::paths::runtime_file::LOGS {
             assert!(super::DIAG.contains(&log), "{log} is written by this app but absent from DIAG — it would suppress the boot picker forever");
         }
     }
@@ -861,7 +861,7 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     #[test]
     fn storage_diagnostics_is_never_an_armed_trigger() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let root = std::env::temp_dir().join(format!(".plx-diag-trigger-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         struct Cleanup(std::path::PathBuf);
@@ -869,12 +869,12 @@ mod tests {
             fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
         }
         let _cleanup = Cleanup(root.clone());
-        std::fs::write(root.join(plx_platform::storage::diagnostics::NAME), b"schema=1\n").unwrap();
+        std::fs::write(root.join(nj_platform::storage::diagnostics::NAME), b"schema=1\n").unwrap();
         let entry = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap();
         assert!(!super::is_armed_trigger(&entry));
         assert!(super::armed_triggers_in(&root).is_empty());
-        std::fs::write(root.join("plxnative-home"), b"").unwrap();
-        assert_eq!(super::armed_triggers_in(&root), vec!["plxnative-home"]);
+        std::fs::write(root.join("nativejelly-home"), b"").unwrap();
+        assert_eq!(super::armed_triggers_in(&root), vec!["nativejelly-home"]);
     }
 
     /// The poster pipeline's two observers — the per-image timeline and the cache counters — must
@@ -884,7 +884,7 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     #[test]
     fn the_poster_observers_are_never_armed_triggers() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let root = std::env::temp_dir().join(format!(".plx-poster-observers-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         struct Cleanup(std::path::PathBuf);
@@ -892,7 +892,7 @@ mod tests {
             fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
         }
         let _cleanup = Cleanup(root.clone());
-        for name in ["plxnative-imgtrace", "plxnative-imagecache-stats"] {
+        for name in ["nativejelly-imgtrace", "nativejelly-imagecache-stats"] {
             std::fs::write(root.join(name), b"").unwrap();
         }
         // `is_armed_trigger` is the predicate `any_trigger_present` (the picker suppression) applies
@@ -916,17 +916,17 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     #[test]
     fn a_directory_is_not_an_armed_trigger() {
-        if !plx_base::devtrig::ENABLED {
+        if !nj_base::devtrig::ENABLED {
             return; // a release build reads nothing
         }
         // Test the exact entry rather than scanning the whole host /tmp. Developers legitimately
         // keep captured TV artifacts there, and their names are intentionally outside DIAG.
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // Per PROCESS, not a fixed name: the runtime dir is the host's /tmp here, shared with every
         // other `cargo test` on this Mac, and two suites running at once (a second checkout's
         // `make check`) removed each other's entry between the create and the read_dir.
-        let d = plx_base::paths::in_runtime_dir(&format!(
-            "plxnative-notatrigger-{}",
+        let d = nj_base::paths::in_runtime_dir(&format!(
+            "nativejelly-notatrigger-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&d);
@@ -946,7 +946,7 @@ mod tests {
     }
 
     /// **How an https origin is exercised without a plex.tv account that has one.** The
-    /// `plxnative-servers` trigger is the only surface that can inject a server the app did not
+    /// `nativejelly-servers` trigger is the only surface that can inject a server the app did not
     /// discover, so it is also the only way any lane or the integrator can put a TLS origin
     /// through `plex::register_origin` headlessly.
     ///
@@ -964,7 +964,7 @@ mod tests {
         let plain = one(r#"{"machine_id":"m","host":"10.0.0.2","port":32400,"token":"t"}"#);
         assert_eq!(
             plain.scheme,
-            crate::plex::Scheme::Http,
+            crate::catalog::Scheme::Http,
             "an overlay that says nothing means http"
         );
         assert_eq!(
@@ -1009,7 +1009,7 @@ mod tests {
         assert_eq!(one(r#"{"host":"10.0.0.2","token":"t"}"#).tier, None);
         assert_eq!(
             one(r#"{"host":"10.0.0.2","token":"t","tier":"remote"}"#).tier,
-            Some(crate::plex::probe::Location::Remote)
+            Some(crate::catalog::probe::Location::Remote)
         );
         assert!(
             super::parse_servers(r#"{"host":"10.0.0.2","token":"t","tier":"wan"}"#).is_err(),
@@ -1214,32 +1214,32 @@ mod tests {
         assert_eq!(v[0].describe(), "SHARED ref=71c955 port_set=true");
     }
 
-    /// `plxnative-servers` must NOT be exempt from the picker-suppression scan: it names a host and
+    /// `nativejelly-servers` must NOT be exempt from the picker-suppression scan: it names a host and
     /// carries the token to trust it with, which is automation of the strongest kind. Listing it in
     /// DIAG would let a headless run boot to the who's-watching picker instead of Home.
     #[test]
     fn servers_trigger_is_not_diagnostic() {
-        assert!(!super::DIAG.contains(&"plxnative-servers"));
+        assert!(!super::DIAG.contains(&"nativejelly-servers"));
     }
 
-    // ---- plxnative-playurl (the pipeline test tier's one trigger) ----
+    // ---- nativejelly-playurl (the pipeline test tier's one trigger) ----
 
     /// The trigger decides WHAT THE APP PLAYS. Listing it in DIAG would leave a headless pipeline
     /// run booting to the who's-watching picker — with no session, to the sign-in screen — instead
     /// of into the player.
     #[test]
     fn playurl_trigger_is_not_diagnostic() {
-        assert!(!super::DIAG.contains(&"plxnative-playurl"));
+        assert!(!super::DIAG.contains(&"nativejelly-playurl"));
     }
 
-    /// **One vocabulary for a rung, in both directions.** `plxnative-quality` and
-    /// `plxnative-qualityswitch` accept these strings and `quality: switch → …` prints them, so a
+    /// **One vocabulary for a rung, in both directions.** `nativejelly-quality` and
+    /// `nativejelly-qualityswitch` accept these strings and `quality: switch → …` prints them, so a
     /// case states its rung once and asserts on the same word. A one-way table would let the log
     /// drift from what the trigger accepts and the drift would show up as a case that arms
     /// correctly and then matches nothing — indistinguishable from the feature not working.
     #[test]
     fn every_quality_wire_name_parses_back_to_itself() {
-        use crate::plex::session::PlaybackQuality as Q;
+        use crate::catalog::session::PlaybackQuality as Q;
         for q in [
             Q::Auto,
             Q::Original,
@@ -1260,10 +1260,10 @@ mod tests {
 
     /// The script grammar, including the two ways it must FAIL CLOSED. A typo that resolved to a
     /// default would switch the playback to something the case never asked for — the same hazard
-    /// `plxnative-abrpin` documents for its own value.
+    /// `nativejelly-abrpin` documents for its own value.
     #[test]
     fn a_quality_script_fails_closed_and_never_substitutes() {
-        use crate::plex::session::PlaybackQuality as Q;
+        use crate::catalog::session::PlaybackQuality as Q;
         let parse = super::parse_quality_switch_script;
         assert_eq!(
             parse("720p_4_mbps"),

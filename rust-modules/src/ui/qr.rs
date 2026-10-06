@@ -1,7 +1,7 @@
 //! Offline QR links with a four-module quiet zone and integer-sized modules.
 //! Encode on mount, upload once in `prepare`, then paint one texture per frame.
 use super::{theme, Painter, Rect};
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use super::label::HAlign;
 use super::text_view::TextView;
 
@@ -119,8 +119,8 @@ impl QrCode {
                 }
             }
         }
-        plx_gfx::gfx::delete_tex(self.texture);
-        self.texture = plx_gfx::img::img_upload_rgba(rgba.as_ptr(), side, side);
+        nj_gfx::gfx::delete_tex(self.texture);
+        self.texture = nj_gfx::img::img_upload_rgba(rgba.as_ptr(), side, side);
         self.pixels = side;
     }
 
@@ -133,7 +133,7 @@ impl QrCode {
 }
 
 impl Drop for QrCode {
-    fn drop(&mut self) { plx_gfx::gfx::delete_tex(self.texture); }
+    fn drop(&mut self) { nj_gfx::gfx::delete_tex(self.texture); }
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@ half of that banner.
 
 ## 0. Provenance, and how to re-read the evidence
 
-Ten diagnostic snapshots reached `tools/plxnative-lab` through the bridge of
+Ten diagnostic snapshots reached `tools/nativejelly-lab` through the bridge of
 `docs/lab-diagnostics.md`. Each is one `{"kind":"envelope",…}` line plus the ring's tail, so the
 ring's records are re-sent on every upload: **6907 record lines, 3083 distinct records**, across
 **three app runs**. `seq` restarts at 1 per relaunch, so the runs are ordered by upload number
@@ -35,10 +35,10 @@ Every quoted line below is verbatim from the ring, trimmed only at the right. `<
 and `<name>` are the scrubber's own placeholders (§4.2 is about the places it failed). Library
 titles are the maintainer's and a friend's and are never named here.
 
-The app under test: `install: id=com.beb.plxnative.debug flavour=debug runtime=/tmp/com.beb.plxnative.debug
-features=dev APPID_env=com.beb.plxnative.debug`, version 0.4.1, features
+The app under test: `install: id=com.beb.nativejelly.debug flavour=debug runtime=/tmp/com.beb.nativejelly.debug
+features=dev APPID_env=com.beb.nativejelly.debug`, version 0.4.1, features
 `["lab-diagnostics","devtools","devtriggers"]`, installed at the Developer Mode prefix
-`/media/developer/apps/usr/palm/applications/com.beb.plxnative.debug`. Note `APPID_env=` is
+`/media/developer/apps/usr/palm/applications/com.beb.nativejelly.debug`. Note `APPID_env=` is
 populated — SAM **does** export `APPID` to a native app on this firmware, which is one free answer
 the boot line was added to get.
 
@@ -762,7 +762,7 @@ regression run: `./tests/run.py` was never executed against it, on either tier.
 **One thing the records suggest is settled and cannot themselves prove.**
 `docs/lab-diagnostics.md` §11 lists *"The `.ipk` path"* as never exercised, since every device run
 so far went through `make deploy`. A Cloud Test Lab set has no ssh and takes a package, and this
-build reported `appdir: /media/developer/apps/usr/palm/applications/com.beb.plxnative.debug (from
+build reported `appdir: /media/developer/apps/usr/palm/applications/com.beb.nativejelly.debug (from
 current_exe)` — the Developer Mode prefix, which is where `appinstalld` lands a dev-mode `.ipk` as
 well as where `scp` would put one. The install method is not in the ring. If the binary got there
 as `make LAB=1 FLAVOR=debug ipk`, that gap is closed and §11 should say so; the maintainer knows

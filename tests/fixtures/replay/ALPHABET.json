@@ -37,7 +37,7 @@
     "inst:[0-9]+",
     "store:[0-9]+",
     "seed=[0-9]+",
-    "plxnative-(rec|focus|noidle|nowan|token|settings|detail|detailsec|detailok|filmography|personcredits|app-init)",
+    "nativejelly-(rec|focus|noidle|nowan|token|settings|detail|detailsec|detailok|filmography|personcredits|app-init)",
     "http://127\\.0\\.0\\.1:[0-9]{1,5}",
     "route=(home|library|detail|person|search|player|login|profiles|onboard)( overlay=(account|itemmenu|settings|legal|privacy|consent|info|chapters|menu|more|none))?",
     "Landing\\((Instance\\(InstanceId\\([0-9]+\\)\\)|Store\\(StoreOrd\\([0-9]+\\)\\)|Session|Consent|Input|Present|Nav|Player|Cache)\\)",

@@ -7,7 +7,7 @@
 use std::ffi::CString;
 
 use crate::metadata::{Detail, Episode};
-use plx_machine::machine::GroupId;
+use nj_machine::machine::GroupId;
 use crate::ui::text_lift::{TextLift, TOP_CENTRE};
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::{self, PosterMark};
@@ -65,7 +65,7 @@ pub(crate) fn locate(key: u32) -> Option<(usize, Row)> {
 pub(crate) enum Action {
     None,
     Play(usize),
-    OpenDetail(crate::plex::ServerId, String),
+    OpenDetail(crate::catalog::ServerId, String),
 }
 
 pub(crate) fn action(d: &Detail, key: u32, loading: bool) -> Action {
@@ -92,7 +92,7 @@ pub(crate) fn still_rect(i: usize, top: f32, scroll: f32) -> Rect {
     Rect::new(strip_x(i) - scroll, top, W, H)
 }
 
-pub(crate) fn meta_layout(ep: &Episode, measure: &dyn plx_machine::machine::Measure) -> (f32, f32, f32) {
+pub(crate) fn meta_layout(ep: &Episode, measure: &dyn nj_machine::machine::Measure) -> (f32, f32, f32) {
     let title_h = TextView::new(&ep.title, theme::size::BODY, theme::TEXT_PRIMARY)
         .bold()
         .with_measure(measure)
@@ -125,7 +125,7 @@ pub(crate) fn meta_layout(ep: &Episode, measure: &dyn plx_machine::machine::Meas
     (date_y, summary_y, bottom + META_BOTTOM_PAD)
 }
 
-pub(crate) fn meta_rect(ep: &Episode, i: usize, top: f32, scroll: f32, measure: &dyn plx_machine::machine::Measure) -> Rect {
+pub(crate) fn meta_rect(ep: &Episode, i: usize, top: f32, scroll: f32, measure: &dyn nj_machine::machine::Measure) -> Rect {
     let (_, _, h) = meta_layout(ep, measure);
     Rect::new(
         strip_x(i) - scroll - TEXT_PAD_X,
@@ -135,7 +135,7 @@ pub(crate) fn meta_rect(ep: &Episode, i: usize, top: f32, scroll: f32, measure: 
     )
 }
 
-pub(crate) fn block_h(d: &Detail, measure: &dyn plx_machine::machine::Measure) -> f32 {
+pub(crate) fn block_h(d: &Detail, measure: &dyn nj_machine::machine::Measure) -> f32 {
     H + d
         .episodes
         .iter()
@@ -195,7 +195,7 @@ pub(crate) fn watch_state(ep: &Episode) -> PosterMark {
 /// The kicker's cap-top offset from its texture origin — fixed by the font, so callers compute it
 /// once per draw rather than once per cell.
 fn kicker_cap_top() -> f32 {
-    plx_gfx::text::text_cap_band(theme::size::CAPTION, 0).0
+    nj_gfx::text::text_cap_band(theme::size::CAPTION, 0).0
 }
 
 pub(crate) fn draw(
@@ -206,7 +206,7 @@ pub(crate) fn draw(
     focused: Option<(usize, Row)>,
     scale: impl Fn(usize) -> f32,
     lift: impl Fn(usize) -> TextLift,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
     meta: crate::metadata::MetadataView<'_>,
 ) {
     let stale = if meta.season_loading() {
@@ -235,7 +235,7 @@ pub(crate) fn draw_focused(
     scroll: f32,
     scale: f32,
     lift: &TextLift,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
     meta: crate::metadata::MetadataView<'_>,
 ) {
     let Some(episode) = d.episodes.get(index) else {
@@ -272,7 +272,7 @@ fn draw_cell(
     scale: f32,
     lift: &TextLift,
     kicker_cap_top: f32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let x = strip_x(i);
     let still_focused = focused == Some((i, Row::Still));
@@ -324,7 +324,7 @@ fn draw_cell(
     let (date_y, summary_y, content_h_with_pad) = meta_layout(ep, measure);
     let text_x = x + PLATTER_PAD;
     let labels = |p: Painter| {
-        if let Ok(kicker) = CString::new(plx_platform::i18n::msg::browse_detail_episode_number(ep.index as i64)) {
+        if let Ok(kicker) = CString::new(nj_platform::i18n::msg::browse_detail_episode_number(ep.index as i64)) {
             p.text(
                 kicker.as_ptr(),
                 text_x,
@@ -360,7 +360,7 @@ fn draw_cell(
                 0,
             );
             if !ep.rating.is_empty() {
-                let (top, baseline) = plx_gfx::text::text_cap_band(theme::size::MICRO, 0);
+                let (top, baseline) = nj_gfx::text::text_cap_band(theme::size::MICRO, 0);
                 crate::ui::widgets::keyline_chip(
                     p,
                     text_x + width + theme::space::SM,
@@ -519,7 +519,7 @@ mod tests {
     /// survives once focus has left and the spring has settled.
     #[test]
     fn the_label_plate_shows_for_either_stop_and_leaves_nothing_at_rest() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let rest = cell_census(1.0, &TextLift::new());
         assert!(
             cell_census(theme::EP_CARD_FOCUS_SCALE, &TextLift::new()).len() > rest.len(),

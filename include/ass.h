@@ -1,5 +1,5 @@
-#ifndef PLX_ASS_H
-#define PLX_ASS_H
+#ifndef NJ_ASS_H
+#define NJ_ASS_H
 
 /* Private, versioned facade over the pinned bundled libass. No upstream struct
  * crosses this ABI; every handle and returned pixel buffer belongs to one worker. */
@@ -13,7 +13,7 @@ typedef struct {
     const uint8_t *rgba; /* straight RGBA; valid until the next render or destroy */
 } PlxAssBitmap;
 
-#define PLX_ASS_MAX_REGIONS 64
+#define NJ_ASS_MAX_REGIONS 64
 typedef struct {
     size_t count;
     const PlxAssBitmap *regions; /* disjoint bounds; same lifetime as their pixels */

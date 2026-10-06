@@ -1,4 +1,4 @@
-//! `imgtrace` — the per-image timeline of the poster pipeline, armed by `/tmp/plxnative-imgtrace`
+//! `imgtrace` — the per-image timeline of the poster pipeline, armed by `/tmp/nativejelly-imgtrace`
 //! (`dev::scenarios::imgtrace_armed`). Inert unless armed: every entry point returns at its first
 //! line when the latch reads `false`, and without `devtriggers` the trigger reader behind it always
 //! answers `false`, so the latch never arms.
@@ -278,14 +278,14 @@ fn with<R>(f: impl FnOnce(&mut Tracker, u64, u64) -> R) -> R {
     // the workers that report stages (`app::clock` is the main thread's frame time), and the
     // instrument clock `app/` already reads in place of `Instant`. Every line prints differences
     // only, so its origin does not matter.
-    let ms = plx_base::diag::heartbeat::now_us() / 1000;
+    let ms = nj_base::diag::heartbeat::now_us() / 1000;
     let frame = g.frame;
     f(&mut g.t, frame, ms)
 }
 
 fn log_all(lines: Vec<String>) {
     for l in lines {
-        plx_base::eventlog::log(&l);
+        nj_base::eventlog::log(&l);
     }
 }
 

@@ -5,10 +5,10 @@
 //! the same strip as Related ([`super::related::draw_strip`]).
 
 use crate::metadata::{CollectionShelf, Detail};
-use crate::pms::PmsMovie;
+use crate::catalog_fetch::PmsMovie;
 use crate::ui::card_row::CardRow;
 use crate::ui::linked_heading::LinkedHeading;
-use plx_machine::machine::{GroupId, Measure};
+use nj_machine::machine::{GroupId, Measure};
 use crate::ui::{Painter, Rect};
 
 use super::related;

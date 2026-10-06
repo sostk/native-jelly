@@ -1,5 +1,5 @@
 {
- "comment": "Every source asset the demo library derives from: pinned URL, sha256, byte size, licence, author and attribution. tools/demo_library.py fetches them into ~/.cache/plxnative-demo and refuses a file whose hash differs.",
+ "comment": "Every source asset the demo library derives from: pinned URL, sha256, byte size, licence, author and attribution. tools/demo_library.py fetches them into ~/.cache/nativejelly-demo and refuses a file whose hash differs.",
  "assets": {
   "a-trip-to-the-moon-1902-poster": {
    "url": "https://upload.wikimedia.org/wikipedia/commons/8/83/Voyage_dans_la_Lune_affiche.jpg",

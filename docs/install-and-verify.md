@@ -1,10 +1,10 @@
-# Installing PlxNative
+# Installing Native Jelly
 
-PlxNative is not yet available in the LG Content Store. You can install it on a regular LG webOS TV using LG's Developer Mode and a computer. **No root is required.**
+Native Jelly is not yet available in the LG Content Store. You can install it on a regular LG webOS TV using LG's Developer Mode and a computer. **No root is required.**
 
 ## Already have Homebrew Channel?
 
-Open **Homebrew Channel** on your TV, find [**PlxNative**](https://repo.webosbrew.org/apps/com.sostk.nativejelly/), and select **Install**. Then [open PlxNative and sign in](#4-open-plxnative-and-sign-in).
+Open **Homebrew Channel** on your TV, find [**Native Jelly**](https://repo.webosbrew.org/apps/com.sostk.nativejelly/), and select **Install**. Then [open Native Jelly and sign in](#4-open-nativejelly-and-sign-in).
 
 You can skip the Developer Mode and computer setup below. If your existing Homebrew Channel installation uses Developer Mode, keep renewing that session as usual.
 
@@ -13,11 +13,11 @@ You can skip the Developer Mode and computer setup below. If your existing Homeb
 You will need:
 
 - an LG TV running **webOS 4.0 or newer**; check the [compatibility notes](../README.md#will-it-work-on-my-television), since playback support varies by model;
-- a Plex account with access to a **Plex Media Server**, either your own or one shared with you;
+- a **Jellyfin server** you can reach on your network;
 - a Mac, Windows PC, or Linux computer for the setup described here;
 - the TV and computer on the **same local network**.
 
-The route is **set up the TV → connect from your computer → install PlxNative**. No LG SDK or IDE is required.
+The route is **set up the TV → connect from your computer → install Native Jelly**. No LG SDK or IDE is required.
 
 > **Important:** Developer Mode needs periodic renewal. If it expires and LG disables Developer Mode, apps installed through it are removed. This applies to both installation options below, including Homebrew Channel installed through Developer Mode. [How to keep the apps installed](#important-developer-mode-expires).
 
@@ -46,59 +46,59 @@ The route is **set up the TV → connect from your computer → install PlxNativ
    | Field | What to enter |
    |---|---|
    | **Device Name** | A name you choose, such as `living-room-tv`. |
-   | **Address** | Your **TV's local IP address**, not your Plex server's address. |
+   | **Address** | Your **TV's local IP address**, not your Jellyfin server's address. |
    | **Passphrase / authentication info** | The **Passphrase shown in the TV's Developer Mode app**, with the same capitalisation. This is **not your LG account password**. |
 
    Keep the Developer Mode defaults: **Username** `prisoner`, **Port** `9922`, and **Authentication** `Dev Mode`. The wizard sets these for you.
 5. Finish adding the TV. In Dev Manager, open **Apps** and check that the **Installed** tab can load the TV's apps.
 
-**Ready to continue:** Dev Manager can display the TV's installed apps. If it cannot connect, see [Connection problems](#connection-problems) before downloading PlxNative.
+**Ready to continue:** Dev Manager can display the TV's installed apps. If it cannot connect, see [Connection problems](#connection-problems) before downloading Native Jelly.
 
-## 3. Choose how to install PlxNative
+## 3. Choose how to install Native Jelly
 
-Both options install PlxNative; neither unlocks extra PlxNative features. The difference is how you install and manage updates.
+Both options install Native Jelly; neither unlocks extra Native Jelly features. The difference is how you install and manage updates.
 
 | | Direct installation | Through Homebrew Channel |
 |---|---|---|
-| **What you add to the TV** | PlxNative only. | Homebrew Channel, then PlxNative. |
+| **What you add to the TV** | Native Jelly only. | Homebrew Channel, then Native Jelly. |
 | **How you update** | Install a newer `.ipk` from your computer using Dev Manager. | Open Homebrew Channel on the TV and select **Update** when available. |
 | **Why choose it** | Fewer steps and no extra catalogue app. | Browse other homebrew apps and install updates with the TV remote. |
 
 **Both options use the Developer Mode setup above and need the same session renewal.** Installing Homebrew Channel does not remove that requirement. Its catalogue can also contain apps with their own requirements; not every homebrew app works on every TV.
 
-### Option A — install PlxNative directly
+### Option A — install Native Jelly directly
 
-**The shorter route if you only want PlxNative.**
+**The shorter route if you only want Native Jelly.**
 
-1. On your computer, open the [latest PlxNative release](https://github.com/sostk/native-jelly/releases/latest).
+1. On your computer, open the [latest Native Jelly release](https://github.com/sostk/native-jelly/releases/latest).
 2. Under **Assets**, download **`com.sostk.nativejelly_X.Y.Z_arm.ipk`**. `X.Y.Z` is the release's version number. The `.ipk` is the TV app, not something to open on your computer; the manifest and source archives are not installers.
 3. For a manual download, [check the package against the release checksum](#verifying-the-package) before installing it.
 4. In Dev Manager, select your TV, open **Apps**, and click **Install**. Choose the downloaded `.ipk`.
-5. Wait for installation to finish and check that **PlxNative** appears under **Installed**.
+5. Wait for installation to finish and check that **Native Jelly** appears under **Installed**.
 
-Continue to [step 4](#4-open-plxnative-and-sign-in). You do not need to install Homebrew Channel as well.
+Continue to [step 4](#4-open-nativejelly-and-sign-in). You do not need to install Homebrew Channel as well.
 
 For future updates, repeat this with the newer `.ipk`. Install over the existing app rather than uninstalling it first.
 
-### Option B — install Homebrew Channel, then PlxNative
+### Option B — install Homebrew Channel, then Native Jelly
 
 **Choose this for a catalogue and app updates on the TV.** Homebrew Channel is a separate TV app; you still use your computer for this initial setup.
 
 1. In **Dev Manager on your computer**, select your TV and open **Apps → Available**. This is the webOS Homebrew catalogue.
 2. Find **Homebrew Channel**, open its entry, and select **Install**.
 3. Wait for installation to finish. **On your TV**, open **Homebrew Channel** from the app launcher.
-4. Find **PlxNative**, open its entry, and select **Install**.
-5. Wait for installation to finish, then continue to [step 4](#4-open-plxnative-and-sign-in).
+4. Find **Native Jelly**, open its entry, and select **Install**.
+5. Wait for installation to finish, then continue to [step 4](#4-open-nativejelly-and-sign-in).
 
-For future updates, open PlxNative's entry in Homebrew Channel and select **Update** when offered. Updates are installed when you select them, not automatically.
+For future updates, open Native Jelly's entry in Homebrew Channel and select **Update** when offered. Updates are installed when you select them, not automatically.
 
-## 4. Open PlxNative and sign in
+## 4. Open Native Jelly and sign in
 
-Open **PlxNative** from the TV's app launcher. Scan the on-screen QR code and sign in to the Plex account that has access to your server or shared libraries. Choose your Plex Home profile if prompted.
+Open **Native Jelly** from the TV's app launcher. Enter your Jellyfin server address and sign in with a password or Quick Connect.
 
-**Installation is complete.** You can now use PlxNative from the TV launcher. The remaining setup responsibility is keeping Developer Mode active, as described below.
+**Installation is complete.** You can now use Native Jelly from the TV launcher. The remaining setup responsibility is keeping Developer Mode active, as described below.
 
-PlxNative is free and open source. If it's useful to you, you can [support it on Ko-fi](https://ko-fi.com/0xbeb).
+Native Jelly is free and open source. If it's useful to you, you can [support it on Ko-fi](https://ko-fi.com/0xbeb).
 
 ## Important: Developer Mode expires
 
@@ -122,11 +122,11 @@ See [LG's session guidance](https://webostv.developer.lge.com/develop/getting-st
 
 **The apps disappeared:** check **Dev Mode Status** and **Remain Session**. If Developer Mode has been disabled, enable it again and reinstall the apps using the same route.
 
-**PlxNative opens but your libraries are missing:** make sure you signed in to a Plex account with access to a server and that the server is reachable. PlxNative does not include a media library or set up Plex Media Server for you.
+**Native Jelly opens but your libraries are missing:** make sure you signed in to a Jellyfin server that is reachable. Native Jelly does not include a media library or set up Jellyfin for you.
 
-For more connection help, see [webOSbrew's troubleshooting guide](https://www.webosbrew.org/devmode/#troubleshooting). To [report a PlxNative problem](https://github.com/sostk/native-jelly/issues), include your TV model, webOS version, PlxNative version, installation method, and the exact error. Do not post passwords, Passphrase, Plex tokens, or screenshots containing them.
+For more connection help, see [webOSbrew's troubleshooting guide](https://www.webosbrew.org/devmode/#troubleshooting). To [report a Native Jelly problem](https://github.com/sostk/native-jelly/issues), include your TV model, webOS version, Native Jelly version, installation method, and the exact error. Do not post passwords, Passphrase, Jellyfin tokens, or screenshots containing them.
 
-If PlxNative itself is installed and opens but something inside it doesn't work — sign-in, playback, or anything else — see [Troubleshooting](troubleshooting.md).
+If Native Jelly itself is installed and opens but something inside it doesn't work — sign-in, playback, or anything else — see [Troubleshooting](troubleshooting.md).
 
 ---
 
@@ -162,9 +162,9 @@ sha256sum -c ipk.sha256                                    # Linux, with the che
 certutil -hashfile com.sostk.nativejelly_X.Y.Z_arm.ipk SHA256 # Windows
 ```
 
-[Return to direct installation](#option-a--install-plxnative-directly) after checking the file.
+[Return to direct installation](#option-a--install-nativejelly-directly) after checking the file.
 
-**If Homebrew Channel installs PlxNative from its catalogue, you have nothing to verify manually.** It fetches that release's `com.sostk.nativejelly.manifest.json`, hashes the download on the television, and refuses to install a package that does not match.
+**If Homebrew Channel installs Native Jelly from its catalogue, you have nothing to verify manually.** It fetches that release's `com.sostk.nativejelly.manifest.json`, hashes the download on the television, and refuses to install a package that does not match.
 
 If you point Homebrew Channel at a bare `.ipk` yourself instead of installing the catalogue entry, that catalogue verification path is bypassed, so verify the package yourself.
 
@@ -182,8 +182,8 @@ This section is invariant across releases. Where a release changes one of these 
 
 All of the following are created mode `0600`:
 
-- `/tmp/plxnative-events.log`, `/tmp/plxnative-stderr.log` and `/tmp/plxnative-crash.log` — the first two are truncated each launch, while the crash log is append-only so it survives a restart. Every line is scrubbed **before it is written**: tokens, header and query credentials, hostnames (including `plex.direct` names that encode your LAN address), bare addresses, Plex GUIDs, search queries, and your server and profile names are rewritten. Media titles, search terms, and subtitle text are never written at all. What remains includes ratingKeys — server-local item numbers used to diagnose playback bugs. Someone with access to the same server could map one back to an item, so still think before posting a log publicly. [`PRIVACY.md`](https://github.com/sostk/native-jelly/blob/main/PRIVACY.md) is the full contract.
-- Your signed-in session, as `<id>-auth.json` under `/media/developer` or `/media/internal` — one access token per server your account can reach. PlxNative capability-probes the documented `com.webos.service.keymanager3` service (TV 24+) and uses its AES-GCM operation when LS2 policy permits it. The older `com.palm.keymanager` AES-CFB service is deliberately not used because it cannot authenticate ciphertext. webOS TV 4.10.2 has neither usable service, so the compatible result there is an atomically replaced, app-owned mode-0600 file. A protected file is never silently downgraded during a temporary service failure. The probe is an ordinary application-service call and the fallback needs no root service or root-only HAL API; store entitlement for Key Manager is still capability-tested at runtime rather than assumed from the OS version.
+- `/tmp/nativejelly-events.log`, `/tmp/nativejelly-stderr.log` and `/tmp/nativejelly-crash.log` — the first two are truncated each launch, while the crash log is append-only so it survives a restart. Every line is scrubbed **before it is written**: tokens, header and query credentials, hostnames, bare addresses, Jellyfin item ids, search queries, and your server and user names are rewritten. Media titles, search terms, and subtitle text are never written at all. What remains includes ratingKeys — server-local item numbers used to diagnose playback bugs. Someone with access to the same server could map one back to an item, so still think before posting a log publicly. [`PRIVACY.md`](https://github.com/sostk/native-jelly/blob/main/PRIVACY.md) is the full contract.
+- Your signed-in session, as `<id>-auth.json` under `/media/developer` or `/media/internal` — the access token for the Jellyfin server you signed in to. Native Jelly capability-probes the documented `com.webos.service.keymanager3` service (TV 24+) and uses its AES-GCM operation when LS2 policy permits it. The older `com.palm.keymanager` AES-CFB service is deliberately not used because it cannot authenticate ciphertext. webOS TV 4.10.2 has neither usable service, so the compatible result there is an atomically replaced, app-owned mode-0600 file. A protected file is never silently downgraded during a temporary service failure. The probe is an ordinary application-service call and the fallback needs no root service or root-only HAL API; store entitlement for Key Manager is still capability-tested at runtime rather than assumed from the OS version.
 
 The app does not persist the last screen: an authenticated cold launch starts on Home. Upgrades remove the retired `<id>-lastplace.json` bookmark written by older builds.
 
@@ -195,9 +195,9 @@ The television's codec table at `/etc/umediaserver/device_codec_capability_confi
 
 ### What it reaches
 
-`plex.tv` and `discover.provider.plex.tv` over TLS, and the Plex Media Servers your account can reach — your own and any shared with you — over HTTPS whenever a token is present, except the home-network exception below.
+the Jellyfin server you signed in to, over HTTPS whenever a token is present, except the home-network exception below.
 
-Stable builds refuse token-bearing plaintext HTTP, with one exception that is yours to make: when a server answers only unencrypted on your home network — every secure route to it, Plex's relay included, failed — the app asks **Connect without encryption?**: on the sign-in screen, on the Home or library read-out that reports the failure, or when you switch the server on in Settings → **Unencrypted connections**. It is offered only for a numeric private address plex.tv lists as local and on the same network as the television, never for a remote address or the relay, and never for a server set to require secure connections. The answer is remembered per server for the Plex account that gave it, so another account signing in is asked again. The permission it grants is never stored: it holds only while each fresh check of that server still reaches the same address, and it ends when you sign in or out, switch to a profile that does not use that server at that address, or bring the app back from the background — the app cannot see the television change network, so those are the points where it proves eligibility again. While it is in use the app keeps retrying HTTPS and switches back as soon as a secure route verifies, and Settings → **Unencrypted connections** turns it off at once. Developer-trigger builds may enable plaintext for a local lab and log that exception.
+Stable builds refuse token-bearing plaintext HTTP, with one exception that is yours to make: when a server answers only unencrypted on your home network — every secure route to it failed — the app asks **Connect without encryption?**: on the sign-in screen, on the Home or library read-out that reports the failure, or when you switch the server on in Settings → **Unencrypted connections**. It is offered only for a numeric private address on the same network as the television, never for a remote address. The answer is remembered per server, so another user signing in is asked again. The permission it grants is never stored: it holds only while each fresh check of that server still reaches the same address, and it ends when you sign in or out, or bring the app back from the background — the app cannot see the television change network, so those are the points where it proves eligibility again. While it is in use the app keeps retrying HTTPS and switches back as soon as a secure route verifies, and Settings → **Unencrypted connections** turns it off at once. Developer-trigger builds may enable plaintext for a local lab and log that exception.
 
 **Only if you switch them on**, the app also reaches Sentry and PostHog in the European Union. They have separate switches, both are off by default, and both are reversible. [`PRIVACY.md`](https://github.com/sostk/native-jelly/blob/main/PRIVACY.md) describes them in full.
 
@@ -209,9 +209,9 @@ Nothing. A release build compiles out the whole `/tmp` trigger surface, the remo
 
 ## Scope
 
-Movies and TV shows from a Plex Media Server your account can reach. No music, no photos, no live TV, no DVR.
+Movies and TV shows from a Jellyfin server you sign in to. No music, no photos, no live TV, no DVR.
 
-There is deliberately nowhere on the television to type a server address — configure servers on a phone or PC, and the app offers what your Plex account already knows about.
+Sign-in asks for the Jellyfin server address on the television, then a password or Quick Connect code.
 
 ## The bundled FFmpeg
 

@@ -16,7 +16,7 @@ use super::test_support::*;
 /// before and after, which is why they live inside the failing test rather than beside it.
 #[test]
 fn a_season_landing_only_installs_while_it_is_still_the_one_being_awaited() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
 
     // A FAILED /children GET. It must not be mistaken for a season with no episodes.
     install_show("show-1", 0, &["s1e1", "s1e2"]);
@@ -165,7 +165,7 @@ fn a_season_landing_only_installs_while_it_is_still_the_one_being_awaited() {
 /// show would have been listing our show's episodes, silently.
 #[test]
 fn a_season_landing_for_another_servers_show_with_the_same_key_is_refused() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
 
     // our server's show 42, one season switch in flight
     install_show_on(SRV_A, "42", 0, &["ours-e1"]);
@@ -220,13 +220,13 @@ fn a_season_landing_for_another_servers_show_with_the_same_key_is_refused() {
 #[test]
 fn menu_play_season_load_inside_a_frame_still_installs_the_episode_list() {
     use std::io::{Read, Write};
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     // The season fetch is one blocking `http::request_with` GET, i.e. `net`'s easy API and nothing
     // of the media plane, so what this needs from the machine is `net`'s own "libcurl is bound and
     // may be used from several threads" -- not `curlio::available()`, which adds the multi table
     // only the media transport reads (and `curlio` is not the data layer's to name).
     assert!(
-        plx_net::net::global_init() && plx_net::net::available() && plx_net::net::threaded_tls_ready()
+        nj_net::net::global_init() && nj_net::net::available() && nj_net::net::threaded_tls_ready()
     );
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
@@ -251,17 +251,17 @@ fn menu_play_season_load_inside_a_frame_still_installs_the_episode_list() {
             body.len(),
         );
     });
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("season-live", "127.0.0.1", port, "token", "season-client");
-    crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("season-live", "127.0.0.1", port, "token", "season-client");
+    crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Local);
     install_show_on(sid, "show-1", 1, &["stale"]);
 
-    let frame = plx_base::task::FrameScope::enter();
+    let frame = nj_base::task::FrameScope::enter();
     load_season_now(test_state(), test_adapter(), 0);
     drop(frame);
 
     server.join().unwrap();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     assert_eq!(listed_eps(), ["ep-menu"], "the blocking season fetch must run under its allow_blocking exception");
     assert_eq!(selected_tab(), 0);
 }

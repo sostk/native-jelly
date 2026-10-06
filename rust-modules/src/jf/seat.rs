@@ -12,7 +12,7 @@
 //!
 //! The user id is learned lazily from `GET /Users/Me` (the token names the user), so a seat needs
 //! nothing at registration beyond the origin.
-use crate::plex::Origin;
+use crate::catalog::Origin;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn a_seat_is_keyed_by_the_whole_origin() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         reset_for_test();
         let a = Origin::parse("http://10.0.0.2:8096").unwrap();
         let other_port = Origin::parse("http://10.0.0.2:32400").unwrap();

@@ -368,15 +368,15 @@ client, the moonlight-tv reproduction, the four Luna IME methods, and the jail's
 Neither the TV harness nor the desktop simulator can type, so both would otherwise only ever see the
 empty state.
 
-- **`/tmp/plxnative-search[=<query>]`** — boot straight into Search with the field already holding
+- **`/tmp/nativejelly-search[=<query>]`** — boot straight into Search with the field already holding
   `<query>`. Read once at boot in `app/boot.rs`, through `devtrig::read` like every other trigger; it
   seeds `stores::search::SearchCmd::SetQuery` directly rather than driving a screen method.
-- **`/tmp/plxnative-searchosc`** — sweep the result shelves' focus down↔up perpetually: one step per
+- **`/tmp/nativejelly-searchosc`** — sweep the result shelves' focus down↔up perpetually: one step per
   350 ms, reversing every 3 s, the same cadence `homeosc` and `libosc` use so all three read the same
   in a log. It injects synthetic D-pad input through the real dispatcher (`bridge::script_key`),
   exactly as `homeosc` does, rather than reaching into the screen's focus state directly.
 
-**`searchosc` does not reach the screen on its own** — pair it with `plxnative-search`. Neither is on
+**`searchosc` does not reach the screen on its own** — pair it with `nativejelly-search`. Neither is on
 `dev.rs`'s `DIAG` exemption list, and neither should be: DIAG is for files that are pure diagnostics
 (the four logs, the profiler, the remote FIFO, the capture listener, the idle-gate override), and an
 oscillator is automation — it changes what the app does. Both therefore mark the boot automated and
@@ -395,8 +395,8 @@ and only mean something together** — the same screen with and without its osci
 
 | scene | asserts | triggers |
 |---|---|---|
-| `fps:search-type` | `fps_floor` — the screen still ANIMATES under a travelling focus | `plxnative-search`, `plxnative-searchosc` |
-| `fps:search-idle` | `fps_ceiling` — a settled result set STOPS presenting | `plxnative-search` |
+| `fps:search-type` | `fps_floor` — the screen still ANIMATES under a travelling focus | `nativejelly-search`, `nativejelly-searchosc` |
+| `fps:search-idle` | `fps_ceiling` — a settled result set STOPS presenting | `nativejelly-search` |
 
 Picking the wrong assertion is how a frozen animation ships, so, restated: `loop_floor` grades
 `loop=`, which counts **loop iterations** and reads ~60 with every present skipped — it proves the

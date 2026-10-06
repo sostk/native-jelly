@@ -26,7 +26,7 @@
 //!
 //! ## The grammar
 //!
-//! `/tmp/plxnative-glassload` holds an optional `hold=<seconds>;` prefix and then a comma-separated
+//! `/tmp/nativejelly-glassload` holds an optional `hold=<seconds>;` prefix and then a comma-separated
 //! list of steps:
 //!
 //! ```text
@@ -65,7 +65,7 @@
 //! is designed around. Two surfaces at opposite corners are a different (worse) case and are not
 //! what this dial produces; that asymmetry is recorded in `docs/glass-hardware-budget.md`.
 //!
-//! ## The transition prototype (`/tmp/plxnative-navblur`)
+//! ## The transition prototype (`/tmp/nativejelly-navblur`)
 //!
 //! The route change is a DIP today (see [`crate::ui::nav`]): the outgoing page fades to
 //! `theme::SURFACE_APP`, the route flips at the floor, the incoming page fades up. The design
@@ -107,7 +107,7 @@ pub(crate) enum Kind {
     /// has and the one the hero photograph takes. The control the other two are priced against.
     Image,
     /// Not a synthetic surface at all: the REAL Account popover, on the real route, with cached
-    /// panel glass and its one-copy host [`plx_gfx::gfx::FrameCache`]. Its geometry and lifecycle are
+    /// panel glass and its one-copy host [`nj_gfx::gfx::FrameCache`]. Its geometry and lifecycle are
     /// the shipped ones; this module only asks for the route. Size fields are ignored.
     Account,
 }
@@ -327,10 +327,10 @@ impl Dial {
     /// the publication — constructing a plan therefore publishes too, which is what keeps a host
     /// test that arms one from leaving the instruments armed for every test after it.
     pub(crate) fn publish(&self) {
-        plx_gfx::gfx::profile::publish_dial(self.step, self.armed());
+        nj_gfx::gfx::profile::publish_dial(self.step, self.armed());
     }
 
-    /// Arm the dial from `/tmp/plxnative-glassload`'s content. Logs what it will actually run, because
+    /// Arm the dial from `/tmp/nativejelly-glassload`'s content. Logs what it will actually run, because
     /// a sweep that silently dropped a step reports a curve with a hole in it.
     pub(crate) fn configure(&mut self, spec: &str) {
         match parse(spec) {
@@ -373,7 +373,7 @@ impl Dial {
                         }
                     })
                     .collect();
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "GLASSLOAD armed hold={}ms steps=[{}]",
                     s.hold_ms,
                     list.join(" ")
@@ -382,14 +382,14 @@ impl Dial {
                 self.step = 0;
                 self.publish();
             }
-            None => plx_base::eventlog::log(&format!(
+            None => nj_base::eventlog::log(&format!(
                 "GLASSLOAD spec {spec:?} not understood — dial disarmed"
             )),
         }
     }
 }
 
-/// Arm the blurred-transition prototype from `/tmp/plxnative-navblur`'s content
+/// Arm the blurred-transition prototype from `/tmp/nativejelly-navblur`'s content
 /// (`[<mode>][:<cadence>]`, mode 1 or 2, cadence in presents).
 pub(crate) fn parse_navblur(spec: &str) -> Option<(u32, u32, bool)> {
     let (head, cad) = spec.trim().split_once(':').unwrap_or((spec.trim(), "1"));
@@ -407,7 +407,7 @@ pub(crate) fn parse_navblur(spec: &str) -> Option<(u32, u32, bool)> {
 impl Dial {
     pub(crate) fn configure_navblur(&mut self, spec: &str) {
         let Some((mode, cad, pin)) = parse_navblur(spec) else {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "NAVBLUR spec {spec:?} not understood — prototype off"
             ));
             return;
@@ -419,7 +419,7 @@ impl Dial {
         // Pinned, the slab is not a transition at all, so the page must keep its own fade. Only the
         // riding form replaces the dip.
         crate::ui::nav::set_blur_dissolve(!pin);
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "NAVBLUR armed mode={mode} cadence={cad} pinned={pin}"
         ));
     }
@@ -453,13 +453,13 @@ impl Dial {
 /// published snapshot, since neither caller holds the plan.
 #[inline]
 pub(crate) fn step_index() -> i32 {
-    plx_gfx::gfx::profile::dial_step()
+    nj_gfx::gfx::profile::dial_step()
 }
 
 /// Is anything in this module armed? The published half of [`Dial::armed`], for the same readers.
 #[inline]
 pub(crate) fn armed() -> bool {
-    plx_gfx::gfx::profile::dial_armed()
+    nj_gfx::gfx::profile::dial_armed()
 }
 
 /// Advance the dial one presented frame, BEFORE the page draws.
@@ -475,7 +475,7 @@ impl Dial {
         }
         // A dial run is a perf measurement: it must keep presenting whatever the idle gate thinks.
         // `wake` rather than `invalidate` — nothing here claims the PAGE's pixels changed.
-        plx_machine::idle::wake();
+        nj_machine::idle::wake();
         let Some((hold_ms, len)) = self.sweep.as_ref().map(|s| (s.hold_ms, s.steps.len())) else {
             return;
         };
@@ -488,7 +488,7 @@ impl Dial {
             self.presents = 0;
             self.publish();
             crate::ui::popover::host::blur_invalidate();
-            plx_base::eventlog::log(&format!("GLASSLOAD step={idx}"));
+            nj_base::eventlog::log(&format!("GLASSLOAD step={idx}"));
             return;
         }
         self.presents = self.presents.wrapping_add(1);
@@ -511,7 +511,7 @@ impl Dial {
         // A surface met while the page is being drawn as a blur SOURCE must not draw, record a need
         // or take a capture — `gfx::draw_blur_backdrop` refuses anyway, but the frost quad would
         // still land in the source target. See `widgets::tab_glass_on`.
-        if plx_gfx::gfx::blur_source_pass() {
+        if nj_gfx::gfx::blur_source_pass() {
             return;
         }
         let idx = self.step;
@@ -536,8 +536,8 @@ impl Dial {
                         0.0,
                         PANEL_RADIUS,
                         [1.0, 1.0, 1.0, 1.0],
-                        plx_gfx::gfx::GlassRim::Bevelled,
-                        plx_gfx::gfx::GlassFace::NONE,
+                        nj_gfx::gfx::GlassRim::Bevelled,
+                        nj_gfx::gfx::GlassFace::NONE,
                         theme::Material::Regular.deep(),
                     ) {
                         crate::ui::profile::phase("glass.frost", || {
@@ -558,7 +558,7 @@ impl Dial {
                     // synthetic noise: no subject and no aspect to keep, so the whole texture
                     p.tex_carded(
                         self.card_tex(i),
-                        plx_gfx::gfx::UV_FULL,
+                        nj_gfx::gfx::UV_FULL,
                         r,
                         theme::CARD_RING_RAD,
                         [1.0, 1.0, 1.0, 1.0],
@@ -600,7 +600,7 @@ impl Dial {
             state ^= state << 5;
             *byte = state as u8;
         }
-        let id = plx_gfx::gfx::upload_rgba(0, W as i32, H as i32, px.as_ptr());
+        let id = nj_gfx::gfx::upload_rgba(0, W as i32, H as i32, px.as_ptr());
         self.card_tex[slot] = id;
         id
     }
@@ -634,7 +634,7 @@ fn nav_capsule() -> Rect {
 impl Dial {
     /// Draw the blurred route transition, if one is in flight. Returns whether it drew.
     pub(crate) fn draw_nav_blur(&mut self) -> bool {
-        if !self.navblur_on() || plx_gfx::gfx::blur_source_pass() {
+        if !self.navblur_on() || nj_gfx::gfx::blur_source_pass() {
             return false;
         }
         let amount = if self.navblur_pin {
@@ -664,8 +664,8 @@ impl Dial {
             0.0,
             0.0,
             [1.0, 1.0, 1.0, amount],
-            plx_gfx::gfx::GlassRim::Bevelled,
-            plx_gfx::gfx::GlassFace::NONE,
+            nj_gfx::gfx::GlassRim::Bevelled,
+            nj_gfx::gfx::GlassFace::NONE,
             theme::Material::Regular.deep(),
         );
         // Mode 2: a PRIVATE cache for the surface above. There is one snapshot chain in this renderer,
@@ -680,8 +680,8 @@ impl Dial {
             0.0,
             cap.h * 0.5,
             [1.0, 1.0, 1.0, amount],
-            plx_gfx::gfx::GlassRim::Standing,
-            plx_gfx::gfx::GlassFace::NONE,
+            nj_gfx::gfx::GlassRim::Standing,
+            nj_gfx::gfx::GlassFace::NONE,
             theme::Material::Regular.deep(),
         ) {
             p.alpha(amount).rect_sheened(

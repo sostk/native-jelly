@@ -1,7 +1,7 @@
 //! person — the actor/person page's data layer (the store `ui/person.rs` draws).
 //!
 //! Sibling of `metadata.rs` (the detail page's item store) and `browse.rs` (the Library's paged
-//! catalog), and built on the same three pieces: [`plx_base::task::spawn_small`] + a `Mutex` mailbox
+//! catalog), and built on the same three pieces: [`nj_base::task::spawn_small`] + a `Mutex` mailbox
 //! + a generation, applied on the MAIN thread by [`PersonState::pump`] once a frame. One
 //! `PersonState` and rotated `Arc<PersonAdapter>` belong to each production Bridge; screens borrow
 //! a `PersonView` through their frame `Cx`, so neither reads nor workers select process state.
@@ -37,7 +37,7 @@
 //!   `show`). Each row is stamped with the source's `ServerId`, which is what makes a card open on
 //!   the machine it came from.
 //! * **[`K_ROLES`]** — the character names, one batched `GET /library/metadata/{that source's shelf
-//!   keys}` ([`crate::plex::Client::metadata_many`]). It exists because the shelf listing does NOT
+//!   keys}` ([`crate::catalog::Client::metadata_many`]). It exists because the shelf listing does NOT
 //!   carry them: its rows have a `Role[]` whose entries hold only `tag`. It is the ONE fetch here
 //!   that DEPENDS on another — it can only be addressed once that source's shelves have landed, and
 //!   [`address`] expresses that by keying it on that source's shelf keys, which are empty until
@@ -74,8 +74,8 @@
 //! source, resolved rather than given; [`Person::guid`] is the `tagKey` and is the ONLY thing
 //! plex.tv answers to — the numeric id 404s there (`"Invalid value provided for metadataId!"`).
 //! Keep all three; do not collapse them.
-use crate::plex::{ServerId, Tag};
-use crate::pms::{parse_item, PmsMovie};
+use crate::catalog::{ServerId, Tag};
+use crate::catalog_fetch::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 use std::sync::Arc;
 
@@ -83,10 +83,10 @@ use std::sync::Arc;
 /// springs and `scale(i)` clamps past the end, so an item beyond the cap would draw with the last
 /// cell's pop and — worse — never pop at all when focused (`update`'s loop can't reach its index).
 /// It is also the perf ceiling the A53 budget wants: a shelf is a horizontal strip, not a grid.
-/// The data layer cannot name the UI library's constant, so this is [`crate::pms::MAX_SHELF_ITEMS`],
+/// The data layer cannot name the UI library's constant, so this is [`crate::catalog_fetch::MAX_SHELF_ITEMS`],
 /// the data layer's own spelling of the same number; `screens::home`'s
 /// `the_data_shelf_cap_is_the_card_rows_capacity` pins the two equal.
-const SHELF_MAX: usize = crate::pms::MAX_SHELF_ITEMS;
+const SHELF_MAX: usize = crate::catalog_fetch::MAX_SHELF_ITEMS;
 
 /// How many departments the roles line names before it stops. Plex prints every one; on a couch
 /// that turns a one-line kicker into "Actor, Writer, Producer, Composer, Costume Makeup" for a
@@ -195,7 +195,7 @@ pub(crate) struct Person {
     /// [`Person::key`] means anything on. A personId is server-local exactly like a ratingKey
     /// (docs/shared-servers.md §1), so `key` alone names a person on no machine in particular once
     /// a share is registered; the pair is the identity, compared through
-    /// [`crate::plex::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
+    /// [`crate::catalog::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
     ///
     /// It is NOT "the server this page reads" any more — that is every entry of [`Person::srcs`].
     /// What it still decides is the header (`Art::Person` fetches the headshot from it) and the
@@ -259,7 +259,7 @@ pub(crate) struct Person {
     /// The filmography as plex.tv sent it — every department, in the provider's own order, with
     /// nothing folded, sorted or joined. The DISPLAY model is [`filmography`], derived on demand,
     /// because its availability column is a function of the sources and changes under it.
-    credits: Vec<crate::plex::discover::CreditGroup>,
+    credits: Vec<crate::catalog::discover::CreditGroup>,
     /// the credits fetch has ANSWERED at least once — including the answer "no credits", which is
     /// an empty vector. [`Person::profiled`]'s twin, and the gate the Filmography entry row is
     /// drawn on: an entry naming no count is an entry that cannot promise a list.
@@ -317,7 +317,7 @@ pub(crate) struct PersonState {
     generation: u32,
     retry_cd: [u32; NFETCH],
     dev_held: usize,
-    session_watch: crate::plex::session::VisibleSessionWatch,
+    session_watch: crate::catalog::session::VisibleSessionWatch,
     session_identity: (String, String),
 }
 
@@ -357,7 +357,7 @@ impl PersonState {
 pub(crate) fn facts_pending(p: &Person) -> bool {
     // **Bounded by a real ATTEMPT, not only by success.** `!p.profiled` alone is unbounded whenever
     // plex.tv cannot be reached — an offline or LAN-only television, a provider outage, or any
-    // headless boot, where the injected `/tmp/plxnative-token` is a SERVER token that
+    // headless boot, where the injected `/tmp/nativejelly-token` is a SERVER token that
     // `discover.provider.plex.tv` answers 401. The profile mailbox then re-arms its back-off
     // forever, `profiled` never turns true, and `draw_header` paints five `skeleton_bar`s a frame,
     // each of which calls `idle::invalidate()` — so the whole-frame present gate never closes and
@@ -388,7 +388,7 @@ const NKIND: usize = 3;
 /// The two fetches that are not per-server: plex.tv's biography and plex.tv's filmography, both of
 /// which are already global (module doc). They sit past every per-source mailbox, which is what
 /// keeps [`un_fx`] total.
-const F_PROFILE: usize = crate::plex::MAX_SERVERS * NKIND;
+const F_PROFILE: usize = crate::catalog::MAX_SERVERS * NKIND;
 /// The FILMOGRAPHY — `{DISCOVER}/library/people/{tagKey}/credits`. Global for [`F_PROFILE`]'s
 /// reason and then some: it is a fact about the person's CAREER, which no server has an opinion
 /// about at all. What the servers contribute is the AVAILABILITY join, and that rides on the
@@ -403,13 +403,13 @@ const NFETCH: usize = F_CREDITS + 1;
 /// **Keyed on the registry SLOT, never on a position in [`Person::srcs`].** A slot is stable for
 /// the life of the process, so a worker's landing is applied to the server it asked even if the
 /// source list is rebuilt under it; an index into a `Vec` would silently start meaning a different
-/// machine. [`crate::plex::MAX_SERVERS`] is the registry's own ceiling, imported rather than
+/// machine. [`crate::catalog::MAX_SERVERS`] is the registry's own ceiling, imported rather than
 /// restated — a second 16 here would go out of bounds the day that one moves.
 fn fx(sid: ServerId, k: usize) -> Option<usize> {
     let slot = sid
         .is_set()
         .then(|| sid.raw() as usize)
-        .filter(|&s| s < crate::plex::MAX_SERVERS)?;
+        .filter(|&s| s < crate::catalog::MAX_SERVERS)?;
     Some(slot * NKIND + k)
 }
 
@@ -451,11 +451,11 @@ enum Landing {
     /// One source's own `personId`. `Some("")` = answered, and this server has never heard of them.
     Resolve(Option<String>),
     Media(Option<MediaLanding>),
-    Profile(Option<crate::plex::discover::PersonProfile>),
+    Profile(Option<crate::catalog::discover::PersonProfile>),
     /// The whole filmography, ungrouped and unsorted — the display model is derived on the main
     /// thread by [`filmography`], because the AVAILABILITY half of it changes every time a source
     /// lands and cannot be baked into a worker's answer.
-    Credits(Option<Vec<crate::plex::discover::CreditGroup>>),
+    Credits(Option<Vec<crate::catalog::discover::CreditGroup>>),
     Roles(Option<RolesLanding>),
 }
 
@@ -572,7 +572,7 @@ impl PersonState {
 /// that explicit boundary prevents an open page retaining a revoked share or missing a new one.
 fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
     let mut out: Vec<Src> = Vec::new();
-    for sid in crate::plex::server_ids().chain(std::iter::once(origin)) {
+    for sid in crate::catalog::server_ids().chain(std::iter::once(origin)) {
         if fx(sid, K_RESOLVE).is_none() || out.iter().any(|s| s.sid == sid) {
             continue;
         }
@@ -622,7 +622,7 @@ fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
 /// Hubs are matched on either `hubIdentifier` or `type` because `/hubs/search` sends the same token
 /// in both (`docs/plex-openapi.json`'s own example), and `Hub::directory` is keyed by that word.
 pub(crate) fn resolve_local(
-    mc: &crate::plex::MediaContainer,
+    mc: &crate::catalog::MediaContainer,
     name: &str,
     guid: &str,
 ) -> Option<String> {
@@ -669,7 +669,7 @@ fn local_id(t: &Tag) -> String {
 /// far down the merged shelf it lands (`ui::person`'s activation reads `mm.sid`, and `Art::Poster`
 /// resolves the artwork on that server too).
 ///
-/// The per-shelf budget is divided by [`crate::pms::allot`] rather than spent first-come, for the
+/// The per-shelf budget is divided by [`crate::catalog_fetch::allot`] rather than spent first-come, for the
 /// reason that function documents: a prolific actor's 24 films on the first source would otherwise
 /// fill the row and leave every share behind it nothing — which is this unit's own bug, re-created
 /// one level down. The heading's count is the sum of the REAL totals, not of what fitted.
@@ -683,7 +683,7 @@ fn merge_shelves(srcs: &[Src]) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
     for (kind, sh_out) in out.iter_mut().enumerate() {
         let want: Vec<usize> = srcs.iter().map(|s| s.shelves[kind].items.len()).collect();
-        let take = crate::pms::allot(SHELF_MAX, &want);
+        let take = crate::catalog_fetch::allot(SHELF_MAX, &want);
         for (i, s) in srcs.iter().enumerate() {
             let sh = &s.shelves[kind];
             sh_out.total += sh.total;
@@ -730,8 +730,8 @@ fn set_watched_local(state: &mut PersonState, sid: ServerId, rk: &str, on: bool)
         .flat_map(|s| s.shelves.iter_mut())
         .flat_map(|sh| sh.items.iter_mut())
     {
-        if crate::plex::same_item((m.sid, &m.rk), (sid, rk)) {
-            crate::pms::set_watched(m, on);
+        if crate::catalog::same_item((m.sid, &m.rk), (sid, rk)) {
+            crate::catalog_fetch::set_watched(m, on);
             hit = true;
         }
     }
@@ -772,7 +772,7 @@ fn open(
     if state
         .current
         .as_ref()
-        .is_some_and(|p| crate::plex::same_item((p.sid, p.key.as_str()), (sid, key)))
+        .is_some_and(|p| crate::catalog::same_item((p.sid, p.key.as_str()), (sid, key)))
     {
         return;
     }
@@ -780,7 +780,7 @@ fn open(
     // session cache recovers asynchronously and is not an input in that transcript.
     if !crate::stores::tape::active() {
         let _ = state.session_watch.changed();
-        if let Some(session) = crate::plex::session::peek_settled() {
+        if let Some(session) = crate::catalog::session::peek_settled() {
             state.session_identity = (session.client_id.clone(), session.account_token.clone());
         }
     }
@@ -804,7 +804,7 @@ fn open(
         profile_tried: false,
         credits: Vec::new(),
         credited: false,
-        roster_gen: crate::plex::server_roster_gen(),
+        roster_gen: crate::catalog::server_roster_gen(),
     });
     // A page with NO source at all has already answered — see `resettle`'s fold. Deriving it
     // here rather than hardcoding `landed: false` is what keeps that rule in one place.
@@ -816,17 +816,17 @@ fn open(
     }
 }
 
-/// `/tmp/plxnative-personbio[=<text>]` — **stand in for the plex.tv biography record**, so the
+/// `/tmp/nativejelly-personbio[=<text>]` — **stand in for the plex.tv biography record**, so the
 /// person page's header bio and the bio alert panel behind it can be reached headlessly.
 ///
 /// **Why this trigger has to exist.** Everything below the name on this page — roles, dates,
 /// birthplace and the biography itself — comes from `discover.provider.plex.tv`, which is a
-/// different identity from the PMS. An automated boot signs in with `/tmp/plxnative-token`, a
+/// different identity from the PMS. An automated boot signs in with `/tmp/nativejelly-token`, a
 /// *server* token, and the provider answers that `401`; a real interactive session gets a real
 /// biography and an automated one never does. So neither `tests/run.py` nor `make sim-shot` can
 /// reach a person page with any prose on it at all, and the panel this seeds is by construction
 /// only reachable when there is MORE prose than the header shows. That is the same argument
-/// `/tmp/plxnative-search`'s query seed makes (no harness can type) and `/tmp/plxnative-failtest`'s
+/// `/tmp/nativejelly-search`'s query seed makes (no harness can type) and `/tmp/nativejelly-failtest`'s
 /// (no server will refuse on cue) — the screen is real, the route to it is not automatable.
 ///
 /// Empty file = a long built-in sample with paragraph breaks in it, which is the shape that
@@ -841,7 +841,7 @@ fn open(
 /// `None` at compile time without `devtriggers`).
 #[allow(unused_variables)]
 fn seed_dev_profile(p: &mut Person) {
-    let Some(text) = plx_base::devtrig::read("personbio") else {
+    let Some(text) = nj_base::devtrig::read("personbio") else {
         return;
     };
     p.bio = if text.is_empty() {
@@ -864,8 +864,8 @@ fn seed_dev_profile(p: &mut Person) {
     }
     p.profiled = true;
     #[cfg(feature = "devtriggers")]
-    plx_base::eventlog::log(&format!(
-        "person: DEV bio seeded ({}B) — /tmp/plxnative-personbio",
+    nj_base::eventlog::log(&format!(
+        "person: DEV bio seeded ({}B) — /tmp/nativejelly-personbio",
         p.bio.len()
     ));
 }
@@ -970,10 +970,10 @@ pub(crate) fn media_resolving(p: &Person, sid: ServerId) -> bool {
 /// Returns true when the store just changed — the screen re-clamps its focus and rebuilds its
 /// cached header strings on it.
 impl PersonState {
-    pub(crate) fn pump_with_gate(&mut self, adapter: &Arc<PersonAdapter>, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump_with_gate(&mut self, adapter: &Arc<PersonAdapter>, gate: &nj_machine::landgate::Gate) -> bool {
         let mut session_changed = false;
         if !crate::stores::tape::active() && self.session_watch.changed() {
-            if let Some(session) = crate::plex::session::peek_settled() {
+            if let Some(session) = crate::catalog::session::peek_settled() {
                 let identity = (session.client_id.clone(), session.account_token.clone());
                 if self.session_identity != identity {
                     self.session_identity = identity;
@@ -1000,7 +1000,7 @@ impl PersonState {
                 adapter.fetch[i].release();
                 // Every landing repaints, failures included: a shelf or stopped spinner must not
                 // wait for the next keypress to become visible.
-                plx_machine::idle::invalidate();
+                nj_machine::idle::invalidate();
                 if reply.gen == self.generation {
                     changed |= apply_landing(self, i, reply.what);
                 }
@@ -1020,11 +1020,11 @@ impl PersonState {
 
     #[cfg(test)]
     pub(crate) fn pump(&mut self, adapter: &Arc<PersonAdapter>) -> bool {
-        self.pump_with_gate(adapter, plx_machine::landgate::fixture_gate())
+        self.pump_with_gate(adapter, nj_machine::landgate::fixture_gate())
     }
 }
 
-/// `/tmp/plxnative-personcredits[=<rows>]` — **stand in for the plex.tv FILMOGRAPHY record**, so
+/// `/tmp/nativejelly-personcredits[=<rows>]` — **stand in for the plex.tv FILMOGRAPHY record**, so
 /// [`crate::ui::filmography`] can be reached headlessly.
 ///
 /// It exists for exactly [`seed_dev_profile`]'s reason and the argument is not repeated here: the
@@ -1046,7 +1046,7 @@ impl PersonState {
 fn seed_dev_credits(state: &mut PersonState) -> bool {
     let arg = if crate::stores::tape::active() {
         crate::stores::tape::credits().map(|v| v.to_string())
-    } else { plx_base::devtrig::read("personcredits") };
+    } else { nj_base::devtrig::read("personcredits") };
     let Some(arg) = arg else {
         return false;
     };
@@ -1090,10 +1090,10 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
                 String::new(),
             ),
         };
-        crate::plex::discover::Credit {
+        crate::catalog::discover::Credit {
             order: i as i64,
             role: format!("Character {i}"),
-            item: Some(crate::plex::discover::CreditItem {
+            item: Some(crate::catalog::discover::CreditItem {
                 kind: "movie".into(),
                 title,
                 // one row per department is deliberately UNDATED, which is the sort's own edge
@@ -1120,7 +1120,7 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
         ("Writer", 2),
     ]
         .iter()
-        .map(|(title, rows)| crate::plex::discover::CreditGroup {
+        .map(|(title, rows)| crate::catalog::discover::CreditGroup {
             kind: title.to_lowercase(),
             title: title.to_string(),
             size: *rows as i64,
@@ -1131,11 +1131,11 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
     // Gated: `personcredits` is a `devtrig::CONTROLLED` name (a controlled/recorded boot may carry
     // it), and `ci/check-package.py`'s dev-trigger-catalog check greps a release binary for that
     // exact vocabulary. This function is already unreachable without `devtriggers` (`arg` above
-    // is always `None`), but the log line's literal `/tmp/plxnative-personcredits` would still
+    // is always `None`), but the log line's literal `/tmp/nativejelly-personcredits` would still
     // have shipped in the bytes regardless of whether the branch ever ran.
     #[cfg(feature = "devtriggers")]
-    plx_base::eventlog::log(&format!(
-        "person: DEV credits seeded ({} groups, {} held) — /tmp/plxnative-personcredits",
+    nj_base::eventlog::log(&format!(
+        "person: DEV credits seeded ({} groups, {} held) — /tmp/nativejelly-personcredits",
         p.credits.len(),
         held.len()
     ));
@@ -1145,7 +1145,7 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
 /// Rebuild an open page's per-source projection at an exact registry identity boundary. Header
 /// profile facts survive; server-derived shelves and every old worker/mailbox do not.
 fn sync_roster(state: &mut PersonState, adapter: &PersonAdapter) -> bool {
-    let gen = crate::plex::server_roster_gen();
+    let gen = crate::catalog::server_roster_gen();
     let Some((old, sid, key, name)) =
         state.current().map(|p| (p.roster_gen, p.sid, p.key.clone(), p.name.clone()))
     else {
@@ -1164,7 +1164,7 @@ fn sync_roster(state: &mut PersonState, adapter: &PersonAdapter) -> bool {
     p.landed = false;
     p.roster_gen = gen;
     resettle(p);
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     true
 }
 
@@ -1209,7 +1209,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
             p.birthplace = prof.birth_place;
             p.profiled = true;
             p.profile_tried = true;
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "person: profile guid={} roles='{}' born={} died={} bio={}B",
                 p.guid,
                 p.roles.join(", "),
@@ -1230,7 +1230,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
             }
             // The SLOT, never the handle or the address: a plex.tv username is the friend's, and
             // the event log is what users send us.
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "person: source {} resolve '{}' -> {}",
                 sid.raw(),
                 p.name,
@@ -1251,7 +1251,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
             };
             {
                 let s = &mut p.srcs[si];
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "person: source {} '{}' movies={}/{} shows={}/{} joinable={}",
                     sid.raw(),
                     p.name,
@@ -1275,7 +1275,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
             true
         }
         Landing::Credits(Some(groups)) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "person: credits guid={} groups={} rows={}",
                 p.guid,
                 groups.len(),
@@ -1332,7 +1332,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
 /// `CreditType.title` is the display name — **except** when the provider has none, where it repeats
 /// the raw slug (`"costume-makeup"`, live on Peter Sallis). A leading lower-case letter is what
 /// gives that away, so those are un-slugged and title-cased rather than printed as typed.
-pub(crate) fn roles_line(prof: &crate::plex::discover::PersonProfile) -> Vec<String> {
+pub(crate) fn roles_line(prof: &crate::catalog::discover::PersonProfile) -> Vec<String> {
     prof.credit_types
         .iter()
         .filter_map(|c| {
@@ -1418,14 +1418,14 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     let guid = p.guid.clone();
     if i == F_PROFILE || i == F_CREDITS {
         let controlled = crate::stores::tape::active();
-        let session = if controlled { None } else { crate::plex::session::peek_settled() };
+        let session = if controlled { None } else { crate::catalog::session::peek_settled() };
         if !controlled && session.as_ref().is_none_or(|s| s.client_id.is_empty()) { return; }
         let profile = i == F_PROFILE;
         adapter.fetch[i].claim();
         let worker_adapter = Arc::clone(adapter);
         let spawned = crate::stores::tape::admit(serde_json::json!({
             "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid}), ||
-            plx_base::task::spawn_small("person", move || {
+            nj_base::task::spawn_small("person", move || {
             // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE (None), not
             // as an empty biography / an empty filmography
             let what = if profile {
@@ -1446,7 +1446,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     // slot re-pointed mid-request cannot redirect a fetch already out (`plex::servers` leaks each
     // client precisely so the reference stays live), and a worker that asked which server is
     // current would answer for whichever machine the user has since walked onto.
-    let Some(c) = crate::plex::client_for(sid) else {
+    let Some(c) = crate::catalog::client_for(sid) else {
         // a source whose slot holds no client has nothing to contribute right now — back off rather
         // than re-asking every frame; `pump` retries by itself
         state.retry_cd[i] = RETRY_FRAMES;
@@ -1465,7 +1465,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     let worker_adapter = Arc::clone(adapter);
     let spawned = crate::stores::tape::admit(serde_json::json!({
         "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid,
-        "local":local,"client":c.instance_gen(),"sid":sid.raw()}), || plx_base::task::spawn_small("person", move || {
+        "local":local,"client":c.instance_gen(),"sid":sid.raw()}), || nj_base::task::spawn_small("person", move || {
         // the mailbox is filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE
         // (None), not as an empty filmography / a source silently written off / no captions
         let what = match kind {
@@ -1517,22 +1517,22 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
 /// WORKER THREAD: the blocking plex.tv biography request, using the settled identity captured
 /// before spawning. Storage recovery is observed by the owner before retrying these requests.
 #[cfg(not(test))]
-fn fetch_profile(guid: &str, s: &crate::plex::session::Session) -> Option<crate::plex::discover::PersonProfile> {
+fn fetch_profile(guid: &str, s: &crate::catalog::session::Session) -> Option<crate::catalog::discover::PersonProfile> {
     let tok = (!s.account_token.is_empty()).then_some(s.account_token.as_str());
-    crate::plex::account::AccountClient::new(&s.client_id, tok).person_profile(guid)
+    crate::catalog::account::AccountClient::new(&s.client_id, tok).person_profile(guid)
 }
 
 /// WORKER THREAD: the blocking plex.tv filmography request. [`fetch_profile`]'s twin in every
 /// respect — same identity, same session read, same host — so the two share a spawn arm.
 #[cfg(not(test))]
-fn fetch_credits(guid: &str, s: &crate::plex::session::Session) -> Option<Vec<crate::plex::discover::CreditGroup>> {
+fn fetch_credits(guid: &str, s: &crate::catalog::session::Session) -> Option<Vec<crate::catalog::discover::CreditGroup>> {
     let tok = (!s.account_token.is_empty()).then_some(s.account_token.as_str());
-    crate::plex::account::AccountClient::new(&s.client_id, tok).person_credits(guid)
+    crate::catalog::account::AccountClient::new(&s.client_id, tok).person_credits(guid)
 }
 
 /// HOST SUITE: [`fetch_profile`]'s cut, for its reason — this reaches libcurl.
 #[cfg(test)]
-fn fetch_credits(_guid: &str, _session: &crate::plex::session::Session) -> Option<Vec<crate::plex::discover::CreditGroup>> {
+fn fetch_credits(_guid: &str, _session: &crate::catalog::session::Session) -> Option<Vec<crate::catalog::discover::CreditGroup>> {
     None
 }
 
@@ -1545,7 +1545,7 @@ fn fetch_credits(_guid: &str, _session: &crate::plex::session::Session) -> Optio
 /// [`PersonState::pump`] and [`roles_line`],
 /// which is where the logic worth testing actually lives.
 #[cfg(test)]
-fn fetch_profile(_guid: &str, _session: &crate::plex::session::Session) -> Option<crate::plex::discover::PersonProfile> {
+fn fetch_profile(_guid: &str, _session: &crate::catalog::session::Session) -> Option<crate::catalog::discover::PersonProfile> {
     None
 }
 
@@ -1553,7 +1553,7 @@ fn fetch_profile(_guid: &str, _session: &crate::plex::session::Session) -> Optio
 /// only THIS person's credit in each — the full record's `Role[]` names every cast member, and the
 /// page wants one line, "what did *this* person play in it".
 ///
-/// Which tag IS this person is [`crate::plex::Tag::is_person`]'s job — both id spaces, because the
+/// Which tag IS this person is [`crate::catalog::Tag::is_person`]'s job — both id spaces, because the
 /// local id is the `tagKey` guid whenever the credit row carried no number. `id` is the id local to
 /// **the server this response came from** ([`Src::local`]), never the origin's: they are different
 /// numbers for the same person, and filtering a share's response with ours matched nothing while
@@ -1562,7 +1562,7 @@ fn fetch_profile(_guid: &str, _session: &crate::plex::session::Session) -> Optio
 /// empty pairs, and `apply` reads a missing key as `""`. Naming their department instead would need
 /// the crew arrays this batch excludes, for a line the mockup does not ask for.
 pub(crate) fn roles_from(
-    mc: &crate::plex::MediaContainer,
+    mc: &crate::catalog::MediaContainer,
     id: &str,
     guid: &str,
 ) -> Vec<(String, String)> {
@@ -1586,7 +1586,7 @@ pub(crate) fn roles_from(
 ///
 /// `sid` is the server the response came from, stamped onto every row — the fact that survives
 /// [`merge_shelves`] and lets a card three sources deep open on the right machine.
-pub(crate) fn split_by_type(mc: &crate::plex::MediaContainer, sid: ServerId) -> [Shelf; NSHELF] {
+pub(crate) fn split_by_type(mc: &crate::catalog::MediaContainer, sid: ServerId) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
     for it in &mc.metadata {
         let sh = match it.kind.as_str() {
@@ -1614,7 +1614,7 @@ pub(crate) fn split_by_type(mc: &crate::plex::MediaContainer, sid: ServerId) -> 
 /// A row with no `guid` contributes nothing: the join key is the metadata provider's global id, and
 /// a server old enough to send none simply cannot be joined. That is an ABSENCE of evidence — the
 /// route draws such a credit at full strength with no annotation — never a claim that nobody has it.
-pub(crate) fn guid_index(mc: &crate::plex::MediaContainer) -> Vec<(String, String)> {
+pub(crate) fn guid_index(mc: &crate::catalog::MediaContainer) -> Vec<(String, String)> {
     mc.metadata
         .iter()
         .filter(|it| matches!(it.kind.as_str(), "movie" | "show"))
@@ -1639,13 +1639,13 @@ pub(crate) struct Credit {
     pub(crate) catalog_id: String,
     pub(crate) title: String,
     /// **The poster, as an ABSOLUTE URL on somebody else's host** — see
-    /// [`crate::plex::discover::CreditItem::thumb`]. Carried through to the row rather than dropped
+    /// [`crate::catalog::discover::CreditItem::thumb`]. Carried through to the row rather than dropped
     /// because `posters` proxies exactly this through the current server's photo transcoder; the
     /// first version of the screen threw it away on an unverified claim that it could not.
     pub(crate) thumb: String,
     /// the character or job, `""` where the provider named none
     pub(crate) role: String,
-    /// `0` = the wire carried no year. See [`crate::plex::discover::CreditItem::year`] for why that
+    /// `0` = the wire carried no year. See [`crate::catalog::discover::CreditItem::year`] for why that
     /// is not "upcoming".
     pub(crate) year: i32,
     /// **The library match**: which server holds this credit and under which `ratingKey`, or `None`
@@ -1660,7 +1660,7 @@ pub(crate) struct Department {
     /// the display name, un-slugged by [`pretty_department`]
     pub(crate) title: String,
     /// the department's OWN count — what the pill states. Not `rows.len()` where the provider gave
-    /// a size and sent fewer rows, and never [`crate::plex::discover::CreditType`]'s number.
+    /// a size and sent fewer rows, and never [`crate::catalog::discover::CreditType`]'s number.
     pub(crate) total: usize,
     pub(crate) rows: Vec<Credit>,
 }
@@ -1679,7 +1679,7 @@ pub(crate) struct Department {
 /// missing claim to be unreleased, and the wire cannot tell the two apart until the model carries a
 /// release DATE beside the year.
 pub(crate) fn filmography(p: &Person) -> Vec<Department> {
-    let dept = |g: &crate::plex::discover::CreditGroup| {
+    let dept = |g: &crate::catalog::discover::CreditGroup| {
         let raw = if g.title.is_empty() {
             &g.kind
         } else {
@@ -1708,12 +1708,12 @@ pub(crate) fn filmography(p: &Person) -> Vec<Department> {
     };
     // "Other" is the provider's own group name, so a group already called that folds with the thin
     // ones rather than sitting beside a second Other.
-    let is_thin = |g: &crate::plex::discover::CreditGroup, d: &Department| {
+    let is_thin = |g: &crate::catalog::discover::CreditGroup, d: &Department| {
         d.total < FOLD || g.kind.eq_ignore_ascii_case("other")
     };
     let mut kept: Vec<Department> = Vec::new();
     let mut other = Department {
-        title: plx_platform::i18n::msg::browse_person_other().to_string(),
+        title: nj_platform::i18n::msg::browse_person_other().to_string(),
         total: 0,
         rows: Vec::new(),
     };
@@ -1750,7 +1750,7 @@ pub(crate) fn filmography(p: &Person) -> Vec<Department> {
 /// existing at all. Separate from [`filmography`] because the entry row is drawn every frame and
 /// that function folds, sorts and joins a few hundred rows; this walks a handful of group headers.
 ///
-/// It is the credits response's OWN count, never [`crate::plex::discover::CreditType`]'s — see that
+/// It is the credits response's OWN count, never [`crate::catalog::discover::CreditType`]'s — see that
 /// type's doc for the two numbers and why spending the wrong one is a promise the list breaks.
 pub(crate) fn filmography_total(p: &Person) -> usize {
     p.credits
@@ -1811,7 +1811,7 @@ fn match_local(p: &Person, id: &str) -> Option<(ServerId, String)> {
 #[cfg(test)]
 impl PersonState {
 pub(crate) fn install_credits_for_test(&mut self, groups: &[(&str, usize)]) {
-    use crate::plex::discover::{Credit, CreditGroup, CreditItem};
+    use crate::catalog::discover::{Credit, CreditGroup, CreditItem};
     let Some(p) = self.current.as_mut() else {
         return;
     };
@@ -1921,7 +1921,7 @@ pub(crate) fn late_completion_for_test(
     let generation = self.generation;
     Box::new(move || {
         adapter.land(F_PROFILE, generation, Landing::Profile(Some(
-            crate::plex::discover::PersonProfile {
+            crate::catalog::discover::PersonProfile {
                 summary: "late-old-worker".into(),
                 ..Default::default()
             },
@@ -1944,7 +1944,7 @@ pub(crate) struct OwnershipFixture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::{Hub, MediaContainer, Metadata};
+    use crate::catalog::{Hub, MediaContainer, Metadata};
 
     /// Slot 0 — the server every single-source test opens on. A real slot, so its mailboxes exist,
     /// but nothing is registered at it: `maybe_spawn` therefore refuses to dial (`client_for` is
@@ -1989,16 +1989,16 @@ mod tests {
 
     #[test]
     fn controlled_person_ignores_ambient_session_recovery() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         struct ResetTape;
         impl Drop for ResetTape {
             fn drop(&mut self) { crate::stores::tape::reset_for_test(); }
         }
         for replay in [false, true] {
-            let _session = crate::plex::session::TempSession::new("controlled-person-recovery");
-            crate::plex::reset_servers_for_test();
-            let saved = crate::plex::session::peek();
-            crate::plex::session::install_transient_for_test(true);
+            let _session = crate::catalog::session::TempSession::new("controlled-person-recovery");
+            crate::catalog::reset_servers_for_test();
+            let saved = crate::catalog::session::peek();
+            crate::catalog::session::install_transient_for_test(true);
             crate::stores::tape::init(None, replay);
             let _tape = ResetTape;
             let mut owner = Owner::default();
@@ -2008,7 +2008,7 @@ mod tests {
             let generation = owner.gen();
             // Minimized from ARM: the ambient cache recovered at frame 26 while
             // recording, but frame 20 on replay, retiring/reissuing Person work.
-            crate::plex::session::save(&saved);
+            crate::catalog::session::save(&saved);
             let changed = owner.pump();
             assert_eq!(owner.gen(), generation,
                 "controlled Person must not retire recorded work on an ambient storage completion");
@@ -2023,17 +2023,17 @@ mod tests {
 
     #[test]
     fn session_refresh_retries_person_metadata_after_storage_recovers() {
-        let _g = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("person-session-refresh");
-        crate::plex::reset_servers_for_test();
-        let saved = crate::plex::session::peek();
-        crate::plex::session::install_transient_for_test(true);
+        let _g = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("person-session-refresh");
+        crate::catalog::reset_servers_for_test();
+        let saved = crate::catalog::session::peek();
+        crate::catalog::session::install_transient_for_test(true);
         let mut owner = Owner::default();
         owner.open(S0, "1001", "", "Synthetic person", "");
         owner.state.current.as_mut().unwrap().profiled = true;
         owner.state.current.as_mut().unwrap().credited = true;
         let old_generation = owner.gen();
-        crate::plex::session::save(&saved);
+        crate::catalog::session::save(&saved);
         assert!(owner.pump());
         assert!(owner.gen() > old_generation, "old credential-bound replies must be retired");
         assert!(!owner.current().unwrap().profiled);
@@ -2043,8 +2043,8 @@ mod tests {
     #[test]
     fn filmography_preserves_provider_identity_without_a_local_library_copy() {
         let mut owner = Owner::default();
-        let _g = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        let _g = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
         owner.reset();
         owner.open(S0, "1001", "", "s00000001", "");
         owner.state.install_credits_for_test(&[("Actor", 4)]);
@@ -2055,17 +2055,17 @@ mod tests {
         assert!(rows.iter().all(|r| r.local.is_none()),
             "provider identity survives even when no PMS can supply a local ratingKey");
         owner.reset();
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     #[test]
     fn an_open_person_rebuilds_exact_sources_when_the_profile_roster_changes() {
         let mut owner = Owner::default();
-        let _g = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        let _g = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
         owner.reset();
-        let a = crate::plex::register_for_test("person-a", "127.0.0.1", 1, "a", "cid");
-        let b = crate::plex::register_for_test("person-b", "127.0.0.1", 2, "b", "cid");
+        let a = crate::catalog::register_for_test("person-a", "127.0.0.1", 1, "a", "cid");
+        let b = crate::catalog::register_for_test("person-b", "127.0.0.1", 2, "b", "cid");
         owner.open(a, "7", "plex://person/7", "Actor", "");
         assert_eq!(
             owner.current()
@@ -2083,8 +2083,8 @@ mod tests {
             old_gen,
             media(vec![movie_on(b, "4")], Vec::new()),
         );
-        crate::plex::revoke_for_profile_switch();
-        let c = crate::plex::register_for_test("person-c", "127.0.0.1", 3, "c", "cid");
+        crate::catalog::revoke_for_profile_switch();
+        let c = crate::catalog::register_for_test("person-c", "127.0.0.1", 3, "c", "cid");
         assert!(owner.sync_roster());
         assert_eq!(
             owner.current()
@@ -2106,7 +2106,7 @@ mod tests {
             .all(|s| s.items.is_empty()));
 
         owner.reset();
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// A [`Landing::Media`] payload the way a worker builds one — totals = lens, i.e. an uncapped
@@ -2184,7 +2184,7 @@ mod tests {
     #[test]
     fn per_source_media_resolution_stays_pending_across_failure_until_an_answer() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.reset();
         owner.open(S0, "6059", "guid", "Somebody", "");
         assert!(media_resolving(owner.current().unwrap(), S0));
@@ -2484,8 +2484,8 @@ mod tests {
     /// spawns NO worker: one would reach for a PMS client that isn't installed and for a plex.tv
     /// these tests must never touch, and a stray background thread also perturbs the process-wide
     /// fd count `stream.rs`'s tests assert on. Call it before every `owner.pump()`.
-    fn profile(bio: &str, born: &str, died: &str) -> crate::plex::discover::PersonProfile {
-        crate::plex::discover::PersonProfile {
+    fn profile(bio: &str, born: &str, died: &str) -> crate::catalog::discover::PersonProfile {
+        crate::catalog::discover::PersonProfile {
             summary: bio.to_string(),
             born_at: born.to_string(),
             died_at: died.to_string(),
@@ -2506,7 +2506,7 @@ mod tests {
     #[test]
     fn a_take_releases_the_claim_and_an_empty_mailbox_leaves_it_alone() {
         let owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let f = &owner.adapter.fetch[at(S0, K_ROLES)];
         f.clear();
 
@@ -2537,7 +2537,7 @@ mod tests {
     #[test]
     fn a_landing_from_the_previous_person_is_discarded_but_still_releases_the_fetch() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         let stale = owner.gen();
         owner.open(S0, "465", "5d777", "Cynthia Erivo", ""); // supersedes: the fetch above is now obsolete
@@ -2570,7 +2570,7 @@ mod tests {
     #[test]
     fn a_failed_fetch_keeps_the_shelves_and_backs_off_instead_of_publishing_empty() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         let gen = owner.gen();
         // seed a populated, landed page the honest way (through the pump)
@@ -2606,7 +2606,7 @@ mod tests {
     #[test]
     fn close_clears_every_single_flight_flag_and_retry_backoff() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         for i in 0..NFETCH {
             owner.adapter.fetch[i].claim();
@@ -2631,7 +2631,7 @@ mod tests {
     #[test]
     fn a_profile_landing_fills_the_header_without_touching_the_shelves() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "6059", "5d7768268718ba001e311be6", "Peter Sallis", "");
         let gen = owner.gen();
         owner.land(
@@ -2679,7 +2679,7 @@ mod tests {
     #[test]
     fn an_unknown_person_settles_the_profile_while_a_failure_backs_off() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "6059", "0000000000000000000000ff", "Nobody", "");
         let gen = owner.gen();
         owner.hold_off();
@@ -2687,7 +2687,7 @@ mod tests {
         owner.land(
             F_PROFILE,
             gen,
-            Landing::Profile(Some(crate::plex::discover::PersonProfile::default())),
+            Landing::Profile(Some(crate::catalog::discover::PersonProfile::default())),
         );
         assert!(owner.pump());
         let p = owner.current().unwrap();
@@ -2773,7 +2773,7 @@ mod tests {
     #[test]
     fn a_roles_landing_captions_by_key_and_a_media_landing_resets_it() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(S0, "6059", "5d7768268718ba001e311be6", "Peter Sallis", "");
         let gen = owner.gen();
         let (fm, fr) = (at(S0, K_MEDIA), at(S0, K_ROLES));
@@ -2851,15 +2851,15 @@ mod tests {
     /// Empty the registry around a test that needs real slots in it, and hand it back empty — the
     /// discipline `plex::servers`' own tests document: a client left registered at a port that
     /// closed is one another module's pump will dial on a background thread.
-    struct FreshRegistry(#[allow(dead_code)] plx_base::testlock::Serial);
+    struct FreshRegistry(#[allow(dead_code)] nj_base::testlock::Serial);
     impl Drop for FreshRegistry {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     fn fresh_registry() -> FreshRegistry {
-        let g = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        let g = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
         FreshRegistry(g)
     }
 
@@ -2872,8 +2872,8 @@ mod tests {
         // `register_for_test`, not the public `register`: the latter resolves the device id through
         // `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::catalog::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::catalog::register_for_test(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -2934,8 +2934,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::catalog::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::catalog::register_for_test(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -2997,8 +2997,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::catalog::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::catalog::register_for_test(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -3042,8 +3042,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::catalog::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::catalog::register_for_test(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -3091,11 +3091,11 @@ mod tests {
     /// Sallis's `costume-makeup`) are un-slugged rather than printed as typed.
     #[test]
     fn the_roles_line_prettifies_slugs_and_caps_the_list() {
-        let ct = |kind: &str, title: &str| crate::plex::discover::CreditType {
+        let ct = |kind: &str, title: &str| crate::catalog::discover::CreditType {
             kind: kind.to_string(),
             title: title.to_string(),
         };
-        let mut prof = crate::plex::discover::PersonProfile::default();
+        let mut prof = crate::catalog::discover::PersonProfile::default();
         prof.credit_types = vec![
             ct("actor", "Actor"),
             ct("writer", "Writer"),
@@ -3115,7 +3115,7 @@ mod tests {
         );
 
         assert_eq!(
-            roles_line(&crate::plex::discover::PersonProfile::default()),
+            roles_line(&crate::catalog::discover::PersonProfile::default()),
             Vec::<String>::new()
         );
     }
@@ -3128,7 +3128,7 @@ mod tests {
     #[test]
     fn the_header_stops_sweeping_once_the_profile_has_actually_been_asked() {
         let mut owner = Owner::default();
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         owner.open(ServerId::from_raw(0), "1", "guid", "Somebody", "");
         let p = owner.state.current.as_mut().expect("open mounts a person");
         assert!(facts_pending(p), "before any attempt, the band is genuinely waiting");

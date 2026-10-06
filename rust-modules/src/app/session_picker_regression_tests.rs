@@ -4,7 +4,7 @@
 use super::*;
 use crate::auth::owner::ReplyTo;
 use crate::auth::{Phase, Picker, SessionCmd, SessionInit};
-use crate::plex::session::{self, HomeUserRef, ServerRef, Session, SourceRef, UserRef};
+use crate::catalog::session::{self, HomeUserRef, ServerRef, Session, SourceRef, UserRef};
 
 fn stored(protected: bool) -> Session {
     let uuid = if protected { "adult" } else { "kid" };
@@ -175,21 +175,21 @@ fn back_out_of_the_boot_picker_refuses_a_pin_protected_profile_and_nothing_else(
     }
 }
 
-struct ResourceCleanup<'a>(&'a plx_base::task::MainThread);
+struct ResourceCleanup<'a>(&'a nj_base::task::MainThread);
 impl Drop for ResourceCleanup<'_> {
     fn drop(&mut self) {
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
         session::ProfilePublisher::new(self.0).publish(None, 0);
     }
 }
 
 fn live_detachment() {
-    let _lock = plx_base::testlock::serial();
-    let mt = unsafe { plx_base::task::MainThread::assume() };
+    let _lock = nj_base::testlock::serial();
+    let mt = unsafe { nj_base::task::MainThread::assume() };
     let tmp = session::TempSession::new("picker-owner-detachment");
     let _cleanup = ResourceCleanup(&mt);
     tmp.assert_only_target();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let saved = stored(true);
     session::save(&saved);
     let disk = std::fs::read(tmp.path()).unwrap();
@@ -314,21 +314,21 @@ fn change_profile_then_back_cannot_restore_the_protected_profile_it_left() {
 /// Expected: the picker mounts once, the consent surface mounts once, and neither unmounts.
 ///
 /// `hostsim`-only, and this is a correctness gate rather than a convenience: `paths::ENV_STEERABLE`
-/// is `cfg!(feature = "hostsim")`, so `PLXNATIVE_RUNTIME_DIR` is only honoured in that build; off
+/// is `cfg!(feature = "hostsim")`, so `NJ_RUNTIME_DIR` is only honoured in that build; off
 /// it, `dev::any_trigger_present()` scans the literal shared `/tmp` regardless of the env var this
 /// test sets, and `make check`'s first (non-`hostsim`) pass grades this test against whatever
-/// stray `plxnative-*` file another process or an earlier run left there instead of a private root.
+/// stray `nativejelly-*` file another process or an earlier run left there instead of a private root.
 #[cfg(feature = "hostsim")]
 #[test]
 fn first_run_consent_over_the_picker_does_not_flip_mounts_every_frame() {
     use super::test_support::tick;
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let saved_consent = crate::telemetry::consent::current();
     crate::telemetry::consent::install(crate::telemetry::consent::Consent::default());
-    // Any `plxnative-*` file in the runtime root suppresses the question (`dev::any_trigger_present`);
-    // run under `--features hostsim` with a private `PLXNATIVE_RUNTIME_DIR`, as `make check` does.
+    // Any `nativejelly-*` file in the runtime root suppresses the question (`dev::any_trigger_present`);
+    // run under `--features hostsim` with a private `NJ_RUNTIME_DIR`, as `make check` does.
     assert!(!crate::dev::any_trigger_present(), "a stray trigger in {:?} suppresses the consent question",
-        plx_base::paths::runtime_dir());
+        nj_base::paths::runtime_dir());
     assert!(crate::dev::scenarios::consent_override().is_none());
 
     let mut account = stored(true);
@@ -409,7 +409,7 @@ fn first_run_consent_over_the_picker_does_not_flip_mounts_every_frame() {
 #[test]
 fn login_phase_follower_settles_and_does_not_recycle_the_qr_screen() {
     use super::test_support::tick;
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
 
     let mut init = SessionInit::captured(Session::default());
     init.phase = Phase::Waiting;

@@ -230,7 +230,7 @@
   "settings.login.close": "Cerrar",
   "settings.login.report_question": "¿Enviar un informe sobre este problema de inicio de sesión?",
   "settings.login.report_body": "El informe indica qué paso del inicio de sesión falló y cómo respondió la conexión, las etapas y los códigos de error del almacenamiento, además de la versión de la app. Nunca incluye el nombre de tu cuenta, tokens, PIN, código de inicio de sesión ni direcciones de red.",
-  "settings.login.unreachable": "No se puede conectar con Plex. Comprueba la conexión a internet del televisor.",
+  "settings.login.unreachable": "No se puede conectar con Jellyfin. Comprueba la conexión a internet del televisor.",
   "settings.login.report_sending": "Enviando informe…",
   "settings.login.report_sent": "Informe enviado. Gracias.",
   "settings.login.report_saved": "Informe guardado. Se enviará más tarde.",

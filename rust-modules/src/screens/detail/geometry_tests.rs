@@ -7,7 +7,7 @@
 use super::*;
 use crate::ui::focus::{FocusEngine, Outcome};
 use crate::ui::hit::{HitMap, PointerKind};
-use plx_machine::machine::{Chrome, Host, InputOwner, PressRead, ScreenId};
+use nj_machine::machine::{Chrome, Host, InputOwner, PressRead, ScreenId};
 use crate::ui::screen::{Activate, At, By, Focusable, Hover, ScreenArg, Stop};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -58,16 +58,16 @@ impl crate::screens::registry::MetadataLike for TestHost {
     }
 }
 
-fn cx<'a>(measure: &'a dyn plx_machine::machine::Measure, elem: Option<u32>) -> Cx<'a, TestHost> {
+fn cx<'a>(measure: &'a dyn nj_machine::machine::Measure, elem: Option<u32>) -> Cx<'a, TestHost> {
     Cx {
         views: (),
         tick: Default::default(),
         measure,
         press: PressRead::default(),
-        focus: plx_machine::machine::FocusRead {
+        focus: nj_machine::machine::FocusRead {
             current: elem.map(|elem| FocusKey { entry: EntryId(8), elem }),
         ..Default::default() },
-        owner: plx_machine::machine::InputOwner::Entry(EntryId(8)),
+        owner: nj_machine::machine::InputOwner::Entry(EntryId(8)),
     }
 }
 
@@ -124,13 +124,13 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
             // `crate::metadata::set_current_for_test`, not the hub catalog), so an empty owned
             // state stands in — `index_of_rk` finds nothing in it, exactly as the deleted
             // process-wide catalog found nothing here before Hubs ownership moved onto `PmsState`.
-            let pms_state = crate::pms::PmsState::default();
-            crate::pms::movie(&pms_state, crate::pms::index_of_rk(&pms_state, sid, rk).max(0) as usize)
-                .filter(|_| crate::pms::index_of_rk(&pms_state, sid, rk) >= 0)
+            let pms_state = crate::catalog_fetch::PmsState::default();
+            crate::catalog_fetch::movie(&pms_state, crate::catalog_fetch::index_of_rk(&pms_state, sid, rk).max(0) as usize)
+                .filter(|_| crate::catalog_fetch::index_of_rk(&pms_state, sid, rk) >= 0)
                 .cloned()
         },
         spin_ms: 0.0,
-        spin_phase: plx_machine::motion::Phase::default(),
+        spin_phase: nj_machine::motion::Phase::default(),
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
@@ -148,7 +148,7 @@ fn fixture(sid: ServerId) -> Detail {
         dur_ms: 60_000,
         ..Default::default()
     }).collect();
-    let related = (0..12).map(|i| crate::pms::PmsMovie {
+    let related = (0..12).map(|i| crate::catalog_fetch::PmsMovie {
         sid,
         rk: format!("r{i}"),
         title: format!("Related {i}"),
@@ -180,8 +180,8 @@ fn fixture(sid: ServerId) -> Detail {
     }
 }
 
-fn install(d: Detail) -> plx_base::testlock::Serial {
-    let guard = plx_base::testlock::serial();
+fn install(d: Detail) -> nj_base::testlock::Serial {
+    let guard = nj_base::testlock::serial();
     crate::metadata::set_current_for_test(test_store().state_mut(), Some(d));
     guard
 }

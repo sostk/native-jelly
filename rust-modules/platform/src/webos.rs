@@ -77,14 +77,14 @@ pub fn probe() {
     let info = match std::fs::read_to_string(OS_INFO) {
         Ok(s) => parse(&s),
         Err(e) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "webos: {OS_INFO} unreadable ({e}) — version unknown"
             ));
             Info::default()
         }
     };
     if info.major > 0 {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "webos: {} release={} codename={} api={} major={}",
             info.name, info.release, info.codename, info.api, info.major
         ));
@@ -121,14 +121,14 @@ fn probe_hw() {
     let hw = match std::fs::read_to_string(DEVICE_INFO) {
         Ok(s) => parse_hw(&s),
         Err(e) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "webos: {DEVICE_INFO} unreadable ({e}) — model/board unknown"
             ));
             Hardware::default()
         }
     };
     if !hw.model.is_empty() || !hw.board.is_empty() {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "webos: model={} board={} hw={}",
             hw.model, hw.board, hw.hw_revision
         ));
@@ -186,7 +186,7 @@ fn probe_jail() {
         crate::tv::sandbox::Verdict::NotApplicable
     };
     crate::tv::sandbox::publish(result);
-    plx_base::eventlog::log(&format!("devjail: soc={name} rtkmem={}", crate::tv::sandbox::context()));
+    nj_base::eventlog::log(&format!("devjail: soc={name} rtkmem={}", crate::tv::sandbox::context()));
 }
 
 // ---- the ROOT press: give the screen back, without ending the process -------------------------
@@ -245,14 +245,14 @@ fn probe_jail() {
 /// failed — the log line says what was ASKED, never that it worked, and the screenshot is what
 /// says whether it did.
 ///
-/// `/tmp/plxnative-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
+/// `/tmp/nativejelly-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
 /// session instead of only whichever happens to answer first. Compiled out under `RELEASE=1`.
 ///
 /// **Not rate-limited here** — [`crate::tv::home::take_root_press`] is, and `app.rs` claims the
 /// press through it before it does anything else, `auth::cancel` included. Call this only having
 /// claimed one.
 pub fn go_home() {
-    let forced = plx_base::devtrig::read("gohome");
+    let forced = nj_base::devtrig::read("gohome");
     let forced = forced.as_deref().map(str::trim).unwrap_or("");
     let mode = match forced {
         "sam" | "minimize" | "probe" => forced,
@@ -261,15 +261,15 @@ pub fn go_home() {
     // The FIRST line of every root press, and the one that makes the rest of them readable: which
     // legs are even eligible. Without it a reader cannot tell a forced run from an ordinary one,
     // and the device evidence for this change is read by somebody who did not write it.
-    plx_base::eventlog::log(&format!("gohome: request mode={mode}"));
+    nj_base::eventlog::log(&format!("gohome: request mode={mode}"));
     if mode == "minimize" { minimize(); return; }
     if HOME_PENDING.swap(true, std::sync::atomic::Ordering::AcqRel) { return; }
     let probe = mode == "probe";
     let sam_only = mode == "sam";
-    if !plx_base::task::spawn_small("platform home", move || {
+    if !nj_base::task::spawn_small("platform home", move || {
         if probe { ls2_probe(); }
         else if !launch_home() {
-            if sam_only { plx_base::eventlog::log("gohome: no fallback — the trigger forced SAM only"); }
+            if sam_only { nj_base::eventlog::log("gohome: no fallback — the trigger forced SAM only"); }
             else { HOME_MINIMIZE.store(true, std::sync::atomic::Ordering::Release); }
         }
         HOME_PENDING.store(false, std::sync::atomic::Ordering::Release);
@@ -297,7 +297,7 @@ const HOME_APP_ID: &str = "com.webos.app.home";
 
 #[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 fn launch_home() -> bool {
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "gohome: no LS2 bus off-device — the root press would launch {HOME_APP_ID} on a television"
     ));
     true
@@ -308,7 +308,7 @@ fn minimize() {}
 
 #[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 fn ls2_probe() {
-    plx_base::eventlog::log("gohome: no LS2 bus off-device — nothing to probe");
+    nj_base::eventlog::log("gohome: no LS2 bus off-device — nothing to probe");
 }
 
 #[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
@@ -405,7 +405,7 @@ fn launch_home() -> bool {
             let ok =
                 reply.contains("\"returnValue\":true") || reply.contains("\"returnValue\": true");
             let verdict = if ok { "accepted" } else { "rejected" };
-            plx_base::eventlog::log(&format!("gohome: SAM {verdict} in {ms}ms → {reply}"));
+            nj_base::eventlog::log(&format!("gohome: SAM {verdict} in {ms}ms → {reply}"));
             ok
         }
         // **Four different failures used to arrive as one sentence**, which is exactly the kind of
@@ -413,20 +413,20 @@ fn launch_home() -> bool {
         // refused this app a registration, the call was never submitted, or the reply really did
         // time out. They are three different bugs and only one of them is about SAM.
         Err(ls2::Fail::Setup { stage, detail, .. }) if detail.is_empty() => {
-            plx_base::eventlog::log(&format!("gohome: LS2 setup failed stage={stage} after {ms}ms"));
+            nj_base::eventlog::log(&format!("gohome: LS2 setup failed stage={stage} after {ms}ms"));
             false
         }
         // The hub's own words, when it gave any. The register refusal that shipped with this
         // branch (`Can not find service "" permissions`) was legible ONLY in ls-hubd's log,
         // which nobody reading the app's evidence knew to open.
         Err(ls2::Fail::Setup { stage, detail, .. }) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "gohome: LS2 setup failed stage={stage} after {ms}ms — {detail}"
             ));
             false
         }
         Err(ls2::Fail::Timeout) => {
-            plx_base::eventlog::log(&format!("gohome: SAM timed out in {ms}ms"));
+            nj_base::eventlog::log(&format!("gohome: SAM timed out in {ms}ms"));
             false
         }
     }
@@ -436,13 +436,13 @@ fn launch_home() -> bool {
 fn minimize() {
     let win = WINDOW.load(std::sync::atomic::Ordering::Relaxed);
     if win.is_null() {
-        plx_base::eventlog::log("gohome: no window bound — cannot leave the foreground");
+        nj_base::eventlog::log("gohome: no window bound — cannot leave the foreground");
         return;
     }
     // Returns void: SDL has no way to say whether the driver implemented the hook, so this line
     // says what was ASKED and never that it worked. The screenshot is the evidence.
     unsafe { SDL_MinimizeWindow(win) };
-    plx_base::eventlog::log("gohome: fallback=SDL minimize — asked, and SDL cannot say whether it took");
+    nj_base::eventlog::log("gohome: fallback=SDL minimize — asked, and SDL cannot say whether it took");
 }
 
 #[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
@@ -455,7 +455,7 @@ extern "C" {
 }
 
 /// Hand this module the SDL window, once, at boot — `textinput::bind`'s shape and for its reason:
-/// the window is created deep inside `plex_run` and the platform call needs it a long way from
+/// the window is created deep inside `nj_run` and the platform call needs it a long way from
 /// there.
 #[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
 pub fn bind_window(win: *mut std::os::raw::c_void) {
@@ -472,7 +472,7 @@ pub fn bind_window(_win: *mut std::os::raw::c_void) {}
 /// `keymanager::platform::Client` (a registration kept alive across begin → finish, 4 s budget).
 /// Until 2026-09-04 it was two private copies, both registering with
 /// `LSRegisterApplicationService(NULL, app_id)`, and on this set that registration is REFUSED:
-/// `ls-hubd LSHUB_ROLE_FILE: Can not find service "" permissions for executable ".../plxnative"`
+/// `ls-hubd LSHUB_ROLE_FILE: Can not find service "" permissions for executable ".../nativejelly"`
 /// once per root press, the app logging `stage=register after 2ms` having freed the LSError
 /// unread. The role file appinstalld generates for a native app
 /// (`/var/palm/ls2-dev/roles/{prv,pub}/<app id>.json` on a Developer-Mode set, read off the
@@ -587,7 +587,7 @@ pub mod ls2 {
     /// The app id as a C string, for [`probe`]'s app-service shapes — `register` itself passes
     /// no name at all (module doc).
     fn app_id_cstring() -> Result<CString, RegisterFail> {
-        CString::new(plx_base::paths::app_id()).map_err(|_| RegisterFail::Setup {
+        CString::new(nj_base::paths::app_id()).map_err(|_| RegisterFail::Setup {
             stage: "app-id",
             detail: String::new(), code: None,
         })
@@ -698,7 +698,7 @@ pub mod ls2 {
                 // A handle that would not unregister is still attached to this context, so the
                 // context is leaked rather than freed under it — a bounded leak, once per failed
                 // teardown, against a use-after-free (Codex review, 2026-09-04).
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "ls2: unregister refused — leaking its glib context ({})",
                     error_text(&error)
                 ));
@@ -759,7 +759,7 @@ pub mod ls2 {
             app_id: Option<&str>,
             budget: Duration,
         ) -> Result<String, Fail> {
-            let _block = plx_base::task::assert_may_block(const { &plx_base::task::BlockingLabel::new("LS2 round trip") });
+            let _block = nj_base::task::assert_may_block(const { &nj_base::task::BlockingLabel::new("LS2 round trip") });
             let setup = |stage| Fail::Setup {
                 stage,
                 detail: String::new(), code: None,
@@ -825,7 +825,7 @@ pub mod ls2 {
                 // into it — which is the registration's lifetime, so it is leaked (Codex review,
                 // 2026-09-04: dropping it regardless was a use-after-free on a retained handle).
                 if !unsafe { LSCallCancel(self.handle, token, &mut error) } {
-                    plx_base::eventlog::log(&format!(
+                    nj_base::eventlog::log(&format!(
                         "ls2: cancel refused after a timeout — leaking the reply slot ({})",
                         error_text(&error)
                     ));
@@ -847,7 +847,7 @@ pub mod ls2 {
         registration.call(uri, payload, BUDGET)
     }
 
-    /// `/tmp/plxnative-gohome=probe`: try every registration shape the role file could accept, log
+    /// `/tmp/nativejelly-gohome=probe`: try every registration shape the role file could accept, log
     /// what the hub answers to each — the LSError text this app freed unread for a whole device
     /// session — and, through whichever registered, ONE read-only SAM call. Evidence, not a leg:
     /// its answer is the table in the module doc and decided [`register`]'s shape, and it runs
@@ -857,7 +857,7 @@ pub mod ls2 {
         let app_id = match app_id_cstring() {
             Ok(n) => n,
             Err(e) => {
-                plx_base::eventlog::log(&format!("ls2probe: {e}"));
+                nj_base::eventlog::log(&format!("ls2probe: {e}"));
                 return;
             }
         };
@@ -879,18 +879,18 @@ pub mod ls2 {
                 }
             };
             if !ok || handle.is_null() {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "ls2probe: {label}: register REFUSED — {}",
                     error_text(&error)
                 ));
                 unsafe { LSErrorFree(&mut error) };
                 continue;
             }
-            plx_base::eventlog::log(&format!("ls2probe: {label}: registered"));
+            nj_base::eventlog::log(&format!("ls2probe: {label}: registered"));
             reset(&mut error);
             let context = unsafe { g_main_context_new() };
             if context.is_null() {
-                plx_base::eventlog::log(&format!("ls2probe: {label}: no glib context"));
+                nj_base::eventlog::log(&format!("ls2probe: {label}: no glib context"));
                 unsafe {
                     LSUnregister(handle, &mut error);
                     LSErrorFree(&mut error);
@@ -902,16 +902,16 @@ pub mod ls2 {
                 let registration = Registration { handle, context };
                 let uri = "luna://com.webos.applicationManager/getForegroundAppInfo";
                 match registration.call(uri, "{}", BUDGET) {
-                    Ok(r) => plx_base::eventlog::log(&format!("ls2probe: {label}: getForegroundAppInfo → {r}")),
+                    Ok(r) => nj_base::eventlog::log(&format!("ls2probe: {label}: getForegroundAppInfo → {r}")),
                     Err(Fail::Timeout) => {
-                        plx_base::eventlog::log(&format!("ls2probe: {label}: getForegroundAppInfo timed out"))
+                        nj_base::eventlog::log(&format!("ls2probe: {label}: getForegroundAppInfo timed out"))
                     }
-                    Err(Fail::Setup { stage, detail, .. }) => plx_base::eventlog::log(&format!(
+                    Err(Fail::Setup { stage, detail, .. }) => nj_base::eventlog::log(&format!(
                         "ls2probe: {label}: call failed stage={stage} ({detail})"
                     )),
                 }
             } else {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "ls2probe: {label}: attach failed — {}",
                     error_text(&error)
                 ));

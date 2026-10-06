@@ -33,14 +33,14 @@ fn document_band_visible(p: crate::ui::Painter, y: f32, height: f32, pop: f32) -
     let visible = bounds.intersect(Rect::FULL);
     visible.w > 0.0 && visible.h > 0.0
         && (crate::ui::frame::backdrop::discovering()
-            || !plx_gfx::gfx::culled(bounds.x, bounds.y, bounds.w, bounds.h))
+            || !nj_gfx::gfx::culled(bounds.x, bounds.y, bounds.w, bounds.h))
 }
 
 #[cfg(test)]
 mod layer_tests {
     #[test]
     fn document_band_culling_preserves_partial_labels_focus_and_shadow_edges() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let p = crate::ui::Painter::root();
         let height = crate::ui::widgets::StatusOverlay::CTRL_H;
         let pad = crate::ui::theme::CONTROL_CAST_FOCUS.iter()
@@ -59,10 +59,10 @@ mod layer_tests {
 
     #[test]
     fn document_band_culling_keeps_visible_controls_during_backdrop_discovery() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let _discovery = crate::ui::frame::backdrop::discover(
             std::rc::Rc::new(std::cell::RefCell::new(Default::default())));
-        assert!(plx_gfx::gfx::culled(0.0, 0.0, 100.0, 100.0),
+        assert!(nj_gfx::gfx::culled(0.0, 0.0, 100.0, 100.0),
             "discovery suppresses GL draws without suppressing paint declarations");
         assert!(super::document_band_visible(crate::ui::Painter::root(),
             super::CONTENT_TOP, super::layout::GRID_HEAD_H, 1.0));
@@ -92,7 +92,7 @@ mod layer_tests {
 
 impl LibraryScreen {
     pub(super) fn draw_page<H: LibraryLike>(&mut self, f: &mut DrawFrame<'_, '_, H>) {
-        // **The Library's own phase names**, in the `hm.*`/`st.*` family — `/tmp/plxnative-cpuprof`
+        // **The Library's own phase names**, in the `hm.*`/`st.*` family — `/tmp/nativejelly-cpuprof`
         // times each on the render thread (inclusive wall, no `glFinish`, every phase at once) and
         // `--graphics-profile --profile-phase <name>` samples one. They exist because the owned
         // screen shipped with NONE: the 2026-09-09 `fps:library-switch` profile read `frame.ui`
@@ -105,7 +105,7 @@ impl LibraryScreen {
         // read-out with `lb.shelves` inside it for the card rows alone; `lb.grid` is the poster
         // wall's windowed rows and `lb.rail` the letter rail.
         crate::ui::profile::phase("lb.clear", || {
-            plx_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+            nj_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         });
         crate::ui::profile::phase("lb.ground", || {
             self.ground.draw(f.painter.alpha(f.page_alpha), Rect::FULL);
@@ -200,7 +200,7 @@ impl LibraryScreen {
                     .focused(f.focus.current.is_some_and(|key| key.elem == elem)).draw(&env, p);
             }
         }
-        card_row::draw_heading(p, plx_platform::i18n::msg::browse_library_all(), "", MARGIN_X,
+        card_row::draw_heading(p, nj_platform::i18n::msg::browse_library_all(), "", MARGIN_X,
             y, layout::GRID_RIGHT - MARGIN_X, f.measure);
     }
 

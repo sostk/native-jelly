@@ -6,10 +6,10 @@ const POSTER: &str = "/photo/:/transcode?width=250&height=375&minSize=1&url=%2Fl
 // Holds the global test lock for the whole test (the first dir a test makes takes it, later ones
 // ride on it): `storage::diagnostics`'s umask test makes every file created during its window
 // unreadable, and this fixture writes (and then reads back) real files.
-struct TestDir(PathBuf, #[allow(dead_code)] Option<plx_base::testlock::Serial>);
+struct TestDir(PathBuf, #[allow(dead_code)] Option<nj_base::testlock::Serial>);
 impl TestDir {
     fn new() -> Self {
-        let serial = (!plx_base::testlock::held()).then(plx_base::testlock::serial);
+        let serial = (!nj_base::testlock::held()).then(nj_base::testlock::serial);
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "plx-imgcache-test-{}-{}",

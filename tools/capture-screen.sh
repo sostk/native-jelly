@@ -73,7 +73,7 @@ REMOTE="/tmp/capture/cap-$$.${DEV_EXT}"
 # for the television. TV_USER (default root) rides on explicit user@address arguments below.
 TVSSH="$(dirname "$0")/tv-ssh"
 SSH=("$TVSSH" ssh); SCP=("$TVSSH" scp)
-export PLX_TV_ADDR="$TV_HOST"
+export NJ_TV_ADDR="$TV_HOST"
 
 # ---- run the capture ----------------------------------------------------------
 # luna-send only delivers its request reliably under a pseudo-TTY -> ssh -tt.

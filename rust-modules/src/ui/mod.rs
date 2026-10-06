@@ -72,7 +72,7 @@ pub mod pill; // THE CAPSULE OUTLINE — three blended arcs per corner, solved; 
 pub(crate) mod poster_grid; // uniform six-column portrait geometry for collection-like pages
 pub mod popover; // shared modal open/appear choreography (track menu / info / chapters / account)
 pub mod press; // tvOS-style click: OK-down dips the focused card, OK-up springs it back + activates
-pub(crate) use plx_gfx::gfx::profile; // the draw-phase profiler lives in `gfx` now (module-layers step L5)
+pub(crate) use nj_gfx::gfx::profile; // the draw-phase profiler lives in `gfx` now (module-layers step L5)
 pub(crate) mod route_screen;
 pub(crate) mod rec; // RESTRUCTURE (spec §5.3): the recorder — format, bounded writer, loader, TableMeasure
 pub(crate) mod replay; // RESTRUCTURE (spec §5.5): `--targets` replay of a recording over the dispatcher
@@ -105,7 +105,7 @@ static GUARD_RECOVERED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 /// Run one UI entry point (a screen's `draw`/`update`/key handler) behind a panic barrier: a panic
 /// inside `f` unwinds only as far as this call, and the frame is abandoned instead of the process.
 ///
-/// **Why this exists — it is not defensive programming, it is an FFI requirement.** `plex_run` is
+/// **Why this exists — it is not defensive programming, it is an FFI requirement.** `nj_run` is
 /// `#[no_mangle] pub extern "C"` (the C boot shim in `src/main.c` calls it), and a panic that
 /// unwinds *out of* an `extern "C"` frame is undefined behaviour; the toolchain lowers it to an
 /// immediate `abort()`. Every UI draw runs inside that `extern "C"` frame, so on this device a
@@ -142,7 +142,7 @@ static GUARD_RECOVERED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 #[inline]
 pub fn guard(f: impl FnOnce()) {
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err() {
-        plx_gfx::gfx::clip_clear();
+        nj_gfx::gfx::clip_clear();
         // Log the FIRST recovery only. `app::install_panic_logger` already writes the panic's
         // message + source location to BOTH the event log and the persistent crash log for every
         // panic, so the only news here is "the frame was dropped and the GL clip was released" —
@@ -150,7 +150,7 @@ pub fn guard(f: impl FnOnce()) {
         // an already-flooding stream while telling nobody anything new. One line marks that the
         // barrier is what is keeping the app alive; the hook's lines say what is wrong.
         if !GUARD_RECOVERED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            plx_base::eventlog::log("ui::guard: recovered from a panic — frame dropped, GL clip released (logged once; the panic hook logs every panic)");
+            nj_base::eventlog::log("ui::guard: recovered from a panic — frame dropped, GL clip released (logged once; the panic hook logs every panic)");
         }
     }
 }
@@ -158,8 +158,8 @@ pub fn guard(f: impl FnOnce()) {
 // `Rect`, `Crop` and `Zoom` moved to `gfx::geom` (module-layers step L5): `gfx` and `text` draw with
 // them and the `gfx` layer may not name `ui`. Re-exported here, so every `ui::Rect` / `ui::Crop` /
 // `ui::Zoom` caller names what it always did.
-pub use plx_gfx::gfx::{Crop, Rect};
-pub(crate) use plx_gfx::gfx::Zoom;
+pub use nj_gfx::gfx::{Crop, Rect};
+pub(crate) use nj_gfx::gfx::Zoom;
 
 #[derive(Clone, Copy, Default)]
 pub struct Size {
@@ -180,16 +180,16 @@ impl Spring {
     }
     #[inline]
     pub fn step(&mut self, target: f32, k: f32, dt: f32) {
-        plx_gfx::gfx::spring(&mut self.pos, &mut self.vel, target, k, dt);
+        nj_gfx::gfx::spring(&mut self.pos, &mut self.vel, target, k, dt);
     }
     /// Step with an UNDERdamped spring (`zeta < 1` → overshoots/rings). The critically-damped
     /// [`step`](Self::step) can't bounce; this drives the `ui::press` click spring-back. See
-    /// [`gfx::spring_zeta`](plx_gfx::gfx::spring_zeta).
+    /// [`gfx::spring_zeta`](nj_gfx::gfx::spring_zeta).
     #[inline]
     pub fn step_zeta(&mut self, target: f32, k: f32, zeta: f32, dt: f32) {
-        plx_gfx::gfx::spring_zeta(&mut self.pos, &mut self.vel, target, k, zeta, dt);
+        nj_gfx::gfx::spring_zeta(&mut self.pos, &mut self.vel, target, k, zeta, dt);
     }
-    /// Teleport, with no motion in between. Reports to [`plx_machine::idle`](plx_machine::idle) — a jump
+    /// Teleport, with no motion in between. Reports to [`nj_machine::idle`](nj_machine::idle) — a jump
     /// changes the drawn value without ever reaching a spring integrator, so nothing else would
     /// hear it.
     ///
@@ -198,7 +198,7 @@ impl Spring {
     /// would pin the loop at 60 fps on precisely the screen the present gate exists for.
     #[inline]
     pub fn jump(&mut self, v: f32) {
-        plx_machine::idle::note_jump(self.pos != v || self.vel != 0.0);
+        nj_machine::idle::note_jump(self.pos != v || self.vel != 0.0);
         self.pos = v;
         self.vel = 0.0;
     }
@@ -247,12 +247,12 @@ pub trait View {
 /// already sanctioned for precisely this shape: [`widgets::LegacyMeasure`](widgets::LegacyMeasure)
 /// wraps the identical free functions `TtfMeasure` does, minus its boot-order `debug_assert!`, so a
 /// warming pass recorded before a host test's `init_text` never trips it. The null guard mirrors
-/// `plx_gfx::text::draw_text`'s own — the ordinary, non-recording path this stands in for.
+/// `nj_gfx::text::draw_text`'s own — the ordinary, non-recording path this stands in for.
 fn recorded_text_width(s: *const c_char, sz: c_int, bold: c_int) -> f32 {
     if s.is_null() {
         return 0.0;
     }
-    use plx_machine::machine::Measure as _;
+    use nj_machine::machine::Measure as _;
     widgets::LegacyMeasure.width(unsafe { CStr::from_ptr(s) }, sz, bold != 0)
 }
 
@@ -591,7 +591,7 @@ impl Painter {
         if self.records() { return; }
         let (t, b) = (self.c(top), self.c(bot));
         let m = self.place(r);
-        plx_gfx::gfx::draw_rect(
+        nj_gfx::gfx::draw_rect(
             m.x, m.y, m.w, m.h,
             0.0,
             self.px(rad),
@@ -611,7 +611,7 @@ impl Painter {
         if self.records() { return; }
         let c = self.c(col);
         let m = self.place(r);
-        plx_gfx::gfx::draw_rrect(m.x, m.y, m.w, m.h, self.px(rl), self.px(rr), c.as_ptr());
+        nj_gfx::gfx::draw_rrect(m.x, m.y, m.w, m.h, self.px(rl), self.px(rr), c.as_ptr());
     }
     /// Bottom artwork gradient; false asks the widget to use its shader-failure fallback.
     pub(crate) fn art_scrim(self, r: Rect, rad: f32, h: f32, col: [f32; 4]) -> bool {
@@ -622,7 +622,7 @@ impl Painter {
             col.record(data);
         }) { return true; }
         let m = self.place(r);
-        plx_gfx::gfx::draw_art_scrim(m.x, m.y, m.w, m.h, self.px(rad), self.px(h), self.c(col))
+        nj_gfx::gfx::draw_art_scrim(m.x, m.y, m.w, m.h, self.px(rad), self.px(h), self.c(col))
     }
     /// A rounded-rect **OUTLINE with nothing inside it** — a `w`-px inset ring in `col`, and the
     /// background composites straight through the middle.
@@ -659,7 +659,7 @@ impl Painter {
         let c = self.c(col);
         const HOLLOW: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
         let m = self.place(r);
-        plx_gfx::gfx::draw_rrect_sheened(
+        nj_gfx::gfx::draw_rrect_sheened(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             self.px(rad),
@@ -687,7 +687,7 @@ impl Painter {
         if self.records() { return; }
         let m = self.place(r);
         let c = self.c(col);
-        plx_gfx::gfx::draw_shadow(
+        nj_gfx::gfx::draw_shadow(
             m.x,
             m.y + self.px(off_y),
             m.w,
@@ -717,7 +717,7 @@ impl Painter {
         if self.records() { return; }
         let m = self.place(r);
         let c = self.c(col);
-        plx_gfx::gfx::draw_shadow(
+        nj_gfx::gfx::draw_shadow(
             m.x,
             m.y + self.px(off_y),
             m.w,
@@ -729,7 +729,7 @@ impl Painter {
             c.as_ptr(),
         );
     }
-    /// Standalone soft drop-shadow under a tile (its own [`FS_SHADOW`](plx_gfx::gfx) pass) — used by the
+    /// Standalone soft drop-shadow under a tile (its own [`FS_SHADOW`](nj_gfx::gfx) pass) — used by the
     /// profile chip, whose avatar isn't a folded card composite. Every tile carries a shadow that GROWS
     /// with the pop `f` (0 = resting/close to the shelf, 1 = lifted). Card tiles fold this into their
     /// texture pass via [`tex_carded`](Self::tex_carded) instead; this remains for the non-folded chip.
@@ -769,7 +769,7 @@ impl Painter {
         let (t, b) = (self.c(top), self.c(bot));
         let rim = self.sheen_rim();
         let m = self.place(r);
-        plx_gfx::gfx::draw_rect_sheened(
+        nj_gfx::gfx::draw_rect_sheened(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             t.as_ptr(),
@@ -829,7 +829,7 @@ impl Painter {
         let (t, b) = (self.c(top), self.c(bot));
         let rim = self.c(rim);
         let m = self.place(r);
-        plx_gfx::gfx::draw_rect_sheened(
+        nj_gfx::gfx::draw_rect_sheened(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             t.as_ptr(),
@@ -880,7 +880,7 @@ impl Painter {
         // the glow is light on the FACE, so it fades with the painter's own cascade like the fill
         let glow = glow.map(|g| [g[0], g[1] * self.a, g[2], g[3] * self.a]);
         let m = self.place(r);
-        plx_gfx::gfx::draw_rect_shaped(
+        nj_gfx::gfx::draw_rect_shaped(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             t.as_ptr(),
@@ -903,7 +903,7 @@ impl Painter {
         let c = self.c(col);
         let rim = self.sheen_rim();
         let m = self.place(r);
-        plx_gfx::gfx::draw_rrect_sheened(
+        nj_gfx::gfx::draw_rrect_sheened(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             self.px(rad),
@@ -914,7 +914,7 @@ impl Painter {
         );
     }
     pub fn tex(self, tex: u32, r: Rect, rad: f32, tint: [f32; 4]) {
-        self.tex_uv(tex, plx_gfx::gfx::UV_FULL, r, rad, tint);
+        self.tex_uv(tex, nj_gfx::gfx::UV_FULL, r, rad, tint);
     }
     /// [`tex`](Self::tex) sampling only the `uv` window of the texture — [`Rect::cover_uv`]'s
     /// answer for a picture whose aspect is not `r`'s, so it is cropped rather than squashed.
@@ -926,7 +926,7 @@ impl Painter {
         if self.declare(r, 12, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             uv.record(data);
             rad.record(data);
             tint.record(data);
@@ -934,7 +934,7 @@ impl Painter {
         if self.records() { return; }
         let t = self.c(tint);
         let m = self.place(r);
-        plx_gfx::gfx::draw_tex_uv(tex, uv, m.x, m.y, m.w, m.h, self.px(rad), t.as_ptr());
+        nj_gfx::gfx::draw_tex_uv(tex, uv, m.x, m.y, m.w, m.h, self.px(rad), t.as_ptr());
     }
     /// The FROSTED ground: what the frame drew behind `r`, blurred, clipped to `r`'s rounded rect.
     ///
@@ -955,9 +955,9 @@ impl Painter {
     /// it. Cached glass stays at one snapshot; a dynamic policy may refresh independently;
     /// `gfx::draw_blur_backdrop` has the full argument.
     /// `rim` is the one thing a surface says about the material's GEOMETRY — a sheet's 28px chamfer,
-    /// or the standing track's single line. See [`plx_gfx::gfx::GlassRim`].
+    /// or the standing track's single line. See [`nj_gfx::gfx::GlassRim`].
     /// `face` is what it wears over the backdrop — its scrim and its edge, composited inside the one
-    /// surface rather than drawn as a second rect on top of it ([`plx_gfx::gfx::GlassFace`], and its
+    /// surface rather than drawn as a second rect on top of it ([`nj_gfx::gfx::GlassFace`], and its
     /// doc for the artefact that construction produced). `GlassFace::NONE` for a sheet.
     #[must_use]
     pub fn backdrop_blur(
@@ -966,8 +966,8 @@ impl Painter {
         rest_dy: f32,
         rad: f32,
         tint: [f32; 4],
-        rim: plx_gfx::gfx::GlassRim,
-        face: plx_gfx::gfx::GlassFace,
+        rim: nj_gfx::gfx::GlassRim,
+        face: nj_gfx::gfx::GlassFace,
         deep: f32,
     ) -> bool {
         if self.records() { return false; }
@@ -985,7 +985,7 @@ impl Painter {
         }
         let t = self.c(tint);
         let m = self.place(r);
-        plx_gfx::gfx::draw_blur_backdrop(
+        nj_gfx::gfx::draw_blur_backdrop(
             m.x,
             m.y,
             m.w,
@@ -1005,7 +1005,7 @@ impl Painter {
         if self.declare(r, 13, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             uv.record(data);
             rad.record(data);
             tint.record(data);
@@ -1014,7 +1014,7 @@ impl Painter {
         if self.records() { return; }
         let t = self.c(tint);
         let m = self.place(r);
-        plx_gfx::gfx::draw_tex_stroked(
+        nj_gfx::gfx::draw_tex_stroked(
             tex,
             uv,
             m.x, m.y, m.w, m.h,
@@ -1027,7 +1027,7 @@ impl Painter {
     }
     /// The full CARD composite in ONE pass — texture + 1px edge-sheen + the soft drop-shadow that
     /// grows AND, past `f == 0`, shifts down with the pop `f` (folded via
-    /// [`gfx::draw_tex_carded`](plx_gfx::gfx::draw_tex_carded)) — a lifted tile reads as RISEN, its
+    /// [`gfx::draw_tex_carded`](nj_gfx::gfx::draw_tex_carded)) — a lifted tile reads as RISEN, its
     /// shadow falling below it rather than glowing evenly around it. `r` is the (already-scaled) card
     /// rect; the quad is inflated by the penumbra AND the downward shift internally. This is how
     /// every art tile gets its resting-and-rising shadow without a separate soft-shadow pass.
@@ -1036,7 +1036,7 @@ impl Painter {
         if self.declare({ let (b,o,_,_)=card_shadow_params(r.h,f,theme::CARD_SHADOW[3]); Rect::new(r.x-b,r.y+o-b,r.w+2.0*b,r.h+2.0*b) }, 14, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             uv.record(data);
             rad.record(data);
             tint.record(data);
@@ -1053,7 +1053,7 @@ impl Painter {
         let shcol = self.c(theme::with_a(theme::CARD_SHADOW, sa));
         let pad = blur + dy + 1.0; // inflate for the penumbra + the downward shift (+1 AA margin)
         let m = self.place(r);
-        plx_gfx::gfx::draw_tex_carded(
+        nj_gfx::gfx::draw_tex_carded(
             tex,
             uv,
             m.x, m.y, m.w, m.h,
@@ -1082,7 +1082,7 @@ impl Painter {
             Rect::new(r.x-b,r.y+o-b,r.w+2.0*b,r.h+2.0*b) }, 22, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             uv.record(data);
             rad.record(data);
             f.record(data);
@@ -1093,7 +1093,7 @@ impl Painter {
         let dy = self.px(f.clamp(0.0, 1.0) * off_l); // see `tex_carded`'s own note — 0 exactly at rest
         let m = self.place(r);
         let blur = self.px(blur);
-        plx_gfx::gfx::draw_tex_carded_still(
+        nj_gfx::gfx::draw_tex_carded_still(
             tex, uv, m.x, m.y, m.w, m.h, self.px(rad), self.c(theme::TINT_WHITE),
             self.px(theme::CARD_SHEEN_W), self.sheen_rim(), blur + dy + 1.0, blur,
             self.c(theme::with_a(theme::CARD_SHADOW, sa)), band, self.c(scrim), f, dy,
@@ -1112,7 +1112,7 @@ impl Painter {
         if self.declare(r, 15, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             art_a.record(data);
             ramp.record(data);
             wedge.record(data);
@@ -1121,7 +1121,7 @@ impl Painter {
         let tint = self.c(theme::with_a(theme::TINT_WHITE, art_a));
         let ink = self.c(theme::scrim(1.0));
         let m = self.place(r);
-        plx_gfx::gfx::draw_hero_ground(
+        nj_gfx::gfx::draw_hero_ground(
             tex,
             m.x, m.y, m.w, m.h,
             tint.as_ptr(),
@@ -1155,7 +1155,7 @@ impl Painter {
         if self.records() { return; }
         let k = self.wash_corners(k);
         let m = self.place(r);
-        plx_gfx::gfx::draw_ambient(
+        nj_gfx::gfx::draw_ambient(
             m.x, m.y, m.w, m.h,
             dim,
             k[0].as_ptr(),
@@ -1189,7 +1189,7 @@ impl Painter {
             use frame::backdrop::Value;
             k.record(data);
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             let am = self.place(art);
             [am.x, am.y, am.w, am.h].record(data);
             uv.record(data);
@@ -1201,7 +1201,7 @@ impl Painter {
         let t = self.c(tint);
         let (ink, inka) = self.ink(ink);
         let (m, am) = (self.place(r), self.place(art));
-        plx_gfx::gfx::draw_art_wash(
+        nj_gfx::gfx::draw_art_wash(
             (m.x, m.y, m.w, m.h),
             self.wash_corners(k),
             tex,
@@ -1229,7 +1229,7 @@ impl Painter {
         let k = self.wash_corners(k);
         let (ink, inka) = self.ink(ink);
         let m = self.place(r);
-        plx_gfx::gfx::draw_ambient_inked(
+        nj_gfx::gfx::draw_ambient_inked(
             m.x, m.y, m.w, m.h,
             1.0,
             [k[0].as_ptr(), k[1].as_ptr(), k[2].as_ptr(), k[3].as_ptr()],
@@ -1275,7 +1275,7 @@ impl Painter {
         // bind the mapped array to a `let` first — pointers into a temporary would dangle
         let c = k.map(|q| self.c(q));
         let m = self.place(r);
-        plx_gfx::gfx::draw_grad4(
+        nj_gfx::gfx::draw_grad4(
             m.x, m.y, m.w, m.h,
             c[0].as_ptr(),
             c[1].as_ptr(),
@@ -1300,13 +1300,13 @@ impl Painter {
         if self.declare(r, 18, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             tint.record(data);
         }) { return; }
         if self.records() { return; }
         let t = self.c(tint);
         let m = self.place(r);
-        plx_gfx::gfx::draw_field(m.x, m.y, m.w, m.h, tex, t.as_ptr());
+        nj_gfx::gfx::draw_field(m.x, m.y, m.w, m.h, tex, t.as_ptr());
     }
     /// [`field`](Self::field) as an OPAQUE GROUND — the field counterpart of
     /// [`ambient`](Self::ambient), and it reads a fade the same way that one does: an alpha below 1
@@ -1324,7 +1324,7 @@ impl Painter {
         if self.declare(r, 19, |data| {
             use frame::backdrop::Value;
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             a.record(data);
         }) { return; }
         let a = (self.a * a).clamp(0.0, 1.0);
@@ -1348,14 +1348,14 @@ impl Painter {
             use frame::backdrop::Value;
             rad.record(data);
             tex.record(data);
-            plx_gfx::gfx::tex_ledger::revision(tex).record(data);
+            nj_gfx::gfx::tex_ledger::revision(tex).record(data);
             uv.record(data);
             tint.record(data);
         }) { return tex != 0; }
         if self.records() { return false; }
         let t = self.c(tint);
         let m = self.place(r);
-        plx_gfx::gfx::draw_field_panel(
+        nj_gfx::gfx::draw_field_panel(
             m.x, m.y, m.w, m.h,
             self.px(rad),
             uv,
@@ -1387,14 +1387,14 @@ impl Painter {
             return width;
         }
         if self.records() {
-            plx_gfx::text::queue_prewarm(s, sz, bold);
+            nj_gfx::text::queue_prewarm(s, sz, bold);
             let w = recorded_text_width(s, sz, bold);
             #[cfg(test)]
             draw_census::note(100, self.place(Rect::new(x, y, w, 0.0)));
             return w;
         }
         let c = self.c(col);
-        plx_gfx::text::draw_text(s, x + self.dx, y + self.dy, sz, c.as_ptr(), align, bold, self.screen_zoom())
+        nj_gfx::text::draw_text(s, x + self.dx, y + self.dy, sz, c.as_ptr(), align, bold, self.screen_zoom())
     }
     /// [`text`](Self::text) with a horizontal fade-out: glyph alpha runs 1→0 between
     /// `fade_from`..`fade_to` px from the string's left edge (see `text::draw_text_fade`).
@@ -1424,14 +1424,14 @@ impl Painter {
             return width;
         }
         if self.records() {
-            plx_gfx::text::queue_prewarm(s, sz, bold);
+            nj_gfx::text::queue_prewarm(s, sz, bold);
             let w = recorded_text_width(s, sz, bold);
             #[cfg(test)]
             draw_census::note(100, self.place(Rect::new(x, y, w, 0.0)));
             return w;
         }
         let c = self.c(col);
-        plx_gfx::text::draw_text_fade(
+        nj_gfx::text::draw_text_fade(
             s,
             x + self.dx,
             y + self.dy,
@@ -1482,7 +1482,7 @@ impl Painter {
             return width;
         }
         if self.records() {
-            plx_gfx::text::queue_prewarm(s, sz, bold);
+            nj_gfx::text::queue_prewarm(s, sz, bold);
             let w = recorded_text_width(s, sz, bold);
             #[cfg(test)]
             draw_census::note(100, self.place(Rect::new(x, y, w, 0.0)));
@@ -1493,7 +1493,7 @@ impl Painter {
         // cascade translate that shifts `y` below has to shift them too, or a popover's entry
         // slide would fade a line against a band that stayed put while the text itself moved.
         let shift = |b: Option<(f32, f32)>| b.map(|(a, z)| (a + self.dy, z + self.dy));
-        plx_gfx::text::draw_text_fade(
+        nj_gfx::text::draw_text_fade(
             s,
             x + self.dx,
             y + self.dy,
@@ -1515,13 +1515,13 @@ impl Painter {
         if frame::backdrop::discovering() { frame::backdrop::clip(Some(self.place(r))); return; }
         if self.records() { return; }
         let m = self.place(r);
-        plx_gfx::gfx::clip_set(m.x, m.y, m.w, m.h);
+        nj_gfx::gfx::clip_set(m.x, m.y, m.w, m.h);
     }
     /// Release the clip set by [`clip`](Self::clip).
     pub fn clip_clear(self) {
         if frame::backdrop::discovering() { frame::backdrop::clip(None); return; }
         if self.records() { return; }
-        plx_gfx::gfx::clip_clear();
+        nj_gfx::gfx::clip_clear();
     }
 }
 
@@ -1630,7 +1630,7 @@ pub trait Column {
     fn height(&self, i: usize) -> f32;
     fn gap_before(&self, i: usize) -> f32;
     fn focus_child(&self) -> Option<usize>;
-    fn draw_child(&self, i: usize, env: &Env, p: Painter, measure: &dyn plx_machine::machine::Measure);
+    fn draw_child(&self, i: usize, env: &Env, p: Painter, measure: &dyn nj_machine::machine::Measure);
 }
 
 impl ScrollColumn {
@@ -1658,7 +1658,7 @@ impl ScrollColumn {
     /// Draw every present child, scrolled and band-culled — off-screen children are SKIPPED by
     /// culling (this flow culls rather than using the `Painter::clip` scissor). The focused child is never culled (the scroll keeps it at
     /// `margin`). The child `Painter` is pre-translated to the child origin, so children draw 0-based.
-    pub fn draw(&self, c: &impl Column, env: &Env, p: Painter, measure: &dyn plx_machine::machine::Measure) {
+    pub fn draw(&self, c: &impl Column, env: &Env, p: Painter, measure: &dyn nj_machine::machine::Measure) {
         let ps = p.translate(0.0, -self.scroll.pos);
         let f = c.focus_child();
         let mut y = self.top;
@@ -1837,14 +1837,14 @@ mod tests {
             (Rect::new(0.0, 0.0, 250.0, 375.0), 500.0, 750.0),
         ] {
             for crop in [Crop::Centre, Crop::Headshot] {
-                assert!(near4(r.cover_uv(tw, th, crop), plx_gfx::gfx::UV_FULL), "{tw}x{th} {crop:?}");
+                assert!(near4(r.cover_uv(tw, th, crop), nj_gfx::gfx::UV_FULL), "{tw}x{th} {crop:?}");
             }
         }
         let r = Rect::new(0.0, 0.0, 190.0, 190.0);
         for (tw, th) in [(0.0, 0.0), (0.0, 450.0), (300.0, 0.0), (-1.0, -1.0)] {
-            assert_eq!(r.cover_uv(tw, th, Crop::Headshot), plx_gfx::gfx::UV_FULL);
+            assert_eq!(r.cover_uv(tw, th, Crop::Headshot), nj_gfx::gfx::UV_FULL);
         }
-        assert_eq!(Rect::new(0.0, 0.0, 0.0, 0.0).cover_uv(300.0, 450.0, Crop::Centre), plx_gfx::gfx::UV_FULL);
+        assert_eq!(Rect::new(0.0, 0.0, 0.0, 0.0).cover_uv(300.0, 450.0, Crop::Centre), nj_gfx::gfx::UV_FULL);
     }
 
     /// The centring is about the FRAME, not about the panel: home's backdrop layer is parallaxed to
@@ -1889,7 +1889,7 @@ mod tests {
         let r = Rect::new(100.0, 200.0, 400.0, 225.0);
         assert!(p.art_scrim(r, 14.0, 80.0, theme::scrim(0.7)));
         assert!(p.tex_carded_still(71, [0.1, 0.0, 0.8, 1.0], r, 14.0, 0.0, 80.0, theme::scrim(0.7)));
-        assert!(!p.tex_carded_still(0, plx_gfx::gfx::UV_FULL, r, 14.0, 0.0, 80.0, theme::scrim(0.7)),
+        assert!(!p.tex_carded_still(0, nj_gfx::gfx::UV_FULL, r, 14.0, 0.0, 80.0, theme::scrim(0.7)),
             "missing artwork must still traverse the placeholder path");
     }
 
@@ -1939,7 +1939,7 @@ mod tests {
     fn a_glass_under_a_frozen_host_boundary_is_skipped_not_asserted() {
         use frame::backdrop::{self, Layer, Sources, Z};
         use std::{cell::RefCell, rc::Rc};
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let sources = Rc::new(RefCell::new(Sources::default()));
         sources.borrow_mut().begin(vec![Layer {
             z: Z::surface(0),
@@ -1963,7 +1963,7 @@ mod tests {
     fn a_glass_in_the_surfaces_band_still_asserts() {
         use frame::backdrop::{self, Sources, Z};
         use std::{cell::RefCell, rc::Rc};
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let sources = Rc::new(RefCell::new(Sources::default()));
         sources.borrow_mut().begin(vec![]);
         let _walk = backdrop::discover(sources.clone());
@@ -1975,17 +1975,17 @@ mod tests {
 #[cfg(test)]
 mod spring_tests {
     //! `Spring`'s own reports to the present gate. They need `testlock`, which the geometry tests
-    //! above do not (`plx_machine::idle`'s gate state is process-wide).
+    //! above do not (`nj_machine::idle`'s gate state is process-wide).
     use super::Spring;
-    use plx_machine::idle::{frame_begin, note_present, reset_for_test, should_present};
+    use nj_machine::idle::{frame_begin, note_present, reset_for_test, should_present};
 
     /// A jump reports only when it actually moved — `home.rs` jumps to the same value every frame
     /// while the hub list is empty, and an unguarded report would pin 60fps on that exact screen.
-    /// The gate's half of this (`note_jump`) is graded in `plx_machine::idle`; this is the guard on the
+    /// The gate's half of this (`note_jump`) is graded in `nj_machine::idle`; this is the guard on the
     /// `Spring` side of it.
     #[test]
     fn spring_jump_reports_only_when_it_changes_something() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         reset_for_test();
         let mut s = Spring::at(1.0);
         note_present(10_000);

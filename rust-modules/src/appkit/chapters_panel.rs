@@ -12,7 +12,7 @@ use crate::metadata;
 use crate::ui::consts::{MARGIN_X, SCR_W};
 use crate::ui::frame::Budget;
 use crate::ui::geom::IndexElem;
-use plx_machine::machine::{Cx, EntryId, FocusKey, GroupId, Host};
+use nj_machine::machine::{Cx, EntryId, FocusKey, GroupId, Host};
 use crate::ui::screen::{
     Activate, At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, Focusable, GroupKind, GroupSpec,
     Hover, Part, Placed, Seat, Step, Stop,
@@ -111,7 +111,7 @@ impl ChaptersState {
         &mut self,
         ps: &crate::route::PlaybackSession,
         appear: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         meta: metadata::MetadataView<'_>,
     ) {
         let chs = chapters(meta);
@@ -168,11 +168,11 @@ impl ChaptersState {
                 theme::TEXT_SECONDARY
             };
             let name = if ch.title.trim().is_empty() {
-                plx_platform::i18n::msg::widgets_chapters_number(ch.index as i64)
+                nj_platform::i18n::msg::widgets_chapters_number(ch.index as i64)
             } else {
                 ch.title.clone()
             };
-            if let Ok(tc) = CString::new(plx_gfx::text::elide_by(&name, CH_W, false, |t| {
+            if let Ok(tc) = CString::new(nj_gfx::text::elide_by(&name, CH_W, false, |t| {
                 measure.width_str(t, theme::size::LABEL, true)
             })) {
                 p.text(tc.as_ptr(), x, ty, theme::size::LABEL, titc, 0, 1);
@@ -354,7 +354,7 @@ where
 #[cfg(test)]
 mod focus_tests {
     use super::*;
-    use plx_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
+    use nj_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
 
     struct HostFixture;
     impl Host for HostFixture {

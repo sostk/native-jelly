@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/focusfp.sh — the FOCUS FINGERPRINT flows, on the simulator, against the synthetic PMS.
 #
-# Each flow boots `plxnative-sim` into an instance root with `plxnative-focus` armed, drives it
+# Each flow boots `nativejelly-sim` into an instance root with `nativejelly-focus` armed, drives it
 # through the remote FIFO with the same tokens a television session uses, and keeps every
 # `focus …` fingerprint line (`crate::focusprobe`, logged only on CHANGE) plus every `route=`
 # heartbeat transition the run produced. The result is one `.fp` file per flow under $OUT: the
@@ -19,9 +19,9 @@
 #
 #   tests/focusfp.sh                    # all flows, own mock PMS on 127.0.0.1:32498
 #   tests/focusfp.sh --only 2,8         # a subset
-#   tests/focusfp.sh --rec --only 1     # RECORD each flow (plxnative-rec): the recording lands in
-#                                       #   $OUT/root-<n>/plxnative-recordings/latest, ready for
-#                                       #   `tools/plxnative-rec import <dir> <name>`
+#   tests/focusfp.sh --rec --only 1     # RECORD each flow (nativejelly-rec): the recording lands in
+#                                       #   $OUT/root-<n>/nativejelly-recordings/latest, ready for
+#                                       #   `tools/nativejelly-rec import <dir> <name>`
 #   tests/focusfp.sh --replay --only 1  # REPLAY tests/fixtures/replay/<n>-<name> instead of
 #                                       #   sending tokens; a flow passes when the app's own
 #                                       #   `replay: done … verdict=SAME` line is produced
@@ -32,8 +32,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SIM_BIN="${SIM_BIN:-$ROOT/rust-modules/target-sim/debug/plxnative-sim}"
-OUT="${OUT:-/tmp/plxnative-focusfp}"
+SIM_BIN="${SIM_BIN:-$ROOT/rust-modules/target-sim/debug/nativejelly-sim}"
+OUT="${OUT:-/tmp/nativejelly-focusfp}"
 PORT="${MOCK_PORT:-32498}"
 SEED="${MOCK_SEED:-1}"
 PMS=""
@@ -103,34 +103,34 @@ run_flow() {
     # Complete typed initial inputs, before boot. Never seed/copy an auth file or rewrite an ID
     # in a completed recording. These are the supported synthetic bootstrap domains.
     if [ "$n" = 12 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/plxnative-app-init" "$SEED" "$PMS_PORT" flow12
+      "$SIM_BIN" --write-synthetic-initial "$d/nativejelly-app-init" "$SEED" "$PMS_PORT" flow12
     elif [ "$n" = 6 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/plxnative-app-init" "$SEED" "$PMS_PORT" settings=root
+      "$SIM_BIN" --write-synthetic-initial "$d/nativejelly-app-init" "$SEED" "$PMS_PORT" settings=root
     else
-      "$SIM_BIN" --write-synthetic-initial "$d/plxnative-app-init" "$SEED" "$PMS_PORT"
+      "$SIM_BIN" --write-synthetic-initial "$d/nativejelly-app-init" "$SEED" "$PMS_PORT"
     fi
   else
-    printf 'synthetic-token' > "$d/plxnative-token"
+    printf 'synthetic-token' > "$d/nativejelly-token"
   fi
-  touch "$d/plxnative-focus" "$d/plxnative-noidle"
-  [ -n "$REC" ] && touch "$d/plxnative-rec"
+  touch "$d/nativejelly-focus" "$d/nativejelly-noidle"
+  [ -n "$REC" ] && touch "$d/nativejelly-rec"
   if [ -n "$REPLAY" ]; then
     local fixture="${REPLAY_FIXTURE:-$ROOT/tests/fixtures/replay/$n-$name}"
     [ -d "$fixture" ] || { echo "  [SKIP] $n $name: no committed fixture at $fixture"; return 2; }
     local resolution=targets
     [ "$MODE" = --resolve ] && resolution=resolve
-    printf 'v1\n%s\n%s' "$resolution" "$fixture" > "$d/plxnative-recplay"
+    printf 'v1\n%s\n%s' "$resolution" "$fixture" > "$d/nativejelly-recplay"
   fi
   for t in $triggers; do
     case "$t" in
-      *=*) printf '%s' "${t#*=}" > "$d/plxnative-${t%%=*}" ;;
-      *)   touch "$d/plxnative-$t" ;;
+      *=*) printf '%s' "${t#*=}" > "$d/nativejelly-${t%%=*}" ;;
+      *)   touch "$d/nativejelly-$t" ;;
     esac
   done
-  PLXNATIVE_RUNTIME_DIR="$d" PLXNATIVE_APP_DIR="$ROOT/pkg" PLXNATIVE_WIN=1920x1080 \
+  NJ_RUNTIME_DIR="$d" NJ_APP_DIR="$ROOT/pkg" NJ_WIN=1920x1080 \
     "$SIM_BIN" "$PMS_HOST" "$PMS_PORT" > "$d/sim.out" 2>&1 &
   SIM_PID=$!
-  local log="$d/plxnative-events.log"
+  local log="$d/nativejelly-events.log"
   local ok_boot=0
   for _ in $(seq 1 $((BOOT_WAIT * 5))); do
     if [ -f "$log" ] && grep -qE "$marker" "$log"; then ok_boot=1; break; fi
@@ -184,7 +184,7 @@ PY
   sleep 2   # posters and the async landings the first keys must not race
   if [ -n "$tokens" ]; then
     # `<>`: a FIFO opened write-only blocks in open(2) with no reader (ui-sim skill, trap 1).
-    exec 3<> "$d/plxnative-remote"
+    exec 3<> "$d/nativejelly-remote"
     for tok in $tokens; do
       case "$tok" in
         sleep:*) sleep "${tok#sleep:}" ;;
@@ -223,7 +223,7 @@ PY
     return 1
   fi
   echo "  [PASS] $n $name: $lines fingerprint lines -> $fp"
-  [ -n "$REC" ] && echo "         recording: $d/plxnative-recordings/latest ($(cat "$d"/plxnative-recordings/latest/rec-*.jsonl 2>/dev/null | wc -l | tr -d " ") lines)"
+  [ -n "$REC" ] && echo "         recording: $d/nativejelly-recordings/latest ($(cat "$d"/nativejelly-recordings/latest/rec-*.jsonl 2>/dev/null | wc -l | tr -d " ") lines)"
   return 0
 }
 

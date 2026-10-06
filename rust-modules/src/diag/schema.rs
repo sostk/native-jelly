@@ -174,11 +174,11 @@ pub(crate) enum Feature {
     /// **A viewer set the Next episode preference** (Settings → Video & playback) to one of its
     /// three modes. The mode is the whole payload: a closed set of three codes, fired once per
     /// change, never per playback and never with anything about what was playing.
-    NextEpisode(crate::plex::session::NextEpisodeMode),
+    NextEpisode(crate::catalog::session::NextEpisodeMode),
     /// **A viewer set the Skip interval preference** (Settings → Video & playback) to one of its
     /// five lengths. The length is the whole payload: a closed set of five codes, fired once per
     /// durable change, never per press and never with anything about what was playing.
-    SkipInterval(crate::plex::session::SkipInterval),
+    SkipInterval(crate::catalog::session::SkipInterval),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,16 +212,16 @@ impl Feature {
             Self::LibrarySwitch => "library_switch",
             Self::AudioEnhancement => "audio_enhancement",
             Self::NextEpisode(mode) => match mode {
-                crate::plex::session::NextEpisodeMode::Countdown => "next_episode_countdown",
-                crate::plex::session::NextEpisodeMode::AfterCredits => "next_episode_after_credits",
-                crate::plex::session::NextEpisodeMode::Off => "next_episode_off",
+                crate::catalog::session::NextEpisodeMode::Countdown => "next_episode_countdown",
+                crate::catalog::session::NextEpisodeMode::AfterCredits => "next_episode_after_credits",
+                crate::catalog::session::NextEpisodeMode::Off => "next_episode_off",
             },
             Self::SkipInterval(interval) => match interval {
-                crate::plex::session::SkipInterval::Seconds5 => "skip_interval_5s",
-                crate::plex::session::SkipInterval::Seconds10 => "skip_interval_10s",
-                crate::plex::session::SkipInterval::Seconds15 => "skip_interval_15s",
-                crate::plex::session::SkipInterval::Seconds30 => "skip_interval_30s",
-                crate::plex::session::SkipInterval::Seconds60 => "skip_interval_60s",
+                crate::catalog::session::SkipInterval::Seconds5 => "skip_interval_5s",
+                crate::catalog::session::SkipInterval::Seconds10 => "skip_interval_10s",
+                crate::catalog::session::SkipInterval::Seconds15 => "skip_interval_15s",
+                crate::catalog::session::SkipInterval::Seconds30 => "skip_interval_30s",
+                crate::catalog::session::SkipInterval::Seconds60 => "skip_interval_60s",
             },
         }
     }
@@ -294,13 +294,13 @@ pub(crate) struct UsageContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ip_version: Option<String>,
     /// issue #74: the k5lp/k3lp `/dev/rtkmem` sandbox pre-flight — `ok` / `missing` / `n/a` — the
-    /// SAME closed enum [`plx_platform::tv::sandbox::context`] reports, never a free-text probe result.
+    /// SAME closed enum [`nj_platform::tv::sandbox::context`] reports, never a free-text probe result.
     /// Present on every event so a chassis's crash-at-start rate is queryable by sandbox rather
     /// than only discoverable from a single reported issue.
     #[serde(default = "rtkmem_default")]
     pub rtkmem: String,
     /// issue #74: which of the two webOS install prefixes this process runs from — `devmode` /
-    /// `homebrew` / `unknown` — from [`plx_base::paths::install_kind`]. Never the path itself.
+    /// `homebrew` / `unknown` — from [`nj_base::paths::install_kind`]. Never the path itself.
     #[serde(default = "install_default")]
     pub install: String,
 }
@@ -348,32 +348,32 @@ impl UsageContext {
     /// so gets fields at all, possibly `unknown`); `server.is_none()` omits both regardless of
     /// `link`/`ip`, matching [`Self::current`]'s server-less behaviour exactly.
     pub(crate) fn for_snapshot(
-        server: Option<crate::plex::ServerId>,
-        link: Option<crate::plex::probe::Location>,
-        ip: Option<crate::plex::IpVersion>,
+        server: Option<crate::catalog::ServerId>,
+        link: Option<crate::catalog::probe::Location>,
+        ip: Option<crate::catalog::IpVersion>,
     ) -> Self {
         Self::build(server.map(|_| (link, ip)))
     }
 
-    fn build(connection: Option<(Option<crate::plex::probe::Location>, Option<crate::plex::IpVersion>)>) -> Self {
-        let os = plx_platform::tv::device::info();
-        let hw = plx_platform::tv::device::device();
+    fn build(connection: Option<(Option<crate::catalog::probe::Location>, Option<crate::catalog::IpVersion>)>) -> Self {
+        let os = nj_platform::tv::device::info();
+        let hw = nj_platform::tv::device::device();
         let connection = connection.map(|(link, ip)| {
             let connection = match link {
-                Some(crate::plex::probe::Location::Local) => "local",
-                Some(crate::plex::probe::Location::Remote) => "remote",
-                Some(crate::plex::probe::Location::Relay) => "relay",
+                Some(crate::catalog::probe::Location::Local) => "local",
+                Some(crate::catalog::probe::Location::Remote) => "remote",
+                Some(crate::catalog::probe::Location::Relay) => "relay",
                 None => "unknown",
             };
             let ip = match ip {
-                Some(crate::plex::IpVersion::V4) => "v4",
-                Some(crate::plex::IpVersion::V6) => "v6",
+                Some(crate::catalog::IpVersion::V4) => "v4",
+                Some(crate::catalog::IpVersion::V6) => "v6",
                 None => "unknown",
             };
             (connection, ip)
         });
         Self {
-            app_version: dimension(env!("PLX_VERSION")),
+            app_version: dimension(env!("NJ_VERSION")),
             webos_release: dimension(&os.release),
             webos_api: dimension(&os.api),
             webos_codename: dimension(&os.codename),
@@ -382,8 +382,8 @@ impl UsageContext {
             hardware_revision: dimension(&hw.hw_revision),
             server_connection: connection.map(|(c, _)| c.to_string()),
             ip_version: connection.map(|(_, ip)| ip.to_string()),
-            rtkmem: plx_platform::tv::sandbox::context().into(),
-            install: plx_base::paths::install_kind().into(),
+            rtkmem: nj_platform::tv::sandbox::context().into(),
+            install: nj_base::paths::install_kind().into(),
         }
     }
 
@@ -450,9 +450,9 @@ impl UsageEnvelope {
         event: DiagEvent,
         occurred_at_ms: u64,
         session_id: &str,
-        server: crate::plex::ServerId,
-        link: Option<crate::plex::probe::Location>,
-        ip: Option<crate::plex::IpVersion>,
+        server: crate::catalog::ServerId,
+        link: Option<crate::catalog::probe::Location>,
+        ip: Option<crate::catalog::IpVersion>,
     ) -> Self {
         Self::capture_with_context(
             event,
@@ -895,7 +895,7 @@ mod tests {
     /// fixed codes — the mode and nothing else, with no free-text field to put anything in.
     #[test]
     fn the_next_episode_setting_reports_only_its_mode() {
-        use crate::plex::session::NextEpisodeMode;
+        use crate::catalog::session::NextEpisodeMode;
         let sent: Vec<_> = NextEpisodeMode::LADDER
             .iter()
             .map(|&mode| serialize(DiagEvent::FeatureUsed { feature: Feature::NextEpisode(mode) }))
@@ -915,7 +915,7 @@ mod tests {
     /// fixed codes — the length and nothing else, with no free-text field to put anything in.
     #[test]
     fn the_skip_interval_setting_reports_only_its_length() {
-        use crate::plex::session::SkipInterval;
+        use crate::catalog::session::SkipInterval;
         let sent: Vec<_> = SkipInterval::LADDER
             .iter()
             .map(|&interval| serialize(DiagEvent::FeatureUsed { feature: Feature::SkipInterval(interval) }))

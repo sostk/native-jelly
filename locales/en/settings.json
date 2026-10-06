@@ -828,7 +828,7 @@
   },
   "settings.audio.selection_off": {
     "value": "Automatic selection is off. Choosing a language enables it.",
-    "description": "Sub-line under the Audio Language row when Plex's automatic audio selection is off. One line, no wrap (about 670px at most): keep it short and say the same thing in every language."
+    "description": "Sub-line under the Audio Language row when automatic audio selection is off. One line, no wrap (about 670px at most): keep it short and say the same thing in every language."
   },
   "settings.audio.retry": {
     "value": "Retry",
@@ -923,7 +923,7 @@
     "description": "Settings, consent or sign-in UI: settings.login.report_body"
   },
   "settings.login.unreachable": {
-    "value": "Can’t reach Plex. Check your TV’s internet connection.",
+    "value": "Can’t reach Jellyfin. Check your TV’s internet connection.",
     "description": "Settings, consent or sign-in UI: settings.login.unreachable"
   },
   "settings.login.report_sending": {

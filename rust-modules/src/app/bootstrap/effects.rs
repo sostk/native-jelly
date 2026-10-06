@@ -1,11 +1,11 @@
 //! Complete private payloads for the first executable domain. Unsupported is an error, not
 //! a payload-free tag that could accidentally compare equal.
 use crate::screens::registry::{AppFx, AppMsg};
-use plx_machine::machine::{Delivery, Fx};
+use nj_machine::machine::{Delivery, Fx};
 use crate::ui::screen::ScreenEvent;
 use serde_json::{json, Value};
 
-fn focus(key: plx_machine::machine::FocusKey<u32>) -> Value { json!([key.entry.0,key.elem]) }
+fn focus(key: nj_machine::machine::FocusKey<u32>) -> Value { json!([key.entry.0,key.elem]) }
 fn content(arg: &crate::screens::registry::ContentArg) -> Value {
     use crate::screens::registry::ContentArg;
     match arg {
@@ -102,8 +102,8 @@ fn page_memory(memory: &crate::screens::registry::PageMemory) -> Result<Value, &
     })
 }
 
-pub(crate) fn input(event: &plx_machine::machine::InputEvent<u32>) -> Result<Value, &'static str> {
-    use plx_machine::machine::{InputKind,Key,Edge,Source};
+pub(crate) fn input(event: &nj_machine::machine::InputEvent<u32>) -> Result<Value, &'static str> {
+    use nj_machine::machine::{InputKind,Key,Edge,Source};
     let body = match &event.kind {
         InputKind::Key { key, sym, wcode, edge, at_edge } => json!({"key":match key {
             Key::Up => "Up", Key::Down => "Down", Key::Left => "Left", Key::Right => "Right",
@@ -121,8 +121,8 @@ pub(crate) fn input(event: &plx_machine::machine::InputEvent<u32>) -> Result<Val
         "source":match event.source { Source::Sdl => "Sdl", Source::RemoteFifo => "RemoteFifo", Source::Script => "Script", Source::Replay => "Replay" },"body":body}))
 }
 
-pub(crate) fn decode_input(value: &Value) -> Result<plx_machine::machine::InputEvent<u32>, &'static str> {
-    use plx_machine::machine::{InputEvent, InputKind, Key, Edge, Source, Tick};
+pub(crate) fn decode_input(value: &Value) -> Result<nj_machine::machine::InputEvent<u32>, &'static str> {
+    use nj_machine::machine::{InputEvent, InputKind, Key, Edge, Source, Tick};
     let number = |value: &Value| value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("invalid input integer");
     if value["kind"] != "owned" { return Err("unsupported controlled input"); }
     let body = &value["body"];
@@ -261,7 +261,7 @@ pub(crate) fn message(message: &AppMsg) -> Result<Value, &'static str> {
         },
         AppMsg::Store(command) => store(command)?,
         AppMsg::StoreWork(work) => work_value(work)?,
-        AppMsg::HubsResult(result) => crate::pms::record::encode(result),
+        AppMsg::HubsResult(result) => crate::catalog_fetch::record::encode(result),
         AppMsg::Home(command) => json!({"home_command":home_command(command)}),
         _ => return Err("unsupported Home message"),
     })
@@ -272,9 +272,9 @@ pub(crate) fn encode(effect: &Fx<super::super::bridge::AppHost>) -> Result<Value
         Fx::App(effect) => app(effect)?,
         Fx::Mount(id) => json!({"mount":id.0}),
         Fx::Unmount(id) => json!({"unmount":id.0}),
-        Fx::Nav(plx_machine::machine::NavOp::Root(crate::screens::registry::AppArg::Home)) => json!({"root":"home"}),
+        Fx::Nav(nj_machine::machine::NavOp::Root(crate::screens::registry::AppArg::Home)) => json!({"root":"home"}),
         Fx::Nav(op) => {
-            use plx_machine::machine::NavOp;
+            use nj_machine::machine::NavOp;
             match op {
                 NavOp::Root(a) => json!({"root":argument(a)?}),
                 NavOp::Push(a) => json!({"push":argument(a)?}),
@@ -291,7 +291,7 @@ pub(crate) fn encode(effect: &Fx<super::super::bridge::AppHost>) -> Result<Value
         Fx::CancelTimer(id) => json!({"cancel_timer":id.0}),
         Fx::Remember { group, elem } => json!({"group":group.0,"elem":elem}),
         Fx::Press(arm) => json!({"press":{"key":focus(arm.key),"from":match arm.from {
-            plx_machine::machine::PressFrom::Key => "key", plx_machine::machine::PressFrom::Pointer => "pointer" },"holdable":arm.holdable}}),
+            nj_machine::machine::PressFrom::Key => "key", nj_machine::machine::PressFrom::Pointer => "pointer" },"holdable":arm.holdable}}),
         Fx::Log(line) => json!({"log":line.0}),
         Fx::Deliver(to, delivery) => {
             let body = match delivery {
@@ -324,8 +324,8 @@ pub(crate) fn encode(effect: &Fx<super::super::bridge::AppHost>) -> Result<Value
                             }}),
                         },
                         ScreenEvent::WillLeave(leave) => json!(match leave {
-                            plx_machine::machine::Leave::ForGood => "for_good",
-                            plx_machine::machine::Leave::Deeper => "deeper",
+                            nj_machine::machine::Leave::ForGood => "for_good",
+                            nj_machine::machine::Leave::Deeper => "deeper",
                         }),
                         ScreenEvent::Tick(tick) => json!({"ms":tick.ms,"dt_us":tick.dt_us}),
                         ScreenEvent::Timer(id) => json!(id.0),
@@ -352,13 +352,13 @@ pub(crate) fn encode(effect: &Fx<super::super::bridge::AppHost>) -> Result<Value
 mod tests {
     use super::encode;
     use crate::screens::registry::AppArg;
-    use plx_machine::machine::{Fx, NavOp};
+    use nj_machine::machine::{Fx, NavOp};
 
     #[test]
     fn controlled_content_records_preview_and_panel_payloads() {
         use crate::screens::registry::{AppFx, ContentPanel, ContentReq};
         use serde_json::json;
-        let sid = crate::plex::ServerId::from_raw(7);
+        let sid = crate::catalog::ServerId::from_raw(7);
         let cases = [
             (ContentReq::PreviewStart { sid, rk: "1001".into(), part: "/part".into(),
                 vcodec: "h264".into(), acodec: "aac".into(), title: "s12345678".into() },

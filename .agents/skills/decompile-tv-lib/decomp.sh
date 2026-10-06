@@ -152,7 +152,7 @@ case "$cmd" in
     mkdir -p "$BIN"
     echo "decomp: harvesting the media stack from the TV …" >&2
     TVSSH="$(cd "$(dirname "$0")/../../.." && pwd)/tools/tv-ssh"   # key first, sshpass only if refused
-    export PLX_TV_ADDR="$TV"
+    export NJ_TV_ADDR="$TV"
     # shellcheck disable=SC2087
     "$TVSSH" ssh tv \
       'find / -name "*.so*" -type f 2>/dev/null | grep -iE "player|/libpf|acb|cbe|smp|starfish|umedia|vpq|dile|dolby"' \

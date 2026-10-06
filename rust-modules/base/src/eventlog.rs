@@ -1,4 +1,4 @@
-//! **The event log** — `/tmp/plxnative-events.log` on the television, the app's one support channel.
+//! **The event log** — `/tmp/nativejelly-events.log` on the television, the app's one support channel.
 //!
 //! [`log`] is the ONE sink every module writes through; [`redact_tokens`] and [`scrub`] are the
 //! guards every line passes on the way, and [`ring`] is the lab's tap. It lives in the base layer
@@ -22,7 +22,7 @@ pub mod ring;
 /// **This is a backstop, not the policy.** The policy is that no call site formats a URL into a log
 /// line at all — but that policy was violated for months by one `-> {url}` in `route::retranscode`,
 /// reached by an ordinary audio-track switch, and the app's whole support channel is "send us
-/// `/tmp/plxnative-events.log`". So the class is closed HERE, where every line passes, rather than
+/// `/tmp/nativejelly-events.log`". So the class is closed HERE, where every line passes, rather than
 /// at the call sites, where the next one is one `format!` away from re-opening it.
 ///
 /// Matches the parameter name rather than the value: the token is a short unstructured alphanumeric
@@ -108,7 +108,7 @@ fn write_log_line(writer: &mut impl std::io::Write, line: &str) -> std::io::Resu
     }
 }
 
-/// Append one line to the on-device event log (`/tmp/plxnative-events.log`) — the primary debugging
+/// Append one line to the on-device event log (`/tmp/nativejelly-events.log`) — the primary debugging
 /// surface (`make run` fetches it). The ONE shared sink; modules bring it in as `use crate::eventlog::log;`.
 ///
 /// Every line goes through [`redact_tokens`] first — see its doc for why the guard lives here.

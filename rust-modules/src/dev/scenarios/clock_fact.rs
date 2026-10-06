@@ -1,4 +1,4 @@
-//! `/tmp/plxnative-clockfact=nokey|keychanged|engaged:<year>` — plant a wrong-clock fact at boot,
+//! `/tmp/nativejelly-clockfact=nokey|keychanged|engaged:<year>` — plant a wrong-clock fact at boot,
 //! so the read-outs and the toast that read `net::keypin`'s facts can be looked at in the simulator
 //! with no television, no certificate and no clock to change (issue #378).
 //!
@@ -11,7 +11,7 @@
 //! The fact is SYNTHETIC and says so in the log (`keypin::plant`): it is filed under a host no
 //! session binds, so no projection clears it. Read once at boot; absent from shipping builds.
 
-use plx_net::net::keypin::{self, Blocked, Planted};
+use nj_net::net::keypin::{self, Blocked, Planted};
 
 /// The fact a trigger value names, or `None` for anything else.
 pub(crate) fn parse(value: &str) -> Option<Planted> {
@@ -27,10 +27,10 @@ pub(crate) fn parse(value: &str) -> Option<Planted> {
 /// Called once from `app::boot`, after the session's key projection. A no-op without the trigger;
 /// a value that names no fact is logged and ignored.
 pub(crate) fn arm_at_boot() {
-    let Some(value) = plx_base::devtrig::read("clockfact") else { return };
+    let Some(value) = nj_base::devtrig::read("clockfact") else { return };
     match parse(&value) {
         Some(fact) => keypin::plant(fact),
-        None => plx_base::eventlog::log("clockfact IGNORED — expected nokey, keychanged or engaged[:<year>]"),
+        None => nj_base::eventlog::log("clockfact IGNORED — expected nokey, keychanged or engaged[:<year>]"),
     }
 }
 

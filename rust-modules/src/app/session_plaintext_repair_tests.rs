@@ -7,12 +7,12 @@
 mod tests {
     use super::super::*;
     use crate::auth::owner::{SessionEvent, SessionWork};
-    use crate::plex::session::{self, ProfileCreds, Session, ServerRef, SourceRef, UserRef};
+    use crate::catalog::session::{self, ProfileCreds, Session, ServerRef, SourceRef, UserRef};
 
-    struct Cleanup<'a>(&'a plx_base::task::MainThread);
+    struct Cleanup<'a>(&'a nj_base::task::MainThread);
     impl Drop for Cleanup<'_> {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
             session::ProfilePublisher::new(self.0).publish(None, 0);
         }
     }
@@ -25,12 +25,12 @@ mod tests {
 
     #[test]
     fn endpoint_repair_upgrades_a_stored_plaintext_session_and_its_cached_profile() {
-        let _lock = plx_base::testlock::serial();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _lock = nj_base::testlock::serial();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let tmp = session::TempSession::new("owner-plaintext-repair");
         let _cleanup = Cleanup(&mt);
         tmp.assert_only_target();
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
 
         let plain = SourceRef {
             machine_id: "synthetic-server".into(),
@@ -60,7 +60,7 @@ mod tests {
         };
         session::save(&saved);
 
-        let id = crate::plex::register_for_test("synthetic-server", "192.0.2.10", 32400,
+        let id = crate::catalog::register_for_test("synthetic-server", "192.0.2.10", 32400,
             "synthetic-token", "synthetic-client");
         let mut init = crate::auth::SessionInit::captured(saved);
         init.epoch = u64::from(u32::MAX) + 91;
@@ -82,13 +82,13 @@ mod tests {
                         let fresh = SourceRef {
                             address: "192.0.2.10".into(),
                             origin_url: "https://192-0-2-10.example.plex.direct:32400".into(),
-                            tier: Some(crate::plex::probe::Location::Local),
+                            tier: Some(crate::catalog::probe::Location::Local),
                             ..SourceRef::default()
                         };
                         (Some(fresh), crate::auth::settled_probe(
-                            &crate::plex::probe::plan(resource, crate::plex::CredentialPolicy::HttpsOnly),
-                            crate::plex::probe::Outcome::Reachable,
-                            Some(crate::plex::probe::Location::Local),
+                            &crate::catalog::probe::plan(resource, crate::catalog::CredentialPolicy::HttpsOnly),
+                            crate::catalog::probe::Outcome::Reachable,
+                            Some(crate::catalog::probe::Location::Local),
                             Some("192.0.2.10".into())))
                     });
             }).join().expect("endpoint worker failed");

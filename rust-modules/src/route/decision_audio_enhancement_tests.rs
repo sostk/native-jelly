@@ -11,13 +11,13 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 use super::test_support::apply_plan;
-use crate::plex::serverinfo::Subscription;
+use crate::catalog::serverinfo::Subscription;
 
-const PREF: crate::plex::AudioEnhancements = crate::plex::AudioEnhancements {
+const PREF: crate::catalog::AudioEnhancements = crate::catalog::AudioEnhancements {
     boost_dialog: false,
     normalize_loudness: true,
 };
-const NONE: crate::plex::AudioEnhancements = crate::plex::AudioEnhancements::NONE;
+const NONE: crate::catalog::AudioEnhancements = crate::catalog::AudioEnhancements::NONE;
 
 fn track(sid: i64, ordinal: i32, codec: &str, channels: i64, capable: bool, immersive: bool) -> CarriedAudio {
     CarriedAudio {
@@ -58,11 +58,11 @@ impl Live {
 
     /// A server whose raw Part GETs answer `parts`, and whose media GETs serve `media_bytes`.
     fn start_with_parts(mode: EnhMode, media_bytes: usize, parts: PartAnswer) -> Self {
-        assert!(plx_net::net::global_init() && crate::curlio::available());
+        assert!(nj_net::net::global_init() && crate::curlio::available());
         let (port, done, server) = enhancement_pms_parts(MDE_DIRECTPLAY, mode, media_bytes, parts);
-        let sid = crate::plex::register_for_test("enh-live", "127.0.0.1", port, "token", "enh-client");
-        crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
-        crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
+        let sid = crate::catalog::register_for_test("enh-live", "127.0.0.1", port, "token", "enh-client");
+        crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Local);
+        crate::catalog::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
         Live { sid, port, done, server }
     }
 
@@ -70,7 +70,7 @@ impl Live {
     fn finish(self) -> Vec<String> {
         self.done.send(()).unwrap();
         let requests = self.server.join().unwrap();
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
         requests
     }
 }
@@ -78,10 +78,10 @@ impl Live {
 #[derive(Clone, Copy)]
 enum Delivery {
     Direct,
-    Remux(crate::plex::AudioEnhancements),
+    Remux(crate::catalog::AudioEnhancements),
     /// M7 follow-up: an ALREADY-APPLIED Burn (`remux: false`, forced re-encode) — for tests that
     /// need to start mid-play already burning a subtitle, rather than transitioning into one.
-    Burn(crate::plex::AudioEnhancements),
+    Burn(crate::catalog::AudioEnhancements),
     Hls,
 }
 
@@ -99,7 +99,7 @@ fn install(
         Delivery::Direct => (
             format!("http://127.0.0.1:{port}/library/parts/960001/1/file.mkv"),
             String::new(),
-            crate::plex::EncodeContract::default(),
+            crate::catalog::EncodeContract::default(),
             EnhancementOutcome::Off,
         ),
         Delivery::Remux(a) => (
@@ -117,8 +117,8 @@ fn install(
         Delivery::Hls => (
             format!("http://127.0.0.1:{port}/video/:/transcode/universal/start.m3u8"),
             "enh-hls-1".to_owned(),
-            crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls { seconds_per_segment: 2 },
+            crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
                 ..Default::default()
             },
@@ -151,7 +151,7 @@ fn install(
 
 /// The toggle row minus persistence (`request_audio_enhancement` also retains a session write,
 /// which a host test must not aim at the developer's real session file).
-fn toggle(ps: &mut PlaybackSession, a: crate::plex::AudioEnhancements) -> bool {
+fn toggle(ps: &mut PlaybackSession, a: crate::catalog::AudioEnhancements) -> bool {
     crate::player::restore_audio_enhancements(a);
     reconcile_enhancement(ps, false)
 }
@@ -220,7 +220,7 @@ fn slow_live(delay: std::time::Duration) -> Live {
 type RequestLog = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
 
 fn slow_live_logged(delay: std::time::Duration) -> (Live, RequestLog) {
-    assert!(plx_net::net::global_init() && crate::curlio::available());
+    assert!(nj_net::net::global_init() && crate::curlio::available());
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port() as i32;
     listener.set_nonblocking(true).unwrap();
@@ -229,7 +229,7 @@ fn slow_live_logged(delay: std::time::Duration) -> (Live, RequestLog) {
     let shared = log.clone();
     let server = std::thread::spawn(move || {
         loop {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let line = drain_http(&mut socket);
                     shared.lock().unwrap_or_else(|e| e.into_inner()).push(line.clone());
@@ -253,9 +253,9 @@ fn slow_live_logged(delay: std::time::Duration) -> (Live, RequestLog) {
         }
         shared.lock().unwrap_or_else(|e| e.into_inner()).clone()
     });
-    let sid = crate::plex::register_for_test("enh-live-slow", "127.0.0.1", port, "token", "enh-client");
-    crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
-    crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
+    let sid = crate::catalog::register_for_test("enh-live-slow", "127.0.0.1", port, "token", "enh-client");
+    crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Local);
+    crate::catalog::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
     (Live { sid, port, done, server }, log)
 }
 
@@ -301,7 +301,7 @@ fn landing_posted() -> bool {
 /// instance — always succeeds against it. This fixture refuses everything, for a test that needs a
 /// PLAIN retranscode attempt to fail server-side.
 fn always_refusing_live() -> Live {
-    assert!(plx_net::net::global_init() && crate::curlio::available());
+    assert!(nj_net::net::global_init() && crate::curlio::available());
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().unwrap().port() as i32;
     listener.set_nonblocking(true).unwrap();
@@ -309,7 +309,7 @@ fn always_refusing_live() -> Live {
     let server = std::thread::spawn(move || {
         let mut requests = Vec::new();
         loop {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let line = drain_http(&mut socket);
                     if line.contains("/decision?") && line.contains("hasMDE=1") {
@@ -335,9 +335,9 @@ fn always_refusing_live() -> Live {
         }
         requests
     });
-    let sid = crate::plex::register_for_test("enh-live-refuse", "127.0.0.1", port, "token", "enh-client");
-    crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
-    crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
+    let sid = crate::catalog::register_for_test("enh-live-refuse", "127.0.0.1", port, "token", "enh-client");
+    crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Local);
+    crate::catalog::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
     Live { sid, port, done, server }
 }
 
@@ -491,7 +491,7 @@ fn recovery_flavour_uses_candidate_family_not_live_hls() {
     crate::player::restore_audio_enhancements(PREF);
     let cand = candidate(true, a1(), None);
     install(&mut ps, &live, Delivery::Hls, a1(), Some(cand.clone()), 0);
-    assert!(matches!(ps.cur_contract.delivery, crate::plex::TranscodeDelivery::FixedHls { .. }));
+    assert!(matches!(ps.cur_contract.delivery, crate::catalog::TranscodeDelivery::FixedHls { .. }));
     assert_eq!(recovery_flavour(&cand, recovery_want(&ps, &cand)), RecoveryFlavour::Remux(PREF));
     crate::player::restore_audio_enhancements(NONE);
     assert_eq!(recovery_flavour(&cand, recovery_want(&ps, &cand)), RecoveryFlavour::Direct);
@@ -607,7 +607,7 @@ fn claim_frees_the_frame_thread_pms_call_runs_on_a_worker() {
     assert!(toggle(&mut ps, PREF));
     let action = claim_route_action().expect("a queued user action");
 
-    let _frame = plx_base::task::FrameScope::enter();
+    let _frame = nj_base::task::FrameScope::enter();
     let dispatch = execute_retranscode_claim(&mut ps, &action, 60, -1, 0);
     assert!(
         matches!(dispatch, RetranscodeClaimDispatch::Pending),
@@ -1669,10 +1669,10 @@ fn subtitle_repick_while_cold_start_burn_keeps_the_burn() {
     crate::player::restore_audio_enhancements(PREF);
 
     let (port, done, server) = enhancement_pms(MDE_DIRECTPLAY, EnhMode::Honor("ac3"), 0);
-    let sid = crate::plex::register_for_test("enh-repick", "127.0.0.1", port, "token", "enh-client");
-    let client = crate::plex::client_for(sid).unwrap();
-    client.set_link(crate::plex::probe::Location::Local);
-    crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
+    let sid = crate::catalog::register_for_test("enh-repick", "127.0.0.1", port, "token", "enh-client");
+    let client = crate::catalog::client_for(sid).unwrap();
+    client.set_link(crate::catalog::probe::Location::Local);
+    crate::catalog::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
 
     let audio = crate::metadata::Stream {
         id: 10976,
@@ -1719,7 +1719,7 @@ fn subtitle_repick_while_cold_start_burn_keeps_the_burn() {
     assert_eq!(query_param(d[1], "subtitles"), Some("burn"), "the re-pick must still burn: {}", d[1]);
 
     cleanup(&mut ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// The FIRST device run's actual entry state (`/tmp/enh-burn-tv/logs/...log`, before its own PUT
@@ -1737,10 +1737,10 @@ fn subtitle_first_pick_while_plain_enhanced_remux_burns_it() {
     crate::player::restore_audio_enhancements(PREF);
 
     let (port, done, server) = enhancement_pms(MDE_DIRECTPLAY, EnhMode::Honor("ac3"), 0);
-    let sid = crate::plex::register_for_test("enh-firstpick", "127.0.0.1", port, "token", "enh-client");
-    let client = crate::plex::client_for(sid).unwrap();
-    client.set_link(crate::plex::probe::Location::Local);
-    crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
+    let sid = crate::catalog::register_for_test("enh-firstpick", "127.0.0.1", port, "token", "enh-client");
+    let client = crate::catalog::client_for(sid).unwrap();
+    client.set_link(crate::catalog::probe::Location::Local);
+    crate::catalog::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
 
     let audio = crate::metadata::Stream {
         id: 10976,
@@ -1801,7 +1801,7 @@ fn subtitle_first_pick_while_plain_enhanced_remux_burns_it() {
     assert_eq!(query_param(d[1], "subtitles"), Some("burn"), "the pick must burn: {}", d[1]);
 
     cleanup(&mut ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 // ---- PR review follow-up: off-main-thread claim PMS I/O, mailbox lifetime, snapshot isolation --
@@ -1871,7 +1871,7 @@ fn commit_track_inside_a_frame_does_not_trip_the_blocking_guard() {
     let _g = fresh_registry(&mut ps);
     let live = Live::start(EnhMode::Honor("ac3"));
     install(&mut ps, &live, Delivery::Direct, a5(), Some(candidate(true, a5(), None)), 0);
-    let _frame = plx_base::task::FrameScope::enter();
+    let _frame = nj_base::task::FrameScope::enter();
     commit_audio_selection(&mut ps, a3()); // native pick: PUT must not run inline here
     drop(_frame);
     wait_until("the selection worker to drain", selection_queue_idle);
@@ -2144,7 +2144,7 @@ fn a_landing_from_a_torn_down_item_never_reaches_the_next_playback() {
     // the encoder stop the discard owes the landing must not block it (`FrameScope` panics a
     // blocking call outside `allow_blocking`).
     {
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         begin_engine_teardown(false);
         assert!(begin_playback_request());
     }
@@ -2191,7 +2191,7 @@ fn the_stale_arms_of_the_drain_stop_their_encoder_off_the_frame_thread() {
             url: String::new(),
             vcodec: "hevc".into(),
             acodec: "ac3".into(),
-            contract: crate::plex::EncodeContract::default(),
+            contract: crate::catalog::EncodeContract::default(),
             enhancement: EnhancementOutcome::Off,
             ticket,
             client,
@@ -2203,7 +2203,7 @@ fn the_stale_arms_of_the_drain_stop_their_encoder_off_the_frame_thread() {
     PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner()).phase = ControlPhase::Stable;
     post_claim_landing(landing("stale-phase-session", worker_ticket(), 1));
     {
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         assert!(take_ready_retranscode_claim(&mut ps).is_none());
     }
     wait_until("the stale-phase encoder stop", || stop_seen(&log, "stale-phase-session"));
@@ -2215,7 +2215,7 @@ fn the_stale_arms_of_the_drain_stop_their_encoder_off_the_frame_thread() {
     PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner()).phase = ControlPhase::Applying(2);
     post_claim_landing(landing("stale-ticket-session", stale, 2));
     {
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         let (_, tail, ..) = take_ready_retranscode_claim(&mut ps).expect("the landing posted above");
         assert_eq!(tail, ClaimTail::Rejected(RETRANSCODE_REJECTED));
     }
@@ -2314,7 +2314,7 @@ fn a_stale_landing_at_drain_time_stops_the_leaked_encoder_instead_of_installing_
             ),
             vcodec: "hevc".into(),
             acodec: "ac3".into(),
-            contract: crate::plex::EncodeContract::default(),
+            contract: crate::catalog::EncodeContract::default(),
             enhancement: EnhancementOutcome::Off,
             ticket: leaked_ticket,
             client: cur_client(&ps).expect("install() registered this session's server"),
@@ -2371,7 +2371,7 @@ fn a_deferred_audio_pick_replayed_from_settle_route_start_does_not_trip_the_bloc
         },
     ));
 
-    let _frame = plx_base::task::FrameScope::enter();
+    let _frame = nj_base::task::FrameScope::enter();
     assert!(settle_route_start(&mut ps, attempt, RouteStartResult::Started));
     drop(_frame);
 

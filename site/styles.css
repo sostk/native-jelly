@@ -2345,7 +2345,7 @@ video::-webkit-media-controls-start-playback-button {
    to fit under the header, alone on the screen. After the phone rule above,
    which a phone on its side can match as well. */
 /* Under 390px (iPhone SE and mini) the brand, GitHub, Ko-fi and Install do
-   not fit on one capsule, the sub-pages' "<- PlxNative" being the widest:
+   not fit on one capsule, the sub-pages' "<- Native Jelly" being the widest:
    the PLX mark stands for the name, and the link keeps its aria-label. */
 @media (max-width: 389px) {
   .brand-name {

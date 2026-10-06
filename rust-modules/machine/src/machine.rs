@@ -194,7 +194,7 @@ pub trait Measure {
 
     /// `width` for a borrowed `&str` (spec §4.3, phase 12 D4): builds the transient `CString` so
     /// a draw-time call site measures a `String`/`&str` slice without hand-rolling one — the exact
-    /// conversion every `plx_gfx::text::text_width(c.as_ptr(), …)` call site already did, moved
+    /// conversion every `nj_gfx::text::text_width(c.as_ptr(), …)` call site already did, moved
     /// behind the capability so the raw free function stops being reachable outside `ui/text*.rs`
     /// and the three `Measure` impls. An embedded NUL (never produced by real UI strings) answers
     /// `0.0`, the same fallback `CString::new(..).ok()` gave every caller before.
@@ -1030,9 +1030,9 @@ impl Measure for BareMeasure {
 /// and the trait is this module's, so the impl lives here: the lowest layer that names both, and
 /// the one place the orphan rule lets it sit once the layers are crates.
 #[cfg(any(test, feature = "test-support"))]
-impl Measure for plx_base::fontcov::advances::ShippedMeasure {
+impl Measure for nj_base::fontcov::advances::ShippedMeasure {
     fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
-        plx_base::fontcov::advances::shipped(bold).width(&s.to_string_lossy(), sz)
+        nj_base::fontcov::advances::shipped(bold).width(&s.to_string_lossy(), sz)
     }
     fn cap_h(&self, sz: i32) -> f32 {
         sz as f32 * 0.73

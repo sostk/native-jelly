@@ -27,7 +27,7 @@
 //! protocol as documented.
 use super::models::*;
 use super::{api::Jf, convert, ids, ticks};
-use crate::plex::{
+use crate::catalog::{
     Ceiling, MediaContainer, Media, MediaPart, Metadata, Stream, StreamSelection, StreamUrl,
     TimelineReport, TimelineState, TranscodeOffset, TranscodeSpec,
 };
@@ -144,10 +144,10 @@ pub(crate) struct ProfileAsk {
 
 /// The DeviceProfile for this device — the Jellyfin twin of `transcoder::profile_for_delivery`,
 /// derived from the same capability snapshot so the two servers are told the same limits.
-pub(crate) fn device_profile(caps: &plx_platform::devcaps::Caps, ask: &ProfileAsk) -> Value {
+pub(crate) fn device_profile(caps: &nj_platform::devcaps::Caps, ask: &ProfileAsk) -> Value {
     let dp_video = if caps.hevc || ask.forced { "h264,hevc" } else { "h264" };
     let dp_audio: Vec<&str> = if ask.forced {
-        plx_platform::devcaps::DP_AUDIO_CODECS.split(',').collect()
+        nj_platform::devcaps::DP_AUDIO_CODECS.split(',').collect()
     } else {
         caps.audio.split(',').filter(|c| !c.is_empty()).map(jf_audio).collect()
     };
@@ -233,7 +233,7 @@ pub(crate) fn device_profile(caps: &plx_platform::devcaps::Caps, ask: &ProfileAs
         subs.extend(EXTERNAL_SUBS.iter().map(|f| json!({ "Format": f, "Method": "External" })));
     }
     json!({
-        "Name": crate::plex::identity::PRODUCT,
+        "Name": crate::catalog::identity::PRODUCT,
         "MaxStreamingBitrate": max_streaming_bps,
         "MaxStaticBitrate": max_static_bps,
         "DirectPlayProfiles": direct_play,
@@ -366,7 +366,7 @@ impl Jf<'_> {
         // `MaxAudioChannels` is a per-request bound and has no profile equivalent. Without it the
         // server has no reason to downmix, so a 5.1 or 7.1 track reaches a stereo panel at its own
         // channel count and the pipeline plays what it can of it.
-        let max_channels = plx_platform::devcaps::caps()
+        let max_channels = nj_platform::devcaps::caps()
             .audio_channels
             .values()
             .copied()
@@ -399,7 +399,7 @@ impl Jf<'_> {
         let guid = self.guid(rk)?;
         let audio = (audio_stream_id > 0).then(|| ids::stream_index(audio_stream_id));
         let sub = (subtitle_stream_id > 0).then(|| ids::stream_index(subtitle_stream_id));
-        let caps = plx_platform::devcaps::caps();
+        let caps = nj_platform::devcaps::caps();
         let profile = device_profile(caps, &ProfileAsk { direct: true, forced, ceiling: None, burn: false });
         // Direct stream is offered on the ordinary ask so a container mismatch answers as a video
         // copy; strict Original withdraws it, because that mode means the file as it is or nothing.
@@ -470,7 +470,7 @@ impl Jf<'_> {
         // halves read the same flag: offering `External` while also forcing `Encode` would ask the
         // server for two different things.
         let burn = sub.is_some();
-        let profile = device_profile(plx_platform::devcaps::caps(),
+        let profile = device_profile(nj_platform::devcaps::caps(),
             &ProfileAsk { direct: false, forced: false, ceiling, burn });
         let r = self.playback_info(&guid, profile, &InfoAsk {
             direct_play: false,
@@ -541,7 +541,7 @@ impl Jf<'_> {
         let mut path = part_key.to_string();
         if let Some(s) = session(session_key).filter(|s| !s.play_session_id.is_empty()) {
             let sep = if path.contains('?') { '&' } else { '?' };
-            path = format!("{path}{sep}PlaySessionId={}", crate::plex::urlenc_str(&s.play_session_id));
+            path = format!("{path}{sep}PlaySessionId={}", crate::catalog::urlenc_str(&s.play_session_id));
         }
         StreamUrl { origin: self.origin().clone(), path: super::url::with_api_key(&path, &self.token()) }
     }
@@ -679,8 +679,8 @@ impl Jf<'_> {
 mod tests {
     use super::*;
 
-    fn caps() -> plx_platform::devcaps::Caps {
-        let mut c = plx_platform::devcaps::Caps::assumed();
+    fn caps() -> nj_platform::devcaps::Caps {
+        let mut c = nj_platform::devcaps::Caps::assumed();
         c.audio = "aac,ac3,eac3,dts".into();
         c.audio_channels.insert("dts".into(), 6);
         c

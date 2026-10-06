@@ -3,7 +3,7 @@
 //! Only idle source periods start refreshes. A key gets at most one attempt per account epoch
 //! within the bounded recent-attempt set, so revisiting stale art cannot hammer an offline PMS.
 
-use plx_platform::imgcache::DiskKey;
+use nj_platform::imgcache::DiskKey;
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -13,7 +13,7 @@ const QUEUE_CAP: usize = 32;
 const RECENT_CAP: usize = 8192;
 
 struct Job {
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     path: String,
     key: DiskKey,
     epoch: u64,
@@ -52,8 +52,8 @@ static QUEUE: Mutex<Option<Queue>> = Mutex::new(None);
 static READY: Condvar = Condvar::new();
 static WORKER: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
-pub(super) fn enqueue(client: &'static crate::plex::Client, path: String, key: DiskKey, epoch: u64, token_gen: u32) {
-    if epoch != plx_platform::imgcache::generation() { return; }
+pub(super) fn enqueue(client: &'static crate::catalog::Client, path: String, key: DiskKey, epoch: u64, token_gen: u32) {
+    if epoch != nj_platform::imgcache::generation() { return; }
     let mut q = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
     if q.as_mut().is_some_and(|q| q.push(Job { client, path, key, epoch, token_gen })) {
         READY.notify_one();
@@ -62,7 +62,7 @@ pub(super) fn enqueue(client: &'static crate::plex::Client, path: String, key: D
 
 pub(super) fn init() {
     *QUEUE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Queue { running: true, ..Default::default() });
-    let worker = plx_base::task::spawn("image-refresh", run);
+    let worker = nj_base::task::spawn("image-refresh", run);
     if worker.is_none() {
         QUEUE.lock().unwrap_or_else(|e| e.into_inner()).as_mut().unwrap().running = false;
     }
@@ -76,7 +76,7 @@ pub(super) fn shutdown() {
     }
     READY.notify_all();
     if let Some(h) = WORKER.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        plx_base::task::join("image-refresh", h);
+        nj_base::task::join("image-refresh", h);
     }
 }
 
@@ -94,14 +94,14 @@ fn run() {
                     .map(|(g, _)| g).unwrap_or_else(|e| e.into_inner().0);
             }
         };
-        if job.epoch != plx_platform::imgcache::generation() || !grant_is_current(&job) { continue; }
+        if job.epoch != nj_platform::imgcache::generation() || !grant_is_current(&job) { continue; }
         // Failed refresh leaves both the cached file and already-published texture untouched.
         if let Some(bytes) = super::fetch_image(job.client, &job.path) {
             let (mut w, mut h) = (0, 0);
-            let px = plx_gfx::img::img_decode_rgba(bytes.as_ptr(), bytes.len() as i32, &mut w, &mut h);
+            let px = nj_gfx::img::img_decode_rgba(bytes.as_ptr(), bytes.len() as i32, &mut w, &mut h);
             if !px.is_null() {
-                plx_gfx::img::img_free(px);
-                plx_platform::imgcache::write_at(job.epoch, &job.key, &bytes);
+                nj_gfx::img::img_free(px);
+                nj_platform::imgcache::write_at(job.epoch, &job.key, &bytes);
             }
         }
     }
@@ -110,23 +110,23 @@ fn run() {
 /// Profile changes retain disk images but retire their old request credentials. A client can
 /// also be replaced at a new origin without changing the account's disk-cache epoch.
 fn grant_is_current(job: &Job) -> bool {
-    crate::plex::client_for(job.client.id()).is_some_and(|live|
+    crate::catalog::client_for(job.client.id()).is_some_and(|live|
         std::ptr::eq(live, job.client) && live.token_gen() == job.token_gen)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn job(client: &'static crate::plex::Client, i: usize, epoch: u64) -> Job {
+    fn job(client: &'static crate::catalog::Client, i: usize, epoch: u64) -> Job {
         let path = format!("/photo/:/transcode?url=%2Fthumb%2F{i}&width=250&height=375");
-        Job { client, key: plx_platform::imgcache::classify("fixture", &path).unwrap(), path, epoch, token_gen: client.token_gen() }
+        Job { client, key: nj_platform::imgcache::classify("fixture", &path).unwrap(), path, epoch, token_gen: client.token_gen() }
     }
     #[test]
     fn refreshes_are_bounded_deduplicated_and_retired_with_the_account() {
-        let _guard = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("refresh-fixture", "127.0.0.1", 1, "fixture", "fixture");
-        let client = crate::plex::client_for(sid).unwrap();
+        let _guard = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
+        let sid = crate::catalog::register_for_test("refresh-fixture", "127.0.0.1", 1, "fixture", "fixture");
+        let client = crate::catalog::client_for(sid).unwrap();
         let old_grant = job(client, 0, 1);
         assert!(grant_is_current(&old_grant));
         let job = |i, epoch| job(client, i, epoch);
@@ -145,8 +145,8 @@ mod tests {
         assert_eq!(q.epoch, 2);
         q.running = false;
         assert!(!q.push(job(1, 2)));
-        crate::plex::register_for_test("refresh-fixture", "127.0.0.1", 1, "changed-grant", "fixture");
+        crate::catalog::register_for_test("refresh-fixture", "127.0.0.1", 1, "changed-grant", "fixture");
         assert!(!grant_is_current(&old_grant), "queued old-profile credentials must never refresh");
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 }

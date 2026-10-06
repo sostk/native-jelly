@@ -17,7 +17,7 @@ Two committed manifests drive it:
   shelves) and, per item, which asset each image is derived from and how (`mode`, `anchor`, `crop`).
 
 Nothing is committed but the manifests: the sources and the derived images live in a cache outside
-the repository (`$PLXNATIVE_DEMO_CACHE`, default `~/.cache/plxnative-demo`, ~390 MB of sources,
+the repository (`$NJ_DEMO_CACHE`, default `~/.cache/nativejelly-demo`, ~390 MB of sources,
 283 MB of it the complete Sintel the player figure plays), so a fresh clone rebuilds them with one
 command. Derivation is ffmpeg with fixed filters and fixed
 encoder settings, so one ffmpeg build derives byte-identical files every time. The clear logos
@@ -52,8 +52,8 @@ THUMB = (1280, 720)
 
 
 def cache_dir():
-    env = os.environ.get("PLXNATIVE_DEMO_CACHE")
-    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "plxnative-demo"
+    env = os.environ.get("NJ_DEMO_CACHE")
+    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "nativejelly-demo"
 
 
 def load():
@@ -560,17 +560,17 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
     <title>Artwork credits — PlxNative</title>
-    <link rel="canonical" href="https://plxnative.com/credits.html" />
+    <link rel="canonical" href="https://nativejelly.com/credits.html" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#202022" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="PlxNative" />
-    <meta property="og:url" content="https://plxnative.com/credits.html" />
+    <meta property="og:url" content="https://nativejelly.com/credits.html" />
     <meta property="og:title" content="Artwork credits — PlxNative" />
     <meta property="og:description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
-    <meta property="og:image" content="https://plxnative.com/media/og-card.jpg" />
+    <meta property="og:image" content="https://nativejelly.com/media/og-card.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
@@ -579,7 +579,7 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Artwork credits — PlxNative" />
     <meta name="twitter:description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
-    <meta name="twitter:image" content="https://plxnative.com/media/og-card.jpg" />
+    <meta name="twitter:image" content="https://nativejelly.com/media/og-card.jpg" />
     <meta name="twitter:image:alt" content="PlxNative home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
     <link rel="stylesheet" href="styles.css" />
   </head>

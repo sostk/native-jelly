@@ -15,7 +15,7 @@ use super::test_support::apply_plan;
 #[cfg(feature = "devtriggers")]
 fn the_codec_gates_verdict_is_what_the_quality_menu_reads() {
     let mut ps = crate::route::PlaybackSession::IDLE;
-    let caps = plx_platform::devcaps::Caps::assumed();
+    let caps = nj_platform::devcaps::Caps::assumed();
     let dv = crate::metadata::Dovi::default().presentation_now(true);
     // The two ends of the gate, at a UHD raster this device's table admits.
     assert!(
@@ -49,7 +49,7 @@ fn the_codec_gates_verdict_is_what_the_quality_menu_reads() {
 #[test]
 fn a_declared_4k_source_makes_the_uhd_actuator_feasible() {
     let mut ps = crate::route::PlaybackSession::IDLE;
-    let _lock = plx_base::testlock::serial();
+    let _lock = nj_base::testlock::serial();
     let mut uhd_feasible = |raster: (u16, u16)| {
         arm_auto_fixture(&mut ps, 
             "http://host/clip.mp4",
@@ -88,7 +88,7 @@ fn the_fixture_can_start_in_hls_instead_of_provoking_a_starvation() {
     );
     assert!(matches!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     ));
     assert!(
         auto_original_watch(&ps).is_some(),
@@ -110,7 +110,7 @@ fn the_fixture_can_start_in_hls_instead_of_provoking_a_starvation() {
     );
     assert!(matches!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2
         }
     ));
@@ -206,7 +206,7 @@ fn dv_decision_survives_reload_recovery_and_rollback() {
         23.976,
         p8(),
         true,
-        plx_platform::devcaps::dv::DvCapability::Supported,
+        nj_platform::devcaps::dv::DvCapability::Supported,
     ));
     let frozen = stream_dv_decision(&ps);
     assert!(frozen.presentation.declared().is_some());
@@ -258,7 +258,7 @@ fn dv_decision_survives_reload_recovery_and_rollback() {
         23.976,
         p8(),
         false,
-        plx_platform::devcaps::dv::DvCapability::Supported,
+        nj_platform::devcaps::dv::DvCapability::Supported,
     ));
     clear_output_dv(&mut ps);
     assert_eq!(
@@ -313,23 +313,23 @@ fn a_local_auto_original_is_supervised_exactly_like_a_remote_one() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "machine-local-watch",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .expect("server installed")
-        .set_link(crate::plex::probe::Location::Local);
+        .set_link(crate::catalog::probe::Location::Local);
     apply_plan(&mut ps, 
         Plan {
             sid,
             url: "https://example.invalid/source.mkv".into(),
             transport_kbps: 10_634,
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -345,7 +345,7 @@ fn a_local_auto_original_is_supervised_exactly_like_a_remote_one() {
     );
     restore_quality(Quality::Original);
     reset_session(&mut ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
@@ -357,8 +357,8 @@ fn hls_controller_starts_at_the_rung_the_runtime_fallback_selected() {
     apply_plan(&mut ps, 
         Plan {
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
@@ -402,8 +402,8 @@ fn a_candidate_is_never_named_after_the_encoder_it_would_replace() {
             // seeds the live encoder. Before any switch they agree, as they do on the wire.
             sess: "sess-42".into(),
             tsession: "sess-42".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080M12.ceiling()),
@@ -548,7 +548,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
         }
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "seek-session-test",
         "127.0.0.1",
         port,
@@ -562,8 +562,8 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
             sess: "playback-seek".into(),
             tsession: "playback-seek-abr-old".into(),
             url: "http://127.0.0.1/old/master.m3u8".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
@@ -604,7 +604,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// A `/decision` response is preparation, not publication. PMS can close the connection or
@@ -644,7 +644,7 @@ fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
         }
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "failed-retranscode-test",
         "127.0.0.1",
         port,
@@ -658,8 +658,8 @@ fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
             sess: "logical-playback".into(),
             tsession: "live-encoder".into(),
             url: "http://127.0.0.1/live/master.m3u8".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
@@ -709,7 +709,7 @@ fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Exact user sequence from the device trace: Auto HLS commits a replacement encoder, a
@@ -728,8 +728,8 @@ fn failed_original_then_auto_keeps_the_live_adaptive_route() {
             url: "http://fixture.invalid/720/master.m3u8?offset=100".into(),
             sess: "sess-live".into(),
             tsession: "encoder-bootstrap".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -823,8 +823,8 @@ fn hls_recovery_restores_the_exact_direct_source_and_rearms_its_watchdog() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -859,7 +859,7 @@ fn hls_recovery_restores_the_exact_direct_source_and_rearms_its_watchdog() {
     assert!(!is_transcoding(&ps));
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     );
     assert_eq!(cur_ceiling(&ps), None);
     assert_eq!(stream_vcodec(&ps), "hevc");
@@ -899,8 +899,8 @@ fn a_recovery_that_never_opens_can_still_go_back_to_the_encoder_it_replaced() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -962,7 +962,7 @@ fn a_recovery_that_never_opens_can_still_go_back_to_the_encoder_it_replaced() {
     assert!(
         matches!(
             cur_delivery(&ps),
-            crate::plex::TranscodeDelivery::FixedHls { .. }
+            crate::catalog::TranscodeDelivery::FixedHls { .. }
         ),
         "the delivery shape must come back with it, or the demuxer reads an m3u8 as an mkv",
     );
@@ -1013,7 +1013,7 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
         }
         fn poll(listener: &std::net::TcpListener, rounds: usize, requests: &mut Vec<String>) {
             for _ in 0..rounds {
-                match plx_base::testnet::accept(listener) {
+                match nj_base::testnet::accept(listener) {
                     Ok((mut socket, _)) => {
                         requests.push(request(&mut socket));
                         socket
@@ -1057,7 +1057,7 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
             .expect("publish rollback requests");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "remux-recovery",
         "127.0.0.1",
         port,
@@ -1071,8 +1071,8 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
             sess: "remux-logical".into(),
             url: "http://fixture.invalid/hls/master.m3u8".into(),
             tsession: "remux-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1141,7 +1141,7 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -1178,8 +1178,8 @@ fn a_missing_whole_file_bitrate_must_not_silently_delete_original_recovery() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -1236,8 +1236,8 @@ fn a_recovery_that_opens_spends_the_way_back_rather_than_leaving_it_armed() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1309,8 +1309,8 @@ fn manual_original_adopts_one_running_trial_and_revokes_its_auto_ticket_on_frame
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "adopt-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1382,8 +1382,8 @@ fn a_quality_change_waits_for_an_original_handoff_to_commit() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "quality-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1422,7 +1422,7 @@ fn a_quality_change_waits_for_an_original_handoff_to_commit() {
     );
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv,
+        crate::catalog::TranscodeDelivery::ProgressiveMkv,
         "the pending source declaration may not be rewritten before its first frame",
     );
     assert!(
@@ -1444,7 +1444,7 @@ fn a_quality_change_waits_for_an_original_handoff_to_commit() {
     finish_route_action(&mut ps, &staged, RouteApplyResult::Rejected);
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv,
+        crate::catalog::TranscodeDelivery::ProgressiveMkv,
         "rejecting the deferred effect must restore the Original candidate which produced frames",
     );
     assert_eq!(cur_ceiling(&ps), None);
@@ -1465,8 +1465,8 @@ fn a_quality_change_survives_an_original_handoff_rollback() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "quality-rollback-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1496,7 +1496,7 @@ fn a_quality_change_survives_an_original_handoff_rollback() {
     assert_eq!(rollback_seconds(&mut ps), Some(120));
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2
         },
         "failure first restores the one route that was proven to play",
@@ -1526,7 +1526,7 @@ fn a_failed_rollback_load_discards_trial_effects_before_the_next_trial() {
     { let s = &mut ps; {
         s.url = "http://fixture.invalid/hls/master.m3u8".into();
         s.tsession = "rollback-owner".into();
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.cur_contract.ceiling = Some(crate::abr::Rung::P1080High.ceiling());
@@ -1542,7 +1542,7 @@ fn a_failed_rollback_load_discards_trial_effects_before_the_next_trial() {
     { let s = &mut ps; {
         s.url = "https://example.invalid/first-source.mkv".into();
         s.tsession.clear();
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::ProgressiveMkv;
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::ProgressiveMkv;
         s.cur_contract.ceiling = None;
     } };
     set_pending_original(&ps, first, true);
@@ -1565,7 +1565,7 @@ fn a_failed_rollback_load_discards_trial_effects_before_the_next_trial() {
     { let s = &mut ps; {
         s.url = "https://example.invalid/second-source.mkv".into();
         s.tsession.clear();
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::ProgressiveMkv;
+        s.cur_contract.delivery = crate::catalog::TranscodeDelivery::ProgressiveMkv;
         s.cur_contract.ceiling = None;
     } };
     set_pending_original(&ps, second, true);
@@ -1596,8 +1596,8 @@ fn audio_selected_during_original_trial_uses_the_route_that_actually_lands() {
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "audio-rollback-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -1663,7 +1663,7 @@ fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let mut requests = Vec::new();
         while std::time::Instant::now() < deadline {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let timeout = Some(std::time::Duration::from_secs(20));
                     socket.set_read_timeout(timeout).expect("request timeout");
@@ -1688,7 +1688,7 @@ fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
         }
         tx.send(requests).unwrap();
     });
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "cold-direct-owner",
         "127.0.0.1",
         port,
@@ -1733,7 +1733,7 @@ fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
 
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// #266 follow-up: the Auto watchdog already probes this exact Part on this exact identity on its
@@ -1750,7 +1750,7 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
     use std::io::{BufRead, BufReader, Write};
 
     let _g = fresh_registry(&mut ps);
-    if !plx_net::net::global_init() || !crate::curlio::available() {
+    if !nj_net::net::global_init() || !crate::curlio::available() {
         return;
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -1764,7 +1764,7 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
         let mut requests = Vec::new();
         while std::time::Instant::now() < deadline {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
                     let mut first = String::new();
@@ -1788,14 +1788,14 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
         tx.send(requests).expect("publish observation");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "auto-no-admission",
         "127.0.0.1",
         port,
         "token",
         "auto-no-admission-client",
     );
-    let client = crate::plex::client_for(sid).expect("test server installed");
+    let client = crate::catalog::client_for(sid).expect("test server installed");
     let logical_url = client
         .direct_play_url("/library/parts/1/file.mkv", "auto-no-admission-logical")
         .to_url();
@@ -1806,8 +1806,8 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
             sess: "auto-no-admission-logical".into(),
             url: "http://fixture.invalid/hls/master.m3u8".into(),
             tsession: "auto-no-admission-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -1846,7 +1846,7 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -1862,7 +1862,7 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
     use std::io::{BufRead, BufReader, Write};
 
     let _g = fresh_registry(&mut ps);
-    if !plx_net::net::global_init() || !crate::curlio::available() {
+    if !nj_net::net::global_init() || !crate::curlio::available() {
         return;
     }
     let plan = crate::abr::source_probe_plan(320, crate::abr::PROBE_BUDGET_MS).unwrap();
@@ -1907,14 +1907,14 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
         all_tx.send(requests).expect("publish direct lifecycle");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "direct-recovery",
         "127.0.0.1",
         port,
         "token",
         "direct-client",
     );
-    let client = crate::plex::client_for(sid).expect("test server installed");
+    let client = crate::catalog::client_for(sid).expect("test server installed");
     let logical_url = client
         .direct_play_url("/library/parts/1/file.mkv", "direct-logical")
         .to_url();
@@ -1925,8 +1925,8 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
             sess: "direct-logical".into(),
             url: "http://fixture.invalid/hls/master.m3u8".into(),
             tsession: "direct-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -2015,7 +2015,7 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -2055,7 +2055,7 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
         while std::time::Instant::now() < hard_deadline
             && observe_until.is_none_or(|until| std::time::Instant::now() < until)
         {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
                     let mut first = String::new();
@@ -2088,14 +2088,14 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
         tx.send(requests).expect("publish stop requests");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "direct-pending-stop",
         "127.0.0.1",
         port,
         "token",
         "direct-stop-client",
     );
-    let candidate_url = crate::plex::client_for(sid)
+    let candidate_url = crate::catalog::client_for(sid)
         .unwrap()
         .direct_play_url("/library/parts/1/file.mkv", "direct-stop-logical")
         .to_url();
@@ -2106,8 +2106,8 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
             sess: "direct-stop-logical".into(),
             url: "http://fixture.invalid/hls/master.m3u8".into(),
             tsession: "direct-stop-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -2152,7 +2152,7 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -2169,8 +2169,8 @@ fn direct_recovery_without_its_server_keeps_hls_instead_of_using_a_logical_alias
             sess: "missing-logical".into(),
             url: "http://fixture.invalid/hls/master.m3u8".into(),
             tsession: "missing-hls".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
@@ -2212,8 +2212,8 @@ fn manually_picking_original_restores_native_dolby_vision_instead_of_retranscodi
         Plan {
             url: "https://example.invalid/hls/master.m3u8".into(),
             tsession: "encoder-1".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 2,
             },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
@@ -2228,10 +2228,10 @@ fn manually_picking_original_restores_native_dolby_vision_instead_of_retranscodi
                 fps: 23.976,
                 dovi: p8(),
                 dv_decision: crate::metadata::DvDecision {
-                    capability: plx_platform::devcaps::dv::DvCapability::Supported,
+                    capability: nj_platform::devcaps::dv::DvCapability::Supported,
                     presentation: p8().presentation(
                         true,
-                        plx_platform::devcaps::dv::DvCapability::Supported,
+                        nj_platform::devcaps::dv::DvCapability::Supported,
                         true,
                     ),
                 },
@@ -2250,7 +2250,7 @@ fn manually_picking_original_restores_native_dolby_vision_instead_of_retranscodi
     assert!(
         matches!(
             cur_delivery(&ps),
-            crate::plex::TranscodeDelivery::FixedHls { .. }
+            crate::catalog::TranscodeDelivery::FixedHls { .. }
         ),
         "the pump owns the pending codec-changing reload; the menu must not pre-mutate it"
     );
@@ -2295,22 +2295,22 @@ fn local_auto_preserves_the_candidate_needed_to_leave_a_fixed_rung() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "machine-local",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .expect("server installed")
-        .set_link(crate::plex::probe::Location::Local);
+        .set_link(crate::catalog::probe::Location::Local);
     apply_plan(&mut ps, 
         Plan {
             sid,
             url: "https://example.invalid/source.mkv".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -2338,7 +2338,7 @@ fn local_auto_preserves_the_candidate_needed_to_leave_a_fixed_rung() {
 
     reset_session(&mut ps);
     restore_quality(Quality::Original);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Returning from a fixed rung to Auto on a Local server must not confuse "the link needs no
@@ -2351,22 +2351,22 @@ fn local_auto_keeps_hls_when_original_is_infeasible() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::P720);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "machine-local-infeasible",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .expect("server installed")
-        .set_link(crate::plex::probe::Location::Local);
+        .set_link(crate::catalog::probe::Location::Local);
     apply_plan(&mut ps, 
         Plan {
             sid,
             tsession: "encoder-fixed".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: Some(Quality::P720.ceiling().expect("fixed rung")),
                 ..Default::default()
             },
@@ -2384,7 +2384,7 @@ fn local_auto_keeps_hls_when_original_is_infeasible() {
     assert!(
         matches!(
             cur_delivery(&ps),
-            crate::plex::TranscodeDelivery::FixedHls { .. }
+            crate::catalog::TranscodeDelivery::FixedHls { .. }
         ),
         "Auto must rebuild the HLS controller when no native source candidate exists",
     );
@@ -2398,7 +2398,7 @@ fn local_auto_keeps_hls_when_original_is_infeasible() {
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// The exact remote-control sequence from a 4K Original session: Manual 1080p replaces it
@@ -2415,8 +2415,8 @@ fn manual_original_after_a_fixed_rung_returns_to_the_native_source() {
         Plan {
             url: "https://example.invalid/source.mkv".into(),
             tsession: String::new(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -2443,7 +2443,7 @@ fn manual_original_after_a_fixed_rung_returns_to_the_native_source() {
     assert_eq!(quality(), Quality::P1080High);
     assert_eq!(
         cur_ceiling(&ps),
-        Some(crate::plex::Ceiling {
+        Some(crate::catalog::Ceiling {
             max_kbps: 20_000,
             max_w: 1920,
             max_h: 1080
@@ -2470,7 +2470,7 @@ fn manual_original_after_a_fixed_rung_returns_to_the_native_source() {
     );
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv,
+        crate::catalog::TranscodeDelivery::ProgressiveMkv,
         "the pending recovery owns the route; the pump will perform the native reload"
     );
     assert_eq!(
@@ -2485,7 +2485,7 @@ fn manual_original_after_a_fixed_rung_returns_to_the_native_source() {
     assert_eq!(cur_ceiling(&ps), None);
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::catalog::TranscodeDelivery::ProgressiveMkv
     );
     assert!(
         auto_original_watch(&ps).is_none(),
@@ -2508,22 +2508,22 @@ fn original_to_auto_restarts_the_worker_to_arm_the_watchdog() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "machine-local-original-auto",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .expect("server installed")
-        .set_link(crate::plex::probe::Location::Local);
+        .set_link(crate::catalog::probe::Location::Local);
     apply_plan(&mut ps, 
         Plan {
             sid,
             url: "https://example.invalid/source.mkv".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -2576,7 +2576,7 @@ fn original_to_auto_restarts_the_worker_to_arm_the_watchdog() {
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     crate::player::reset_route_requests_for_test(&ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
@@ -2585,22 +2585,22 @@ fn auto_to_an_admitting_fixed_rung_restarts_the_worker_to_remove_the_watchdog() 
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "machine-auto-fixed-direct",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .expect("server installed")
-        .set_link(crate::plex::probe::Location::Local);
+        .set_link(crate::catalog::probe::Location::Local);
     apply_plan(&mut ps, 
         Plan {
             sid,
             url: "https://example.invalid/source.mkv".into(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -2642,7 +2642,7 @@ fn auto_to_an_admitting_fixed_rung_restarts_the_worker_to_remove_the_watchdog() 
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     crate::player::reset_route_requests_for_test(&ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Manual Original is not Auto, but it is still a zero-encode route and must be recoverable
@@ -2658,8 +2658,8 @@ fn manual_original_after_a_fixed_rung_with_a_subtitle_returns_to_direct_play() {
         Plan {
             url: "https://example.invalid/source.mkv".into(),
             tsession: String::new(),
-            contract: crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+            contract: crate::catalog::EncodeContract {
+                delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
                 ceiling: None,
                 ..Default::default()
             },
@@ -2693,7 +2693,7 @@ fn manual_original_after_a_fixed_rung_with_a_subtitle_returns_to_direct_play() {
     set_quality(&mut ps, Quality::Original);
     assert_eq!(
         cur_delivery(&ps),
-        crate::plex::TranscodeDelivery::ProgressiveMkv,
+        crate::catalog::TranscodeDelivery::ProgressiveMkv,
         "Original requests the native reload; it must not build another capped encoder"
     );
     assert_eq!(

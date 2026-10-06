@@ -2,7 +2,7 @@
 //! samples by (`LOOP_RE`/`FPS_RE` against `tests/manifest.json`'s `route`/`overlay` fields), and
 //! the same words the focus fingerprint, the diag `RouteEntered` event and the lab envelope print.
 //!
-//! It is its own module since D1's item 8, out of `app/mod.rs` — which is `plex_run`'s ten-line
+//! It is its own module since D1's item 8, out of `app/mod.rs` — which is `nj_run`'s ten-line
 //! skeleton and the `App` struct, and had grown four test modules that graded four other files'
 //! subjects (`ci/check-deps.sh`'s `testmod` gate). Everything the alphabet is made of came with
 //! the tests that grade it, because the point of [`heartbeat_word_tests`] is that the two tables
@@ -69,7 +69,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
 #[cfg(test)]
 pub(crate) fn every_route() -> [AppArg; 10] {
     use crate::screens::registry::ContentArg;
-    let sid = crate::plex::ServerId::UNSET;
+    let sid = crate::catalog::ServerId::UNSET;
     [
         AppArg::Login,
         AppArg::Profiles,
@@ -80,7 +80,7 @@ pub(crate) fn every_route() -> [AppArg; 10] {
         AppArg::Content(ContentArg::Person {
             sid, key: String::new(), guid: String::new(), name: String::new(), thumb: String::new(),
         }),
-        AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef::by_tag(sid, 0, 1, ""))),
+        AppArg::Content(ContentArg::Collection(crate::catalog::collections::CollectionRef::by_tag(sid, 0, 1, ""))),
         AppArg::Search,
         AppArg::Player,
     ]
@@ -182,7 +182,7 @@ mod heartbeat_word_tests {
         crate::screens::registry::word::PICKER,
     ];
 
-    /// **Every caller holds `plx_base::testlock::serial()` for its whole body**, because deriving
+    /// **Every caller holds `nj_base::testlock::serial()` for its whole body**, because deriving
     /// this alphabet is not a read: [`overlay_words`] goes through
     /// `bridge::every_surface_word`, which mounts each surface by running real
     /// `bridge::frame`s — and a frame pumps every store. `browse`'s pump ends in `sync_roster`,
@@ -203,7 +203,7 @@ mod heartbeat_word_tests {
 
     #[test]
     fn every_manifest_route_word_is_one_the_heartbeat_prints() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let routes = route_words();
         let overlays = overlay_alphabet();
         for s in scenes() {
@@ -233,7 +233,7 @@ mod heartbeat_word_tests {
     /// is the player's.
     #[test]
     fn the_tables_are_derived_and_the_two_alphabets_stay_apart() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let routes = route_words();
         let overlays = overlay_alphabet();
         assert_eq!(
@@ -303,7 +303,7 @@ mod heartbeat_word_tests {
     /// route that exists.
     #[test]
     fn the_manifest_uses_a_subset_of_the_derived_alphabets() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let routes = route_words();
         let overlays = overlay_alphabet();
         let mut used_overlays = 0;
@@ -337,7 +337,7 @@ mod heartbeat_word_tests {
     /// thread, under the guard, and is therefore deterministic.
     #[test]
     fn deriving_the_surface_alphabet_cannot_mutate_an_unrelated_browse_owner() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_two_source_table_for_test();
         let mut directory = crate::stores::browse::DirectorySnapshot::default();

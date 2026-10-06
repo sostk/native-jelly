@@ -4,7 +4,7 @@
 
 use super::card_row;
 use super::icons::{self, Icon};
-use plx_machine::machine::{FocusKey, FocusRead, GroupId, Host, Measure};
+use nj_machine::machine::{FocusKey, FocusRead, GroupId, Host, Measure};
 use super::screen::{
     Activate, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, GroupKind, GroupSpec, Hover, Link,
     Seat, Stop,
@@ -179,7 +179,7 @@ impl<'a> LinkedHeading<'a> {
             ),
             Presentation::Heading => {
                 let (cap_top, cap_bottom) =
-                    plx_gfx::text::text_cap_band(theme::size::HEADLINE, 1);
+                    nj_gfx::text::text_cap_band(theme::size::HEADLINE, 1);
                 let cy = y + (cap_top + cap_bottom) * 0.5;
                 Rect::new(
                     x - SIDE_PAD,
@@ -357,7 +357,7 @@ fn draw_middle(
     p.text(
         text.as_ptr(),
         x,
-        plx_gfx::text::text_vcenter_y(size, i32::from(bold), cy),
+        nj_gfx::text::text_vcenter_y(size, i32::from(bold), cy),
         size,
         ink,
         0,
@@ -380,7 +380,7 @@ fn draw_cap(
     p.text(
         text.as_ptr(),
         x,
-        plx_gfx::text::baseline_y(size, i32::from(bold), theme::size::HEADLINE, 1, cap_y),
+        nj_gfx::text::baseline_y(size, i32::from(bold), theme::size::HEADLINE, 1, cap_y),
         size,
         ink,
         0,
@@ -448,7 +448,7 @@ mod tests {
         tree::{key, split, Tree},
         FocusEngine, Outcome,
     };
-    use plx_machine::machine::{Cx, EntryId, InputOwner, PressRead, Tick};
+    use nj_machine::machine::{Cx, EntryId, InputOwner, PressRead, Tick};
     use crate::ui::screen::By;
 
     const ENTRY: EntryId = EntryId(1);
@@ -481,7 +481,7 @@ mod tests {
         let rest = heading.face_rect(x, y, 0.0, &m);
         let focused = heading.face_rect(x, y, 1.0, &m);
         let (cap_top, cap_bottom) =
-            plx_gfx::text::text_cap_band(theme::size::HEADLINE, 1);
+            nj_gfx::text::text_cap_band(theme::size::HEADLINE, 1);
         assert_eq!(rest.x, 72.0);
         assert_eq!(focused.x, rest.x);
         assert!(focused.w > rest.w && focused.h > rest.h);

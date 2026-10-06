@@ -82,7 +82,7 @@ pub(super) enum TrailerKey {
 /// own admitted-reload accounting rather than this key ladder routing around it — see
 /// `player/preview.rs`'s module doc for the budget/breaker rules a commit now goes through.
 pub(super) fn trailer_key(
-    key: plx_machine::machine::Key,
+    key: nj_machine::machine::Key,
     sym: u32,
     wcode: u32,
 ) -> Option<TrailerKey> {
@@ -446,7 +446,7 @@ impl Transport {
         film_title: &str,
         extra_title: &str,
         paused: bool,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) {
         if self.alpha <= 0.01 {
             return;
@@ -459,7 +459,7 @@ impl Transport {
         if let Ok(title) = CString::new(transport_title(film_title, extra_title)) {
             crate::appkit::player_hud::draw_title(
                 p,
-                crate::appkit::player_hud::Kicker::Context(plx_platform::i18n::msg::browse_detail_trailer_c().as_ptr()),
+                crate::appkit::player_hud::Kicker::Context(nj_platform::i18n::msg::browse_detail_trailer_c().as_ptr()),
                 title.as_ptr(),
             );
         }
@@ -487,11 +487,11 @@ impl Transport {
     /// line's own centre (the logo/title row) rather than sitting under the action row, so the
     /// hint reads as a third element on that line — logo, hint, whatever else shares it — and not
     /// as page furniture pushed down over the video.
-    pub(super) fn draw_hint(&self, p: Painter, cy: f32, measure: &dyn plx_machine::machine::Measure) {
+    pub(super) fn draw_hint(&self, p: Painter, cy: f32, measure: &dyn nj_machine::machine::Measure) {
         if self.hint <= 0.01 {
             return;
         }
-        let hint = KeyHint::translated_glyph(plx_platform::i18n::msg::browse_detail_full_screen_hint("\u{fffc}"), Icon::ChevronUp);
+        let hint = KeyHint::translated_glyph(nj_platform::i18n::msg::browse_detail_full_screen_hint("\u{fffc}"), Icon::ChevronUp);
         let x = hint_cx(hint.width(measure));
         hint.draw(p.alpha(self.hint), x, cy, measure);
     }
@@ -517,7 +517,7 @@ pub(super) fn hint_cy(row_top: f32, row_h: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_machine::machine::Key as MKey;
+    use nj_machine::machine::Key as MKey;
 
     /// **The "Trailer / Trailer" duplicate case.** When the extra's own PMS title is the
     /// boilerplate "Trailer" (however it's cased/spaced — most servers scan trailers this way),
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn a_fresh_press_hops_the_default_step_and_a_tap_arms_the_debounce_instead_of_committing_at_once()
     {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut t = Transport::IDLE;
         let dur = 120_000_000_000i64;
         let live = 30_000_000_000i64;
@@ -623,8 +623,8 @@ mod tests {
     /// **The trailer shares the Skip interval**: a fresh press hops the chosen length, both ways.
     #[test]
     fn a_fresh_press_hops_the_chosen_skip_interval() {
-        use crate::plex::session::SkipInterval;
-        let _g = plx_base::testlock::serial();
+        use crate::catalog::session::SkipInterval;
+        let _g = nj_base::testlock::serial();
         const S: i64 = 1_000_000_000;
         let (dur, live) = (200 * S, 100 * S);
         for interval in SkipInterval::LADDER {

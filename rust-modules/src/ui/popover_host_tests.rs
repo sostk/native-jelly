@@ -33,7 +33,7 @@ impl FrameCache {
         self.snapshot.as_ref().map_or(0, |s| s.len())
     }
     pub(super) fn capture(&mut self) -> bool {
-        if self.off || plx_gfx::gfx::blur_source_pass() {
+        if self.off || nj_gfx::gfx::blur_source_pass() {
             return false;
         }
         self.snapshot = Some(PIXELS.with(|p| p.borrow().clone()));
@@ -41,14 +41,14 @@ impl FrameCache {
     }
     /// No GL context in a host test: this always declines, exactly as `render_available` says, so
     /// every caller falls back to the `capture`/`draw` copy path exercised by this file's tests.
-    pub(super) fn render_into(&mut self) -> Option<plx_base::surface::PageTarget> {
+    pub(super) fn render_into(&mut self) -> Option<nj_base::surface::PageTarget> {
         None
     }
-    pub(super) fn rendered(&mut self, target: plx_base::surface::PageTarget) {
+    pub(super) fn rendered(&mut self, target: nj_base::surface::PageTarget) {
         self.finish_render(target);
         self.draw();
     }
-    pub(super) fn finish_render(&mut self, target: plx_base::surface::PageTarget) {
+    pub(super) fn finish_render(&mut self, target: nj_base::surface::PageTarget) {
         drop(target);
         self.snapshot = Some(PIXELS.with(|p| p.borrow().clone()));
     }
@@ -70,7 +70,7 @@ struct Reset {
 impl Reset {
     fn new(cache_off: bool) -> Self {
         let users = HOST_USERS.swap(1, Relaxed);
-        let frozen = plx_gfx::gfx::set_page_frozen(false);
+        let frozen = nj_gfx::gfx::set_page_frozen(false);
         unsafe {
             CACHE = FrameCache { snapshot: None, off: cache_off };
             HELD = Held::Nothing;
@@ -85,7 +85,7 @@ impl Drop for Reset {
     fn drop(&mut self) {
         invalidate();
         HOST_USERS.store(self.users, Relaxed);
-        plx_gfx::gfx::set_page_frozen(self.frozen);
+        nj_gfx::gfx::set_page_frozen(self.frozen);
         CAPTURE_OWED.store(false, Relaxed);
         CAPTURE_POINTLESS.store(false, Relaxed);
         GROUND_DRAWN.store(false, Relaxed);
@@ -93,7 +93,7 @@ impl Drop for Reset {
 }
 
 fn ink(label: &'static str) {
-    if !plx_gfx::gfx::culled(0.0, 0.0, 1920.0, 1080.0) {
+    if !nj_gfx::gfx::culled(0.0, 0.0, 1920.0, 1080.0) {
         PIXELS.with(|p| p.borrow_mut().push(label));
     }
 }
@@ -121,25 +121,25 @@ fn embedded_alert_frame(settled: bool, later_scope: bool) -> Vec<&'static str> {
             let _container_scrims = live();
         }
     }
-    assert!(!plx_gfx::gfx::page_frozen(), "the page scope must restore its caller");
+    assert!(!nj_gfx::gfx::page_frozen(), "the page scope must restore its caller");
     PIXELS.with(|p| p.borrow().clone())
 }
 
 #[test]
 fn captured_ground_cannot_overwrite_an_embedded_alerts_foreground() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let _reset = Reset::new(false);
     let expected = vec!["page", "scrim", "glass", "title/body/buttons"];
     assert_eq!(embedded_alert_frame(false, true), expected, "opening frame");
     assert_eq!(embedded_alert_frame(true, true), expected, "first settled frame");
     assert_eq!(embedded_alert_frame(true, true), expected, "cached input frame");
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     assert_eq!(embedded_alert_frame(true, true), expected, "host damage recapture");
 }
 
 #[test]
 fn cache_off_and_no_later_scope_explain_the_old_green_paths() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let expected = vec!["page", "scrim", "glass", "title/body/buttons"];
     {
         let _reset = Reset::new(true);
@@ -154,7 +154,7 @@ fn cache_off_and_no_later_scope_explain_the_old_green_paths() {
 #[test]
 fn reconciling_card_content_invalidates_its_cached_ground_only_when_changed() {
     use crate::ui::decision_alert::{Answers, DecisionAlert};
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let _reset = Reset::new(false);
     let mut alert = DecisionAlert::new();
     alert.open_card(c"Details", vec!["support".into()], Answers::One);
@@ -172,12 +172,12 @@ fn reconciling_card_content_invalidates_its_cached_ground_only_when_changed() {
 // term to be reached through.
 #[test]
 fn a_field_keeps_its_dither_through_every_motion() {
-    use plx_machine::idle::{frame_begin, note_spring, page_moving, present_moving, MotionScope};
+    use nj_machine::idle::{frame_begin, note_spring, page_moving, present_moving, MotionScope};
     use crate::ui::popover::host::begin_frame;
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     frame_begin(1.0 / 60.0);
     begin_frame(false);
-    assert_eq!(plx_gfx::gfx::dither_for_field(700.0, 700.0), plx_gfx::gfx::DITHER_LSB, "at rest, the field pays");
+    assert_eq!(nj_gfx::gfx::dither_for_field(700.0, 700.0), nj_gfx::gfx::DITHER_LSB, "at rest, the field pays");
 
     // A POPOVER's spring: 100 units from its target, stepped inside its own scope, the way
     // `Popover::update` steps every appear spring. The frame is in motion — and the page is not.
@@ -188,8 +188,8 @@ fn a_field_keeps_its_dither_through_every_motion() {
     assert!(present_moving() && !page_moving());
     begin_frame(false);
     assert_eq!(
-        plx_gfx::gfx::dither_for_field(700.0, 700.0),
-        plx_gfx::gfx::DITHER_LSB,
+        nj_gfx::gfx::dither_for_field(700.0, 700.0),
+        nj_gfx::gfx::DITHER_LSB,
         "a field still pays in motion — a focus spring on Settings must not strip its ground"
     );
 
@@ -200,5 +200,5 @@ fn a_field_keeps_its_dither_through_every_motion() {
     note_spring(0.0, 100.0, 0.0);
     assert!(page_moving());
     begin_frame(true);
-    assert_eq!(plx_gfx::gfx::dither_for_field(700.0, 700.0), plx_gfx::gfx::DITHER_LSB, "page motion is not a field's business");
+    assert_eq!(nj_gfx::gfx::dither_for_field(700.0, 700.0), nj_gfx::gfx::DITHER_LSB, "page motion is not a field's business");
 }

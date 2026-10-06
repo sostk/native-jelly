@@ -29,7 +29,7 @@ pub fn with_api_key(path: &str, token: &str) -> String {
         return path.to_string();
     }
     let sep = if path.contains('?') { '&' } else { '?' };
-    format!("{path}{sep}{API_KEY}={}", crate::plex::urlenc_str(token))
+    format!("{path}{sep}{API_KEY}={}", crate::catalog::urlenc_str(token))
 }
 
 /// The four device facts every Jellyfin request names.
@@ -46,7 +46,7 @@ pub struct DeviceIdentity {
 /// sharing the install's id would sign each other out. Deriving it per user keeps every seat its own
 /// device while staying stable across launches.
 pub fn device_id(install_id: &str, username: &str) -> String {
-    let digest = plx_base::sha256::sha256(format!("{install_id}\n{}", username.to_lowercase()).as_bytes());
+    let digest = nj_base::sha256::sha256(format!("{install_id}\n{}", username.to_lowercase()).as_bytes());
     digest[..16].iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -54,7 +54,7 @@ pub fn device_id(install_id: &str, username: &str) -> String {
 /// percent-encoded inside its quotes (the server URL-decodes them), so a device name with a comma
 /// or quote cannot break the header apart.
 pub fn authorization(id: &DeviceIdentity, token: &str) -> String {
-    let enc = crate::plex::urlenc_str;
+    let enc = crate::catalog::urlenc_str;
     let mut v = format!(
         "Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
         enc(&id.client),
@@ -122,7 +122,7 @@ mod tests {
             "GET /Videos/x/stream?static=true&ApiKey=SECRETTOKEN0 {}",
             authorization(&ident(), "HEADERTOKEN1")
         );
-        let out = plx_base::eventlog::scrub::scrub_local_with(&line, &[]);
+        let out = nj_base::eventlog::scrub::scrub_local_with(&line, &[]);
         assert!(!out.contains("SECRETTOKEN0"), "{out}");
         assert!(!out.contains("HEADERTOKEN1"), "{out}");
     }

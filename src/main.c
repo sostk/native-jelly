@@ -3,8 +3,8 @@
  * root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
  * Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
  *
- * plxnative — native webOS Plex client. BOOT SHIM only: the app core is Rust
- * plex_run() (rust-modules). This file stays C for the genuinely low-level
+ * nativejelly — native webOS Plex client. BOOT SHIM only: the app core is Rust
+ * nj_run() (rust-modules). This file stays C for the genuinely low-level
  * bootstrap that must run before any Rust executes — the async-signal-safe crash
  * tracer, the event-log handle, stderr capture, and process bring-up. Everything
  * else (SDL, the event loop, input, playback orchestration, draw) is Rust. */
@@ -22,15 +22,15 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
                        * crash handler here and by the starfish.c seam. Opened "w" each
                        * launch, so it is TRUNCATED on relaunch — do not rely on it to
                        * survive a crash+relaunch (that is what the crash log and `crash_fd` are for). */
-/* The crash log has no `FILE *` any more, only a raw descriptor handed to `plx_crash_install`: its
+/* The crash log has no `FILE *` any more, only a raw descriptor handed to `nj_crash_install`: its
  * ONLY writer is the signal handler, and stdio is not usable there. See `src/crashtrace.c`. */
 
-extern int plex_run(const char *pms_host, int pms_port);  /* Rust app core (no creds — session or /tmp/plxnative-token) */
-extern int plx_sentry_spool_external(const char *path); /* Sentry daemon's spool-only re-entry */
-extern void plx_crash_write_image_marker(int fd); /* identify this binary in the append-only log */
+extern int nj_run(const char *pms_host, int pms_port);  /* Rust app core (no creds — session or /tmp/nativejelly-token) */
+extern int nj_sentry_spool_external(const char *path); /* Sentry daemon's spool-only re-entry */
+extern void nj_crash_write_image_marker(int fd); /* identify this binary in the append-only log */
 
-/* Where this INSTALL's runtime files live — `/tmp/plxnative-events.log` for the app users get,
- * `/tmp/com.sostk.nativejelly.debug/plxnative-events.log` for a developer build installed beside it.
+/* Where this INSTALL's runtime files live — `/tmp/nativejelly-events.log` for the app users get,
+ * `/tmp/com.sostk.nativejelly.debug/nativejelly-events.log` for a developer build installed beside it.
  *
  * The answer comes from Rust (`plx_runtime_path`, rust-modules/base/src/paths.rs) rather than from a
  * literal here, and that is the whole point: this file opens three logs before a single line of
@@ -74,7 +74,7 @@ static int open_fd_0600(const char *path, int flags);
  * Mode 0600 because this file records the server name, the LAN address, Plex Home profile names
  * and episode titles, and /tmp is world-readable. */
 static FILE *open_event_log(void) {
-    int fd = open_fd_0600(runtime_path("plxnative-events.log"), O_TRUNC | O_APPEND);
+    int fd = open_fd_0600(runtime_path("nativejelly-events.log"), O_TRUNC | O_APPEND);
     return fd >= 0 ? fdopen(fd, "a") : NULL;
 }
 
@@ -110,7 +110,7 @@ int main(int argc, char **argv) {
      * process is already beyond saving. Recognise and move it BEFORE opening (and truncating) any
      * ordinary app log, starting SDL, or arming another handler. A lookalike argument returns 0 and
      * proceeds as a normal launch; Rust validates the exact SDK directory, UUID and file type. */
-    if (argc == 2 && plx_sentry_spool_external(argv[1])) return 0;
+    if (argc == 2 && nj_sentry_spool_external(argv[1])) return 0;
     elogf = open_event_log();
     /* The crash handler's own descriptors, both opened BEFORE `install_crash_tracer` arms the
      * handler — so a signal can never reach code that has to open something first, which is the
@@ -123,21 +123,21 @@ int main(int argc, char **argv) {
      * stream has already flushed and nothing is interleaved mid-line. (Every `elogf` writer in
      * `src/starfish.c` does `fflush` immediately today, so there is nothing pending in practice —
      * but a crash tracer must not depend on that continuing to be true.) */
-    int event_fd = open_fd_0600(runtime_path("plxnative-events.log"), O_APPEND);
-    int crash_fd = open_fd_0600(runtime_path("plxnative-crash.log"), O_APPEND); /* append: keep prior crashes across relaunches */
+    int event_fd = open_fd_0600(runtime_path("nativejelly-events.log"), O_APPEND);
+    int crash_fd = open_fd_0600(runtime_path("nativejelly-crash.log"), O_APPEND); /* append: keep prior crashes across relaunches */
     /* Written while allocation and ELF parsing are safe. The signal path then needs only numbers,
      * while the next launch can still pair a record with THIS executable after a deploy. */
-    plx_crash_write_image_marker(crash_fd);
+    nj_crash_write_image_marker(crash_fd);
     /* stderr is redirected from the SAME verified descriptor. Re-opening by path with `freopen`
      * would reintroduce the symlink race that `open_fd_0600` just closed. */
-    int stderr_fd = open_fd_0600(runtime_path("plxnative-stderr.log"), O_TRUNC | O_APPEND);
+    int stderr_fd = open_fd_0600(runtime_path("nativejelly-stderr.log"), O_TRUNC | O_APPEND);
     if (stderr_fd >= 0) {
         if (dup2(stderr_fd, STDERR_FILENO) >= 0)
             fcntl(STDERR_FILENO, F_SETFD, FD_CLOEXEC);
         if (stderr_fd != STDERR_FILENO) close(stderr_fd);
     }
-    plx_crash_install(event_fd, crash_fd);
+    nj_crash_install(event_fd, crash_fd);
     /* request BACK key delivery from the webOS access policy (before SDL init) */
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
-    return plex_run(PMS_HOST, PMS_PORT);
+    return nj_run(PMS_HOST, PMS_PORT);
 }

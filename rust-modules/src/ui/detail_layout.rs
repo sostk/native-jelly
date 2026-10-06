@@ -70,7 +70,7 @@ pub(crate) struct HeroChain {
 pub(crate) fn hero_chain(
     syn_h: f32,
     has_ratings: bool,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) -> HeroChain {
     let meta_y = TITLE_BOTTOM + theme::space::SM;
     // The identity line's own bounding box is its BADGE, not its caption: `draw_identity_line`
@@ -85,7 +85,7 @@ pub(crate) fn hero_chain(
     let facts_y = syn_y + syn_h.max(34.0) + theme::space::MD;
     // The facts row's own icons (`FACTS_GLYPH_D`/capsule) are sized to the `CAPTION` text itself,
     // unlike the two rows above, so its measured height is the plain cap band — read through the
-    // `Measure` seam (`check-deps.sh`'s "textmeasure" gate: raw `plx_gfx::text::cap_h` is not
+    // `Measure` seam (`check-deps.sh`'s "textmeasure" gate: raw `nj_gfx::text::cap_h` is not
     // reachable outside `text.rs`/`ui/text_view.rs`/`ui/text_buffer.rs`/a `Measure` impl body),
     // the same capability `compute_hero_chain`'s caller already threads down for the synopsis.
     let facts_h = measure.cap_h(theme::size::CAPTION);
@@ -125,7 +125,7 @@ pub(crate) fn overscan_rects(out: &mut Vec<(&'static str, Rect)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_machine::machine::Measure;
+    use nj_machine::machine::Measure;
 
     /// The facts row and the people column are LEVEL, so the thing that keeps them apart is a
     /// width bound and nothing else.

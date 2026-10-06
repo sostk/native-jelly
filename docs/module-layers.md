@@ -9,10 +9,10 @@ off behind a port, so that another TV OS can be a second port. L15 is **gate-com
 entries are gone, and the gate fails on any reference from outside the port to a member of it. It
 is not done in the sense of its own goal. L15b, the OS-neutral port, is open (below). Neither holds
 up the split. **The split has started: `base`, `machine`, `platform`, `gfx` and `net` are their own
-crates, `plx_base`, `plx_machine`, `plx_platform`, `plx_gfx` and `plx_net`** (`rust-modules/base/`,
+crates, `nj_base`, `nj_machine`, `nj_platform`, `nj_gfx` and `nj_net`** (`rust-modules/base/`,
 `machine/`, `platform/`, `gfx/` and `net/`; "Split 1: base", "Split 2: machine", "Split 3:
 platform", "Split 4 (gfx)" and "Split 5 (net)" below); the other nine layers are still modules of
-`plxnative-modules`.
+`nativejelly-modules`.
 
 The gate is `ci/check-module-layers.py` and its config is `ci/module-layers.ini`.
 `ci/allow/layers.txt` holds the migration list. L1 to L14 emptied it, L15 declared 44 entries of
@@ -23,7 +23,7 @@ does not count `tv` or `port`.
 
 ## Why this exists
 
-rustc compiles and caches per **crate**. `plxnative-modules` is one 441k-line crate. Any edit
+rustc compiles and caches per **crate**. `nativejelly-modules` is one 441k-line crate. Any edit
 recompiles all of it, and with `CARGO_INCREMENTAL=0` (every linked worktree and every gate) it
 recompiles all of it from scratch. A Cargo workspace of smaller crates would recompile only the
 edited crate and the crates above it. Cargo rejects a dependency cycle between crates, so the
@@ -230,7 +230,7 @@ proves the references are gone and nothing more; L15b is open.
 | **L12** media owns its lifecycle seams — **done** | 7 / 28 | The foreground-resume reducer and the transport-pause contract are `player::lifecycle` (`app::lifecycle` re-exports them), the stats switch is `player::DIAG_READOUT_ON`, `Venc::open` takes the capture socket writer as an argument, and `route` takes the HUD context line as a parameter, with the up-next still prefetch a hook the app installs. |
 | **L13** tests move up to the layer that owns their parts — **done** | 41 / 96 | Part a moved the auth, plex, i18n, task and fontcov tests that named upper layers to `app/` (`session_*_tests.rs`), `screens/login_text_fit_tests.rs`, `plex`, `auth::owner` and `storage::client`, and moved `fontcov`'s `Measure` impl beside the trait, with `ui::machine`'s new `BareArg`/`BareMeasure` fixtures for the rest; part b moved the data, media and ui ones to `app/` (`dispatch_return_tests.rs`, `overscan_audit_tests.rs`) and `screens/` (`plaintext_question`, `library/labels_tests.rs`, `search/tests.rs`, `player`), and rewrote two against their own layer. |
 | **L14** session-layer presentation to screens — **done** | 2 / 4 | `auth::signed_in_reason` is a private fn of `screens::login`, its only caller, with its two tests; `auth` already handed over the plain account name. |
-| **L15** the webOS port — **gate-complete** | 44 / 205 | Everything outside `[port webos]` reaches the television through the `tv` interfaces in `platform` that the port fills at boot: `tv::{device, sandbox, secure, home, toast, window}`, `devcaps::dv`, and `tv::sink::VideoSink`, a Starfish-shaped verb trait that `player::ffi::StarfishSink` and `player::ffi_host::HostSink` implement. `plex_run` is `port::plex_run`. The allowlist is empty. Not "done": the sink is not OS-neutral and the simulator is not its own port (L15b). |
+| **L15** the webOS port — **gate-complete** | 44 / 205 | Everything outside `[port webos]` reaches the television through the `tv` interfaces in `platform` that the port fills at boot: `tv::{device, sandbox, secure, home, toast, window}`, `devcaps::dv`, and `tv::sink::VideoSink`, a Starfish-shaped verb trait that `player::ffi::StarfishSink` and `player::ffi_host::HostSink` implement. `nj_run` is `port::nj_run`. The allowlist is empty. Not "done": the sink is not OS-neutral and the simulator is not its own port (L15b). |
 | **L15b** the OS-neutral port — **open** | — | An OS-neutral video sink with the ACB bind sequence behind it, the simulator as its own port, and the webOS facts the gate cannot see. See below. |
 
 ### L15: the webOS port
@@ -245,8 +245,8 @@ their layers, so none of this held up the split.
 
 L15 moved every one of those references behind an interface in `platform`'s new `tv` module that
 the port fills at boot. `tv::Port` is a table of function pointers, installed once as the first
-statement of `port::plex_run`, before anything that reads it. With no port installed (host unit
-tests, where nothing calls `plex_run`) `tv::ABSENT` answers what the host arms answered before; a
+statement of `port::nj_run`, before anything that reads it. With no port installed (host unit
+tests, where nothing calls `nj_run`) `tv::ABSENT` answers what the host arms answered before; a
 shipping build that reaches it logs `tv: port not installed - using the no-port defaults` once.
 Only `tv`'s own modules read the table. The one thing that leaves it is the sink, through
 `tv::sink::installed()`, and `ci/check-deps.sh` (rule `sink`) fails on that name or `VideoSink`
@@ -262,15 +262,15 @@ published values rather than hooks: the webOS code writes them into `tv::device`
 | native-video availability and repair | `tv::sandbox::{blocks_native_video, context, repair, Verdict, State, Failure, FORCE_BLOCKED}`; the verdict is published by `webos::probe` and the repair is a port hook | `player`, `route`, `appkit::player_hud`, `screens::player`, `app::playback` |
 | video sink | `tv::sink::VideoSink`, implemented by `player::ffi::StarfishSink` and `player::ffi_host::HostSink`, installed in `Port.sink` and read through `tv::sink::installed` | `player::{engine, pump, threads}`, `player::claim_hold`'s tests |
 | secure store | `tv::secure::{seal, open, remove, Sealed, Backend}` | `plex::session` |
-| storage backend | `storage::client::install_activator`, which the port calls with `webos::activate_storage_helper` | `port::plex_run` |
+| storage backend | `storage::client::install_activator`, which the port calls with `webos::activate_storage_helper` | `port::nj_run` |
 | locale | `tv::system_locale` and `tv::LocaleReply`; `i18n` still owns the parse and the log lines | `i18n` |
 | window, surface, video plane, bus pump and frame probe | `tv::window` | `app::boot`, `app::run`, `app/mod.rs` |
 | home key | `tv::home::{go_home, poll, take_root_press, release_root_press}` | `app::input`, `app::run`, `app::adapters::session`, `app::lifecycle`'s tests |
 | system toast | `tv::toast::{toast, send, Identity, Outcome, Sent}` | `app::clock_notice`, `dev::scenarios::toast_probe` |
 
-`tv` may name only `base`, `machine` and `platform`. `port.rs` holds `plex_run` and the `PORT` table
+`tv` may name only `base`, `machine` and `platform`. `port.rs` holds `nj_run` and the `PORT` table
 that points each hook at the `webos`, `keymanager` and `system` function behind it. The C shim and
-the simulator both enter through `port::plex_run`; `app::run_application` is the two-line body it
+the simulator both enter through `port::nj_run`; `app::run_application` is the two-line body it
 hands over to. `lib.rs` declares the port but re-exports nothing from it, because a re-export would
 be a reference from the crate root into the port, which the gate refuses.
 
@@ -296,7 +296,7 @@ at the same `webos`, `keymanager` and `system` functions, whose `hostsim` arms a
 and whose sink is `HostSink`. So the simulator behaves as it did, but it is not yet a second
 implementation of the interfaces.
 
-L15 is gate-complete: no entry carries its tag, `plex_run`, which the C shim calls, lives in the
+L15 is gate-complete: no entry carries its tag, `nj_run`, which the C shim calls, lives in the
 port, and the gate fails on a new reference into it. That is all the gate can see. L15 also set out
 to put an OS-neutral sink with the bind sequence behind it and the simulator's stand-ins in their
 own port. Neither landed, so L15 is not called done. They are L15b.
@@ -336,9 +336,9 @@ still webOS's. Three things are left:
 
 L15b is done when the sink is OS-neutral, the simulator is its own port, and these facts are the
 port's. The port can then leave its layers for a crate of its own on top: it names `app` to start
-it, and nothing names it. `plxnative-modules` stays the staticlib the Makefile links, now holding
+it, and nothing names it. `nativejelly-modules` stays the staticlib the Makefile links, now holding
 the port. Another TV OS is another port in that position. The simulator binary, `src/bin/sim.rs`,
-is already a separate crate there, and enters through `port::plex_run`.
+is already a separate crate there, and enters through `port::nj_run`.
 
 ### Then the split
 
@@ -357,9 +357,9 @@ of the item named or impl coherence. Extract bottom-up: `base`, then `machine`, 
 on. Each extraction:
 
 - creates `rust-modules/<layer>/` as a workspace member (the storage helper in `storage/` is the
-  existing example), moves the files, and turns `crate::x::` into `plx_<layer>::x::` in the layers
+  existing example), moves the files, and turns `crate::x::` into `nj_<layer>::x::` in the layers
   above. `pub(crate)` items named from another layer become `pub`;
-- keeps `plxnative-modules` as the top crate and the one `staticlib` the Makefile links. The layer
+- keeps `nativejelly-modules` as the top crate and the one `staticlib` the Makefile links. The layer
   crates are `rlib`s it depends on. `ci/test_no_host_staticlib.py` and the `$(RUST_LIB)` rule
   stay valid;
 - forwards the features. `devtools`, `devtriggers`, `threadcheck`, `lab-diagnostics` and `hostsim`
@@ -390,19 +390,19 @@ on. Each extraction:
   look in each for a path under `rust-modules/src/` that the moved files left, a `cargo` command
   without the full `-p` list, and a `--src` list missing the new crate. Splits 4 and 5 shipped red
   on two such steps: `tools/font-hint-audit.py` still opened `rust-modules/src/gfx/tokens.rs`
-  (cross-build job), and the build-budget graph step counted `plx_net`'s `test-support` optional
+  (cross-build job), and the build-budget graph step counted `nj_net`'s `test-support` optional
   dependencies because `cargo metadata` unifies features across dependency kinds (host-lint job;
   the tool now reads `cargo tree`). Then
   `grep -rn "rust-modules/src/" tools ci tests Makefile .github` for each moved module name.
 
 ### Split 1: base
 
-`base` was extracted first: `rust-modules/base/` is the workspace member `plx_base` (an `rlib`, in
-the workspace beside the storage helper), `plxnative-modules` depends on it by path and is still
+`base` was extracted first: `rust-modules/base/` is the workspace member `nj_base` (an `rlib`, in
+the workspace beside the storage helper), `nativejelly-modules` depends on it by path and is still
 the one crate the Makefile links as a `staticlib`. Its members are the `[base]` list in
-`ci/module-layers.ini`; `diag::{heartbeat, spans, zlib}` left `diag` and are `plx_base::diag::*`
+`ci/module-layers.ini`; `diag::{heartbeat, spans, zlib}` left `diag` and are `nj_base::diag::*`
 (`base/src/diag.rs` holds only those three, and the application's own `diag` is a different module
-of the same name). Every `crate::<member>::` in the application became `plx_base::<member>::`,
+of the same name). Every `crate::<member>::` in the application became `nj_base::<member>::`,
 written by a script, not by hand; the only hand edits were `lib.rs`'s two simulator accessors.
 What the extraction taught, beyond what the recipe above predicted:
 
@@ -410,7 +410,7 @@ What the extraction taught, beyond what the recipe above predicted:
   in `base` too: the watchdog disarms itself (`task::watchdog`), `assert_may_block` panics instead of
   aborting (`task::blocking`), `persistent_state_root` resolves to a per-process scratch directory
   (`paths`), `diag::heartbeat` stubs the two SDL clock calls so a test binary links no SDL, and
-  `devtrig` arms its readers. A dependent's tests build `plx_base` without `cfg(test)`, so all of
+  `devtrig` arms its readers. A dependent's tests build `nj_base` without `cfg(test)`, so all of
   those would have silently run in their shipping form. Each is now `cfg(any(test, feature =
   "test-support"))` (and `cfg(not(...))` for the shipping arm), so a dependent that enables the
   feature gets the behaviour its tests had before. The gate cannot see this class: it reads
@@ -425,13 +425,13 @@ What the extraction taught, beyond what the recipe above predicted:
   `../src` (it would otherwise have stopped reading the application, silently, and still passed:
   every later layer must be added to its root list); `paths` and `fontcov` climb one more `..`.
 - **No orphan-rule hazard appeared**: no `impl` in the application has both its trait and its type
-  in `plx_base` (`ShippedMeasure`'s impl is `machine`'s trait on a `plx_base` type, which is
-  legal in the application crate and is legal in the `plx_machine` crate; Split 2 below).
+  in `nj_base` (`ShippedMeasure`'s impl is `machine`'s trait on a `nj_base` type, which is
+  legal in the application crate and is legal in the `nj_machine` crate; Split 2 below).
 - **The tooling that knew the tree's shape**: `ci/module_graph.py` reads every sibling
   `rust-modules/<layer>/` package named `plx_*` as part of the same module tree (so the layer gate
   and `check-module-cycle` keep one graph and `base uses nothing` is still enforced; the cycle
   baseline shrank by `diag`, which was in the big cycle only through `diag::heartbeat`), the
-  `cargo test/check` recipes pass `-p plxnative-modules -p plx_base` (a bare `cargo test --lib`
+  `cargo test/check` recipes pass `-p nativejelly-modules -p nj_base` (a bare `cargo test --lib`
   would run the application's tests only), `ci/check-deps.sh` and `ci/check-build-budgets.py`
   scan `base/src` as well, `tools/cargo-seed.py` keys on the layer's manifest, and
   `ci/test_no_host_staticlib.py` holds the layer to `rlib`. The remaining layers each need the
@@ -441,7 +441,7 @@ What the extraction taught, beyond what the recipe above predicted:
 Measured effect (`make build-bench`, same machine, 3 interleaved runs, median; the baseline runs
 logged a host load above the core count, the later ones did not, so read single seconds as noise):
 an edit that only touches the application crate went from 34.9 s (the old one-crate "leaf" edit)
-to 31.9 s with `plx_base` fresh, an edit inside `plx_base` costs 33.2 s (it rebuilds the layer and
+to 31.9 s with `nj_base` fresh, an edit inside `nj_base` costs 33.2 s (it rebuilds the layer and
 then the application behind it), the hub edit 35.5 s to 34.2 s, and the unit suite 59.8 s to 61.8 s
 with the same 5603 tests. That is the expected size: `base` is 6.7k of 450k lines, so the split
 buys about the 2-3 s that crate cost per edit. The leverage is in the layers above it, which are
@@ -449,18 +449,18 @@ the other crates' worth of lines an edit stops recompiling.
 
 ### Split 2: machine
 
-`machine` was extracted second: `rust-modules/machine/` is the workspace member `plx_machine` (an
+`machine` was extracted second: `rust-modules/machine/` is the workspace member `nj_machine` (an
 `rlib`, `uses = base`), holding what was `ui::machine`, `ui::present`, `ui::idle`, `ui::landgate`,
 `ui::landing` and `ui::motion`. They are top-level modules of that crate, so a path
-`crate::ui::machine::Host` is `plx_machine::machine::Host`; `ci/module-layers.ini` lists them as
+`crate::ui::machine::Host` is `nj_machine::machine::Host`; `ci/module-layers.ini` lists them as
 `machine present idle landgate landing motion`, and `ci/module_graph.py` read the new crate with no
 change (it picks up every sibling `plx_*` package). The module-cycle baseline did not move: none of
 the six was on the cycle. There is no re-export in `ui`: the 234 files that named the modules were
-rewritten by a script (`crate::ui::<m>` to `plx_machine::<m>`, `use` groups split so the machine
-items get their own `use plx_machine::{..}`), and the two things it could not resolve were
+rewritten by a script (`crate::ui::<m>` to `nj_machine::<m>`, `use` groups split so the machine
+items get their own `use nj_machine::{..}`), and the two things it could not resolve were
 `super::super::machine`/`::idle` in a nested test module (`ui/dispatch.rs`, `ui/runtime_warning.rs`)
-and the `$crate::ui::machine` inside `focusable_via_*!`, which became `plx_machine::…` (a macro body
-that names another crate's path expands in the caller, which depends on `plx_machine` anyway).
+and the `$crate::ui::machine` inside `focusable_via_*!`, which became `nj_machine::…` (a macro body
+that names another crate's path expands in the caller, which depends on `nj_machine` anyway).
 `pub(crate)` and `pub(super)` became `pub` across the moved files; `machine` has one
 `macro_rules!`, `newtype!`, used only inside `machine.rs`. Features: `devtriggers` and `hostsim`
 are forwarded (`motion`'s held phase clock, `idle`'s simulator settle clock) and `test-support`
@@ -469,7 +469,7 @@ is new. What it taught beyond the recipe:
 - **`--report` listed 11 items, and the first thing it missed was behaviour.** `Present::new()`
   hands every gate a *private* wake door under `cfg(test)`, so that parallel tests cannot wake each
   other's dispatcher, and `idle::invalidate` bumps a per-thread `LOCAL_DAMAGE` counter that
-  `take_local_damage` reads. A dependent's tests build `plx_machine` without `cfg(test)`, so every
+  `take_local_damage` reads. A dependent's tests build `nj_machine` without `cfg(test)`, so every
   gate in the `ui`, `screens` and `app` tests would have shared the one global door and every
   quiet-frame assertion would have read a counter nothing incremented: no compile error, just
   tests that pass or fail at random. Both are `cfg(any(test, feature = "test-support"))` now, as
@@ -477,13 +477,13 @@ is new. What it taught beyond the recipe:
   `idle::{take_local_damage, reset_for_test}`, `BareArg`, `BareMeasure`). The private
   `landgate::phase` wrapper and `Present::global` stay `cfg(test)`: only this crate's tests call
   them, and under `test-support` alone they would be dead code.
-- **The `Measure` impl for `fontcov::advances::ShippedMeasure` lives in `plx_machine`.** The trait
-  is the machine crate's and the type is `plx_base`'s, so the impl may sit in either crate; it
+- **The `Measure` impl for `fontcov::advances::ShippedMeasure` lives in `nj_machine`.** The trait
+  is the machine crate's and the type is `nj_base`'s, so the impl may sit in either crate; it
   cannot sit in a third (E0117), which is why it could not stay in `ui` for the layers above.
   The machine crate is the lowest one that names both. It is `test-support` only, and
-  `plx_machine/test-support` enables `plx_base/test-support`, because `fontcov::advances` is
+  `nj_machine/test-support` enables `nj_base/test-support`, because `fontcov::advances` is
   itself behind that feature. No other orphan-rule hazard appeared (the compiler is the checker:
-  an `impl` of a `plx_machine` trait for a `plx_base` type in the application would be the next
+  an `impl` of a `nj_machine` trait for a `nj_base` type in the application would be the next
   one, and there is none).
 - **Moving a trait to another crate changes dead-code analysis.** `app/recorder.rs`'s
   `RecordedInit` is constructed only by the `cfg(test)` header builder; with `LogicalState` local,
@@ -497,21 +497,21 @@ is new. What it taught beyond the recipe:
   one-door gate for `present`) are pointed at `SRC_MACHINE` too, and `wholly_test_files` classifies
   the crate's `landing/stream_tests.rs` as test code. Without that the move would have removed six
   files from six gates and every gate would have stayed green.
-- **Tooling that knows the tree's shape**: the `-p` lists (`-p plxnative-modules -p plx_base -p
-  plx_machine`) in the Makefile, the workflow, `tools/build-bench.py` and the tests that pin them;
+- **Tooling that knows the tree's shape**: the `-p` lists (`-p nativejelly-modules -p nj_base -p
+  nj_machine`) in the Makefile, the workflow, `tools/build-bench.py` and the tests that pin them;
   `--src rust-modules/machine/src` for the line budget; `RUST_INPUTS`; `tools/cargo-seed.py` keys on
   the new manifest; the eventlog scrub test's root list gained `../machine/src`;
   `ci/test_no_host_staticlib.py` holds the crate to `rlib`; the release-configuration hook treats
   an edit in `machine/src` as a shipping-feature risk; and `make build-bench` has a `machine`
-  scenario ("Edit leaf (plx_machine landgate.rs)").
+  scenario ("Edit leaf (nj_machine landgate.rs)").
 
 Measured effect (`make build-bench`, same machine, 3 interleaved runs, median; the
 host was loaded unevenly, a few runs of both sets took twice as long as their siblings, so the
 medians below are noisy and the minimum is the better guide). Before, on `b1bfa1f2`: an edit in
-`plx_base` 37.4 s (min 35.4), an edit of the application crate 38.1 s (min 36.9), the hub edit
-45.8 s (min 33.6), the unit suite 60.8 s. After: an edit in `plx_base` 37.9 s (min 31.9), an edit
-in `plx_machine` 53.3 s (min 34.6, it rebuilds the machine crate and the application behind it),
-an edit of the application crate 47.2 s (min 31.2, `plx_base` and `plx_machine` fresh), the hub
+`nj_base` 37.4 s (min 35.4), an edit of the application crate 38.1 s (min 36.9), the hub edit
+45.8 s (min 33.6), the unit suite 60.8 s. After: an edit in `nj_base` 37.9 s (min 31.9), an edit
+in `nj_machine` 53.3 s (min 34.6, it rebuilds the machine crate and the application behind it),
+an edit of the application crate 47.2 s (min 31.2, `nj_base` and `nj_machine` fresh), the hub
 edit 39.0 s (min 33.4), and the unit suite 60.9 s with the same 5603 tests (157 + 66 + 5380).
 That is the expected size, and it is small: `machine` is 4.1k of 450k lines, so the split buys the
 couple of seconds that crate cost per edit to everything above it. The gain is in the minima (the
@@ -520,13 +520,13 @@ application edit is 5.7 s faster), not in the noisy medians; the crates that car
 
 ### Split 3: platform
 
-`platform` was extracted third: `rust-modules/platform/` is the workspace member `plx_platform` (an
+`platform` was extracted third: `rust-modules/platform/` is the workspace member `nj_platform` (an
 `rlib`, `uses = base machine`), holding `webos storage keymanager devcaps imgcache i18n labcfg tv`
 and the `storage_service/` files that `storage` and the storage helper both include by `#[path]`
 (they are not a module of their own). `webos` and `keymanager` are still `[port webos]` members, and
-the port fence reads `plx_platform::webos::` exactly as it read `crate::webos::`: a probe naming
+the port fence reads `nj_platform::webos::` exactly as it read `crate::webos::`: a probe naming
 either from `coldstart.rs` still fails the gate for both. The 1828 `crate::<member>::` references in
-150 application files were rewritten by a script to `plx_platform::<member>::`; `pub(crate)` became
+150 application files were rewritten by a script to `nj_platform::<member>::`; `pub(crate)` became
 `pub` across the moved files and in what the two generators emit (`Flavor`, the `i18n::msg`
 accessors). Features: `devtriggers`, `hostsim` and `lab-diagnostics` are forwarded, `test-support`
 is new and enables the two lower layers'. The 218 tests of the layer run in their own binary: the
@@ -536,16 +536,16 @@ suite is 5603 tests before and after (157 + 66 + 218 + 5162). What it taught bey
   `platform/build.rs` runs the catalog generator (`platform/build_support/catalog.rs`, reading
   `locales/`) and the install-identity generator (`rust-modules/build_support/install_identities.rs`,
   which stays where it is because the storage helper's build script calls it too). It reads no
-  `PLX_*` variable and emits no `rustc-link-*`, so it is never dirty on a second run:
-  `ci/test_build_not_always_dirty.py` now fails on `plx_platform` as well as on the application
+  `NJ_*` variable and emits no `rustc-link-*`, so it is never dirty on a second run:
+  `ci/test_build_not_always_dirty.py` now fails on `nj_platform` as well as on the application
   crate. The application's `build.rs` kept the version, the build SHA, the host link configuration
   and the nanosvg object, lost its `serde`/`serde_json` build-dependencies, and the application
   manifest lost the `icu_*` crates, which only `i18n` used.
-- **A `cargo:rustc-env` reaches one crate.** `storage::diagnostics` read `env!("PLX_VERSION")`,
+- **A `cargo:rustc-env` reaches one crate.** `storage::diagnostics` read `env!("NJ_VERSION")`,
   which the application's build script publishes; the platform crate cannot see it, and
   re-deriving the version rule in a second build script would have been a third copy of it (it is
   already in `build.rs` and `ci/version_rule.py`). The application hands it in instead:
-  `storage::diagnostics::start(env!("PLX_VERSION"))`. The platform layer does not know what
+  `storage::diagnostics::start(env!("NJ_VERSION"))`. The platform layer does not know what
   version the application is.
 - **A test that reads another layer's source moves up.** `storage::diagnostics`'s boot-order test
   `include_str!`ed `app/mod.rs`; it now sits beside its sibling in `app/boot.rs`'s
@@ -579,32 +579,32 @@ suite is 5603 tests before and after (157 + 66 + 218 + 5162). What it taught bey
   (the only files with C declarations in the layer; there is no `#[link]` and no `dynlib!` in it)
   differ from their old text in `pub(crate)` alone, and the new build script links nothing, so
   `LIBS_REAL` and `ci/expected-dt-needed.txt` are untouched. The host never compiles the ARM arms:
-  `cargo check --target arm-unknown-linux-gnueabi --lib -p plxnative-modules` (`.cargo/config.toml`'s
+  `cargo check --target arm-unknown-linux-gnueabi --lib -p nativejelly-modules` (`.cargo/config.toml`'s
   `build-std`, no NDK, no link step) does, and passes with and without default features; use it for
   any split that moves FFI when no NDK is at hand.
 - **Gates scoped by the path of a moved file stopped seeing it, and some by its spelling.**
   `ci/check-deps.sh` reads `SRC_PLATFORM` where it read `SRC_MACHINE`; the `frame` and `uistorage`
   rules name a moved module as `crate::tv::window::` and `crate::storage::`, which would have kept
-  passing while matching nothing, so they accept `plx_platform::` too; the `sink` gate exempts
+  passing while matching nothing, so they accept `nj_platform::` too; the `sink` gate exempts
   `$SRC_PLATFORM/tv*`; the `fpflags` rule and the harness's private tree copy include the new
   `Cargo.toml` and `build.rs`. `ci/check-localization.py` named `webos.rs`, `tv/device.rs` and
   `devcaps/dv.rs` under `rust-modules/src` and skips a missing path without a word: it reads
   `platform/src` for them and for the constants table now. Grep the gate scripts for
   `crate::<member>` as well as for directory names.
-- **Tooling that knows the tree's shape**: the `-p` lists (`-p plxnative-modules -p plx_base -p
-  plx_machine -p plx_platform`) in the Makefile, the workflow, `tools/build-bench.py` and the tests
+- **Tooling that knows the tree's shape**: the `-p` lists (`-p nativejelly-modules -p nj_base -p
+  nj_machine -p nj_platform`) in the Makefile, the workflow, `tools/build-bench.py` and the tests
   that pin them; `--src rust-modules/platform/src` for the line budget; `RUST_INPUTS` and
   `STORAGE_INPUTS` (the helper's `#[path]` files are under `platform/`); `tools/cargo-seed.py` keys
   on the new manifest; the eventlog scrub test's root list gained `../platform/src`;
   `ci/test_no_host_staticlib.py` holds the crate to `rlib`; the release-configuration hook treats an
   edit in `platform/src` as a shipping-feature risk; and `make build-bench` has a `platform`
-  scenario ("Edit leaf (plx_platform devcaps.rs)").
+  scenario ("Edit leaf (nj_platform devcaps.rs)").
 
 Measured effect (`make build-bench`, same machine, 3 interleaved runs; the host was quiet for
-both sets, and the figures are non-incremental). Before, on `b131c181`: an edit in `plx_base` 31.3 s
-(min 31.2), in `plx_machine` 31.4 s (min 31.3), of the application crate 32.0 s (min 31.0), the hub
-edit 32.3 s (min 31.4), the unit suite 60.5 s. After: an edit in `plx_base` 30.6 s (min 30.5), in
-`plx_machine` 30.9 s (min 30.5), in `plx_platform` 31.2 s (min 30.1, it rebuilds the platform crate
+both sets, and the figures are non-incremental). Before, on `b131c181`: an edit in `nj_base` 31.3 s
+(min 31.2), in `nj_machine` 31.4 s (min 31.3), of the application crate 32.0 s (min 31.0), the hub
+edit 32.3 s (min 31.4), the unit suite 60.5 s. After: an edit in `nj_base` 30.6 s (min 30.5), in
+`nj_machine` 30.9 s (min 30.5), in `nj_platform` 31.2 s (min 30.1, it rebuilds the platform crate
 and the application behind it), of the application crate 30.8 s (min 28.4, the three layer crates
 fresh), the hub edit 30.8 s (min 28.2), and the unit suite 61.1 s with the same 5603 tests. The gain
 is the 1 to 3 s that `platform` (11k of 450k lines) cost every application edit, and no more: the
@@ -613,13 +613,13 @@ and above, which carry the line count.
 
 ### Split 4 (gfx)
 
-`gfx` was extracted fourth: `rust-modules/gfx/` is the workspace member `plx_gfx` (an `rlib`,
-`uses = base machine platform`; the manifest depends on `plx_base` and `plx_machine` only), holding `gfx` (with `backdrop`, `geom`, `profile`, `tokens`), `egl`, `text`,
+`gfx` was extracted fourth: `rust-modules/gfx/` is the workspace member `nj_gfx` (an `rlib`,
+`uses = base machine platform`; the manifest depends on `nj_base` and `nj_machine` only), holding `gfx` (with `backdrop`, `geom`, `profile`, `tokens`), `egl`, `text`,
 `img`, `svg`, `gpu_timer`, `hwcnt` and `overdraw` (which was `ui::overdraw`), and the `shaders/`
-directory the renderer embeds. The module paths are `plx_gfx::<member>::` (a path
-`plx_gfx::gfx::draw_rect` names module `gfx`), so `ci/module-layers.ini` lists `overdraw` where it
-listed `ui::overdraw`. A script wrote the rewrite (`crate::<member>::` to `plx_gfx::<member>::` in
-the application, `crate::ui::overdraw` to `plx_gfx::overdraw`, `pub(crate)` to `pub` in the moved
+directory the renderer embeds. The module paths are `nj_gfx::<member>::` (a path
+`nj_gfx::gfx::draw_rect` names module `gfx`), so `ci/module-layers.ini` lists `overdraw` where it
+listed `ui::overdraw`. A script wrote the rewrite (`crate::<member>::` to `nj_gfx::<member>::` in
+the application, `crate::ui::overdraw` to `nj_gfx::overdraw`, `pub(crate)` to `pub` in the moved
 files except the `glsl!` re-export, which names a non-exported `macro_rules!` and must stay
 `pub(crate)`); the application's `lib.rs` and `ui/mod.rs` lost the six `mod` lines and the
 `pub mod overdraw;`. Features: `devtriggers` and `hostsim` are forwarded to the lower layers, `devtools`
@@ -628,7 +628,7 @@ own `devtools`), and `test-support` is new and enables the two lower layers'. Th
 layer run in their own binary. What it taught beyond the recipe:
 
 - **A layer that holds `extern "C"` blocks has a test binary that has to link them.** Splits 1 to 3
-  moved no code whose own tests reach SDL, GL or nanosvg. `plx_gfx`'s `--test` binary does (the
+  moved no code whose own tests reach SDL, GL or nanosvg. `nj_gfx`'s `--test` binary does (the
   drawing tests make `gfx` and `text` live), and with the link lines left in the application's
   `build.rs` it fails on undefined symbols (observed: it did, with the call to the shared emitter
   removed). A `cargo:rustc-link-lib` line reaches the package that prints it and the packages that
@@ -645,9 +645,9 @@ layer run in their own binary. What it taught beyond the recipe:
   residency in a ledger instead of calling `text_tex` (no GL context on a host), and
   `gfx::delete_tex` skips `glDeleteTextures` under `cfg(not(test))` because the host driver's
   dispatch table is a null vtable and the call is an immediate SIGSEGV (`screens::login`'s
-  `unmount_frees_the_qr_texture` is the test that proves it). A dependent's tests build `plx_gfx`
+  `unmount_frees_the_qr_texture` is the test that proves it). A dependent's tests build `nj_gfx`
   without `cfg(test)`, so all three would have run in their shipping form: the last one as a crash
-  of the whole `plxnative-modules` test binary. A fourth was nested, `cfg(all(debug_assertions,
+  of the whole `nativejelly-modules` test binary. A fourth was nested, `cfg(all(debug_assertions,
   not(test)))` on `video_plane_refuses`' panic, and a grep for `cfg(not(test))` did not find it: the
   suite did (two `ui` tests that drive the refusal on purpose died on it), so grep for `test` inside
   any `cfg(...)`, not for the spelled forms. All are `cfg(any(test, feature = "test-support"))`
@@ -664,7 +664,7 @@ layer run in their own binary. What it taught beyond the recipe:
 - **A gate that spells a moved item's path goes silent, not red.** `ci/check-deps.sh`'s
   `textmeasure` rule greps `crate::text::(text_width|elide|cap_h)(` and exempts `$SRC/text.rs`; after
   the rewrite no file contains that spelling, so the zero-tolerance gate would have matched
-  nothing and stayed green. It accepts `(crate|plx_gfx)::text::` now and exempts
+  nothing and stayed green. It accepts `(crate|nj_gfx)::text::` now and exempts
   `$SRC_GFX/text.rs`. The libm allowlist (`ci/allow/libm.txt`) names `gfx.rs` by path and failed
   loudly, which is the better way to be wrong. `ci/check-localization.py` read `ui/overdraw.rs`
   as part of `ui/` and now reads it as `gfx/src/overdraw.rs`.
@@ -673,39 +673,39 @@ layer run in their own binary. What it taught beyond the recipe:
   it was the one thing `gfx.rs`'s header said the renderer named of `ui`, so it moves down with
   the renderer. The rules scoped to `$SRC/ui` stopped reading the file; it holds no clock, store
   or session call, and the whole-tree rules read `$SRC_GFX`.
-- **The crate does not depend on `plx_platform`.** The layer's `uses` ceiling includes `platform`
-  and nothing in the moved files names it, so the manifest depends on `plx_base` and `plx_machine`
-  only. An edit in `plx_platform` therefore does not rebuild `plx_gfx`, which a declared-but-unused
+- **The crate does not depend on `nj_platform`.** The layer's `uses` ceiling includes `platform`
+  and nothing in the moved files names it, so the manifest depends on `nj_base` and `nj_machine`
+  only. An edit in `nj_platform` therefore does not rebuild `nj_gfx`, which a declared-but-unused
   dependency would have caused.
 - **No orphan-rule hazard and no dead code appeared.** No `impl` in the application has both its
-  trait and its type in `plx_gfx`; the compiler is the checker.
-- **Tooling that knows the tree's shape**: the `-p` lists (`... -p plx_platform -p plx_gfx -p plx_net`, with Split 5) in the
+  trait and its type in `nj_gfx`; the compiler is the checker.
+- **Tooling that knows the tree's shape**: the `-p` lists (`... -p nj_platform -p nj_gfx -p nj_net`, with Split 5) in the
   Makefile, the workflow, `tools/build-bench.py` and the tests that pin them;
   `--src rust-modules/gfx/src` for the line budget; `RUST_INPUTS`; `tools/cargo-seed.py` keys on the
   new manifest; the eventlog scrub test's root list gained `../gfx/src` (a log call in `gfx` would
   otherwise be unread); `ci/test_no_host_staticlib.py` holds the crate to `rlib`;
-  `ci/test_build_not_always_dirty.py` fails on `plx_gfx` as well (and its throwaway-repository half
+  `ci/test_build_not_always_dirty.py` fails on `nj_gfx` as well (and its throwaway-repository half
   copies `build.rs` alone, so it has to copy `build_support/host_link.rs` too, or the script it
   grades does not compile) (its build script prints
   `rerun-if-changed` lines and reads no environment variable of ours); the
   release-configuration hook treats an edit in `gfx/src` as a shipping-feature risk; the harness's
   private tree copy and the `fpflags` rule include the new `Cargo.toml` and `build.rs`; and
-  `make build-bench` has a `gfx` scenario ("Edit leaf (plx_gfx overdraw.rs)"). The `--no-default-features`
+  `make build-bench` has a `gfx` scenario ("Edit leaf (nj_gfx overdraw.rs)"). The `--no-default-features`
   and `cargo check --target arm-unknown-linux-gnueabi --lib` gates pass.
 
 ### Split 5 (net)
 
-`net` was extracted fifth: `rust-modules/net/` is the workspace member `plx_net` (an `rlib`), holding
+`net` was extracted fifth: `rust-modules/net/` is the workspace member `nj_net` (an `rlib`), holding
 `net` (`net.rs`, `net/origin.rs`, the HTTP/2 reset fixture script `net/h2_reset_fixture.py`) and
 `stream` (`stream.rs`, `stream_redirect.rs` and the six `stream_*_tests.rs` files plus
-`stream_test_support.rs`, all declared by `#[path]` from `stream.rs`). It depends on `plx_base` and
+`stream_test_support.rs`, all declared by `#[path]` from `stream.rs`). It depends on `nj_base` and
 nothing else: `[net] uses = base platform` still allows `platform`, but no line of the layer names
 it, so the crate does not depend on it. It has no build script and links nothing (libcurl is
-`dlopen`ed through `plx_base::dynlib!`; the final link line stays the application crate's and the
+`dlopen`ed through `nj_base::dynlib!`; the final link line stays the application crate's and the
 Makefile's `LIBS_REAL`; `ci/expected-dt-needed.txt` did not change). The references were rewritten
-by script (`crate::net` and `crate::stream` to `plx_net::net` and `plx_net::stream`, 44 files) and
+by script (`crate::net` and `crate::stream` to `nj_net::net` and `nj_net::stream`, 44 files) and
 `pub(crate)` became `pub` across the moved files. Features: `devtriggers` and `lab-diagnostics` are
-forwarded, `test-support` is new and enables `plx_base`'s. The 128 tests of the layer run in their
+forwarded, `test-support` is new and enables `nj_base`'s. The 128 tests of the layer run in their
 own binary: the suite is 5603 before and after (with Split 4 landed in the same change: 157 + 66 +
 218 + 94 + 128 + 4940). What it taught beyond
 the recipe and Splits 1 to 3:
@@ -737,7 +737,7 @@ the recipe and Splits 1 to 3:
   own, `wire_fixtures`, gated like the wrappers; `request_tests` imports them back.
 - **Fixtures that need crates make those crates dependencies.** `loopback_pms` mints certificates
   (`rcgen`) and runs a TLS server (`rustls`), and the H2 fixture reads its startup line as JSON
-  (`serde_json`). They left the application's `[dev-dependencies]`; in `plx_net` they are
+  (`serde_json`). They left the application's `[dev-dependencies]`; in `nj_net` they are
   `optional` dependencies behind `test-support` (`dep:`) *and* ordinary dev-dependencies, because
   the crate's own tests build with `cfg(test)` and without the feature. No shipped build sees them.
 - **A gate that recognised one spelling of "this is test code".** The `threads` rule in
@@ -747,7 +747,7 @@ the recipe and Splits 1 to 3:
   threads. The rule accepts the second spelling. `ci/rust_test_modules.py` does not treat that
   attribute as test-only (an `any(...)` containing an unknown feature may be on), which is right:
   the whole-file exemption applies to the `stream_*_tests.rs` files, which stay bare `cfg(test)`.
-- **A `cargo:rustc-env` was not needed, and a path was.** Nothing in the layer reads a `PLX_*`
+- **A `cargo:rustc-env` was not needed, and a path was.** Nothing in the layer reads a `NJ_*`
   variable. `net.rs` spawns the H2 fixture from `concat!(env!("CARGO_MANIFEST_DIR"),
   "/src/net/h2_reset_fixture.py")`; `CARGO_MANIFEST_DIR` is the manifest of the crate being
   compiled, so it is `rust-modules/net` now and the script moved with the module (one `src/net/`
@@ -761,13 +761,13 @@ the recipe and Splits 1 to 3:
   together, and the cycle itself is the same 8 modules (no moved module was on it; the smaller
   `gfx`/`text`/`ui` component the baseline also listed is gone with `gfx`);
   `ci/check-module-cycle.py --update-baseline` records it.
-- **Tooling that knows the tree's shape**: the `-p` lists (`-p plxnative-modules -p plx_base -p
-  plx_machine -p plx_platform -p plx_gfx -p plx_net`) in the Makefile, the workflow, `tools/build-bench.py` and
+- **Tooling that knows the tree's shape**: the `-p` lists (`-p nativejelly-modules -p nj_base -p
+  nj_machine -p nj_platform -p nj_gfx -p nj_net`) in the Makefile, the workflow, `tools/build-bench.py` and
   the tests that pin them; `--src rust-modules/net/src` for the line budget; `RUST_INPUTS`;
   `tools/cargo-seed.py` keys on the new manifest; `ci/test_no_host_staticlib.py` holds the crate to
   `rlib`; the release-configuration hook treats an edit in `net/src` as a shipping-feature risk; the
   `fw-compat-reviewer` prompt names the moved file; and `make build-bench` has a `net` scenario
-  ("Edit leaf (plx_net stream_redirect.rs)").
+  ("Edit leaf (nj_net stream_redirect.rs)").
 - **FFI moved byte for byte.** `net.rs` has no `#[link]` and no plain `extern "C"` block; its
   libcurl table is one `dynlib!` invocation, whose only change is the `pub` in front of `curl`, and
   its two `extern "C"` callbacks (`write_cb`, `legacy_crypto_lock`)
@@ -784,12 +784,12 @@ The two splits were made in parallel from the same commit and landed as one chan
   `[dev-dependencies]`, where one side added a line and the other removed two). Both rewrite
   scripts were re-run on the result and on a `main` that had moved meanwhile, and changed nothing.
 - **Both gates still fire.** Proven by a temporary violating edit, not by reading: a
-  `plx_gfx::text::text_width(` call in `coldstart.rs` fails `textmeasure`; a `thread::spawn`, an
-  `SDL_GetTicks(` and a `/tmp/plxnative-` literal in `net/src/stream_redirect.rs` fail `threads`,
+  `nj_gfx::text::text_width(` call in `coldstart.rs` fails `textmeasure`; a `thread::spawn`, an
+  `SDL_GetTicks(` and a `/tmp/nativejelly-` literal in `net/src/stream_redirect.rs` fail `threads`,
   `ticks` and `tmppath`; `SDL_GetTicks(` and `Effect::` in `gfx/src/overdraw.rs` fail `ticks` and
   `effect`; and a `log(&format!(.., d.title))` in either crate fails the eventlog scrub scan.
 - **The `pub` `dynlib!` table stands.** The alternative, a narrower wrapper API exported from
-  `plx_net`, is not a small cut: `curlio` is a second libcurl client that drives the easy handle
+  `nj_net`, is not a small cut: `curlio` is a second libcurl client that drives the easy handle
   directly (two dozen `curl_easy_setopt_{ptr,long}` calls with its own option set, slists and
   callbacks), so the wrapper would be either a pass-through with the same surface or a redesign of
   the media transport. A second `dynlib!` table in the application would bind the same library
@@ -799,27 +799,27 @@ The two splits were made in parallel from the same commit and landed as one chan
   `dynlib_wrapper!` is unchanged, and an existing table cannot select the `pub` arm.
 - **`uses` is a ceiling.** `ci/module-layers.ini` keeps `gfx uses base machine platform` and `net
   uses base platform`; neither crate names `platform`, so neither manifest depends on
-  `plx_platform`, and an edit there rebuilds neither (the bench rows below show it).
+  `nj_platform`, and an edit there rebuilds neither (the bench rows below show it).
 
 Measured effect (`make build-bench`, same machine, 3 interleaved runs, no load warning in either
 set; non-incremental). Before, on `464ceb33` (the commit before `main`'s current tip, which
-differs from it by a Home change only): an edit in `plx_base` 30.7 s (min 30.4), in `plx_machine`
-30.4 s (min 30.1), in `plx_platform` 30.3 s (min 30.1), of the application crate 28.4 s (min 28.1),
+differs from it by a Home change only): an edit in `nj_base` 30.7 s (min 30.4), in `nj_machine`
+30.4 s (min 30.1), in `nj_platform` 30.3 s (min 30.1), of the application crate 28.4 s (min 28.1),
 the hub edit 29.2 s (min 28.1), the unit suite 62.3 s (min 61.7) with 5603 tests. After: an edit in
-`plx_base` 29.3 s (min 29.3), in `plx_machine` 29.2 s (min 29.2), in `plx_platform` 28.9 s (min
-28.6), in `plx_gfx` 27.7 s (min 27.6), in `plx_net` 27.3 s (min 27.1), of the application crate
+`nj_base` 29.3 s (min 29.3), in `nj_machine` 29.2 s (min 29.2), in `nj_platform` 28.9 s (min
+28.6), in `nj_gfx` 27.7 s (min 27.6), in `nj_net` 27.3 s (min 27.1), of the application crate
 26.7 s (min 26.6), the hub edit 26.8 s (min 26.6), and the unit suite 67.7 s (min 67.5) with 5606
 tests (the base moved: 3 new Home tests). Every edit is 1.4 to 2.4 s faster, which is what 25k of
 450k lines leaving the application crate buys; the application crate is still about 27 s of every
 row. The unit suite is 5 s slower: six test binaries are linked and started where four were, and
-the two new ones link SDL/GL (`plx_gfx`) and build the TLS fixtures (`plx_net`).
+the two new ones link SDL/GL (`nj_gfx`) and build the TLS fixtures (`nj_net`).
 
 ## Limits of the analysis
 
 - `cfg` predicates other than `test` count as possibly on, so the graph is the union of every
   feature configuration.
 - Files included from `OUT_DIR` are not read: the generated `i18n::msg` catalog and
-  `storage::state`'s install identities (both generated by `plx_platform`'s build script since
+  `storage::state`'s install identities (both generated by `nj_platform`'s build script since
   Split 3). Today they name nothing outside their own parent module.
 - A `macro_rules!` that is neither `#[macro_export]` nor inside a `#[macro_use]` module is
   visible only to its own module and to children declared after it. The analyzer does not follow
@@ -827,7 +827,7 @@ the two new ones link SDL/GL (`plx_gfx`) and build the TLS fixtures (`plx_net`).
 - The source side is per module, not per item. When an item has to move, the whole file's
   references count against the file's current layer until it does.
 - The `cfg(test)` item report sees a name written as a path (`crate::net::clear()`,
-  `crate::pms::HubsSnapshot::empty_for_test()`, a `use` of the item), a glob of the item's module
+  `crate::catalog_fetch::HubsSnapshot::empty_for_test()`, a `use` of the item), a glob of the item's module
   followed by the bare name, and a `use` of the module followed by `module::name`. It does not see
   a method call, trait dispatch through a `cfg(test)` impl, an associated item called through a
   `use`d type name, or a module imported under another name.

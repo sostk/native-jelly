@@ -166,10 +166,10 @@ TestItem = collections.namedtuple('TestItem', 'module owner name file line')
 
 def split_crates(root):
     """{package name: src directory} of the layer crates beside `root` (a crate's `src/`): the
-    sibling directories holding a `Cargo.toml` whose package is `plx_<layer>` and a `src/lib.rs`."""
+    sibling directories holding a `Cargo.toml` whose package is `nj_<layer>` and a `src/lib.rs`."""
     found = {}
     for manifest in sorted(Path(root).resolve().parent.glob('*/Cargo.toml')):
-        match = re.search(r'^name\s*=\s*"(plx_[a-z0-9_]+)"', manifest.read_text(), re.M)
+        match = re.search(r'^name\s*=\s*"(nj_[a-z0-9_]+)"', manifest.read_text(), re.M)
         src = manifest.parent / 'src'
         if match and (src / 'lib.rs').is_file(): found[match.group(1)] = src
     return found
@@ -181,9 +181,9 @@ class Crate:
     def __init__(self, root, entry='lib.rs', extern_crates=None):
         self.root = Path(root).resolve()
         # The layer crates already split out of this one (`rust-modules/<layer>/`, package
-        # `plx_<layer>`), read as part of the SAME module tree: their `lib.rs` is the crate root
+        # `nj_<layer>`), read as part of the SAME module tree: their `lib.rs` is the crate root
         # again, so `eventlog` is module `eventlog` whichever crate holds the file, and a path
-        # written `plx_base::eventlog::log` resolves like `crate::eventlog::log` did. That keeps
+        # written `nj_base::eventlog::log` resolves like `crate::eventlog::log` did. That keeps
         # one graph for the layer gate and the cycle count while the code moves out one layer at a
         # time; ci/module-layers.ini is still the only statement of who may name whom.
         self.extern_crates = split_crates(self.root) if extern_crates is None else dict(extern_crates)
@@ -230,10 +230,10 @@ class Crate:
 
     def test_item_refs(self):
         """[(Ref, label, provider module)] for every `cfg(test)` reference that names a test-only
-        module or a `test_items` entry: by path (`crate::net::clear()`, `use crate::pms::movie`,
-        `crate::pms::HubsSnapshot::empty_for_test()`), or through a `use` of its module — a glob
+        module or a `test_items` entry: by path (`crate::net::clear()`, `use crate::catalog_fetch::movie`,
+        `crate::catalog_fetch::HubsSnapshot::empty_for_test()`), or through a `use` of its module — a glob
         (`use crate::gfx::backdrop::*` and a bare `commit`) or the module itself
-        (`use crate::plex::session;` and `session::reads_for_test()`), where the file's tokens are
+        (`use crate::catalog::session;` and `session::reads_for_test()`), where the file's tokens are
         searched for the module's `cfg(test)` item names. The label is the module (`testlock`) or
         the item. Not seen: a method call, trait dispatch through a `cfg(test)` impl, an associated
         item called through a `use`d type name, and a module imported under another name."""

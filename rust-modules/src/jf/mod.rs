@@ -1,6 +1,6 @@
 //! Jellyfin, behind the Plex-shaped facade.
 //!
-//! The app above `plex::Client` speaks one vocabulary — PMS containers, rating keys, part keys,
+//! The app above `catalog::Client` speaks one vocabulary — catalog containers, rating keys, part keys,
 //! `/:/timeline` reports. A server registered as a Jellyfin [`seat`] answers the same `Client`
 //! methods through [`Jf`]: each op asks the Jellyfin API and [`convert`]s the answer into the PMS
 //! types, so stores, screens and the player do not know which server they are reading.

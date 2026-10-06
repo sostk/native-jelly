@@ -146,11 +146,11 @@ fn all_auth_worker_bodies_are_observation_only() {
         "install_roster(",
         "publish_settled_probe(",
         "publish_settled_probes(",
-        "crate::plex::register_origin(",
-        "crate::plex::revoke_",
-        "crate::plex::finish_profile_switch(",
-        "crate::plex::publish_probe_result(",
-        "crate::plex::describe_server(",
+        "crate::catalog::register_origin(",
+        "crate::catalog::revoke_",
+        "crate::catalog::finish_profile_switch(",
+        "crate::catalog::publish_probe_result(",
+        "crate::catalog::describe_server(",
     ];
     for name in [
         "discover_and_store",
@@ -184,7 +184,7 @@ fn all_auth_worker_bodies_are_observation_only() {
 /// as a connection problem. Before this, all of these were one `None`.
 #[test]
 fn roster_grading_tells_a_refused_identity_from_no_answer() {
-    use plx_net::net::{RequestError, RequestFailure};
+    use nj_net::net::{RequestError, RequestFailure};
     let user = HomeUser { uuid: "synthetic-user".into(), title: "Synthetic".into(), ..Default::default() };
     assert_eq!(grade_roster(Ok(vec![user])).map(|users| users.len()), Some(1));
     assert_eq!(grade_roster(Ok(Vec::new())).map(|users| users.len()), Some(0));

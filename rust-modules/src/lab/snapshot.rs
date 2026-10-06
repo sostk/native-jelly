@@ -7,8 +7,8 @@
 //!
 //! # What may appear, and what may not
 //!
-//! The envelope is assembled from [`crate::player::Diag`], [`plx_platform::tv::device`] and
-//! [`plx_platform::devcaps`], whose fields are numbers, bools, enums and short platform strings.
+//! The envelope is assembled from [`crate::player::Diag`], [`nj_platform::tv::device`] and
+//! [`nj_platform::devcaps`], whose fields are numbers, bools, enums and short platform strings.
 //! `app::diagnostics`'s module doc states the rule those types already live under and the reasoning
 //! behind each clause; it applies here unchanged and for a stronger reason, since an upload
 //! crosses the public internet rather than a room:
@@ -24,13 +24,13 @@
 //! # Defence in depth: [`scrub`]
 //!
 //! Ring records are ordinary log lines, and the log's own policy — *no call site formats a URL into
-//! a line* — has been violated before (`plx_base::eventlog::redact_tokens`'s doc carries that history: one
+//! a line* — has been violated before (`nj_base::eventlog::redact_tokens`'s doc carries that history: one
 //! `-> {url}` in `route::retranscode`, reached by an ordinary audio-track switch, live for months).
 //! So every record passes a second, broader pass on the way out. It is deliberately not the same
 //! function as the log's: that one is a hot-path backstop for one parameter name, this one is a
 //! wider sweep that runs once per upload on a worker thread and can afford to be thorough.
-use plx_base::eventlog::ring::Rec;
-use plx_base::eventlog::scrub::{scrub, Scrubbed};
+use nj_base::eventlog::ring::Rec;
+use nj_base::eventlog::scrub::{scrub, Scrubbed};
 use serde::Serialize;
 
 // ---- the envelope -----------------------------------------------------------------------------
@@ -80,7 +80,7 @@ pub(crate) struct Device {
     pub hw_revision: String,
 }
 
-/// What the SoC's own table says it decodes ([`plx_platform::devcaps`]) — the field that separates "this
+/// What the SoC's own table says it decodes ([`nj_platform::devcaps`]) — the field that separates "this
 /// firmware refuses the stream" from "this set was never going to decode it".
 #[derive(Serialize)]
 pub(crate) struct Caps {
@@ -190,7 +190,7 @@ fn features() -> Vec<&'static str> {
 }
 
 /// Build the whole body. **Main thread**: `player::diag` is main-thread by contract, and the
-/// ring clone is a memcpy of at most [`plx_base::eventlog::ring::MAX_BYTES`].
+/// ring clone is a memcpy of at most [`nj_base::eventlog::ring::MAX_BYTES`].
 pub(crate) fn build(
     seq: u32,
     reason: &str,
@@ -199,7 +199,7 @@ pub(crate) fn build(
     ps: &crate::route::PlaybackSession,
 ) -> String {
     let d = crate::player::diag(ps);
-    let (recs, dropped) = plx_base::eventlog::ring::take();
+    let (recs, dropped) = nj_base::eventlog::ring::take();
     body(seq, reason, session, route, &d, recs, dropped)
 }
 
@@ -214,7 +214,7 @@ pub(crate) fn body(
     recs: Vec<Rec>,
     dropped: u64,
 ) -> String {
-    let now = plx_base::eventlog::ring::t_ms();
+    let now = nj_base::eventlog::ring::t_ms();
     let mut lines: Vec<String> = Vec::with_capacity(recs.len() + 1);
     let mut refused = 0u64;
     let mut kept: Vec<Line> = Vec::with_capacity(recs.len());
@@ -238,9 +238,9 @@ pub(crate) fn body(
         reason: reason.to_string(),
         sent_at_ms: now,
         app: App {
-            version: env!("PLX_VERSION"),
-            id: plx_base::paths::app_id(),
-            flavour: plx_base::paths::flavour().unwrap_or("stable"),
+            version: env!("NJ_VERSION"),
+            id: nj_base::paths::app_id(),
+            flavour: nj_base::paths::flavour().unwrap_or("stable"),
             features: features(),
             uptime_ms: now,
         },
@@ -269,8 +269,8 @@ pub(crate) fn body(
 }
 
 fn device() -> Device {
-    let i = plx_platform::tv::device::info();
-    let d = plx_platform::tv::device::device();
+    let i = nj_platform::tv::device::info();
+    let d = nj_platform::tv::device::device();
     Device {
         webos_release: i.release.clone(),
         webos_codename: i.codename.clone(),
@@ -283,7 +283,7 @@ fn device() -> Device {
 }
 
 fn caps() -> Caps {
-    let c = plx_platform::devcaps::caps();
+    let c = nj_platform::devcaps::caps();
     Caps {
         hevc: c.hevc,
         hevc_max_w: c.hevc_max.0,
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(env["dropped"], 7);
         assert_eq!(env["records"], 2);
         assert_eq!(env["route"], "player");
-        assert_eq!(env["app"]["version"], env!("PLX_VERSION"));
+        assert_eq!(env["app"]["version"], env!("NJ_VERSION"));
         // the never-started session reads honestly rather than as a healthy one
         assert_eq!(env["player"]["vp_mode"], "NONE — no video path");
         assert_eq!(env["player"]["feed_state"], "— nothing fed yet");

@@ -9,7 +9,7 @@
 //! main loop. Data model: one [`SecItems`] per section — a PAGE-CHUNKED table sized to the
 //! listing's `totalSize`, a page (`PAGE` items) allocated only when it lands (restructure phase
 //! 4's O(result) rule) — filled page-by-page by ONE background fetch at a
-//! time using the season-switch idiom from `metadata.rs` — [`plx_base::task::spawn_small`] + a
+//! time using the season-switch idiom from `metadata.rs` — [`nj_base::task::spawn_small`] + a
 //! `Mutex` mailbox + generation atomics (a re-query supersedes in-flight landings), applied
 //! on the main thread by [`pump`] once a frame while the Library screen is up.
 //!
@@ -48,8 +48,8 @@
 //! the old synchronous discovery's early-return was the only thing preventing that; appending is the property
 //! that replaces it, and it holds for every source that lands later rather than only for the
 //! second call.
-use crate::plex::{SectionQuery, ServerId};
-use crate::pms::{parse_item, PmsMovie};
+use crate::catalog::{SectionQuery, ServerId};
+use crate::catalog_fetch::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 #[cfg(test)]
 use std::panic::AssertUnwindSafe;
@@ -73,7 +73,7 @@ const SRC_RETRY_CD: u32 = 600; // ~10 s at 60 fps
 ///
 /// A bool could say "answered" or "did not", and the Sources list said exactly those two things.
 /// It could not say the three things a user needs told apart, and which the prober already
-/// distinguishes ([`crate::plex::probe::Outcome`]): nobody has dialled yet, the server answered but
+/// distinguishes ([`crate::catalog::probe::Outcome`]): nobody has dialled yet, the server answered but
 /// refused our token, and the server did not answer at all. Those want different words and, for the
 /// middle one, a different remedy — a 401 is a sharing-grant problem that re-fetching
 /// `/api/v2/resources` fixes, and telling the user their friend's server is unreachable sends them
@@ -105,8 +105,8 @@ pub(crate) enum SourceState {
 }
 
 /// One SOURCE the table is addressed by — a server this account has been granted. Comes from the
-/// [server registry](crate::plex::server_ids), which is the granted roster: a server is registered
-/// only once plex.tv (or the `plxnative-servers` dev trigger) handed us a token for it.
+/// [server registry](crate::catalog::server_ids), which is the granted roster: a server is registered
+/// only once plex.tv (or the `nativejelly-servers` dev trigger) handed us a token for it.
 #[derive(Clone)]
 pub(crate) struct BrowseSource {
     /// The registry slot every fetch for this source's sections is issued through.
@@ -135,9 +135,9 @@ pub(crate) struct BrowseSource {
     /// [`household`](Self::household); `0` means plex.tv named nobody and never matches a
     /// household member.
     pub(crate) owner_id: i64,
-    /// **Is this OUR HOUSEHOLD'S server?** — [`crate::plex::is_household`]'s verdict on the three
+    /// **Is this OUR HOUSEHOLD'S server?** — [`crate::catalog::is_household`]'s verdict on the three
     /// carried evidence fields above plus the Plex Home roster
-    /// ([`crate::plex::session::Session::household_ids`]).
+    /// ([`crate::catalog::session::Session::household_ids`]).
     ///
     /// A cached DERIVATION, not a fact from the wire, and it lives here rather than on
     /// `SourceRef`/`ServerFacts` for one reason: those carry evidence, which is durable, while
@@ -180,7 +180,7 @@ pub(crate) struct BrowseSource {
     /// from the persisted winner at boot and replaced by auth when a new race settles. The Sources
     /// list only renders it beside [`SourceState::Reachable`], so an offline source retains the
     /// route metadata needed for retry/playback policy without claiming that route works now.
-    pub(crate) tier: Option<crate::plex::probe::Location>,
+    pub(crate) tier: Option<crate::catalog::probe::Location>,
     /// its `/library/sections` has landed — sections are appended exactly once per source
     sections_done: bool,
     /// its per-library item counts have landed (the row sub-line's "185 films")
@@ -219,31 +219,31 @@ impl BrowseSource {
     }
     /// Mirror the registry's canonical result after it atomically merged a generic request with
     /// any more-specific identity-probe answer.
-    fn set_probe_outcome(&mut self, outcome: crate::plex::probe::Outcome) {
+    fn set_probe_outcome(&mut self, outcome: crate::catalog::probe::Outcome) {
         self.state = source_state(Some(outcome));
     }
 }
 
-fn source_state(outcome: Option<crate::plex::probe::Outcome>) -> SourceState {
+fn source_state(outcome: Option<crate::catalog::probe::Outcome>) -> SourceState {
     match outcome {
         None => SourceState::NotProbed,
-        Some(crate::plex::probe::Outcome::Reachable) => SourceState::Reachable,
-        Some(crate::plex::probe::Outcome::Unauthorized) => SourceState::Unauthorized,
+        Some(crate::catalog::probe::Outcome::Reachable) => SourceState::Reachable,
+        Some(crate::catalog::probe::Outcome::Unauthorized) => SourceState::Unauthorized,
         Some(
-            crate::plex::probe::Outcome::WrongServer | crate::plex::probe::Outcome::Unreachable,
+            crate::catalog::probe::Outcome::WrongServer | crate::catalog::probe::Outcome::Unreachable,
         ) => SourceState::Unreachable,
-        Some(crate::plex::probe::Outcome::InsecureOnly) => SourceState::InsecureOnly,
+        Some(crate::catalog::probe::Outcome::InsecureOnly) => SourceState::InsecureOnly,
     }
 }
 
-fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::plex::probe::Location>)> {
-    let client = crate::plex::client_for(sid)?;
+fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::catalog::probe::Location>)> {
+    let client = crate::catalog::client_for(sid)?;
     let token_gen = client.token_gen();
     // Probe publication follows set_link, so read the acquire-backed result before the tier. The
     // second lookup rejects a re-point or in-place retoken between those two reads.
-    let state = source_state(crate::plex::server_probe_result(sid));
+    let state = source_state(crate::catalog::server_probe_result(sid));
     let tier = client.link();
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .filter(|now| std::ptr::eq(*now, client) && now.token_gen() == token_gen)
         .map(|_| (state, tier))
 }
@@ -254,8 +254,8 @@ fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::plex::pr
 /// It is a free function rather than a method so that it reads the evidence and NOTHING else —
 /// in particular not the cached verdict it is about to overwrite.
 fn household_verdict(source: &BrowseSource, household: &[i64]) -> bool {
-    crate::plex::is_household(
-        crate::plex::GrantEvidence {
+    crate::catalog::is_household(
+        crate::catalog::GrantEvidence {
             owned: source.owned,
             home: source.home,
             owner_id: source.owner_id,
@@ -298,7 +298,7 @@ pub(crate) struct BrowseSection {
     /// favourite-library hits first.
     ///
     /// Your HOUSEHOLD's libraries start favourite and a friend's start favourite only where the
-    /// household has no library of that type ([`crate::plex::pins::default_on`]); the last
+    /// household has no library of that type ([`crate::catalog::pins::default_on`]); the last
     /// favourite cannot be turned off, or the app has nothing. The household and not the account
     /// — see [`BrowseSource::household`] and [`BrowseState::lib_refs`] for why plex.tv's raw
     /// `owned` cannot answer this for a Plex Home managed profile.
@@ -335,16 +335,16 @@ impl LibraryType {
     }
 
     pub(crate) fn title(self, kind: SecKind) -> &'static str {
-        self.title_in(kind, plx_platform::i18n::current())
+        self.title_in(kind, nj_platform::i18n::current())
     }
 
-    fn title_in(self, kind: SecKind, locale: &plx_platform::i18n::LocaleContext) -> &'static str {
+    fn title_in(self, kind: SecKind, locale: &nj_platform::i18n::LocaleContext) -> &'static str {
         match (self, kind) {
-            (Self::Primary, SecKind::Movie) => plx_platform::i18n::msg::browse_kind_movies_in(locale),
-            (Self::Primary, SecKind::Show) => plx_platform::i18n::msg::browse_kind_tv_shows_in(locale),
-            (Self::Seasons, _) => plx_platform::i18n::msg::browse_kind_seasons_in(locale),
-            (Self::Episodes, _) => plx_platform::i18n::msg::browse_kind_episodes_in(locale),
-            (Self::Collections, _) => plx_platform::i18n::msg::browse_kind_collections_in(locale),
+            (Self::Primary, SecKind::Movie) => nj_platform::i18n::msg::browse_kind_movies_in(locale),
+            (Self::Primary, SecKind::Show) => nj_platform::i18n::msg::browse_kind_tv_shows_in(locale),
+            (Self::Seasons, _) => nj_platform::i18n::msg::browse_kind_seasons_in(locale),
+            (Self::Episodes, _) => nj_platform::i18n::msg::browse_kind_episodes_in(locale),
+            (Self::Collections, _) => nj_platform::i18n::msg::browse_kind_collections_in(locale),
         }
     }
 
@@ -353,11 +353,11 @@ impl LibraryType {
     /// order differ by language.
     pub(crate) fn empty_readout(self, kind: SecKind, library: &str) -> String {
         match (self, kind) {
-            (Self::Primary, SecKind::Movie) => plx_platform::i18n::msg::browse_library_no_movies(library),
-            (Self::Primary, SecKind::Show) => plx_platform::i18n::msg::browse_library_no_shows(library),
-            (Self::Seasons, _) => plx_platform::i18n::msg::browse_library_no_seasons(library),
-            (Self::Episodes, _) => plx_platform::i18n::msg::browse_library_no_episodes(library),
-            (Self::Collections, _) => plx_platform::i18n::msg::browse_library_no_collections(library),
+            (Self::Primary, SecKind::Movie) => nj_platform::i18n::msg::browse_library_no_movies(library),
+            (Self::Primary, SecKind::Show) => nj_platform::i18n::msg::browse_library_no_shows(library),
+            (Self::Seasons, _) => nj_platform::i18n::msg::browse_library_no_seasons(library),
+            (Self::Episodes, _) => nj_platform::i18n::msg::browse_library_no_episodes(library),
+            (Self::Collections, _) => nj_platform::i18n::msg::browse_library_no_collections(library),
         }
     }
 
@@ -586,7 +586,7 @@ impl SecItems {
     }
     /// A read scan first: an optimistic edit must not clone unrelated retained pages.
     fn set_watched(&mut self, sid: ServerId, rk: &str, on: bool) -> bool {
-        let matches = |m: &PmsMovie| crate::plex::same_item((m.sid, &m.rk), (sid, rk));
+        let matches = |m: &PmsMovie| crate::catalog::same_item((m.sid, &m.rk), (sid, rk));
         let mut hit = false;
         for p in 0..self.pages.len() {
             if !self.pages[p]
@@ -601,7 +601,7 @@ impl SecItems {
                 .flatten()
                 .filter(|m| matches(m))
             {
-                crate::pms::set_watched(m, on);
+                crate::catalog_fetch::set_watched(m, on);
                 hit = true;
             }
         }
@@ -685,18 +685,18 @@ pub(crate) struct BrowseState {
     tab_shape: u32,
     retry_cd: u32,
     remembered: Vec<(SecKind, String, i64)>,
-    /// This profile's remembered library sorts ([`crate::plex::session::Session::library_sorts`]),
+    /// This profile's remembered library sorts ([`crate::catalog::session::Session::library_sorts`]),
     /// loaded beside [`remembered`](Self::remembered) and cleared with it on a reset, so a
     /// profile switch can never open one person's library in another's order.
-    sort_memory: crate::plex::session::LibrarySorts,
-    recorded: Option<crate::plex::session::HomePins>,
+    sort_memory: crate::catalog::session::LibrarySorts,
+    recorded: Option<crate::catalog::session::HomePins>,
     pending_pins: Option<(String, std::sync::Arc<std::sync::Mutex<PinWrite>>)>,
 }
 
 /// Shared by a cloned Browse snapshot, so consuming a receipt never makes another clone
 /// mistake a successful write for a disconnected worker. Failed writes keep the local choice.
 struct PinWrite {
-    ticket: plx_base::storage_worker::TypedTicket<bool>,
+    ticket: nj_base::storage_worker::TypedTicket<bool>,
     saved: Option<bool>,
 }
 impl PinWrite {
@@ -780,18 +780,18 @@ impl Default for BrowseState {
             sort_memory: Default::default(),
             recorded: None,
             pending_pins: None,
-            session_generation: crate::plex::session::visible_generation(),
+            session_generation: crate::catalog::session::visible_generation(),
         }
     }
 }
 
 impl BrowseState {
     pub(crate) fn discovery_needs_pump(&self, adapter: &BrowseAdapter) -> bool {
-        if self.session_generation != crate::plex::session::visible_generation() { return true; }
+        if self.session_generation != crate::catalog::session::visible_generation() { return true; }
         if adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
             return true;
         }
-        let live: Vec<ServerId> = crate::plex::server_ids().collect();
+        let live: Vec<ServerId> = crate::catalog::server_ids().collect();
         if live.len() != self.sources.len()
             || self.sources.iter().zip(&live).any(|(source, sid)| source.sid != *sid) {
             return true;
@@ -804,12 +804,12 @@ impl BrowseState {
         // misgraded until something else happened to move a fact. `peek()` is a lock and an `Arc`
         // clone over a live cache (`plex/CLAUDE.md`), not a file read, which is what makes it
         // affordable on a per-frame gate.
-        let household = crate::plex::session::peek().household_ids();
+        let household = crate::catalog::session::peek().household_ids();
         for source in &self.sources {
             if source.household != household_verdict(source, &household) {
                 return true;
             }
-            let now = crate::plex::client_for(source.sid);
+            let now = crate::catalog::client_for(source.sid);
             if source.client_addr != now.map_or(0, |client| client as *const _ as usize)
                 || source.token_gen != now.map_or(0, |client| client.token_gen()) {
                 return true;
@@ -819,7 +819,7 @@ impl BrowseState {
                     return true;
                 }
             }
-            if let Some(facts) = crate::plex::server_facts(source.sid) {
+            if let Some(facts) = crate::catalog::server_facts(source.sid) {
                 if (source.name.is_empty() && !facts.name.is_empty())
                     || source.handle != facts.handle || source.owned != facts.owned
                     || source.home != facts.home || source.owner_id != facts.owner_id {
@@ -1077,9 +1077,9 @@ impl BrowseState {
         if !machine.is_empty() {
             self.remembered.push((kind, machine.clone(), key));
         }
-        let user = crate::plex::session::current_profile_key();
+        let user = crate::catalog::session::current_profile_key();
         let wire = kind.wire();
-        crate::plex::session::queue_update(move |current| {
+        crate::catalog::session::queue_update(move |current| {
             let mut next = current.clone();
             let slot = match next
                 .last_library
@@ -1088,7 +1088,7 @@ impl BrowseState {
             {
                 Some(library) => library,
                 None => {
-                    next.last_library.push(crate::plex::session::LastLibrary {
+                    next.last_library.push(crate::catalog::session::LastLibrary {
                         user: user.clone(),
                         libs: Vec::new(),
                         extensions: Default::default(),
@@ -1125,8 +1125,8 @@ impl BrowseState {
         self.sort_memory.set(&machine, key, wanted(&choice));
         // Deduplicated against the STORED record, under the worker's read — never against
         // `sort_memory`, which a pin reconcile may have just reloaded from an older snapshot.
-        let user = crate::plex::session::current_profile_key();
-        crate::plex::session::queue_update(move |current| {
+        let user = crate::catalog::session::current_profile_key();
+        crate::catalog::session::queue_update(move |current| {
             if current.sorts_for(&user).and_then(|sorts| sorts.get(&machine, key))
                 == wanted(&choice) {
                 return None;
@@ -1155,7 +1155,7 @@ impl BrowseState {
             .get(self.cur())
             .map(|section| section.src)
             .or_else(|| {
-                let sid = crate::plex::current_server();
+                let sid = crate::catalog::current_server();
                 self.sources.iter().position(|source| source.sid == sid)
             })
             .filter(|&index| index < self.sources.len())
@@ -1184,8 +1184,8 @@ impl BrowseState {
     fn apply_source_outcome(
         &mut self,
         src: usize,
-        client: &'static crate::plex::Client,
-        outcome: crate::plex::probe::Outcome,
+        client: &'static crate::catalog::Client,
+        outcome: crate::catalog::probe::Outcome,
     ) -> bool {
         if self.sources.get(src).map(|source| source.sid) != Some(client.id()) {
             return false;
@@ -1202,11 +1202,11 @@ impl BrowseState {
             return true;
         }
         source.set_probe_outcome(outcome);
-        if outcome == crate::plex::probe::Outcome::Reachable {
+        if outcome == crate::catalog::probe::Outcome::Reachable {
             source.retry_cd = 0;
         }
         self.bump_source_facts_gen();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         true
     }
     fn kick_directory<T: Send + 'static>(
@@ -1216,7 +1216,7 @@ impl BrowseState {
         flag: fn(&BrowseAdapter) -> &AtomicBool,
         mail: fn(&BrowseAdapter) -> &Mutex<Option<DirectoryResult<T>>>,
         dir: &'static str,
-        project: fn(&crate::plex::LibrarySection) -> Option<T>,
+        project: fn(&crate::catalog::LibrarySection) -> Option<T>,
     ) {
         let current = self.cur();
         if self.states.get(current).is_none() || done {
@@ -1225,7 +1225,7 @@ impl BrowseState {
         let Some(sid) = self.section_sid(current) else {
             return;
         };
-        let Some(client) = crate::plex::client_for(sid) else {
+        let Some(client) = crate::catalog::client_for(sid) else {
             return;
         };
         let token_gen = client.token_gen();
@@ -1237,7 +1237,7 @@ impl BrowseState {
         let metadata_type = library_type.plex_type(self.sections[current].kind);
         let epoch = self.table_epoch();
         let worker_adapter = Arc::clone(&adapter);
-        let spawned = plx_base::task::spawn_small("directory", move || {
+        let spawned = nj_base::task::spawn_small("directory", move || {
             let list = catch_unwind(|| {
                 let mut values = Vec::new();
                 if let Some(container) = client.section_directory(key, dir, metadata_type) {
@@ -1377,7 +1377,7 @@ impl BrowseState {
         touched[index] = true;
         self.record_pins(true, &touched);
         self.bump_sections_gen();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         true
     }
     #[cfg(test)]
@@ -1554,7 +1554,7 @@ impl BrowseState {
             SecFetch::Loading
         }
     }
-    fn load_remembered(&mut self, session: &crate::plex::session::Session, user: &str) {
+    fn load_remembered(&mut self, session: &crate::catalog::session::Session, user: &str) {
         self.remembered = session.last_library.iter().find(|library| library.user == user)
             .map(|library| library.libs.iter().filter_map(|target| {
                 SecKind::from_wire(&target.kind)
@@ -1571,7 +1571,7 @@ impl BrowseState {
     /// family server a stranger's defaults: plex.tv answers such a profile `owned:false` on it,
     /// and `owns_type` then found nothing of the household's either, so EVERY library defaulted On
     /// — a genuine friend's share included.
-    fn lib_refs(&self) -> Vec<crate::plex::pins::LibRef<'_>> {
+    fn lib_refs(&self) -> Vec<crate::catalog::pins::LibRef<'_>> {
         let household_type = |kind: SecKind| self.sections.iter().any(|section| {
             section.kind == kind
                 && self.sources.get(section.src).map(|source| source.household).unwrap_or(true)
@@ -1579,7 +1579,7 @@ impl BrowseState {
         self.sections.iter().map(|section| {
             let (machine_id, household) = self.sources.get(section.src)
                 .map(|source| (source.machine_id.as_str(), source.household)).unwrap_or(("", true));
-            crate::plex::pins::LibRef {
+            crate::catalog::pins::LibRef {
                 machine_id, key: section.key, household,
                 household_type: household_type(section.kind),
             }
@@ -1598,19 +1598,19 @@ impl BrowseState {
     }
     /// A directory refresh must not replace the pending (or failed) local choice with the
     /// older persisted snapshot. Successful receipts recapture the cache after the worker fill.
-    fn pin_record_for(&mut self, session: &crate::plex::session::Session, user: &str)
-        -> Option<crate::plex::session::HomePins> {
+    fn pin_record_for(&mut self, session: &crate::catalog::session::Session, user: &str)
+        -> Option<crate::catalog::session::HomePins> {
         if let Some((pending_user, write)) = &self.pending_pins {
             if pending_user == user && !write.lock().unwrap_or_else(|e| e.into_inner()).saved() {
                 return self.recorded.clone();
             }
             self.pending_pins = None;
-            return crate::plex::session::peek().pins_for(user).cloned();
+            return crate::catalog::session::peek().pins_for(user).cloned();
         }
         session.pins_for(user).cloned()
     }
 
-    fn resolve_pins_from(&mut self, session: &crate::plex::session::Session, user: &str) -> bool {
+    fn resolve_pins_from(&mut self, session: &crate::catalog::session::Session, user: &str) -> bool {
         self.load_remembered(session, user);
         let record = self.pin_record_for(session, user);
         self.resolve_pins_with(record)
@@ -1618,10 +1618,10 @@ impl BrowseState {
     /// Re-derive every row from `record` and the never-empty floor, and report whether the table
     /// actually MOVED — `pins::resolve` is a whole-table function (its own doc says why the floor
     /// cannot be decided per row), so this is the only shape a re-resolve comes in.
-    fn resolve_pins_with(&mut self, record: Option<crate::plex::session::HomePins>) -> bool {
+    fn resolve_pins_with(&mut self, record: Option<crate::catalog::session::HomePins>) -> bool {
         let want = {
             let libraries = self.lib_refs();
-            crate::plex::pins::resolve(&libraries, record.as_ref())
+            crate::catalog::pins::resolve(&libraries, record.as_ref())
         };
         self.recorded = record;
         let mut moved = false;
@@ -1644,20 +1644,20 @@ impl BrowseState {
     /// profile's RECORD (`apply_pins`). Both end in the same question — what does
     /// `pins::resolve` say about every row now — so they ask it the same way rather than each
     /// keeping a version of the answer. A row that moves without `bump_sections_gen` +
-    /// `plx_machine::idle::invalidate` is a table nothing republishes, which is a pill strip and a set of
+    /// `nj_machine::idle::invalidate` is a table nothing republishes, which is a pill strip and a set of
     /// shelves still drawing the previous resolve.
-    fn reconcile_pins(&mut self, record: Option<crate::plex::session::HomePins>) -> bool {
+    fn reconcile_pins(&mut self, record: Option<crate::catalog::session::HomePins>) -> bool {
         let moved = self.resolve_pins_with(record);
         if moved {
             self.bump_sections_gen();
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
         moved
     }
     /// [`reconcile_pins`](Self::reconcile_pins) against the record a session holds.
     fn reconcile_pins_from(
         &mut self,
-        session: &crate::plex::session::Session,
+        session: &crate::catalog::session::Session,
         user: &str,
     ) -> bool {
         self.load_remembered(session, user);
@@ -1665,12 +1665,12 @@ impl BrowseState {
         self.reconcile_pins(record)
     }
     fn resolve_pins(&mut self) {
-        let session = crate::plex::session::peek();
-        let user = crate::plex::session::current_profile_key();
+        let session = crate::catalog::session::peek();
+        let user = crate::catalog::session::current_profile_key();
         self.resolve_pins_from(&session, &user);
     }
     fn append_sections_with(&mut self, source: usize, list: Vec<(i64, String, SecKind)>,
-        preferences: Option<&crate::plex::session::Session>) {
+        preferences: Option<&crate::catalog::session::Session>) {
         let fresh: Vec<_> = list.into_iter().filter(|(key, _, _)| {
             !self.sections.iter().any(|section| section.src == source && section.key == *key)
         }).collect();
@@ -1689,7 +1689,7 @@ impl BrowseState {
             self.resolve_pins();
         }
         self.bump_sections_gen();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     /// Write this profile's answer down. `touched` is indexed like the section table and marks
     /// the rows the VIEWER answered — as the editor reported them, never as a comparison against
@@ -1701,27 +1701,27 @@ impl BrowseState {
     /// survive. A missing session or a refused queue returns `None`; the visible selection
     /// still stands for this run, without claiming it was saved.
     fn record_pins(&mut self, asked: bool, touched: &[bool])
-        -> Option<crate::plex::session::HomePins> {
+        -> Option<crate::catalog::session::HomePins> {
         let libraries = self.lib_refs();
         let on: Vec<bool> = self.sections.iter().map(|section| section.pinned).collect();
-        let user = crate::plex::session::current_profile_key();
-        let snapshot = crate::plex::session::peek();
+        let user = crate::catalog::session::current_profile_key();
+        let snapshot = crate::catalog::session::peek();
         if snapshot.client_id.is_empty() { return None; }
         let previous = self.recorded.as_ref().or_else(|| snapshot.pins_for(&user));
-        let answers = crate::plex::pins::answers(&libraries, &on, touched, previous);
-        let fresh = crate::plex::pins::record(&user, asked, &libraries, &answers);
-        let record = crate::plex::pins::carry_forward(fresh, previous, &libraries);
+        let answers = crate::catalog::pins::answers(&libraries, &on, touched, previous);
+        let fresh = crate::catalog::pins::record(&user, asked, &libraries, &answers);
+        let record = crate::catalog::pins::carry_forward(fresh, previous, &libraries);
         let owned: Vec<_> = libraries.iter().map(|lib|
             (lib.machine_id.to_owned(), lib.key, lib.household, lib.household_type)).collect();
         let touched = touched.to_vec();
         let pending_user = user.clone();
-        let ticket = crate::plex::session::queue_update_ticket(move |session| {
+        let ticket = crate::catalog::session::queue_update_ticket(move |session| {
             let libraries: Vec<_> = owned.iter().map(|(machine_id, key, household, household_type)|
-                crate::plex::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
+                crate::catalog::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
             let previous = session.pins_for(&user);
-            let answers = crate::plex::pins::answers(&libraries, &on, &touched, previous);
-            let fresh = crate::plex::pins::record(&user, asked, &libraries, &answers);
-            let merged = crate::plex::pins::carry_forward(fresh, previous, &libraries);
+            let answers = crate::catalog::pins::answers(&libraries, &on, &touched, previous);
+            let fresh = crate::catalog::pins::record(&user, asked, &libraries, &answers);
+            let merged = crate::catalog::pins::carry_forward(fresh, previous, &libraries);
             let mut next = session.clone();
             next.set_pins_for(&user, merged);
             Some(next)
@@ -1776,7 +1776,7 @@ impl BrowseState {
         if changed {
             self.repoint_cur();
             self.bump_sections_gen();
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
         // Reconcile the pending selection immediately. Until its receipt lands, a captured
         // older session must not undo the viewer's edits. This is not a durability claim.
@@ -1785,7 +1785,7 @@ impl BrowseState {
                 self.reconcile_pins(Some(record));
             }
             // A missing identity or full queue cannot justify undoing the visible selection.
-            None => plx_base::eventlog::log(
+            None => nj_base::eventlog::log(
                 "browse: the session refused this commit — the selection stands for this run, \
                  and nothing was recorded",
             ),
@@ -1797,17 +1797,17 @@ impl BrowseState {
                 source.retry_cd = 0;
             }
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     fn apply_discovery(
         &mut self,
         epoch: u32,
         source_index: usize,
         landing: SrcLanding,
-        preferences: Option<&crate::plex::session::Session>,
+        preferences: Option<&crate::catalog::session::Session>,
         adapter: &BrowseAdapter,
     ) -> crate::stores::StoreOutcome {
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         if epoch != self.table_epoch() {
             return Default::default();
         }
@@ -1818,7 +1818,7 @@ impl BrowseState {
             SrcWhat::Counts(counts) => !counts.is_empty(),
         };
         let fact_name = (!name.is_empty()).then_some(name.as_str());
-        let committed = crate::plex::commit_reachability_if_current(
+        let committed = crate::catalog::commit_reachability_if_current(
             client.id(), client, token_gen, ok, fact_name, |outcome| {
                 if !self.apply_source_outcome(source_index, client, outcome) {
                     return false;
@@ -1841,7 +1841,7 @@ impl BrowseState {
                         if !answered {
                             let who = self.sources.get(source_index)
                                 .map(|source| source.name.clone()).unwrap_or_default();
-                            plx_base::eventlog::log(&format!(
+                            nj_base::eventlog::log(&format!(
                                 "browse: source {source_index} ({who}) did not answer — its group reads unreachable"
                             ));
                         }
@@ -1918,14 +1918,14 @@ impl BrowseState {
         self.reset_with(|| adapter.clear());
     }
     pub(crate) fn sync_roster_owned(&mut self) -> RosterSync {
-        let generation = crate::plex::session::visible_generation();
+        let generation = crate::catalog::session::visible_generation();
         let session_changed = self.session_generation != generation;
         self.session_generation = generation;
-        let live: Vec<ServerId> = crate::plex::server_ids().collect();
+        let live: Vec<ServerId> = crate::catalog::server_ids().collect();
         // The Plex Home roster, read ONCE for the whole sync: `peek()` is a write-through cache
         // over the persisted session (`plex/CLAUDE.md`), so this is a lock and an `Arc` clone
         // rather than a file read — but it is still per sync and not per source.
-        let session = crate::plex::session::peek();
+        let session = crate::catalog::session::peek();
         let household = session.household_ids();
         let retire_adapter = self.sources.iter().any(|source| !live.contains(&source.sid));
         let mut changed = retire_adapter;
@@ -1939,7 +1939,7 @@ impl BrowseState {
         for sid in live {
             match self.sources.iter().position(|source| source.sid == sid) {
                 Some(index) => {
-                    let now = crate::plex::client_for(sid);
+                    let now = crate::catalog::client_for(sid);
                     let client_addr = now.map_or(0, |client| client as *const _ as usize);
                     let token_gen = now.map_or(0, |client| client.token_gen());
                     let mut changes = 0;
@@ -1959,7 +1959,7 @@ impl BrowseState {
                             changes += 1;
                         }
                     }
-                    if let Some(facts) = crate::plex::server_facts(sid) {
+                    if let Some(facts) = crate::catalog::server_facts(sid) {
                         if source.name.is_empty() && !facts.name.is_empty() {
                             source.name = facts.name.clone();
                             changes += 1;
@@ -1990,11 +1990,11 @@ impl BrowseState {
                     self.src_facts_gen = self.src_facts_gen.wrapping_add(changes);
                     if changes != 0 {
                         changed = true;
-                        plx_machine::idle::invalidate();
+                        nj_machine::idle::invalidate();
                     }
                 }
                 None => {
-                    let facts = crate::plex::server_facts(sid);
+                    let facts = crate::catalog::server_facts(sid);
                     let owned = facts.map(|facts| facts.owned).unwrap_or(true);
                     // An undescribed slot is the session's own server (`servers::describe_name`
                     // says why that is not a guess), so it carries no third-party evidence.
@@ -2006,14 +2006,14 @@ impl BrowseState {
                     let Some((state, tier)) = source_snapshot(sid) else { continue };
                     self.sources.push(BrowseSource {
                         sid,
-                        client_addr: crate::plex::client_for(sid)
+                        client_addr: crate::catalog::client_for(sid)
                             .map_or(0, |client| client as *const _ as usize),
-                        token_gen: crate::plex::client_for(sid)
+                        token_gen: crate::catalog::client_for(sid)
                             .map_or(0, |client| client.token_gen()),
                         machine_id: machine_of(sid),
                         owned, home, owner_id,
-                        household: crate::plex::is_household(
-                            crate::plex::GrantEvidence { owned, home, owner_id }.grant(),
+                        household: crate::catalog::is_household(
+                            crate::catalog::GrantEvidence { owned, home, owner_id }.grant(),
                             &household,
                         ),
                         name, handle, state, tier,
@@ -2025,7 +2025,7 @@ impl BrowseState {
             }
         }
         if self.sources.len() != known {
-            plx_base::eventlog::log(&format!("browse: roster now {} source(s)", self.sources.len()));
+            nj_base::eventlog::log(&format!("browse: roster now {} source(s)", self.sources.len()));
         }
         if reclassified || session_changed {
             // **A source changed sides, so the WHOLE pin table is re-resolved** — `pins::resolve`
@@ -2042,8 +2042,8 @@ impl BrowseState {
             // without a cache of its own. It bumps only when a row actually MOVED — a
             // reclassification that moves none publishes nothing new to the section table, and
             // the source facts it did move have their own generation, bumped above.
-            if crate::plex::session::peek_settled().is_some() {
-                self.reconcile_pins_from(&session, &crate::plex::session::current_profile_key());
+            if crate::catalog::session::peek_settled().is_some() {
+                self.reconcile_pins_from(&session, &crate::catalog::session::current_profile_key());
             }
             changed = true;
         }
@@ -2055,7 +2055,7 @@ impl BrowseState {
             source.sections_done = false;
             source.counts_done = false;
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     pub(crate) fn run_owned(
         &mut self,
@@ -2138,7 +2138,7 @@ impl BrowseState {
             }
         }
         let Some((source, sid, job, want_name)) = pick else { return };
-        let Some(client) = crate::plex::client_for(sid) else { return };
+        let Some(client) = crate::catalog::client_for(sid) else { return };
         let request = DiscoveryRequest {
             epoch: self.table_epoch(), si: source, client, token_gen: client.token_gen(),
             job, want_name, adapter: Arc::clone(adapter),
@@ -2157,7 +2157,7 @@ impl BrowseState {
     fn land_discovery_owned_with_gate(
         &mut self,
         adapter: &Arc<BrowseAdapter>,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
     ) -> crate::stores::StoreOutcome {
         let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()).take()
@@ -2167,7 +2167,7 @@ impl BrowseState {
     }
     fn land_directory_owned_with_gate<T>(
         &mut self,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
         flag: &AtomicBool,
         mail: &Mutex<Option<DirectoryResult<T>>>,
         apply: impl FnOnce(&mut SecState, Vec<T>),
@@ -2176,13 +2176,13 @@ impl BrowseState {
             mail.lock().unwrap_or_else(|e| e.into_inner()).take()
         });
         let Some(result) = taken else { return false };
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         flag.store(false, Ordering::SeqCst);
         if result.epoch != self.table_epoch() {
             return false;
         }
         let DirectoryResult { sec, client, token_gen, library_type, list, .. } = result;
-        crate::plex::commit_if_current(client.id(), client, token_gen, || {
+        crate::catalog::commit_if_current(client.id(), client, token_gen, || {
             if self.section_sid(sec) == Some(client.id()) {
                 if let Some(state) = self.state_mut(sec) {
                     if state.library_type != library_type {
@@ -2198,12 +2198,12 @@ impl BrowseState {
     #[cfg(test)]
     fn land_discovery_owned(&mut self, adapter: &Arc<BrowseAdapter>)
         -> crate::stores::StoreOutcome {
-        self.land_discovery_owned_with_gate(adapter, plx_machine::landgate::fixture_gate())
+        self.land_discovery_owned_with_gate(adapter, nj_machine::landgate::fixture_gate())
     }
     #[cfg(test)]
     fn land_directory_owned<T>(&mut self, flag: &AtomicBool,
         mail: &Mutex<Option<DirectoryResult<T>>>, apply: impl FnOnce(&mut SecState, Vec<T>)) -> bool {
-        self.land_directory_owned_with_gate(plx_machine::landgate::fixture_gate(), flag, mail, apply)
+        self.land_directory_owned_with_gate(nj_machine::landgate::fixture_gate(), flag, mail, apply)
     }
     fn maybe_spawn_owned(&mut self, adapter: &Arc<BrowseAdapter>) {
         if adapter.fetching.load(Ordering::SeqCst) || self.retry_cd > 0 {
@@ -2241,11 +2241,11 @@ impl BrowseState {
         let gen = self.query_gen();
         let key = section.key;
         let Some(sid) = self.section_sid(current) else { return };
-        let Some(client) = crate::plex::client_for(sid) else { return };
+        let Some(client) = crate::catalog::client_for(sid) else { return };
         let token_gen = client.token_gen();
         adapter.fetching.store(true, Ordering::SeqCst);
         let worker_adapter = Arc::clone(adapter);
-        let spawned = plx_base::task::spawn_small("page", move || {
+        let spawned = nj_base::task::spawn_small("page", move || {
             let page = catch_unwind(|| {
                 let query = SectionQuery {
                     section_key: key, sort: &sort, filters: &filters,
@@ -2273,7 +2273,7 @@ impl BrowseState {
     pub(crate) fn discover_pump_owned_with_gate(
         &mut self,
         adapter: &Arc<BrowseAdapter>,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
     ) -> crate::stores::StoreOutcome {
         let outcome = self.land_discovery_owned_with_gate(adapter, gate);
         self.maybe_discover_owned(adapter, &mut execute_discovery);
@@ -2282,12 +2282,12 @@ impl BrowseState {
     #[cfg(test)]
     pub(crate) fn discover_pump_owned(&mut self, adapter: &Arc<BrowseAdapter>)
         -> crate::stores::StoreOutcome {
-        self.discover_pump_owned_with_gate(adapter, plx_machine::landgate::fixture_gate())
+        self.discover_pump_owned_with_gate(adapter, nj_machine::landgate::fixture_gate())
     }
     pub(crate) fn pump_owned_with_gate(
         &mut self,
         adapter: &Arc<BrowseAdapter>,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
     ) -> crate::stores::StoreOutcome {
         let mut changed = false;
         self.retry_cd = self.retry_cd.saturating_sub(1);
@@ -2317,12 +2317,12 @@ impl BrowseState {
             adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).take()
         });
         if let Some(result) = page {
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
             adapter.fetching.store(false, Ordering::SeqCst);
             if let Some(source) = self.sections.get(result.sec).map(|section| section.src) {
                 let client = result.client;
                 let token_gen = result.token_gen;
-                let _ = crate::plex::commit_reachability_if_current(
+                let _ = crate::catalog::commit_reachability_if_current(
                     client.id(), client, token_gen, result.total >= 0, None, |outcome| {
                         if !self.apply_source_outcome(source, client, outcome) {
                             return false;
@@ -2383,7 +2383,7 @@ impl BrowseState {
     #[cfg(test)]
     pub(crate) fn pump_owned(&mut self, adapter: &Arc<BrowseAdapter>)
         -> crate::stores::StoreOutcome {
-        self.pump_owned_with_gate(adapter, plx_machine::landgate::fixture_gate())
+        self.pump_owned_with_gate(adapter, nj_machine::landgate::fixture_gate())
     }
 }
 
@@ -2391,7 +2391,7 @@ impl BrowseState {
 
 /// A remembered sort to put the first page in, once its menu proves the server still offers it —
 /// see [`fetch_listing_page`]. Built by [`BrowseState::restore_for`] from
-/// [`crate::plex::session::Session::library_sorts`].
+/// [`crate::catalog::session::Session::library_sorts`].
 struct Restore {
     kind: SecKind,
     sort: String,
@@ -2426,7 +2426,7 @@ fn restorable(sorts: &[SortEntry], restore: &Restore) -> Option<SortEntry> {
 }
 
 fn fetch_listing_page(
-    client: &crate::plex::Client,
+    client: &crate::catalog::Client,
     sid: ServerId,
     query: &SectionQuery<'_>,
     confirm_sort: bool,
@@ -2500,7 +2500,7 @@ fn fetch_listing_page(
 struct PageResult {
     /// Exact registry lifecycle the worker dialled. Section/query generations do not move when a
     /// slot is re-pointed or retokened, so both pointer identity and token generation are needed.
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     gen: u32,
     sec: usize,
@@ -2518,7 +2518,7 @@ struct PageResult {
 struct DirectoryResult<T> {
     epoch: u32,
     sec: usize,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     library_type: LibraryType,
     list: Vec<T>,
@@ -2533,7 +2533,7 @@ struct DirectoryResult<T> {
 struct SrcLanding {
     /// Exact registry lifecycle the worker dialled. Slot id alone survives both re-point and
     /// profile changes; pointer identity catches the former and token_gen catches in-place retoken.
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     /// `GET /`'s `friendlyName`, or "" when it was already known or the server did not answer
     name: String,
@@ -2554,23 +2554,23 @@ enum SrcWhat {
 #[cfg(test)]
 fn ensure_sections_with(
     state: &mut BrowseState,
-    fetch: impl FnOnce(&crate::plex::Client) -> Option<Vec<(i64, String, SecKind)>>,
+    fetch: impl FnOnce(&crate::catalog::Client) -> Option<Vec<(i64, String, SecKind)>>,
 ) -> usize {
     state.sync_roster_owned();
-    let cur_sid = crate::plex::current_server();
+    let cur_sid = crate::catalog::current_server();
     let Some(si) = state.sources().iter().position(|s| s.sid == cur_sid) else {
         return state.sections().len();
     };
     if state.sources()[si].sections_done {
         return state.sections().len();
     }
-    let Some(client) = crate::plex::client_for(cur_sid) else {
+    let Some(client) = crate::catalog::client_for(cur_sid) else {
         return state.sections().len();
     };
     let token_gen = client.token_gen();
     let found = catch_unwind(AssertUnwindSafe(|| fetch(client))).unwrap_or(None);
     let ok = found.is_some();
-    let committed = crate::plex::commit_reachability_if_current(
+    let committed = crate::catalog::commit_reachability_if_current(
         cur_sid,
         client,
         token_gen,
@@ -2607,7 +2607,7 @@ fn ensure_sections_with(
 /// the top level before it had a tab. What is still missing is the level BELOW the grid — an artist
 /// opens the movie detail page, which has nothing to play — and that belongs to whoever builds the
 /// music level, not to the strip.
-fn project_sections(mc: &crate::plex::MediaContainer) -> Vec<(i64, String, SecKind)> {
+fn project_sections(mc: &crate::catalog::MediaContainer) -> Vec<(i64, String, SecKind)> {
     mc.directory
         .iter()
         .filter_map(|d| {
@@ -2668,8 +2668,8 @@ impl SecKind {
     /// The same thing as a standalone label ("Films"), for a row whose count has not landed yet.
     pub(crate) fn plural(self) -> &'static str {
         match self {
-            SecKind::Movie => plx_platform::i18n::msg::browse_kind_films(),
-            SecKind::Show => plx_platform::i18n::msg::browse_kind_tv_shows_sentence(),
+            SecKind::Movie => nj_platform::i18n::msg::browse_kind_films(),
+            SecKind::Show => nj_platform::i18n::msg::browse_kind_tv_shows_sentence(),
         }
     }
 }
@@ -2698,7 +2698,7 @@ fn kind_offers_plays_sort(kind: SecKind) -> bool {
 /// feature exists for.
 fn with_plays_sort(mut sorts: Vec<SortEntry>, kind: SecKind) -> Vec<SortEntry> {
     if kind_offers_plays_sort(kind) && !sorts.iter().any(|sort| sort.key == PLAYS_SORT_KEY) {
-        sorts.push(plays_sort_entry(plx_platform::i18n::msg::browse_library_plays().into()));
+        sorts.push(plays_sort_entry(nj_platform::i18n::msg::browse_library_plays().into()));
     }
     sorts
 }
@@ -2809,7 +2809,7 @@ pub(crate) const TAB_KINDS: [SecKind; 2] = [SecKind::Movie, SecKind::Show];
 
 /// One source's `machineIdentifier` as the registry knows it, `""` while nobody has learned it.
 fn machine_of(sid: ServerId) -> String {
-    crate::plex::client_for(sid)
+    crate::catalog::client_for(sid)
         .map(|c| c.machine_id().to_string())
         .unwrap_or_default()
 }
@@ -2839,7 +2839,7 @@ pub(crate) struct SrcGroup {
     pub(crate) state: SourceState,
     /// Which tier won — local, remote or relay. The Sources list is the surface that should say it:
     /// "relay" explains a 2 Mbit/s ceiling that otherwise reads as a broken server.
-    pub(crate) tier: Option<crate::plex::probe::Location>,
+    pub(crate) tier: Option<crate::catalog::probe::Location>,
 }
 
 impl SrcGroup {
@@ -2870,8 +2870,8 @@ pub(crate) struct SrcRow {
 fn count_line(count: i64, kind: SecKind) -> String {
     if count >= 0 {
         match kind {
-            SecKind::Movie => plx_platform::i18n::msg::browse_person_films(count),
-            SecKind::Show => plx_platform::i18n::msg::browse_person_shows(count),
+            SecKind::Movie => nj_platform::i18n::msg::browse_person_films(count),
+            SecKind::Show => nj_platform::i18n::msg::browse_person_shows(count),
         }
     } else {
         kind.plural().to_string()
@@ -2900,7 +2900,7 @@ enum SrcJob {
 pub(crate) struct DiscoveryRequest {
     epoch: u32,
     si: usize,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     job: SrcJob,
     want_name: bool,
@@ -3001,7 +3001,7 @@ fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
     if REFUSE_DISCOVERY_FOR_TEST.with(|flag| flag.get()) {
         return false;
     }
-    plx_base::task::spawn_small("sources", job)
+    nj_base::task::spawn_small("sources", job)
 }
 
 #[cfg(test)]
@@ -3026,11 +3026,11 @@ pub(crate) fn with_refused_discovery_for_test<R>(f: impl FnOnce() -> R) -> R {
 pub(crate) fn queue_discovery_for_owner_test(
     state: &mut BrowseState,
     adapter: &Arc<BrowseAdapter>,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     ok: bool,
 ) {
-    plx_base::testlock::assert_held("discovery observation fixture");
+    nj_base::testlock::assert_held("discovery observation fixture");
     let _ = state.sync_roster_owned();
     let si = state.sources.iter().position(|source| source.sid == client.id()).unwrap();
     let what = SrcWhat::Sections(ok.then(Vec::new));
@@ -3048,7 +3048,7 @@ pub(crate) fn queue_discovery_for_owner_test(
 
 #[cfg(test)]
 pub(crate) fn seed_items_for_owner_test(state: &mut BrowseState, n: usize) {
-    plx_base::testlock::assert_held("browse's section table (seed_items_for_test)");
+    nj_base::testlock::assert_held("browse's section table (seed_items_for_test)");
     let c = state.cur();
     let sid = state.section_sid(c).unwrap_or_default();
     if let Some(st) = state.state_mut(c) {
@@ -3056,7 +3056,7 @@ pub(crate) fn seed_items_for_owner_test(state: &mut BrowseState, n: usize) {
         st.items = SecItems::from_vec(
             (0..n)
                 .map(|i| {
-                    Some(crate::pms::PmsMovie {
+                    Some(crate::catalog_fetch::PmsMovie {
                         sid,
                         rk: format!("{}", i + 1),
                         title: format!("Item {i}"),
@@ -3076,9 +3076,9 @@ pub(crate) fn seed_sources_for_owner_test(
     n: usize,
     reachable: bool,
 ) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_sources_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (seed_sources_for_test)");
     state.reset_with(|| {});
-    let current = crate::plex::current_server();
+    let current = crate::catalog::current_server();
     state.sources = (0..n)
         .map(|index| BrowseSource {
             sid: if index == 0 {
@@ -3118,10 +3118,10 @@ pub(crate) fn seed_sources_for_owner_test(
 
 #[cfg(test)]
 pub(crate) fn seed_pins_for_owner_test(state: &mut BrowseState, pinned: &[bool]) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_pins_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (seed_pins_for_test)");
     state.reset_with(|| {});
     state.sources = vec![BrowseSource {
-        sid: crate::plex::current_server(),
+        sid: crate::catalog::current_server(),
         client_addr: 0,
         token_gen: 0,
         machine_id: "mach-test".into(),
@@ -3155,7 +3155,7 @@ pub(crate) fn seed_pins_for_owner_test(state: &mut BrowseState, pinned: &[bool])
 
 #[cfg(test)]
 pub(crate) fn set_pinned_for_owner_test(state: &mut BrowseState, index: usize, on: bool) {
-    plx_base::testlock::assert_held("an owned browse section table (set_pinned_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (set_pinned_for_test)");
     if let Some(section) = state.sections.get_mut(index) {
         section.pinned = on;
     }
@@ -3163,7 +3163,7 @@ pub(crate) fn set_pinned_for_owner_test(state: &mut BrowseState, index: usize, o
 
 #[cfg(test)]
 pub(crate) fn land_pin_for_owner_test(state: &mut BrowseState, pinned: bool) {
-    plx_base::testlock::assert_held("an owned browse section table (land_pin_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (land_pin_for_test)");
     let key = state.sections.len() as i64 + 1;
     state.sections.push(BrowseSection {
         src: 0,
@@ -3179,8 +3179,8 @@ pub(crate) fn land_pin_for_owner_test(state: &mut BrowseState, pinned: bool) {
 
 #[cfg(test)]
 pub(crate) fn seed_two_source_table_for_owner_test(state: &mut BrowseState) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_two_source_table_for_test)");
-    crate::plex::session::forget_pins_for_test(&crate::plex::session::current_profile_key());
+    nj_base::testlock::assert_held("an owned browse section table (seed_two_source_table_for_test)");
+    crate::catalog::session::forget_pins_for_test(&crate::catalog::session::current_profile_key());
     state.reset_with(|| {});
     state.sources = vec![
         test_support::a_source("mac-mini", "", true),
@@ -3209,17 +3209,17 @@ pub(crate) fn seed_registered_table_for_owner_test(
     state: &mut BrowseState,
     sids: [ServerId; 2],
 ) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_registered_table_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (seed_registered_table_for_test)");
     seed_two_source_table_for_owner_test(state);
     for (index, sid) in sids.into_iter().enumerate() {
-        let client = crate::plex::client_for(sid).expect("registered fixture source");
+        let client = crate::catalog::client_for(sid).expect("registered fixture source");
         let source = state.source_mut(index).unwrap();
         source.sid = sid;
         source.machine_id = client.machine_id().to_owned();
         source.client_addr = client as *const _ as usize;
         source.token_gen = client.token_gen();
-        crate::plex::describe_server(sid, &source.name, &source.handle,
-            crate::plex::GrantEvidence {
+        crate::catalog::describe_server(sid, &source.name, &source.handle,
+            crate::catalog::GrantEvidence {
                 owned: source.owned, home: source.home, owner_id: source.owner_id,
             });
     }
@@ -3236,7 +3236,7 @@ pub(crate) fn append_section_for_owner_test(
     title: &str,
     kind: SecKind,
 ) {
-    plx_base::testlock::assert_held("an owned browse section table (append_section_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (append_section_for_test)");
     state.append_sections_with(source, vec![(key, title.into(), kind)], None);
 }
 
@@ -3245,7 +3245,7 @@ pub(crate) fn seed_letter_counts_for_owner_test(
     state: &mut BrowseState,
     letters: &[(&str, i64)],
 ) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_letter_counts_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (seed_letter_counts_for_test)");
     let current = state.cur();
     if let Some(section) = state.state_mut(current) {
         section.letters = Arc::new(
@@ -3264,7 +3264,7 @@ pub(crate) fn seed_query_choices_for_owner_test(
     sorts: Vec<SortEntry>,
     genres: Vec<GenreEntry>,
 ) {
-    plx_base::testlock::assert_held("an owned browse section table (seed_query_choices_for_test)");
+    nj_base::testlock::assert_held("an owned browse section table (seed_query_choices_for_test)");
     let current = state.cur();
     if let Some(section) = state.state_mut(current) {
         section.sorts = Arc::new(sorts);
@@ -3294,7 +3294,7 @@ pub(crate) fn prepare_page_for_owner_test(state: &mut BrowseState, sid: ServerId
 pub(crate) fn queue_genre_for_owner_test(
     state: &mut BrowseState,
     adapter: &BrowseAdapter,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
 ) {
     prepare_page_for_owner_test(state, client.id());
     let sec = state.cur();
@@ -3332,7 +3332,7 @@ pub(crate) fn adapter_src_fetching_for_test(adapter: &BrowseAdapter) -> bool {
 pub(crate) fn queue_page_failure_for_owner_test(
     state: &mut BrowseState,
     adapter: &BrowseAdapter,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
 ) {
     prepare_page_for_owner_test(state, client.id());
     let sec = state.cur();
@@ -3352,7 +3352,7 @@ pub(crate) fn set_adapter_fetching_for_test(adapter: &BrowseAdapter, fetching: b
 pub(crate) fn spawn_owned_page_for_test(
     state: &BrowseState,
     adapter: &Arc<BrowseAdapter>,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     title: &str,
 ) -> (std::sync::mpsc::SyncSender<()>, std::sync::mpsc::Receiver<()>) {
     let sec = state.cur();
@@ -3365,7 +3365,7 @@ pub(crate) fn spawn_owned_page_for_test(
     let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
     let (done_tx, done_rx) = std::sync::mpsc::sync_channel(0);
     adapter.fetching.store(true, Ordering::SeqCst);
-    assert!(plx_base::task::spawn_small("browse-owner-test", move || {
+    assert!(nj_base::task::spawn_small("browse-owner-test", move || {
         release_rx.recv().expect("test releases worker");
         *worker_adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) =
             Some(PageResult {
@@ -3415,7 +3415,7 @@ mod localized_type_tests {
 
     #[test]
     fn library_type_titles_translate_without_changing_the_pms_query_type() {
-        use plx_platform::i18n::{LocaleContext, Preference};
+        use nj_platform::i18n::{LocaleContext, Preference};
         for (preference, expected) in [
             (Preference::En, ["Movies", "Collections", "TV Shows", "Seasons", "Episodes", "Collections"]),
             (Preference::Es, ["Películas", "Colecciones", "Series", "Temporadas", "Episodios", "Colecciones"]),

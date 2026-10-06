@@ -18,12 +18,12 @@
 use super::*;
 use crate::ui::fixture::FixtureMeasure;
 // `By` is the odd one out and the split is deliberate rather than untidy: the other seven
-// names really are `plx_machine::machine`'s, but `By` — how a focus move was CAUSED (a direction key,
+// names really are `nj_machine::machine`'s, but `By` — how a focus move was CAUSED (a direction key,
 // a pointer, a restore) — belongs to `ui::screen` beside `ScreenEvent::FocusMoved`, the only
-// thing that carries one. Writing it as `plx_machine::machine::By` compiles nowhere and is invisible
+// thing that carries one. Writing it as `nj_machine::machine::By` compiles nowhere and is invisible
 // to every non-test gate, since this module is `cfg(test)`.
-use plx_machine::machine::{Edge, FocusRead, InputEvent, InputKind, InputOwner, PressRead, Source};
-use plx_machine::present::Present;
+use nj_machine::machine::{Edge, FocusRead, InputEvent, InputKind, InputOwner, PressRead, Source};
+use nj_machine::present::Present;
 
 // A `static`, not a `const`: `Cx::measure` needs a genuine `&'static dyn Measure`, and a
 // `static` gives one outright rather than leaning on constant-promotion rules at the borrow
@@ -116,35 +116,35 @@ impl Screen<InnerHost> for DrawProbe {
 /// and no dialable server, i.e. deterministically SIGNED OUT, which is the state the row
 /// comments here already assume. The caller must hold `testlock::serial()` for its whole body
 /// (the redirected path is a crate global); every test below takes it first.
-pub(super) fn scratch_session(tag: &str) -> crate::plex::session::TempSession {
-    crate::plex::session::TempSession::new(tag)
+pub(super) fn scratch_session(tag: &str) -> crate::catalog::session::TempSession {
+    crate::catalog::session::TempSession::new(tag)
 }
 
-pub(super) fn multi_user_session(tag: &str) -> crate::plex::session::TempSession {
-    let t = crate::plex::session::TempSession::new(tag);
-    crate::plex::session::save(&crate::plex::session::Session {
+pub(super) fn multi_user_session(tag: &str) -> crate::catalog::session::TempSession {
+    let t = crate::catalog::session::TempSession::new(tag);
+    crate::catalog::session::save(&crate::catalog::session::Session {
         client_id: "cid-test".into(),
         account_token: "acct".into(),
-        server: crate::plex::session::ServerRef {
+        server: crate::catalog::session::ServerRef {
             address: "192.168.0.10".into(),
             port: 32400,
             token: "t".into(),
             ..Default::default()
         },
-        user: crate::plex::session::UserRef {
+        user: crate::catalog::session::UserRef {
             uuid: "u-0".into(),
             token: "ut".into(),
             title: "Admin".into(),
             ..Default::default()
         },
         home_users: vec![
-            crate::plex::session::HomeUserRef {
+            crate::catalog::session::HomeUserRef {
                 uuid: "u-0".into(),
                 title: "Admin".into(),
                 admin: true,
                 ..Default::default()
             },
-            crate::plex::session::HomeUserRef {
+            crate::catalog::session::HomeUserRef {
                 uuid: "u-1".into(),
                 title: "Kid".into(),
                 ..Default::default()
@@ -166,7 +166,7 @@ pub(super) fn root_key(id: RootId) -> u32 {
 pub(super) fn select_root(page: &mut RootPage, id: RootId) {
     let entry = page.entry;
     let mut out = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
     let to = FocusKey { entry, elem: root_key(id) };
     page.step(&ScreenEvent::FocusMoved { from: None, to, by: crate::ui::screen::By::Dir }, &cx(None), &mut fx);

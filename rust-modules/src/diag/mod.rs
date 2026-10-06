@@ -3,7 +3,7 @@
 //! Three pieces were lifted out of `lab/` on 2026-08-29 when a second consumer appeared. They were
 //! written for the Cloud Lab bridge, they were correct, and none of them was lab-shaped. Two of
 //! them, the redaction pass and the record ring, are the event log's own guards and now live
-//! under it as `plx_base::eventlog::{scrub, ring}` (docs/module-layers.md: the log is a leaf every
+//! under it as `nj_base::eventlog::{scrub, ring}` (docs/module-layers.md: the log is a leaf every
 //! module names, so it cannot name `diag`, which names the Plex layer). The third stays here:
 //!
 //! * [`zlib`] — `dlopen`'d `compress2` plus a gzip envelope, in its own one-symbol table.
@@ -56,9 +56,9 @@ pub(crate) fn event(e: schema::DiagEvent) {
 /// only for that test.
 pub(crate) fn event_for_connection(
     e: schema::DiagEvent,
-    server: crate::plex::ServerId,
-    link: Option<crate::plex::probe::Location>,
-    ip: Option<crate::plex::IpVersion>,
+    server: crate::catalog::ServerId,
+    link: Option<crate::catalog::probe::Location>,
+    ip: Option<crate::catalog::IpVersion>,
 ) {
     event_for(e, ServerContext::Snapshot(server, link, ip));
 }
@@ -68,9 +68,9 @@ pub(crate) fn event_for_connection(
 enum ServerContext {
     None,
     Snapshot(
-        crate::plex::ServerId,
-        Option<crate::plex::probe::Location>,
-        Option<crate::plex::IpVersion>,
+        crate::catalog::ServerId,
+        Option<crate::catalog::probe::Location>,
+        Option<crate::catalog::IpVersion>,
     ),
 }
 
@@ -191,7 +191,7 @@ fn event_for_impl(e: schema::DiagEvent, server: ServerContext, stamp: Option<Sta
     // the NEXT sign-in's identifier at send time (`sender::wire_body` attaches the identifier
     // current at the send, not at the capture). The handled playback error already went this way.
     //
-    // Deliberately not logged. `plx_base::eventlog::log` writes the event log, and an event stream duplicated
+    // Deliberately not logged. `nj_base::eventlog::log` writes the event log, and an event stream duplicated
     // into the primary debugging surface would double its volume to say nothing new — every one of
     // these is derived from a line already there.
     let record = crate::telemetry::queue::Record {
@@ -345,7 +345,7 @@ mod tests {
     /// `telemetry::consent`'s own snapshot-install tests, since this module reads that same
     /// `CURRENT` global.
     fn with_consent_snapshot(body: impl FnOnce()) {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = consent::current();
         clear_deferred();
         body();

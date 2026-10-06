@@ -50,7 +50,7 @@ def ssh(tv: str, command: str, *, check: bool = True) -> subprocess.CompletedPro
 
 
 def lock_reexec(argv: list[str]) -> None:
-    if os.environ.get("PLX_TV_LOCK_INHERITED") == "1":
+    if os.environ.get("NJ_TV_LOCK_INHERITED") == "1":
         return
     os.execv(str(LOCK), [str(LOCK), "with", "--why", "passive graphics observation", "--",
                              sys.executable, str(Path(__file__).resolve()), *argv])
@@ -71,7 +71,7 @@ def main() -> int:
         raise SystemExit("--seconds must be positive")
     lock_reexec(sys.argv[1:])
     tv, appid, appdir, rundir = make_query(args.flavor)
-    executable = f"{appdir}/plxnative"
+    executable = f"{appdir}/nativejelly"
     pid_out = ssh(tv, f"fuser {shlex.quote(executable)} 2>/dev/null", check=False).stdout
     pids = [word for word in pid_out.split() if word.isdigit()]
     if not pids:
@@ -79,25 +79,25 @@ def main() -> int:
     trigger_probe = ssh(
         tv,
         "for n in profile hwcnt cpuprof; do "
-        f"[ -e {rundir}/plxnative-$n ] && echo $n; done",
+        f"[ -e {rundir}/nativejelly-$n ] && echo $n; done",
         check=False,
     ).stdout.split()
     pacing_valid = not trigger_probe
 
     subprocess.run(["make", "mali-irq-sample"], cwd=ROOT, check=True)
-    remote = f"/tmp/plxnative-mali-irq-{os.getpid()}"
+    remote = f"/tmp/nativejelly-mali-irq-{os.getpid()}"
     try:
         scp = [TV_SSH, "scp", str(LOCAL_HELPER), f"root@{tv}:{remote}.new"]
         subprocess.run(scp, cwd=ROOT, check=True)
         ssh(tv, f"chmod 700 {remote}.new && mv {remote}.new {remote}")
-        start_lines_text = ssh(tv, f"wc -l < {rundir}/plxnative-events.log 2>/dev/null || echo 0",
+        start_lines_text = ssh(tv, f"wc -l < {rundir}/nativejelly-events.log 2>/dev/null || echo 0",
                                check=False).stdout.strip()
         start_lines = int(start_lines_text or "0")
         samples = max(2, math.ceil(args.seconds * 10.0) + 1)
         raw = ssh(tv, f"{remote} {samples} 100", check=False)
         if not raw.stdout:
             raise SystemExit(raw.stderr.strip() or "Mali IRQ sampler produced no data")
-        log = ssh(tv, f"tail -n +{start_lines + 1} {rundir}/plxnative-events.log 2>/dev/null",
+        log = ssh(tv, f"tail -n +{start_lines + 1} {rundir}/nativejelly-events.log 2>/dev/null",
                   check=False).stdout
     finally:
         ssh(tv, f"rm -f {remote} {remote}.new", check=False)

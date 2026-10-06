@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::sync::Arc;
 
-use crate::pms::{HeroRef, HubIdentity, HubRef, HubsView, PmsMovie};
+use crate::catalog_fetch::{HeroRef, HubIdentity, HubRef, HubsView, PmsMovie};
 use crate::stores::hubs::HubsCmd;
 use crate::stores::{StoreCmd, StoreId, StoreWork};
 use crate::ui::card_row::{self, CardRow, RowStyle};
@@ -28,11 +28,11 @@ use crate::ui::landing_hero::{
     base_scrim_ramp, stack_top as hero_stack_top, COL_W as HERO_COL_W,
     TEXT_BOTTOM as HERO_TEXT_BOTTOM,
 };
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputEvent,
     InputKind, InstanceId, Key, LogicalState, Machine, MachineId, Measure, Tick,
 };
-use plx_machine::present::{PresentEvent, Provenance};
+use nj_machine::present::{PresentEvent, Provenance};
 use crate::ui::screen::{
     Activate, At, AxisMask, By, Dir, DrawFrame, EdgeRule, ElemKind, Enter, FocusTarget, Focusable,
     GroupKind, GroupSpec, Hover, Link, Placed, RenderStrategy, Screen, ScreenEvent, Seat, Step,
@@ -77,7 +77,7 @@ pub(crate) const STRIP_SHOWS_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 2;
 pub(crate) const STRIP_SEARCH_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 3;
 pub(crate) const STRIP_ACCOUNT_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 4;
 
-const MAX_ITEMS: usize = crate::pms::MAX_SHELF_ITEMS;
+const MAX_ITEMS: usize = crate::catalog_fetch::MAX_SHELF_ITEMS;
 const HERO_FLIP_CD: f32 = 0.35;
 const HERO_AUTO_S: f32 = 8.0;
 const K_SLIDE: f32 = 130.0;
@@ -121,7 +121,7 @@ struct HubProjection {
     /// Where the row's linked heading leads: the collection a promoted `custom.collection.*` hub
     /// lists, classified once per publication. Every other row is unlinked and keeps its plain
     /// heading.
-    link: Option<crate::plex::collections::CollectionRef>,
+    link: Option<crate::catalog::collections::CollectionRef>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -182,7 +182,7 @@ struct Backdrop {
     outgoing_art: Spring,
     tex: (u32, f32, f32),
     outgoing_tex: (u32, f32, f32),
-    keyed: Option<(crate::plex::ServerId, String)>,
+    keyed: Option<(crate::catalog::ServerId, String)>,
 }
 
 impl Backdrop {
@@ -216,7 +216,7 @@ impl Backdrop {
         &mut self,
         hero: Option<HeroRef<'_>>,
         outgoing: Option<HeroRef<'_>>,
-        selected: Option<&(crate::plex::ServerId, String)>,
+        selected: Option<&(crate::catalog::ServerId, String)>,
         snap: f32,
     ) {
         let resolve = |h: Option<HeroRef<'_>>| {
@@ -237,7 +237,7 @@ impl Backdrop {
             _ => true,
         };
         if changed {
-            plx_gfx::gfx::control_ground_invalidate();
+            nj_gfx::gfx::control_ground_invalidate();
             self.outgoing_art.jump(self.art.pos);
             self.art.jump(f32::from(self.tex.0 != 0));
             if self.keyed.is_none() {
@@ -253,13 +253,13 @@ impl Backdrop {
         hero: Option<HeroRef<'_>>,
         outgoing: Option<HeroRef<'_>>,
         grid_item: Option<&PmsMovie>,
-        selected: Option<&(crate::plex::ServerId, String)>,
+        selected: Option<&(crate::catalog::ServerId, String)>,
         snap: f32,
         dt: f32,
     ) {
         self.bind(hero, outgoing, selected, snap);
         // decorative hero-art reveal dissolve (same reason as the wash below)
-        plx_machine::idle::decorative(|| {
+        nj_machine::idle::decorative(|| {
             if self.tex.0 != 0 {
                 self.art.step(1.0, AmbientWash::K, dt);
             }
@@ -271,7 +271,7 @@ impl Backdrop {
             self.grid_target = AmbientWash::keyed(item.blur, PageGround::CARD_W);
         }
         // decorative colour dissolve under the page — must not hold the page-freeze snapshot
-        plx_machine::idle::decorative(|| {
+        nj_machine::idle::decorative(|| {
             self.wash.step(
                 wash_corners(hero.map(|h| h.item), self.grid_target, snap),
                 AmbientWash::K,
@@ -350,14 +350,14 @@ impl Backdrop {
 /// A card named by borrowed parts, so a lookup in the key table clones nothing.
 #[derive(Clone, Copy)]
 enum ItemRef<'a> {
-    Item { sid: crate::plex::ServerId, rk: &'a str },
+    Item { sid: crate::catalog::ServerId, rk: &'a str },
     Slot { generation: u32, ordinal: u32 },
 }
 
 /// One hub's entries in the key table: positions in `HomeScreen::items`.
 #[derive(Default)]
 struct HubKeys {
-    by_rk: HashMap<String, Vec<(crate::plex::ServerId, usize)>>,
+    by_rk: HashMap<String, Vec<(crate::catalog::ServerId, usize)>>,
     slots: HashMap<(u32, u32), usize>,
 }
 
@@ -393,8 +393,8 @@ pub(crate) struct HomeScreen {
     restore_reveal: bool,
 
     /// Selected hero ITEM identity. It is data, not focus.
-    carousel: Option<(crate::plex::ServerId, String)>,
-    outgoing: Option<(crate::plex::ServerId, String)>,
+    carousel: Option<(crate::catalog::ServerId, String)>,
+    outgoing: Option<(crate::catalog::ServerId, String)>,
     hero_flip_cd: f32,
     hero_slide: Spring,
     hero_dir: f32,
@@ -671,7 +671,7 @@ impl HomeScreen {
             // a hub lists one section's items.
             let link = match hub.identity {
                 Some(HubIdentity::Identifier { sid, id, key }) =>
-                    crate::plex::collections::promoted_collection_link(
+                    crate::catalog::collections::promoted_collection_link(
                         sid, id, key, hub.title, hub.items.first().map_or(0, |item| item.sec)),
                 _ => None,
             };
@@ -702,7 +702,7 @@ impl HomeScreen {
         }
         self.rows = rows;
         self.restored_scroll.retain(|(group, _)| {
-            view.state != crate::pms::HubState::Ready
+            view.state != crate::catalog_fetch::HubState::Ready
                 && !self.rows.iter().any(|row| row.group.0 == *group)
         });
         self.projected_generation = Some(view.generation);
@@ -752,17 +752,17 @@ impl HomeScreen {
         self.rebuild_indexes();
     }
 
-    fn identity_of(item: &PmsMovie) -> Option<(crate::plex::ServerId, String)> {
+    fn identity_of(item: &PmsMovie) -> Option<(crate::catalog::ServerId, String)> {
         (!item.rk.is_empty()).then(|| (item.sid, item.rk.clone()))
     }
 
-    fn same_item(item: &PmsMovie, identity: &(crate::plex::ServerId, String)) -> bool {
+    fn same_item(item: &PmsMovie, identity: &(crate::catalog::ServerId, String)) -> bool {
         item.sid == identity.0 && item.rk == identity.1
     }
 
     fn hero_by_identity<'a>(
         view: HubsView<'a>,
-        identity: &(crate::plex::ServerId, String),
+        identity: &(crate::catalog::ServerId, String),
     ) -> Option<HeroRef<'a>> {
         (0..view.hero_count())
             .filter_map(|i| view.hero(i))
@@ -894,7 +894,7 @@ impl HomeScreen {
     }
 
     /// Where a row's linked heading leads, if it has one.
-    fn linked(&self, row: usize) -> Option<&crate::plex::collections::CollectionRef> {
+    fn linked(&self, row: usize) -> Option<&crate::catalog::collections::CollectionRef> {
         self.rows.get(row)?.link.as_ref()
     }
 
@@ -1006,7 +1006,7 @@ impl HomeScreen {
             self.snap_target = 0.0;
             self.snap.jump(0.0);
         }
-        let current = crate::plex::client_for(crate::plex::current_server()).map(|c| c.machine_id());
+        let current = crate::catalog::client_for(crate::catalog::current_server()).map(|c| c.machine_id());
         // `|` not `||`: both watches must re-read.
         if self.plaintext.refresh(current, Near::First) | self.clock.refresh(current) {
             fx.invalidate(Provenance::Landing(fx.from()));
@@ -1048,7 +1048,7 @@ impl HomeScreen {
             // It reports NO `Motion`, deliberately. Nothing draws `hero_auto`: it is a TIMER, not
             // an animator (the `Timer` class of `docs/retui-invalidation-design.md`, not its
             // `Ramp`), and the dispatcher delivers `Tick` to the page every loop iteration whether or not the
-            // frame presents (`plx_machine::idle`, "What this module does NOT do"), so the countdown runs
+            // frame presents (`nj_machine::idle`, "What this module does NOT do"), so the countdown runs
             // on a closed gate while the page is uncovered and the flip it ends in is what wakes
             // it — `outgoing` is set, and `moving` below reports the slide. Noting `Motion` on
             // every countdown tick made a still billboard present at the full frame rate forever:
@@ -1082,13 +1082,13 @@ impl HomeScreen {
         };
         // decorative: an in-place scale of the focused control, no layout — must not hold the
         // page-freeze snapshot (`idle::decorative`)
-        plx_machine::idle::decorative(|| self.hero_pop.step(hero_focus, dt));
+        nj_machine::idle::decorative(|| self.hero_pop.step(hero_focus, dt));
         let visible_cx: Cx<'_, H> = Cx {
             views: cx.views,
             tick: cx.tick,
             measure: cx.measure,
             press: cx.press,
-            focus: plx_machine::machine::FocusRead {
+            focus: nj_machine::machine::FocusRead {
                 current: visible_focus,
             ..Default::default() },
             owner: cx.owner,
@@ -1269,7 +1269,7 @@ impl HomeScreen {
                 self.hero_slide.jump(1.0);
                 if matches!(command, HomeCmd::PinHero(_)) {
                     self.hero_pinned = true;
-                    plx_base::eventlog::log(&format!("home: hero pinned at slot {index}"));
+                    nj_base::eventlog::log(&format!("home: hero pinned at slot {index}"));
                 }
                 fx.invalidate(Provenance::Input);
             }
@@ -1292,7 +1292,7 @@ impl HomeScreen {
             // asks the shared question rather than retrying what cannot succeed.
             if let Some(v) = self.plaintext.verdict() {
                 let machine = v.machine_id.clone();
-                let sid = crate::plex::id_of_machine(&machine);
+                let sid = crate::catalog::id_of_machine(&machine);
                 self.plaintext_alert.open(&machine, sid, MachineId::Instance(self.instance), fx);
                 fx.invalidate(Provenance::Input);
             }
@@ -1383,7 +1383,7 @@ impl HomeScreen {
     }
 
     fn draw_page<H: HomeLike>(&mut self, f: &mut DrawFrame<'_, '_, H>) {
-        plx_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+        nj_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         let view = H::hubs(f.cx);
         let visible_focus = self.visible_focus(f.focus.current);
         let env = self.env(0.0);
@@ -1474,7 +1474,7 @@ impl HomeScreen {
         press_scale: f32,
     ) {
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
-        let label = if resumes { plx_platform::i18n::msg::browse_home_continue_c() } else { plx_platform::i18n::msg::browse_detail_play_c() };
+        let label = if resumes { nj_platform::i18n::msg::browse_home_continue_c() } else { nj_platform::i18n::msg::browse_detail_play_c() };
         let pill = Rect::new(
             MARGIN_X,
             HERO_ROW_Y,
@@ -1503,7 +1503,7 @@ impl HomeScreen {
             return;
         }
         let may_read = live && dx.abs() < 0.5 && page_alpha >= 0.999;
-        let palette = plx_gfx::gfx::sample_control_ground(
+        let palette = nj_gfx::gfx::sample_control_ground(
             [pill.x + dx, pill.y, info.x + info.w - pill.x, pill.h],
             may_read,
         )
@@ -2237,7 +2237,7 @@ impl HomeScreen {
         }
         let hero = self.selected_hero(view)?.item;
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
-        let label = if resumes { plx_platform::i18n::msg::browse_home_continue_c() } else { plx_platform::i18n::msg::browse_detail_play_c() };
+        let label = if resumes { nj_platform::i18n::msg::browse_home_continue_c() } else { nj_platform::i18n::msg::browse_detail_play_c() };
         let pill = Rect::new(
             MARGIN_X,
             HERO_ROW_Y,
@@ -2434,7 +2434,7 @@ impl<H: HomeLike> Machine<H> for HomeScreen {
 }
 
 impl<H: HomeLike> Screen<H> for HomeScreen {
-    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<plx_machine::machine::FocusKey<u32>>) {
+    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<nj_machine::machine::FocusKey<u32>>) {
         HomeScreen::redraw_focused::<H>(self, f, focus)
     }
     fn name(&self) -> &'static str {
@@ -2577,18 +2577,18 @@ fn status_read(
         return None;
     }
     Some(match view.state {
-        crate::pms::HubState::Loading => {
-            (plx_platform::i18n::msg::browse_home_loading_c(), StatusKind::Working, None)
+        crate::catalog_fetch::HubState::Loading => {
+            (nj_platform::i18n::msg::browse_home_loading_c(), StatusKind::Working, None)
         }
-        crate::pms::HubState::Failed => (
-            plx_platform::i18n::msg::browse_home_failed_c(),
+        crate::catalog_fetch::HubState::Failed => (
+            nj_platform::i18n::msg::browse_home_failed_c(),
             StatusKind::Failed,
-            Some(plx_platform::i18n::msg::browse_action_retry_c()),
+            Some(nj_platform::i18n::msg::browse_action_retry_c()),
         ),
-        crate::pms::HubState::Ready => (
-            plx_platform::i18n::msg::browse_home_empty_c(),
+        crate::catalog_fetch::HubState::Ready => (
+            nj_platform::i18n::msg::browse_home_empty_c(),
             StatusKind::Empty,
-            Some(plx_platform::i18n::msg::browse_home_refresh_c()),
+            Some(nj_platform::i18n::msg::browse_home_refresh_c()),
         ),
     })
 }
@@ -2717,7 +2717,7 @@ fn hero_art(tex: (u32, f32, f32), snap: f32, alpha: f32) -> crate::ui::widgets::
     crate::ui::widgets::WashArt {
         tex: if alpha <= 0.01 { 0 } else { tex.0 },
         rect: art_rect(tex, snap, 0.0),
-        uv: plx_gfx::gfx::UV_FULL,
+        uv: nj_gfx::gfx::UV_FULL,
         tint: theme::with_a(theme::TINT_WHITE, alpha * (1.0 - snap)),
     }
 }
@@ -2757,7 +2757,7 @@ fn prefetch_armed(snap: f32, sliding: bool) -> bool {
 fn display_source(real: &str) -> &str {
     static OVERRIDE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     OVERRIDE
-        .get_or_init(|| plx_base::devtrig::read("shared"))
+        .get_or_init(|| nj_base::devtrig::read("shared"))
         .as_deref()
         .unwrap_or(real)
 }
@@ -2795,7 +2795,7 @@ fn meta_source_flow(
 }
 fn draw_meta_source(p: Painter, source: &str, x: f32, y: f32, base_w: f32, measure: &dyn Measure) {
     meta_source_flow(base_w, source, |text, dx, budget, size, bold, ink| {
-        let elided = plx_gfx::text::elide_by(text, budget, false, |t| {
+        let elided = nj_gfx::text::elide_by(text, budget, false, |t| {
             measure.width_str(t, size, bold != 0)
         });
         let Ok(text) = CString::new(elided) else {
@@ -2844,10 +2844,10 @@ fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32, measure: &dy
     } else {
         format!(
             "{} \u{b7} {} \u{b7} {}",
-            if hero.kind == 1 { plx_platform::i18n::msg::browse_kind_show() } else { plx_platform::i18n::msg::browse_kind_movie() },
+            if hero.kind == 1 { nj_platform::i18n::msg::browse_kind_show() } else { nj_platform::i18n::msg::browse_kind_movie() },
             hero.year,
             if hero.rating.is_empty() {
-                plx_platform::i18n::msg::browse_detail_unrated()
+                nj_platform::i18n::msg::browse_detail_unrated()
             } else {
                 &hero.rating
             }

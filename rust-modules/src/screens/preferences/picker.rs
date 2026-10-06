@@ -66,7 +66,7 @@ fn option_form(options: Vec<(String, Value)>, current: &Value, busy: bool, retry
         choices = choices.item_keyed(OptionId::Choice(value.clone()), RowKey(i as u32), RowKind::Choice, PickAction::Pick(value), row);
     }
     let retry = FormSection::new("").visible(retry).item_keyed(OptionId::Retry, RowKey(RETRY_KEY), RowKind::Button, PickAction::Retry,
-        Row::new(plx_platform::i18n::msg::settings_audio_retry()).detail(plx_platform::i18n::msg::settings_audio_retry_detail()));
+        Row::new(nj_platform::i18n::msg::settings_audio_retry()).detail(nj_platform::i18n::msg::settings_audio_retry_detail()));
     Form::new().section(choices).section(retry)
 }
 
@@ -77,7 +77,7 @@ impl PickerPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(),
                 checked: u32::MAX, confirming: false, affirmative: false, alert_scroll: 0 },
             copy: String::new(), txn: Txn::new(true),
-            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, plx_platform::i18n::msg::settings_cancel_c(), plx_platform::i18n::msg::settings_playback_enable_force_c()) };
+            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, nj_platform::i18n::msg::settings_cancel_c(), nj_platform::i18n::msg::settings_playback_enable_force_c()) };
         s.rebuild(true);
         s
     }
@@ -89,8 +89,8 @@ impl PickerPage {
     /// write the checked row is live but not on disk, and OK on it must retry rather than pop.
     fn durable(&self, value: &Value) -> bool {
         match value {
-            Value::SubtitleSize(v) => crate::plex::session::peek().subtitle_size() == *v,
-            Value::SubtitlePosition(v) => crate::plex::session::peek().subtitle_position() == *v,
+            Value::SubtitleSize(v) => crate::catalog::session::peek().subtitle_size() == *v,
+            Value::SubtitlePosition(v) => crate::catalog::session::peek().subtitle_position() == *v,
             _ => true,
         }
     }
@@ -138,8 +138,8 @@ impl PickerPage {
         self.state.selected = self.form.key_at(self.form.table.sel.max(0) as usize).map_or(0, |k| k.0);
     }
     fn pop(&self, fx: &mut Effects<'_, InnerHost>) {
-        fx.push(Fx::Nav(plx_machine::machine::NavOp::Pop));
-        fx.invalidate(plx_machine::present::Provenance::Input);
+        fx.push(Fx::Nav(nj_machine::machine::NavOp::Pop));
+        fx.invalidate(nj_machine::present::Provenance::Input);
     }
     fn activate(&mut self, key: u32, fx: &mut Effects<'_, InnerHost>) {
         if self.state.io.busy { return; }
@@ -149,7 +149,7 @@ impl PickerPage {
                 if let Some(update) = self.txn.retry.clone() { self.txn.start_account(&mut self.state.io, Some(update), fx); }
                 else { self.txn.load(&mut self.state.io, fx); }
                 self.rebuild(false);
-                fx.invalidate(plx_machine::present::Provenance::Input);
+                fx.invalidate(nj_machine::present::Provenance::Input);
             }
             None => {}
         }
@@ -160,15 +160,15 @@ impl PickerPage {
         // that changed nothing.
         if self.current() == value && self.durable(&value) { self.pop(fx); return; }
         if value == Value::DirectPlay(DirectPlayMode::Forced) && self.state.direct_play != DirectPlayMode::Forced {
-            self.alert.open(plx_platform::i18n::msg::settings_playback_force_question_c(), plx_platform::i18n::msg::settings_playback_force_body());
+            self.alert.open(nj_platform::i18n::msg::settings_playback_force_question_c(), nj_platform::i18n::msg::settings_playback_force_body());
             self.state.confirming = true; self.state.affirmative = false;
             self.state.alert_scroll = self.alert.scroll_target_bits(); self.focus(fx, ALERT_GROUP);
-            fx.invalidate(plx_machine::present::Provenance::Input);
+            fx.invalidate(nj_machine::present::Provenance::Input);
             return;
         }
         self.commit(value, fx);
         self.rebuild(false);
-        fx.invalidate(plx_machine::present::Provenance::Input);
+        fx.invalidate(nj_machine::present::Provenance::Input);
     }
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
@@ -214,12 +214,12 @@ impl Machine<InnerHost> for PickerPage {
                     self.rebuild(false);
                 }
                 self.focus(fx, GroupId(0));
-                fx.invalidate(plx_machine::present::Provenance::Input); return Handled::Yes;
+                fx.invalidate(nj_machine::present::Provenance::Input); return Handled::Yes;
             }
         }
         match ev {
             ScreenEvent::Enter(_) => {
-                if self.start_initial_load(fx) { self.rebuild(true); fx.invalidate(plx_machine::present::Provenance::Input); }
+                if self.start_initial_load(fx) { self.rebuild(true); fx.invalidate(nj_machine::present::Provenance::Input); }
                 Handled::No
             }
             ScreenEvent::Tick(t) => {
@@ -245,14 +245,14 @@ impl Machine<InnerHost> for PickerPage {
                             self.state.selected = RETRY_KEY;
                             self.focus(fx, GroupId(0));
                         } else if !had_rows && cx.focus.current.is_none() { self.focus(fx, GroupId(0)); }
-                        fx.invalidate(plx_machine::present::Provenance::Landing(MachineId::Session));
+                        fx.invalidate(nj_machine::present::Provenance::Landing(MachineId::Session));
                     }
                     // an optimistic Size/Position pick published its value: move the checkmark now
                     Landed::Nothing if !started && self.checked_position() != self.state.checked => {
                         self.rebuild(false);
-                        fx.invalidate(plx_machine::present::Provenance::Landing(MachineId::Session));
+                        fx.invalidate(nj_machine::present::Provenance::Landing(MachineId::Session));
                     }
-                    Landed::Nothing if started => { self.rebuild(true); fx.invalidate(plx_machine::present::Provenance::Landing(MachineId::Session)); }
+                    Landed::Nothing if started => { self.rebuild(true); fx.invalidate(nj_machine::present::Provenance::Landing(MachineId::Session)); }
                     Landed::Nothing => {}
                 }
                 self.form.table.update(t.dt(), RouteLayout::screen().sectioned_table().h);
@@ -320,7 +320,7 @@ impl Screen<InnerHost> for PickerPage {
     fn name(&self) -> &'static str { word::PICKER }
     fn state(&self) -> &dyn LogicalState { &self.state }
     fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed(plx_platform::i18n::msg::settings_title()))
+        Some(Cow::Borrowed(nj_platform::i18n::msg::settings_title()))
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {

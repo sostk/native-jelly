@@ -13,7 +13,7 @@ use std::ffi::{CStr, CString};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 
 use crate::jf::auth::{AuthError, QuickConnect, SignedIn};
-use crate::plex::Origin;
+use crate::catalog::Origin;
 use crate::ui::frame::Budget;
 use crate::ui::label::{HAlign, Label, VAlign};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
@@ -26,12 +26,12 @@ use crate::ui::text_buffer::TextBuffer;
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::{Button, CtlPop, Spinner, CONTROL_GAP};
 use crate::ui::{theme, Env, Painter, Rect, View};
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind,
     InputOwner, InstanceId, Key, LogicalState, Machine, MachineId, Measure, TextEdit, Tick,
 };
-use plx_machine::present::{PresentEvent, Provenance};
-use plx_platform::i18n::msg;
+use nj_machine::present::{PresentEvent, Provenance};
+use nj_platform::i18n::msg;
 
 use super::registry::{word, AppFx, AppLike, JfAuthCmd, JfAuthReply, LoopReq};
 
@@ -107,7 +107,7 @@ pub(crate) struct JfLoginScreen {
     next_poll_ms: Option<u32>,
     now_ms: u32,
     pop_until_ms: u32,
-    spin: plx_machine::motion::Phase,
+    spin: nj_machine::motion::Phase,
     spin_ms: f32,
     pop: CtlPop<3>,
     ground: RouteGround,
@@ -141,7 +141,7 @@ impl JfLoginScreen {
             next_poll_ms: None,
             now_ms: 0,
             pop_until_ms: 0,
-            spin: plx_machine::motion::Phase::default(),
+            spin: nj_machine::motion::Phase::default(),
             spin_ms: 0.0,
             pop: CtlPop::new(),
             ground: RouteGround::new(),

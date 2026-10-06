@@ -13,7 +13,7 @@
 use crate::ui::consts::Key;
 use crate::ui::icons::{self, Icon};
 use crate::ui::label::{HAlign, Label};
-use plx_machine::machine::Edge;
+use nj_machine::machine::Edge;
 use crate::ui::{theme, Painter, Rect, Spring};
 use std::ffi::CString;
 
@@ -62,20 +62,20 @@ const CHEVRON_SZ: f32 = 30.0;
 /// seconds unit (`core.seconds`). `signed` prefixes `+`/`-` (the Subtitles panel's Timing
 /// read-out); unsigned is the bare magnitude this capsule's sentence says "later"/"earlier" about.
 /// ASCII hyphen-minus rather than U+2212, which the UI font is not guaranteed to carry.
-pub(crate) fn offset_seconds_in(ms: i64, signed: bool, locale: &plx_platform::i18n::LocaleContext) -> String {
+pub(crate) fn offset_seconds_in(ms: i64, signed: bool, locale: &nj_platform::i18n::LocaleContext) -> String {
     let sign = match ms.signum() {
         1 if signed => "+",
         -1 if signed => "-",
         _ => "",
     };
     let tenths = (ms.unsigned_abs() / 100) as i64;
-    plx_platform::i18n::msg::core_seconds_in(locale, &format!("{sign}{}", locale.decimal(tenths, 1)))
+    nj_platform::i18n::msg::core_seconds_in(locale, &format!("{sign}{}", locale.decimal(tenths, 1)))
 }
 
 /// The capsule's sentence for `offset_ms` in `locale` — catalog text, with the magnitude from
 /// [`offset_seconds_in`], as the Timing row's read-out uses.
-fn text_in(offset_ms: i64, locale: &plx_platform::i18n::LocaleContext) -> String {
-    use plx_platform::i18n::msg;
+fn text_in(offset_ms: i64, locale: &nj_platform::i18n::LocaleContext) -> String {
+    use nj_platform::i18n::msg;
     if offset_ms == 0 {
         return msg::widgets_tracks_capsule_original_in(locale).to_string();
     }
@@ -138,7 +138,7 @@ impl TimingCapsule {
     fn set_offset(&mut self, ms: i64) {
         self.offset_ms = ms;
         // catalog text never carries a NUL; an empty caption is the harmless fallback
-        self.caption = CString::new(text_in(ms, plx_platform::i18n::current())).unwrap_or_default();
+        self.caption = CString::new(text_in(ms, nj_platform::i18n::current())).unwrap_or_default();
     }
 
     #[cfg(test)]
@@ -386,7 +386,7 @@ mod tests {
     /// The sentence is catalog text with the locale's decimal and seconds unit.
     #[test]
     fn the_text_is_localized() {
-        use plx_platform::i18n::{LocaleContext, Preference};
+        use nj_platform::i18n::{LocaleContext, Preference};
         let es = LocaleContext::resolve(Preference::Es, None, Some("es-ES"), None, None);
         let be = LocaleContext::resolve(Preference::Be, None, Some("be-BY"), None, None);
         assert_eq!(text_in(300, &es), "Subtítulos 0,3 s más tarde");
@@ -399,10 +399,10 @@ mod tests {
     /// whole-pixel advances in the bold face `draw` uses.
     #[test]
     fn the_capsule_sentence_fits_its_block_in_every_language() {
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         use crate::ui::fit::HEADROOM;
-        use plx_platform::i18n::{LocaleContext, Preference};
-        use plx_machine::machine::Measure;
+        use nj_platform::i18n::{LocaleContext, Preference};
+        use nj_machine::machine::Measure;
         let mut out = Vec::new();
         for (language, region) in [(Preference::En, "en-US"), (Preference::Es, "es-ES"), (Preference::Be, "be-BY")] {
             let locale = LocaleContext::resolve(language, None, Some(region), None, None);

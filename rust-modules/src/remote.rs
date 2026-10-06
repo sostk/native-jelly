@@ -1,6 +1,6 @@
 //! Remote-control channel (dev / on-device testing): a FIFO the event loop drains
 //! once per frame, so a key token written from another machine — `echo down >
-//! /tmp/plxnative-remote` over SSH — drives the UI exactly like the physical remote.
+//! /tmp/nativejelly-remote` over SSH — drives the UI exactly like the physical remote.
 //!
 //! Why in-app instead of injecting system input: on this webOS 4.5 build the wayland
 //! compositor (`surface-manager`) opens a FIXED set of evdev nodes at boot (the RCU /
@@ -9,18 +9,18 @@
 //! `com.webos.service.tv.keymanager/createKeyEvent` injects into the webOS web-app key
 //! layer, not the wayland path we read. The reliable path is therefore in-app: read a
 //! token here, and let `app.rs` synthesize the SDL key event so the ONE real key
-//! handler runs unchanged. This mirrors the existing `/tmp/plxnative-*` dev-trigger
+//! handler runs unchanged. This mirrors the existing `/tmp/nativejelly-*` dev-trigger
 //! design; `tools/stream-screen.py` is the host-side driver. Boot-neutral: the FIFO is
 //! excluded from `automated_boot`, so its presence never changes the boot flow.
 
 use libc::c_void;
 use std::os::unix::io::RawFd;
 
-/// The control FIFO. Kept in the `plxnative-*` dev namespace for consistency — and resolved
-/// through [`plx_base::paths`] rather than a literal, so a host build running several simulators at
+/// The control FIFO. Kept in the `nativejelly-*` dev namespace for consistency — and resolved
+/// through [`nj_base::paths`] rather than a literal, so a host build running several simulators at
 /// once gives each its own FIFO instead of all of them draining one.
 fn fifo_path() -> std::path::PathBuf {
-    plx_base::paths::in_runtime_dir("plxnative-remote")
+    nj_base::paths::in_runtime_dir("nativejelly-remote")
 }
 
 pub struct Remote {
@@ -58,8 +58,8 @@ impl HangProbe {
         let _guard = if self.raw {
             None
         } else {
-            Some(plx_base::task::assert_may_block(
-                const { &plx_base::task::BlockingLabel::new("dev hang probe") },
+            Some(nj_base::task::assert_may_block(
+                const { &nj_base::task::BlockingLabel::new("dev hang probe") },
             ))
         };
         std::thread::sleep(std::time::Duration::from_millis(self.ms));
@@ -88,7 +88,7 @@ impl Remote {
         // pointer handler. Not a theoretical hole: `ck:X,Y` clicks replay through the same path
         // as a physical remote. It was ungated on every boot, before the event loop, with no
         // trigger file required to arm it.
-        if !plx_base::devtrig::ENABLED {
+        if !nj_base::devtrig::ENABLED {
             return None;
         }
         // Exact bytes, not `to_string_lossy`: an instance root comes from the environment, and a
@@ -121,7 +121,7 @@ impl Remote {
                 // local BEFORE the path is rebuilt for the message, so nothing runs between the
                 // failed call and the read.
                 let err = std::io::Error::last_os_error();
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "remote: open {} failed ({err}) — no remote control this run",
                     fifo_path().display()
                 ));
@@ -238,7 +238,7 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     #[test]
     fn drain_passes_hang_probes_through_without_running_them() {
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         let (tokens, tail) = drain_buffer("down\nhang:1\nhang-raw:1\nup\n");
         assert_eq!(tokens, ["down", "hang:1", "hang-raw:1", "up"]);
         assert!(tail.is_empty());

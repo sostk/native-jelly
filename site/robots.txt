@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://plxnative.com/sitemap.xml
+Sitemap: https://nativejelly.com/sitemap.xml

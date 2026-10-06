@@ -48,8 +48,8 @@ use std::hash::Hash;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::frame::{Budget, Class};
-use plx_machine::machine::{PosterKey, PresentHandle};
-use plx_machine::present::{PresentEvent, Provenance, ResourceKind};
+use nj_machine::machine::{PosterKey, PresentHandle};
+use nj_machine::present::{PresentEvent, Provenance, ResourceKind};
 
 /// What a prefetch did — which is what lets a caller spend exactly ONE key per frame: a prefetch
 /// loop walks its candidates and stops at the first `Claimed`.
@@ -167,7 +167,7 @@ pub const TEX_RESIDENT_BYTES_MAX: usize = 44 << 20;
 /// Every byte ceiling derived from a 1080p frame scales by it, or an `n`x backdrop alone breaches.
 #[inline]
 pub(crate) fn render_area() -> usize {
-    let n = plx_base::surface::render_scale() as usize;
+    let n = nj_base::surface::render_scale() as usize;
     n * n
 }
 
@@ -701,7 +701,7 @@ impl<K: Copy + Eq + Hash> TexCache<K> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_machine::present::Present;
+    use nj_machine::present::Present;
 
     struct StubUp {
         next: u32,
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn pending_byte_snapshot_tracks_accept_upload_recycle_and_shutdown() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let old_cache = mutate_cache(|c| std::mem::replace(c, TexCache::with_budget(8, 32)));
         let image = |key, bytes| PosterReady {
             key: PosterKey(key),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exercise `tools/check-lock.py`'s serialization, not `make check` itself: two workers
-racing for one lock file, a killed holder, --timeout, and the PLX_CHECK_LOCK=off escape
+racing for one lock file, a killed holder, --timeout, and the NJ_CHECK_LOCK=off escape
 hatch. No cargo, no network, under 5 s."""
 import os
 from pathlib import Path
@@ -114,19 +114,19 @@ class CheckLockTests(unittest.TestCase):
             holder.stderr.close()
 
     def test_plx_check_lock_off_bypasses_locking(self):
-        # Two invocations with PLX_CHECK_LOCK=off must not serialize on the SAME lock
+        # Two invocations with NJ_CHECK_LOCK=off must not serialize on the SAME lock
         # path even though one is still "holding" it — the escape hatch really disables
         # locking rather than merely widening the poll interval.
         holder = run(self.lock_path, ["python3", "-c", "import time; time.sleep(3)"],
-                     env={"PLX_CHECK_LOCK": "off"})
+                     env={"NJ_CHECK_LOCK": "off"})
         time.sleep(0.3)
         waiter = run(self.lock_path, ["python3", "-c", "import sys; sys.exit(0)"],
-                     env={"PLX_CHECK_LOCK": "off"})
+                     env={"NJ_CHECK_LOCK": "off"})
         start = time.monotonic()
         rc, _out, err = self.wait(waiter, timeout=5)
         elapsed = time.monotonic() - start
         self.assertEqual(rc, 0, err)
-        self.assertLess(elapsed, 2, "waiter blocked even though PLX_CHECK_LOCK=off: " + err)
+        self.assertLess(elapsed, 2, "waiter blocked even though NJ_CHECK_LOCK=off: " + err)
         holder.wait(timeout=5)
         holder.stdout.close()
         holder.stderr.close()

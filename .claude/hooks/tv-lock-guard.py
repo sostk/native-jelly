@@ -17,7 +17,7 @@ television is never contacted from here.
 LANE IDENTITY has to agree with `tools/tv-lock.sh`'s, and `payload["cwd"]` cannot supply it by
 itself: the harness reports the SESSION's own checkout as `cwd` for every subagent's Bash call,
 whatever worktree that agent actually runs in. `lane_from_command()` below is what a subagent
-uses instead — an explicit `PLX_TV_LOCK_LANE=<its worktree>` prefixed on the command, so several
+uses instead — an explicit `NJ_TV_LOCK_LANE=<its worktree>` prefixed on the command, so several
 subagents can each hold their own lease and the lock still arbitrates between them rather than
 collapsing onto one lane. See that function's docstring for the full resolution order.
 
@@ -30,7 +30,7 @@ WHAT IT DELIBERATELY DOES NOT BLOCK.
     simulator. When this hook refuses something, the simulator (`ui-sim` skill) is usually the
     right next move rather than waiting.
 
-THE ESCAPE HATCH is a prefix on the command itself — `PLX_TV_LOCK_BYPASS=1 ssh root@…`. It is for
+THE ESCAPE HATCH is a prefix on the command itself — `NJ_TV_LOCK_BYPASS=1 ssh root@…`. It is for
 a human who knows the set is theirs (and for breaking a genuinely wedged lock); an agent reaching
 for it is an agent working around a lock rather than waiting for one.
 
@@ -45,7 +45,7 @@ import subprocess
 import sys
 import time
 
-STATE_DIR = os.environ.get("PLX_TV_LOCK_STATE") or os.path.expanduser("~/.plxnative/tv-lock")
+STATE_DIR = os.environ.get("NJ_TV_LOCK_STATE") or os.path.expanduser("~/.nativejelly/tv-lock")
 
 # Anything that reaches the television. Matched against the COMMAND WORD of each segment (so a
 # `git commit -m "make deploy now locks the TV"` is a git command, not a deploy).
@@ -270,19 +270,19 @@ def _leading_env_assignments(text):
 def lane_from_command(command, env, cwd):
     """The lane identity the hook must agree with `tools/tv-lock.sh` about.
 
-    `tv-lock.sh` names a lane `LANE="${PLX_TV_LOCK_LANE:-$REPO}"` — the env var if set, else the
+    `tv-lock.sh` names a lane `LANE="${NJ_TV_LOCK_LANE:-$REPO}"` — the env var if set, else the
     checkout the script itself is running from. `cwd` cannot play that role here: the harness
     reports the SESSION's own checkout as `payload["cwd"]` for every subagent's Bash call
     regardless of which worktree that agent is actually acting in, so a hook that only ever reads
     `cwd` refuses a subagent's own, correctly-taken lease (wrong lane) — and the workaround of
-    exporting `PLX_TV_LOCK_LANE` once for the whole session collapses every agent onto ONE lane,
+    exporting `NJ_TV_LOCK_LANE` once for the whole session collapses every agent onto ONE lane,
     which is the failure this exists to prevent (`docs/agent-reference.md`, the 2026-09-03
     collision). So the resolution order is, in this order:
 
-      1. an explicit `PLX_TV_LOCK_LANE=<path>` assignment PREFIXING the command text — directly,
+      1. an explicit `NJ_TV_LOCK_LANE=<path>` assignment PREFIXING the command text — directly,
          after a leading `env `, or after a leading `cd <dir> &&`. This is the only spelling that
          can vary per Bash call, which is what a subagent naming its OWN worktree needs.
-      2. `PLX_TV_LOCK_LANE` in the hook's own environment (a human or wrapper that exported it for
+      2. `NJ_TV_LOCK_LANE` in the hook's own environment (a human or wrapper that exported it for
          the whole process rather than per command).
       3. the git toplevel of `cwd`, exactly as before this change.
 
@@ -294,10 +294,10 @@ def lane_from_command(command, env, cwd):
     if m:
         text = text[m.end():].lstrip()
     for name, value in _leading_env_assignments(text):
-        if name == "PLX_TV_LOCK_LANE" and value:
+        if name == "NJ_TV_LOCK_LANE" and value:
             return value
-    if env.get("PLX_TV_LOCK_LANE"):
-        return env["PLX_TV_LOCK_LANE"]
+    if env.get("NJ_TV_LOCK_LANE"):
+        return env["NJ_TV_LOCK_LANE"]
     return repo_root(cwd)
 
 
@@ -341,7 +341,7 @@ def main():
     cmd = (payload.get("tool_input") or {}).get("command", "")
     if not cmd.strip():
         return 0
-    if re.search(r"\bPLX_TV_LOCK_BYPASS=1\b", cmd):
+    if re.search(r"\bNJ_TV_LOCK_BYPASS=1\b", cmd):
         return 0
 
     reasons = []

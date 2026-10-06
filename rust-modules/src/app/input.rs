@@ -80,7 +80,7 @@ impl Pointer {
 /// itself.
 #[derive(Clone)]
 pub(crate) struct MenuPlayAwait {
-    sid: crate::plex::ServerId,
+    sid: crate::catalog::ServerId,
     /// The rk the press is actually waiting for: the SHOW's, for both the show and season arms
     /// (a season's own `rk` names no page of its own — see `activate_card`'s original comment,
     /// preserved on [`menu_play_tick`]).
@@ -117,7 +117,7 @@ pub(crate) struct MenuPlayAwait {
 pub(crate) unsafe fn activate_card(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog_fetch::PmsMovie,
     want_play: bool,
     hud_ms: u32,
     mut ret: Option<crate::ui::screen::ReturnState<u32, crate::screens::registry::PageMemory>>,
@@ -126,7 +126,7 @@ pub(crate) unsafe fn activate_card(
     menu_play_await: &mut Option<MenuPlayAwait>,
     now: u32,
 ) {
-    if mm.kind == crate::pms::KIND_COLLECTION {
+    if mm.kind == crate::catalog_fetch::KIND_COLLECTION {
         let arg = crate::screens::registry::AppArg::Content(
             collection_content_arg(mm));
         match ret.take() {
@@ -182,8 +182,8 @@ pub(crate) unsafe fn activate_card(
     }
 }
 
-fn collection_content_arg(mm: &crate::pms::PmsMovie) -> crate::screens::registry::ContentArg {
-    crate::screens::registry::ContentArg::Collection(crate::plex::collections::CollectionRef::by_rk(
+fn collection_content_arg(mm: &crate::catalog_fetch::PmsMovie) -> crate::screens::registry::ContentArg {
+    crate::screens::registry::ContentArg::Collection(crate::catalog::collections::CollectionRef::by_rk(
         mm.sid, &mm.rk, mm.sec, &mm.title))
 }
 
@@ -211,7 +211,7 @@ pub(crate) unsafe fn menu_play_tick(
         return;
     }
     let landed = bridge.metadata_view().current()
-        .map(|d| crate::plex::same_item((d.sid, &d.rk), (sid, &expect)))
+        .map(|d| crate::catalog::same_item((d.sid, &d.rk), (sid, &expect)))
         .unwrap_or(false);
     if !landed {
         // Give up once the addressed request has SETTLED without landing this item (a failed or
@@ -283,9 +283,9 @@ mod activate_card_tests {
     /// it.
     #[test]
     fn a_show_or_season_play_no_longer_decides_on_the_press_frame() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut ps = crate::route::PlaybackSession::default();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut pa = crate::player::adapter::PlayerAdapter::new(mt);
         let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
         let mut bridge = super::bridge::Bridge::for_test(|| 0);
@@ -297,13 +297,13 @@ mod activate_card_tests {
                 // SAFETY: captured from `bridge` just above, which outlives this guard for the
                 // whole test body.
                 unsafe { &mut *self.0 }.metadata_mut().run(crate::stores::metadata::MetadataCmd::Clear);
-                crate::plex::reset_servers_for_test();
+                crate::catalog::reset_servers_for_test();
             }
         }
         let _cleanup = Cleanup(&mut bridge as *mut _);
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("press-frame", "127.0.0.1", 1, "t", "c-press-frame");
-        let mm = crate::pms::PmsMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
+        crate::catalog::reset_servers_for_test();
+        let sid = crate::catalog::register_for_test("press-frame", "127.0.0.1", 1, "t", "c-press-frame");
+        let mm = crate::catalog_fetch::PmsMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
 
         unsafe {
             activate_card(&mut ps, &mut pa, &mm, true, 1000, None,
@@ -340,15 +340,15 @@ mod activate_card_tests {
 
     #[test]
     fn a_collection_card_opens_the_collection_page() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut ps = crate::route::PlaybackSession::default();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut pa = crate::player::adapter::PlayerAdapter::new(mt);
         let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
         let mut bridge = super::bridge::Bridge::for_test(|| 0);
         let mut menu_play_await = None;
-        let collection = crate::pms::PmsMovie { rk: "50001".into(),
-            kind: crate::pms::KIND_COLLECTION, ..Default::default() };
+        let collection = crate::catalog_fetch::PmsMovie { rk: "50001".into(),
+            kind: crate::catalog_fetch::KIND_COLLECTION, ..Default::default() };
         unsafe { activate_card(&mut ps, &mut pa, &collection, false, 1000, None,
             &mut pages, &mut bridge, &mut menu_play_await, 0); }
         assert!(pages.has_pending_navigation(), "a collection must queue its own page");
@@ -384,7 +384,7 @@ impl<R: super::playback::PlaybackResources> LiveItemPlayback<'_, R> {
         &mut self,
         ps: &mut crate::route::PlaybackSession,
         pa: &mut crate::player::adapter::PlayerAdapter,
-        item: &crate::pms::PmsMovie,
+        item: &crate::catalog_fetch::PmsMovie,
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         bridge: &mut super::bridge::Bridge,
     ) {
@@ -794,7 +794,7 @@ mod unsupported_key_tests {
     #[test]
     fn a_bound_key_still_wakes_the_hud_and_aborts_the_click() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (armed, dismissed) = press(&ps, SDLK_ESCAPE, 0);
         assert!(
             !armed,
@@ -810,7 +810,7 @@ mod unsupported_key_tests {
     #[test]
     fn an_unsupported_key_wakes_nothing_and_abandons_nothing() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (sym, wcode, what) in [
             (0, 269, "HOME"),
             (0, 270, "AC_BACK"),
@@ -828,7 +828,7 @@ mod unsupported_key_tests {
     #[test]
     fn a_number_key_counts_as_bound_because_the_pin_keypad_types_from_it() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (armed, dismissed) = press(&ps, b'5' as c_uint, 34);
         assert!(!armed);
         assert!(!dismissed);
@@ -919,7 +919,7 @@ pub(crate) fn enter_profiles_from_onboard(pages: &mut crate::ui::dispatch::Dispa
 /// routing call sites go on simply asking.
 pub(crate) fn maybe_ask_consent(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
     let c = crate::telemetry::consent::current().unwrap_or_default();
-    // dev: /tmp/plxnative-consent[=<crash|product>] forces either first-run purpose even on an
+    // dev: /tmp/nativejelly-consent[=<crash|product>] forces either first-run purpose even on an
     // automated boot. This screen is suppressed BY the presence of any trigger, so without an
     // override it cannot be reached headlessly at all. Selecting Product changes display state
     // only; no answer is stored by a harness boot — the stage byte is where the surface STARTS,
@@ -1003,7 +1003,7 @@ pub(crate) fn delete_outcome(leftovers: usize) -> DeleteOutcome {
 /// A leftover is a file that is still THERE. The candidate lists name `/media/internal`, which
 /// some jails mount read-only, and Linux answers EROFS from the parent's mount before it looks the
 /// child up — so an unlink refusal alone does not say a file remains. The shared rule
-/// ([`plx_platform::storage::remove_file_or_prove_absent`]) counts a refusal whose no-follow lookup finds
+/// ([`nj_platform::storage::remove_file_or_prove_absent`]) counts a refusal whose no-follow lookup finds
 /// no entry as removed; a file that exists, or cannot be looked at, stays a leftover.
 fn remove_local_file(path: &std::path::Path) -> Result<(), String> {
     remove_or_prove_absent(path).map_err(|e| format!("{}: {e}", path.display()))
@@ -1012,13 +1012,13 @@ fn remove_local_file(path: &std::path::Path) -> Result<(), String> {
 /// The erase sweeps' removal rule as a plain `fn`, for the sweeps `ui/` owns
 /// ([`crate::ui::rec::erase_owned_artifacts`]), which may not name the storage layer themselves.
 pub(crate) fn remove_or_prove_absent(path: &std::path::Path) -> std::io::Result<()> {
-    plx_platform::storage::remove_file_or_prove_absent(path).map(|_| ())
+    nj_platform::storage::remove_file_or_prove_absent(path).map(|_| ())
 }
 
 fn erase_runtime_logs(root: &std::path::Path) -> Vec<String> {
     let mut failures = Vec::new();
-    for name in plx_base::paths::runtime_file::LOGS {
-        if name == plx_platform::storage::diagnostics::NAME {
+    for name in nj_base::paths::runtime_file::LOGS {
+        if name == nj_platform::storage::diagnostics::NAME {
             continue;
         }
         if let Err(error) = remove_local_file(&root.join(name)) {
@@ -1046,13 +1046,13 @@ fn sweep_local_files(persistent: impl IntoIterator<Item = std::path::PathBuf>,
 pub(crate) fn delete_all_local_data(meta: &mut crate::stores::metadata::MetadataStore,
     mut failures: Vec<String>) -> Vec<String> {
     failures.extend(sweep_local_files(
-        plx_base::paths::obsolete_last_place_candidates()
+        nj_base::paths::obsolete_last_place_candidates()
             .into_iter()
-            .chain(plx_base::paths::telemetry_candidates())
-            .chain(plx_base::paths::telemetry_spool_candidates())
-            .chain(plx_base::paths::telemetry_crashmark_candidates())
-            .chain(plx_base::paths::jellyfin_candidates()),
-        plx_base::paths::runtime_dir(),
+            .chain(nj_base::paths::telemetry_candidates())
+            .chain(nj_base::paths::telemetry_spool_candidates())
+            .chain(nj_base::paths::telemetry_crashmark_candidates())
+            .chain(nj_base::paths::jellyfin_candidates()),
+        nj_base::paths::runtime_dir(),
     ));
     meta.run(crate::stores::metadata::MetadataCmd::Clear);
     // No explicit `ClearRecents` here (phase 7 Search cutover retired the legacy screen's own
@@ -1108,9 +1108,9 @@ mod delete_all_tests {
     /// mount before it looks the child up. Nothing was left behind, so nothing is a leftover.
     #[test]
     fn absent_files_behind_a_read_only_mount_are_not_leftovers() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let tv = Tv::new("absent-erofs");
-        let _erofs = plx_platform::storage::UnlinkFaultForTest::install(&tv.0, libc::EROFS);
+        let _erofs = nj_platform::storage::UnlinkFaultForTest::install(&tv.0, libc::EROFS);
         let leftovers = sweep_local_files(tv.persistent(), &tv.runtime());
         assert!(leftovers.is_empty(), "absent files reported as leftovers: {leftovers:?}");
     }
@@ -1119,17 +1119,17 @@ mod delete_all_tests {
     /// still be reported so the user is told data may remain.
     #[test]
     fn present_files_behind_a_read_only_mount_are_still_leftovers() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let tv = Tv::new("present-erofs");
         let persistent = tv.persistent();
         for path in &persistent {
             std::fs::write(path, b"x").unwrap();
         }
-        let log = tv.runtime().join(plx_base::paths::runtime_file::EVENTS);
-        let rec = tv.runtime().join("plxnative-rec");
+        let log = tv.runtime().join(nj_base::paths::runtime_file::EVENTS);
+        let rec = tv.runtime().join("nativejelly-rec");
         std::fs::write(&log, b"x").unwrap();
         std::fs::write(&rec, b"x").unwrap();
-        let _erofs = plx_platform::storage::UnlinkFaultForTest::install(&tv.0, libc::EROFS);
+        let _erofs = nj_platform::storage::UnlinkFaultForTest::install(&tv.0, libc::EROFS);
         let leftovers = sweep_local_files(persistent.clone(), &tv.runtime());
         assert_eq!(leftovers.len(), persistent.len() + 2, "{leftovers:?}");
         assert!(persistent.iter().chain([&log, &rec]).all(|p| p.exists()));
@@ -1137,11 +1137,11 @@ mod delete_all_tests {
 
     #[test]
     fn runtime_log_sweep_includes_the_storage_diagnostics_snapshot() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
-                plx_platform::storage::diagnostics::reset_for_test();
+                nj_platform::storage::diagnostics::reset_for_test();
             }
         }
         let _restore = Restore;
@@ -1151,16 +1151,16 @@ mod delete_all_tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir(&root).unwrap();
-        for name in plx_base::paths::runtime_file::LOGS {
+        for name in nj_base::paths::runtime_file::LOGS {
             std::fs::write(root.join(name), name.as_bytes()).unwrap();
         }
-        let event = root.join(plx_base::paths::runtime_file::EVENTS);
-        let diagnostics = root.join(plx_platform::storage::diagnostics::NAME);
+        let event = root.join(nj_base::paths::runtime_file::EVENTS);
+        let diagnostics = root.join(nj_platform::storage::diagnostics::NAME);
 
-        plx_platform::storage::diagnostics::disable();
-        plx_platform::storage::diagnostics::finish_disable(&root).unwrap();
+        nj_platform::storage::diagnostics::disable();
+        nj_platform::storage::diagnostics::finish_disable(&root).unwrap();
         assert!(erase_runtime_logs(&root).is_empty());
-        assert!(plx_base::paths::runtime_file::LOGS
+        assert!(nj_base::paths::runtime_file::LOGS
             .iter()
             .all(|name| !root.join(name).exists()));
         assert!(!event.exists());
@@ -1203,7 +1203,7 @@ pub(crate) fn chip_activate(
     pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
 ) {
     use crate::ui::screen::ScreenArg;
-    if pages.top_arg().map(|a| a.chrome()) != Some(plx_machine::machine::Chrome::TabBar) {
+    if pages.top_arg().map(|a| a.chrome()) != Some(nj_machine::machine::Chrome::TabBar) {
         return;
     }
     // Search USED to need an explicit keyboard-dismissal nudge here (`BarHost::Search =>` the
@@ -1227,7 +1227,7 @@ pub(crate) fn chip_activate(
 /// bar", and the two cannot drift.
 pub(crate) fn wears_the_chip(route: &AppArg) -> bool {
     use crate::ui::screen::ScreenArg;
-    route.chrome() == plx_machine::machine::Chrome::TabBar
+    route.chrome() == nj_machine::machine::Chrome::TabBar
 }
 
 /// Did this click land on the profile chip of a screen that is WEARING the shared bar? The pointer
@@ -1375,11 +1375,11 @@ pub(crate) fn key_back(
 /// **It does not end the process, and nothing about a BACK press does any more.** The remote's own
 /// EXIT key still terminates (LG checklist item 38), and a script that wants the app closed uses
 /// SAM's `closeByAppId` exactly as `make kill`, `tests/run.py` and `tools/tv-session.sh` already do.
-/// That is why the old `/tmp/plxnative-noexitconfirm` bypass went with the alert: it existed to let
+/// That is why the old `/tmp/nativejelly-noexitconfirm` bypass went with the alert: it existed to let
 /// a headless caller quit by pressing BACK, and BACK is no longer a quit for anybody.
 pub(crate) fn back_at_root() {
-    if plx_platform::tv::home::take_root_press() {
-        plx_platform::tv::home::go_home();
+    if nj_platform::tv::home::take_root_press() {
+        nj_platform::tv::home::go_home();
     }
 }
 

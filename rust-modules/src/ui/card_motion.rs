@@ -112,7 +112,7 @@ pub(crate) fn declines_request() -> bool {
 
 /// A declined miss has no worker whose completion could wake it. The next sample
 /// MUST present, including an unknown card first appearing on an otherwise idle page.
-pub(crate) fn deferred() { plx_machine::idle::invalidate(); }
+pub(crate) fn deferred() { nj_machine::idle::invalidate(); }
 
 #[cfg(test)]
 mod tests {
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn scopes_exclude_hero_work_restore_on_exit_and_unknown_misses_wake() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         assert!(!declines_request());
         {
             let _scope = Scope::moving_for_test();
@@ -212,8 +212,8 @@ mod tests {
             assert!(!declines_request());
         }
         assert!(!declines_request(), "hero/heading work outside card() has no motion scope");
-        plx_machine::idle::take_local_damage();
+        nj_machine::idle::take_local_damage();
         deferred();
-        assert!(plx_machine::idle::take_local_damage() > 0, "a declined miss must request its next observation");
+        assert!(nj_machine::idle::take_local_damage() > 0, "a declined miss must request its next observation");
     }
 }

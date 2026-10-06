@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{boot, recorder::Recplay};
-use crate::plex::session::{self, Session};
+use crate::catalog::session::{self, Session};
 
 fn initial_for(saved: Session, entropy: Option<[u8; 16]>) -> Initial {
     let mut initial = Initial::synthetic_home(17, 32517, None).unwrap();
@@ -16,11 +16,11 @@ fn initial_for(saved: Session, entropy: Option<[u8; 16]>) -> Initial {
 
 #[test]
 fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let temp = session::TempSession::new("recording-attachment-race");
     temp.assert_only_target();
     let root = temp.path().parent().unwrap().to_path_buf();
-    let latest = root.join("plxnative-recordings/latest");
+    let latest = root.join("nativejelly-recordings/latest");
     std::fs::create_dir_all(&latest).unwrap();
     std::fs::write(
         latest.join("preexisting-sentinel"),
@@ -31,7 +31,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
     std::fs::create_dir(&external).unwrap();
     std::fs::write(external.join("sentinel"), b"keep external target").unwrap();
     std::os::unix::fs::symlink(&external, latest.join("preexisting-link")).unwrap();
-    std::fs::write(root.join("plxnative-recplay"), external.to_str().unwrap()).unwrap();
+    std::fs::write(root.join("nativejelly-recplay"), external.to_str().unwrap()).unwrap();
 
     let (saved, entropy, deferred) = session::load_capturing_entropy();
     let initial = initial_for(saved, entropy);
@@ -48,7 +48,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
         ..Default::default()
     });
     let newer = std::fs::read(temp.path()).unwrap();
-    assert!(boot::apply_deferred_capture(&mut rec, plx_machine::landgate::fixture_gate(), deferred).is_err());
+    assert!(boot::apply_deferred_capture(&mut rec, nj_machine::landgate::fixture_gate(), deferred).is_err());
     drop(rec); // the production refusal drops App; no later drop may recreate capture files
     assert!(std::fs::read(temp.path()).unwrap() == newer);
     assert!(
@@ -69,7 +69,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
         std::fs::read(external.join("sentinel")).unwrap(),
         b"keep external target"
     );
-    assert!(root.join("plxnative-recplay").exists());
+    assert!(root.join("nativejelly-recplay").exists());
 
     let (saved, entropy, deferred) = session::load_capturing_entropy();
     let initial = initial_for(saved, entropy);
@@ -78,7 +78,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
         Box::new(crate::ui::rec::DirSink::create(&latest).unwrap()),
     )
     .expect("immediate next attempt can open");
-    boot::apply_deferred_capture(&mut retry, plx_machine::landgate::fixture_gate(), deferred).unwrap();
+    boot::apply_deferred_capture(&mut retry, nj_machine::landgate::fixture_gate(), deferred).unwrap();
     retry.tick(0, 0.0);
-    assert!(!retry.finish(plx_machine::landgate::fixture_gate()));
+    assert!(!retry.finish(nj_machine::landgate::fixture_gate()));
 }

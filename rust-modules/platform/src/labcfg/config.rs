@@ -2,10 +2,10 @@
 //!
 //! # Why the app directory and not `/tmp`
 //!
-//! Every other knob in this app arrives as a `/tmp/plxnative-*` trigger written over ssh, and on a
+//! Every other knob in this app arrives as a `/tmp/nativejelly-*` trigger written over ssh, and on a
 //! Cloud Test Lab set there is no ssh: the **.ipk is the only channel into the device**. So the
 //! session's endpoint, secret and certificate pin are staged into the package beside the binary
-//! (`make LAB=1 … ipk`, `ci/mkipk.py`) and resolved here through [`plx_base::paths::in_app_dir`] — the
+//! (`make LAB=1 … ipk`, `ci/mkipk.py`) and resolved here through [`nj_base::paths::in_app_dir`] — the
 //! same `/proc/self/exe` resolution everything else in this app uses, so it is correct under both
 //! install prefixes and both jail profiles.
 //!
@@ -119,7 +119,7 @@ static LOADED: OnceLock<Result<Config, &'static str>> = OnceLock::new();
 
 fn load() -> &'static Result<Config, &'static str> {
     LOADED.get_or_init(|| {
-        let p = plx_base::paths::in_app_dir(FILE);
+        let p = nj_base::paths::in_app_dir(FILE);
         match std::fs::read_to_string(&p) {
             Ok(s) => parse(&s),
             Err(_) => Err("no lab.json beside the binary"),
@@ -142,17 +142,17 @@ pub fn why_not() -> &'static str {
 mod tests {
     use super::*;
 
-    const GOOD: &str = r#"{"endpoint":"lab.plxnative.com:39443","session":"a1b2c3d4",
+    const GOOD: &str = r#"{"endpoint":"lab.nativejelly.com:39443","session":"a1b2c3d4",
         "secret":"c2VjcmV0LXNlY3JldC1zZWNyZXQtc2VjcmV0","pin":"sha256//9F8kQb2ZC0mQ3xY1t6nX0oPq7RkS4uVwXyZaBcDeFgH=",
         "trigger_wcodes":[406,0],"trigger_syms":[]}"#;
 
     #[test]
     fn a_good_file_parses_and_builds_the_one_url() {
         let c = parse(GOOD).expect("parses");
-        assert_eq!(c.url(), "https://lab.plxnative.com:39443/v1/diag");
+        assert_eq!(c.url(), "https://lab.nativejelly.com:39443/v1/diag");
         assert_eq!(
             c.control_url(),
-            "https://lab.plxnative.com:39443/v1/control/poll"
+            "https://lab.nativejelly.com:39443/v1/control/poll"
         );
         assert_eq!(c.session, "a1b2c3d4");
         assert!(!c.control, "an old config is upload-only by default");

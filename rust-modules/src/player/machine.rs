@@ -49,7 +49,7 @@ pub(crate) struct Player {
     /// before the plane binds and a second after it unbinds, when the compositor has an ordinary
     /// UI surface and the gate should be treating it like one.
     ///
-    /// Its EDGES are the only source of [`plx_machine::present::PresentEvent::VideoPlane`]; see
+    /// Its EDGES are the only source of [`nj_machine::present::PresentEvent::VideoPlane`]; see
     /// [`Player::set_video_plane_bound`].
     pub(crate) video_plane_bound: bool,
     /// Last frame's [`crate::screens::player::PlayerScreen::clock_fingerprint`] — the machine's
@@ -86,7 +86,7 @@ impl Player {
     /// come to disagree about which frame the plane went away on and the false edge lands on a
     /// frame that was never presented.
     /// `Some(bound)` when this was an EDGE — the loop forwards that, and only that, to the two
-    /// `plx_machine::present::Present` machines it owns beside the live gate.
+    /// `nj_machine::present::Present` machines it owns beside the live gate.
     pub(crate) fn set_video_plane_bound(&mut self, bound: bool) -> Option<bool> {
         if self.video_plane_bound == bound {
             return None;
@@ -95,18 +95,18 @@ impl Player {
         // ONE line per edge, in the event log. The bit decides the present gate, the opaque
         // region, the capture skip and whether a frame may sample the framebuffer at all — and
         // every one of those is invisible from a log that does not say when the plane arrived.
-        plx_base::eventlog::log(if bound {
+        nj_base::eventlog::log(if bound {
             "videoplane: BOUND — the gate presents unconditionally and no frame may snapshot"
         } else {
             "videoplane: unbound — ordinary idle rules from here"
         });
-        plx_machine::idle::note(plx_machine::present::PresentEvent::VideoPlane(bound));
+        nj_machine::idle::note(nj_machine::present::PresentEvent::VideoPlane(bound));
         // The FALSE edge has to reach the panel, and the frame it lands on is very often one the
         // gate would otherwise skip — the picture is gone and nothing is animating (spec §3.3
         // step 9). `invalidate` is what makes that frame present, so the opaque region is really
         // cleared and the UI surface really goes back to being blended.
         if !bound {
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
         Some(bound)
     }
@@ -129,21 +129,21 @@ impl Default for Player {
 
 /// Logical repair authority; resource handles live in PlayerAdapter. No reset-on-playback API.
 pub(crate) struct RepairAttempt {
-    state: plx_platform::tv::sandbox::State,
+    state: nj_platform::tv::sandbox::State,
 }
 impl RepairAttempt {
-    pub(crate) const fn new() -> Self { Self { state: plx_platform::tv::sandbox::State::Idle } }
-    pub(crate) fn state(&self) -> plx_platform::tv::sandbox::State { self.state }
+    pub(crate) const fn new() -> Self { Self { state: nj_platform::tv::sandbox::State::Idle } }
+    pub(crate) fn state(&self) -> nj_platform::tv::sandbox::State { self.state }
     pub(crate) fn begin(&mut self, supported: bool) -> Option<u64> {
-        use plx_platform::tv::sandbox::{State, Failure};
+        use nj_platform::tv::sandbox::{State, Failure};
         if self.state != State::Idle { return None; }
         if !supported { self.state = State::Failed(Failure::Unsupported); return None; }
         self.state = State::Running;
         Some(1)
     }
     /// The single issued token can land only once. Wrong/duplicate completions cannot rewrite it.
-    pub(crate) fn complete(&mut self, token: u64, result: Result<(), plx_platform::tv::sandbox::Failure>) -> bool {
-        use plx_platform::tv::sandbox::State;
+    pub(crate) fn complete(&mut self, token: u64, result: Result<(), nj_platform::tv::sandbox::Failure>) -> bool {
+        use nj_platform::tv::sandbox::State;
         if token != 1 || self.state != State::Running { return false; }
         self.state = match result { Ok(()) => State::Repaired, Err(e) => State::Failed(e) };
         true
@@ -153,7 +153,7 @@ impl RepairAttempt {
 #[cfg(test)]
 mod repair_tests {
     use super::*;
-    use plx_platform::tv::sandbox::Failure;
+    use nj_platform::tv::sandbox::Failure;
     // `repair_survives_screen_and_session_recreation_and_rejects_stale_completions` builds a
     // `PlayerScreen`, which `player` may not name: it lives in `screens::player`'s
     // `repair_confirmation_tests`, beside the screen it recreates.

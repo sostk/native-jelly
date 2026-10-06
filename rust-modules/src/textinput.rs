@@ -122,7 +122,7 @@ mod host_test_sdl {
     pub(super) unsafe fn SDL_StartTextInput() {}
     pub(super) unsafe fn SDL_StopTextInput() {}
 }
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 use std::os::raw::{c_int, c_void};
 use std::ptr::{addr_of, addr_of_mut};
 
@@ -175,7 +175,7 @@ const SDL_LOG_CATEGORY_INPUT: c_int = 3;
 const SDL_LOG_PRIORITY_DEBUG: c_int = 2;
 
 /// Ask LG's SDL to narrate its own keyboard lifecycle into stderr
-/// (`/tmp/plxnative-stderr.log`).
+/// (`/tmp/nativejelly-stderr.log`).
 ///
 /// The driver already logs `[WebOSShowScreenKeyboard] called`, `... called text_model_activate`,
 /// `[TextModelLeave] called`, `[TextModelInputPanelState] called - state: %d` and
@@ -485,7 +485,7 @@ mod tests {
     use std::sync::Mutex;
 
     /// `PENDING`/`STARTED` are module singletons, so the tests that drive them must not overlap.
-    /// Module-local rather than `plx_base::testlock`: nothing outside this file touches either, and
+    /// Module-local rather than `nj_base::testlock`: nothing outside this file touches either, and
     /// `testlock` is for globals that move under ANOTHER module's code (see `lib.rs`).
     static BUF: Mutex<()> = Mutex::new(());
 
@@ -532,7 +532,7 @@ mod tests {
     }
 
     /// Invalid UTF-8 must not panic. This runs inside the SDL event loop, where a panic unwinds
-    /// out of `plex_run` and takes the app with it — `remote.rs` lost the app exactly this way to
+    /// out of `nj_run` and takes the app with it — `remote.rs` lost the app exactly this way to
     /// a multi-byte whitespace. The bytes come from the television's own IME, so "that cannot
     /// happen" is not a thing this file gets to assume.
     #[test]

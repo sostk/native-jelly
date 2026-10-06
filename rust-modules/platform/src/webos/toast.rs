@@ -9,7 +9,7 @@
 //! the hub lets a jailed app say so about itself is what the `toast` dev trigger measures.
 //!
 //! **Blocking.** One LS2 round trip, so [`crate::tv::toast::toast`] must run on a worker, never on
-//! the frame thread; `crate::tv::toast::send` asserts that itself (`plx_base::task::assert_may_block`).
+//! the frame thread; `crate::tv::toast::send` asserts that itself (`nj_base::task::assert_may_block`).
 //!
 //! **Off-device** there is no bus and nothing here touches one: `go_home`'s precedent, a log line
 //! and [`Outcome::NoBus`].
@@ -54,7 +54,7 @@ pub fn grade(reply: &str) -> Outcome {
 /// `deliver_toast`: `tv::toast::send` is the door callers use.
 #[cfg(any(feature = "hostsim", test, feature = "test-support"))]
 pub fn deliver(_message: &str, identity: Identity) -> Sent {
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "toast: no LS2 bus off-device — {identity:?} call to {CREATE_TOAST} not sent"
     ));
     Sent { reply: None, outcome: Outcome::NoBus }
@@ -64,7 +64,7 @@ pub fn deliver(_message: &str, identity: Identity) -> Sent {
 #[cfg(all(not(feature = "hostsim"), not(any(test, feature = "test-support"))))]
 pub fn deliver(message: &str, identity: Identity) -> Sent {
     use super::ls2::{self, Fail};
-    let payload = payload(plx_base::paths::app_id(), message);
+    let payload = payload(nj_base::paths::app_id(), message);
     let bus = |fail: Fail| match fail {
         Fail::Timeout => Outcome::Bus { stage: "timeout", code: None, detail: String::new() },
         Fail::Setup { stage, code, detail } => Outcome::Bus { stage, code, detail },
@@ -76,7 +76,7 @@ pub fn deliver(message: &str, identity: Identity) -> Sent {
     let called = match identity {
         #[cfg(any(feature = "devtriggers", test, feature = "test-support"))]
         Identity::Anonymous => registration.call(CREATE_TOAST, &payload, BUDGET),
-        Identity::AsApp => registration.call_as_app(CREATE_TOAST, &payload, plx_base::paths::app_id(), BUDGET),
+        Identity::AsApp => registration.call_as_app(CREATE_TOAST, &payload, nj_base::paths::app_id(), BUDGET),
     };
     match called {
         Ok(reply) => {

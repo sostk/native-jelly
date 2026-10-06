@@ -9,7 +9,7 @@
 //! application's.
 
 use crate::app::bridge::Bridge;
-use crate::plex::session::{self, Session};
+use crate::catalog::session::{self, Session};
 
 fn signed_in() -> Session {
     Session {
@@ -24,26 +24,26 @@ fn signed_in() -> Session {
 /// for a save that serves the same content.
 #[test]
 fn a_visible_session_change_invalidates_the_frame_once_per_landing() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let _session = session::TempSession::new("bridge-session-landing");
     struct ResetIdle;
     impl Drop for ResetIdle {
-        fn drop(&mut self) { plx_machine::idle::reset_for_test(); }
+        fn drop(&mut self) { nj_machine::idle::reset_for_test(); }
     }
     let _idle = ResetIdle;
     let mut bridge = Bridge::for_test(|| 0);
     session::save(&signed_in());
-    plx_machine::idle::reset_for_test();
-    let _frame = plx_base::task::FrameScope::enter();
+    nj_machine::idle::reset_for_test();
+    let _frame = nj_base::task::FrameScope::enter();
     bridge.land_session_cache();
-    assert_eq!(plx_machine::idle::take_local_damage(), 1, "a changed session lands on the frame step");
+    assert_eq!(nj_machine::idle::take_local_damage(), 1, "a changed session lands on the frame step");
     bridge.land_session_cache();
-    assert_eq!(plx_machine::idle::take_local_damage(), 0, "one invalidation per landing");
+    assert_eq!(nj_machine::idle::take_local_damage(), 0, "one invalidation per landing");
     drop(_frame);
     session::save(&signed_in());
-    let _frame = plx_base::task::FrameScope::enter();
+    let _frame = nj_base::task::FrameScope::enter();
     bridge.land_session_cache();
-    assert_eq!(plx_machine::idle::take_local_damage(), 0, "a save that serves the same content lands nothing");
+    assert_eq!(nj_machine::idle::take_local_damage(), 0, "a save that serves the same content lands nothing");
 }
 
 /// This thread holds the session's IO lock for the whole run, so a frame that took it — or made any
@@ -53,20 +53,20 @@ fn a_visible_session_change_invalidates_the_frame_once_per_landing() {
 /// are the assertion here.
 #[test]
 fn login_frames_never_wait_for_the_session_io_lock() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let _session = session::TempSession::new("login-frame-storage-blocked");
     // The scratch session's own save primed the cache; start from the unloaded one a first frame
     // finds, so its `peek` has a refresh to schedule behind the held lock.
     session::invalidate_for_test();
     session::reset_reads_for_test();
     session::with_io_for_test(|| {
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         let mut bridge = Bridge::for_test(|| 0);
         let mut pages = crate::ui::dispatch::Dispatcher::new();
         crate::app::bridge::nav_root(&mut pages, crate::screens::registry::AppArg::Login);
         for ms in 0..30 {
             crate::app::bridge::frame(&mut pages, &mut bridge,
-                plx_machine::machine::Tick { ms: ms * 16, dt_us: 16_000 }, Vec::new());
+                nj_machine::machine::Tick { ms: ms * 16, dt_us: 16_000 }, Vec::new());
         }
         assert!(matches!(pages.top_arg(), Some(crate::screens::registry::AppArg::Login)));
         assert_eq!(session::reads_for_test(), 0, "login's Browse/Search captures may only peek");
@@ -80,21 +80,21 @@ fn login_frames_never_wait_for_the_session_io_lock() {
 /// it. A record saved before the field existed loads as NONE.
 #[test]
 fn audio_enhancements_persist_and_restore() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let _session = session::TempSession::new("audio-enhancements");
     session::save(&signed_in());
-    assert_eq!(session::load().audio_enhancements(), crate::plex::AudioEnhancements::NONE, "absent field = NONE");
+    assert_eq!(session::load().audio_enhancements(), crate::catalog::AudioEnhancements::NONE, "absent field = NONE");
 
-    let enh = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
+    let enh = crate::catalog::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
     crate::player::set_audio_enhancements(enh);
-    plx_base::storage_worker::drain_for_test();
+    nj_base::storage_worker::drain_for_test();
     let saved = session::load();
     assert_eq!(saved.audio_enhancements(), enh);
     assert_eq!(saved.client_id, signed_in().client_id, "merged, not replaced");
 
-    crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+    crate::player::restore_audio_enhancements(crate::catalog::AudioEnhancements::NONE);
     crate::player::restore_audio_enhancements(saved.audio_enhancements());
     assert_eq!(crate::player::audio_enhancements(), enh, "boot restores what was saved");
     assert!(!session::set_audio_enhancements(enh), "an unchanged preference is not rewritten");
-    crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+    crate::player::restore_audio_enhancements(crate::catalog::AudioEnhancements::NONE);
 }

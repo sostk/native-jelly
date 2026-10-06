@@ -136,27 +136,27 @@ foreach ($directoryOverride in @(
 $repoWindows = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $repoLinux = ConvertTo-WslPath $repoWindows
 $commonEnvironment = @{
-    PLX_REPO = $repoLinux
-    PLX_PMS = $PmsHost
-    PLX_PORT = $(if ($PSBoundParameters.ContainsKey("PmsPort")) {
+    NJ_REPO = $repoLinux
+    NJ_PMS = $PmsHost
+    NJ_PORT = $(if ($PSBoundParameters.ContainsKey("PmsPort")) {
         $PmsPort.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     } else { "" })
-    PLX_RUNTIME = $RuntimeDir
-    PLX_TARGET = $TargetDir
-    PLX_ASSETS = $AssetDir
-    PLX_STAGE_TOKEN = $(if ($StageToken) { "1" } else { "" })
+    NJ_RUNTIME = $RuntimeDir
+    NJ_TARGET = $TargetDir
+    NJ_ASSETS = $AssetDir
+    NJ_STAGE_TOKEN = $(if ($StageToken) { "1" } else { "" })
 }
 
 $prepare = @'
 set -euo pipefail
 . "$HOME/.cargo/env"
-repo="$PLX_REPO"
-runtime="${PLX_RUNTIME:-$HOME/.local/state/plxnative-sim}"
-target="${PLX_TARGET:-$HOME/.cache/plxnative-sim/target}"
-assets="${PLX_ASSETS:-$HOME/.local/share/plxnative-sim/assets}"
+repo="$NJ_REPO"
+runtime="${NJ_RUNTIME:-$HOME/.local/state/nativejelly-sim}"
+target="${NJ_TARGET:-$HOME/.cache/nativejelly-sim/target}"
+assets="${NJ_ASSETS:-$HOME/.local/share/nativejelly-sim/assets}"
 mkdir -p "$runtime" "$target" "$assets"
 # All launch paths use the same build-and-stage operation. The ASS library is
-# produced by make, and the process loads it from PLXNATIVE_APP_DIR, not pkg/.
+# produced by make, and the process loads it from NJ_APP_DIR, not pkg/.
 build_simulator() {
     cd "$repo"
     make sim-wsl SIM_TDIR="$target"
@@ -166,7 +166,7 @@ build_simulator() {
         mv -f "$staged" "$assets/$file"
     done
 }
-if [ "${PLX_STAGE_TOKEN:-}" = 1 ]; then
+if [ "${NJ_STAGE_TOKEN:-}" = 1 ]; then
     token=""
     if [ -f "$repo/src/config.local.h" ]; then
         token=$(sed -n 's/^#define[[:space:]]*PMS_TOKEN[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
@@ -176,37 +176,37 @@ if [ "${PLX_STAGE_TOKEN:-}" = 1 ]; then
         exit 1
     fi
     umask 077
-    printf '%s' "$token" > "$runtime/plxnative-token"
+    printf '%s' "$token" > "$runtime/nativejelly-token"
     echo "Plex token staged in the private simulator runtime directory."
-elif [ -s "$runtime/plxnative-token" ]; then
+elif [ -s "$runtime/nativejelly-token" ]; then
     echo "Using the token already staged in the simulator runtime directory."
 fi
-pms="${PLX_PMS:-}"
+pms="${NJ_PMS:-}"
 if [ -z "$pms" ] && [ -f "$repo/src/config.local.h" ]; then
     pms=$(sed -n 's/^#define[[:space:]]*PMS_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
-port="${PLX_PORT:-}"
+port="${NJ_PORT:-}"
 if [ -z "$port" ] && [ -f "$repo/src/config.local.h" ]; then
     port=$(sed -n 's/^#define[[:space:]]*PMS_PORT[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
 port="${port:-32400}"
-export PLXNATIVE_RUNTIME_DIR="$runtime"
-export PLXNATIVE_APP_DIR="$assets"
-export PLXNATIVE_WIN=1920x1080
+export NJ_RUNTIME_DIR="$runtime"
+export NJ_APP_DIR="$assets"
+export NJ_WIN=1920x1080
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
 '@
 
 $instanceLocks = @'
 set -euo pipefail
-runtime="${PLX_RUNTIME:-$HOME/.local/state/plxnative-sim}"
-target="${PLX_TARGET:-$HOME/.cache/plxnative-sim/target}"
+runtime="${NJ_RUNTIME:-$HOME/.local/state/nativejelly-sim}"
+target="${NJ_TARGET:-$HOME/.cache/nativejelly-sim/target}"
 mkdir -p "$runtime" "$target"
-exec 9>"$runtime/plxnative-sim.lock"
+exec 9>"$runtime/nativejelly-sim.lock"
 if ! flock -n 9; then
     echo "Simulator runtime is already in use: $runtime" >&2
     exit 1
 fi
-exec 8>"$target/plxnative-sim.instance.lock"
+exec 8>"$target/nativejelly-sim.instance.lock"
 if ! flock -n 8; then
     echo "Simulator build artifacts are in use: $target. Use a separate -TargetDir for another instance." >&2
     exit 1
@@ -241,48 +241,48 @@ echo "WSLg simulator dependencies are ready."
     "build" {
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
-echo "Built $target/release/plxnative-sim"
+echo "Built $target/release/nativejelly-sim"
 '@)
     }
     "run" {
         Assert-WslgFastTransport
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
-printf '%s\n' "$$" > "$runtime/plxnative-sim.pid"
-exec "$target/release/plxnative-sim" "$pms" "$port"
+printf '%s\n' "$$" > "$runtime/nativejelly-sim.pid"
+exec "$target/release/nativejelly-sim" "$pms" "$port"
 '@)
     }
     "shot" {
         Assert-WslgFastTransport
         if ([string]::IsNullOrWhiteSpace($Output)) {
-            $Output = Join-Path (Get-Location) "plxnative-shot.png"
+            $Output = Join-Path (Get-Location) "nativejelly-shot.png"
         }
         $outputAbsolute = Get-AbsoluteWindowsPath $Output
-        $commonEnvironment.PLX_OUTPUT = ConvertTo-WslPath $outputAbsolute
+        $commonEnvironment.NJ_OUTPUT = ConvertTo-WslPath $outputAbsolute
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
-mkdir -p "$(dirname "$PLX_OUTPUT")"
+mkdir -p "$(dirname "$NJ_OUTPUT")"
 base="$runtime/windows-shot.png"
 captured="$runtime/windows-shot-1.png"
 rm -f "$base" "$captured"
-PLXNATIVE_SHOT="$base" "$target/release/plxnative-sim" "$pms" "$port" &
+NJ_SHOT="$base" "$target/release/nativejelly-sim" "$pms" "$port" &
 pid=$!
-printf '%s\n' "$pid" > "$runtime/plxnative-sim.pid"
+printf '%s\n' "$pid" > "$runtime/nativejelly-sim.pid"
 cleanup() {
     kill "$pid" 2>/dev/null || true
-    if [ "$(cat "$runtime/plxnative-sim.pid" 2>/dev/null || true)" = "$pid" ]; then
-        rm -f "$runtime/plxnative-sim.pid"
+    if [ "$(cat "$runtime/nativejelly-sim.pid" 2>/dev/null || true)" = "$pid" ]; then
+        rm -f "$runtime/nativejelly-sim.pid"
     fi
 }
 trap cleanup EXIT
 for _ in $(seq 1 200); do
-    [ -p "$runtime/plxnative-remote" ] && break
+    [ -p "$runtime/nativejelly-remote" ] && break
     kill -0 "$pid" 2>/dev/null || { wait "$pid"; exit $?; }
     sleep 0.05
 done
-[ -p "$runtime/plxnative-remote" ] || { echo "Simulator remote did not start." >&2; exit 1; }
+[ -p "$runtime/nativejelly-remote" ] || { echo "Simulator remote did not start." >&2; exit 1; }
 sleep 5
-exec 3<>"$runtime/plxnative-remote"
+exec 3<>"$runtime/nativejelly-remote"
 printf 'shot ' >&3
 exec 3>&-
 complete=0
@@ -302,10 +302,10 @@ done
 [ "$complete" = 1 ] || { echo "Simulator did not produce a complete screenshot." >&2; exit 1; }
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
-rm -f "$runtime/plxnative-sim.pid"
+rm -f "$runtime/nativejelly-sim.pid"
 trap - EXIT
-mv "$captured" "$PLX_OUTPUT"
-echo "Wrote $PLX_OUTPUT"
+mv "$captured" "$NJ_OUTPUT"
+echo "Wrote $NJ_OUTPUT"
 '@)
         Write-Host "Screenshot: $outputAbsolute"
     }
@@ -318,21 +318,21 @@ echo "Wrote $PLX_OUTPUT"
                 throw "Unsupported simulator token '$token'."
             }
         }
-        $commonEnvironment.PLX_TOKENS = $InputTokens -join " "
+        $commonEnvironment.NJ_TOKENS = $InputTokens -join " "
         Invoke-WslShell -Environment $commonEnvironment -Script @'
 set -euo pipefail
-runtime="${PLX_RUNTIME:-$HOME/.local/state/plxnative-sim}"
-target="${PLX_TARGET:-$HOME/.cache/plxnative-sim/target}"
-fifo="$runtime/plxnative-remote"
-pid=$(cat "$runtime/plxnative-sim.pid" 2>/dev/null || true)
+runtime="${NJ_RUNTIME:-$HOME/.local/state/nativejelly-sim}"
+target="${NJ_TARGET:-$HOME/.cache/nativejelly-sim/target}"
+fifo="$runtime/nativejelly-remote"
+pid=$(cat "$runtime/nativejelly-sim.pid" 2>/dev/null || true)
 actual=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
-expected=$(readlink -f "$target/release/plxnative-sim" 2>/dev/null || true)
+expected=$(readlink -f "$target/release/nativejelly-sim" 2>/dev/null || true)
 if [ ! -p "$fifo" ] || [ -z "$pid" ] || [ "$actual" != "$expected" ]; then
     echo "The simulator remote is unavailable at $fifo. Start tools/sim.ps1 run first." >&2
     exit 1
 fi
 exec 3<>"$fifo"
-for token in $PLX_TOKENS; do
+for token in $NJ_TOKENS; do
     printf '%s ' "$token" >&3
 done
 exec 3>&-

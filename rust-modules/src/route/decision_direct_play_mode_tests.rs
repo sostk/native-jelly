@@ -25,10 +25,10 @@ fn direct_play_modes_compose_with_each_quality_ceiling() {
 fn force_registers_original_despite_saved_quality_relay_and_device_raster() {
     let mut ps = PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    assert!(plx_net::net::global_init());
+    assert!(nj_net::net::global_init());
     let (port, rx, server) = plan_pms(2, MDE_DIRECTPLAY);
-    let sid = crate::plex::register_for_test("forced-original", "127.0.0.1", port, "token", "forced-client");
-    crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Relay);
+    let sid = crate::catalog::register_for_test("forced-original", "127.0.0.1", port, "token", "forced-client");
+    crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Relay);
     restore_quality(Quality::P480);
     restore_direct_play_mode(DirectPlayMode::Forced);
     let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
@@ -50,7 +50,7 @@ fn force_registers_original_despite_saved_quality_relay_and_device_raster() {
     assert_eq!(quality(), Quality::P480, "Force must retain the saved ceiling");
     restore_quality(Quality::Original);
     restore_direct_play_mode(DirectPlayMode::Auto);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
@@ -58,10 +58,10 @@ fn force_registers_original_despite_saved_quality_relay_and_device_raster() {
 fn force_server_refusal_or_missing_mde_never_attempts_conversion() {
     let mut ps = PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    assert!(plx_net::net::global_init());
+    assert!(nj_net::net::global_init());
     for body in [MDE_TRANSCODE, EMPTY_MC] {
         let (port, rx, server) = plan_pms(2, body);
-        let sid = crate::plex::register_for_test("forced-refusal", "127.0.0.1", port, "token", "forced-client");
+        let sid = crate::catalog::register_for_test("forced-refusal", "127.0.0.1", port, "token", "forced-client");
         let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
         env.direct_play_mode = DirectPlayMode::Forced;
         env.cached_item = Some(fourk_item(sid, vec![eac3_track()]));
@@ -72,7 +72,7 @@ fn force_server_refusal_or_missing_mde_never_attempts_conversion() {
         assert!(plan.verdict.as_ref().unwrap().text().contains("Force Direct Play is on"));
         assert_eq!(requests.iter().filter(|r| r.contains("/decision?")).count(), 1);
         assert!(!requests.iter().any(|r| r.starts_with("PUT ") || r.contains("start.")));
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 }
 
@@ -81,9 +81,9 @@ fn force_server_refusal_or_missing_mde_never_attempts_conversion() {
 fn disabling_direct_play_keeps_codec_preserving_remux() {
     let mut ps = PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    assert!(plx_net::net::global_init());
+    assert!(nj_net::net::global_init());
     let (port, rx, server) = plan_pms(3, MDE_TRANSCODE_COPY);
-    let sid = crate::plex::register_for_test("disabled-original", "127.0.0.1", port, "token", "disabled-client");
+    let sid = crate::catalog::register_for_test("disabled-original", "127.0.0.1", port, "token", "disabled-client");
     let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
     env.direct_play_mode = DirectPlayMode::Disabled;
     env.cached_item = Some(fourk_item(sid, vec![eac3_track()]));
@@ -92,7 +92,7 @@ fn disabling_direct_play_keeps_codec_preserving_remux() {
     server.join().unwrap();
     assert!(plan.contract.remux && plan.url.contains("start.mkv") && !plan.tsession.is_empty());
     assert!(!requests.iter().any(|r| query_param(r, "directPlay") == Some("1")));
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn force_retains_feed_limits_and_session_snapshot_across_retry_and_track_edits()
     assert!(!audio_track_direct_plays(&ps, "", 0));
     assert!(!video_feed_supported("vp9", crate::metadata::DvPresentation::NotDv));
     let blocked_dv = crate::metadata::Dovi { present: true, profile: 5, bl_compat: 0, ..crate::metadata::Dovi::NONE }
-        .presentation(false, plx_platform::devcaps::dv::DvCapability::Unsupported, true);
+        .presentation(false, nj_platform::devcaps::dv::DvCapability::Unsupported, true);
     assert!(!video_feed_supported("hevc", blocked_dv));
     assert!(hls_abr_control(&ps).is_none());
     assert!(auto_original_watch(&ps).is_none());

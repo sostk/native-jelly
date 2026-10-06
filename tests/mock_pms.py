@@ -52,7 +52,7 @@ refuse it, correctly.
 
 Every mode also answers the four plex.tv calls of the QR sign-in (`/api/v2/pins`, the poll, the
 QR image, and `/api/v2/user`) with a fixed demo code, for an app booted with
-`plxnative-plextv=http://127.0.0.1:<port>`: the sign-in screen can then be driven and captured
+`nativejelly-plextv=http://127.0.0.1:<port>`: the sign-in screen can then be driven and captured
 without touching plex.tv. The poll stays pending unless `--authorize-after N` (implied, N=2, by
 `--plaintext-only-lan`) links the code on the Nth poll with a synthetic account token, so a
 sign-in completes end to end without any real account.
@@ -63,7 +63,7 @@ mock stops, and PUTs are recorded in the mock write log. Ordinary mode advertise
 can reach Settings without a pre-seeded session.
 
 The app reaches it as any other server: `make sim-shot SIM_PMS=127.0.0.1 SIM_PORT=32499` with
-any non-empty string in `$SIM_DIR/plxnative-token` (the token is accepted, never checked).
+any non-empty string in `$SIM_DIR/nativejelly-token` (the token is accepted, never checked).
 
 `--plaintext-only-lan` reproduces Sentry PLX-NATIVE-10: a person's OWN server (`owned=true`) on
 their LAN, whose owner never turned on port forwarding, so every HTTPS route plex.tv could name
@@ -92,9 +92,9 @@ sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
        (hold the TV lock first):
          ssh -N -R 32499:127.0.0.1:32499 root@<TV-HOST>
     3. in the install's runtime root, arm (empty files unless shown):
-         plxnative-storepolicy                       store HttpsOnly policy (dev builds only)
-         plxnative-login                             boot to the QR sign-in
-         plxnative-plextv = http://127.0.0.1:32499
+         nativejelly-storepolicy                       store HttpsOnly policy (dev builds only)
+         nativejelly-login                             boot to the QR sign-in
+         nativejelly-plextv = http://127.0.0.1:32499
     4. launch. The events log shows, in order:
          - the sign-in read-out "Couldn't sign in" with the reason "Your Plex server is on this
            network but can't be reached securely. Select Connect to connect without encryption."
@@ -113,15 +113,15 @@ read-out; the consent flow itself needs the TV and a real LAN address.
     # TV (replace 192.168.0.10 with the host's actual LAN IPv4; never a real private address from
     # a gitignored file — hold the TV lock for the device commands below):
     python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip 192.168.0.10
-    # `plxnative-plextv` only ever accepts a loopback address (see step 2 above), so make plex.tv
+    # `nativejelly-plextv` only ever accepts a loopback address (see step 2 above), so make plex.tv
     # loopback ON THE DEVICE with a reverse tunnel from the host, then arm the loopback trigger:
     # ssh -N -R 32499:127.0.0.1:32499 root@<TV-HOST>
-    # plxnative-plextv=http://127.0.0.1:32499
+    # nativejelly-plextv=http://127.0.0.1:32499
 
     # Simulator (loopback is both plex.tv and the LAN address it advertises; still exercises the
     # HTTPS-fails / plaintext-answers shape, just not the loopback-ineligibility warning):
     python3 tests/mock_pms.py --plaintext-only-lan --advertise-ip 127.0.0.1
-    # plxnative-plextv=http://127.0.0.1:32499
+    # nativejelly-plextv=http://127.0.0.1:32499
 
 Issue #266 (Boost Dialog / Normalize Loudness) fixtures and flags, every one default-off except
 the loudness attribute itself:
@@ -986,8 +986,8 @@ DEMO_QR_TEXT = b"https://plex.tv/link"
 
 
 def demo_cache_dir():
-    env = os.environ.get("PLXNATIVE_DEMO_CACHE")
-    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "plxnative-demo"
+    env = os.environ.get("NJ_DEMO_CACHE")
+    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "nativejelly-demo"
 
 
 class CatalogLibrary(Library):
@@ -1566,7 +1566,7 @@ class MockPms:
         if write_path and not (method in ("GET", "HEAD") and p.startswith("/library/parts/")):
             self.note_write(method, path, body)
 
-        # plex.tv's QR sign-in, for `plxnative-plextv` (see the module doc). Pending — the state
+        # plex.tv's QR sign-in, for `nativejelly-plextv` (see the module doc). Pending — the state
         # the sign-in screen is captured in — unless `--authorize-after N` links it on the Nth poll.
         if p == "/api/v2/pins" and method == "POST":
             return j({"id": DEMO_PIN_ID, "code": DEMO_PIN_CODE, "expiresIn": 1800, "authToken": None,
@@ -2409,7 +2409,7 @@ def main():
     ap.add_argument("--catalog", type=pathlib.Path,
                     help="serve the demo library (tests/demo_library/catalog.json) instead of a seed")
     ap.add_argument("--catalog-cache", type=pathlib.Path,
-                    help="the demo library cache (default $PLXNATIVE_DEMO_CACHE or ~/.cache/plxnative-demo)")
+                    help="the demo library cache (default $NJ_DEMO_CACHE or ~/.cache/nativejelly-demo)")
     ap.add_argument("--home-hubs", type=int, default=0, metavar="N",
                     help="#395: make /hubs answer exactly N hubs (synthetic 'Mock Shelf i' rows pad "
                          "the library's own); 0 (default) leaves them as they are")

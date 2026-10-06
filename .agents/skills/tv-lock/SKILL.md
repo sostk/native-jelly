@@ -130,7 +130,7 @@ Four layers, so there is no "I forgot" path:
 
 - **A human watching television.** The lock knows about jobs, not about the household. `status`
   therefore also runs the old pre-flight — `fuser` on **both** installs' own binaries (inode-scoped;
-  `pidof plxnative` matches both, since both binaries carry that name) and a count of ssh sessions
+  `pidof nativejelly` matches both, since both binaries carry that name) and a count of ssh sessions
   on the set. `N ssh sessions (one is mine)` is the check that actually fires, and it sees machines
   whose processes you cannot: read the warning, do not dismiss it as your own connection.
 - **Work started before the lock existed**, or from a checkout without these tools. Same warning,
@@ -147,17 +147,17 @@ plan the work so only one lane needs the device.
 A lane is a **checkout**: the lease belongs to the worktree, so every Bash call, `make` and nested
 tool inside it inherits the same lease, and a second worktree on the same Mac is a different lane.
 
-**A subagent takes its OWN lane by prefixing `PLX_TV_LOCK_LANE=<its worktree path>` on every
+**A subagent takes its OWN lane by prefixing `NJ_TV_LOCK_LANE=<its worktree path>` on every
 device command**, not by exporting it once for the session. The harness reports the SESSION's own
 checkout as the Bash `cwd` for every subagent's call, whatever worktree that agent is actually
 running in — so the `PreToolUse` hook cannot tell one subagent's lease from another's by reading
-`cwd`, and exporting `PLX_TV_LOCK_LANE` into the shared session environment instead collapses
+`cwd`, and exporting `NJ_TV_LOCK_LANE` into the shared session environment instead collapses
 every agent onto one lane, which is the exact failure this exists to prevent (the 2026-09-03
 collision: one lane's `make deploy` ran inside another's lease). A per-command prefix is the one
-spelling that can vary call to call: `PLX_TV_LOCK_LANE=$(pwd) tools/tv-lock.sh with --ttl 30
+spelling that can vary call to call: `NJ_TV_LOCK_LANE=$(pwd) tools/tv-lock.sh with --ttl 30
 --wait 300 -- ./tests/run.py --filter seek`, repeated per test run, one lease per run rather than
 one for the whole fleet. `tools/tv-lock.sh` already reads the same variable
-(`LANE="${PLX_TV_LOCK_LANE:-$REPO}"`); the hook's `lane_from_command()` resolves it the same way —
+(`LANE="${NJ_TV_LOCK_LANE:-$REPO}"`); the hook's `lane_from_command()` resolves it the same way —
 the prefix, else the hook's own environment, else `cwd` — so the two agree on which lane a command
 belongs to.
 
@@ -169,13 +169,13 @@ belongs to.
 - It lives on the **device** because the device is the resource — a host-side file cannot see the
   second worktree, the second Mac, or the colleague on the sofa. Under `/tmp` because a TV reboot
   is the one event that also makes every holder's session meaningless.
-- The name deliberately does **not** start with `plxnative-`: for the stable install the app's
+- The name deliberately does **not** start with `nativejelly-`: for the stable install the app's
   runtime root *is* `/tmp`, and any file there with that prefix marks the boot as automated and
   suppresses the who's-watching picker (`dev::any_trigger_present`). It is also outside the glob
   `make run` and `tests/run.py` clear, so a teardown cannot drop somebody's lease.
 - **Every timestamp is the host's.** pmlog's wall clock on this set runs ~3 h off, so a lease
   minted from the TV's own `date` would expire in the past or three hours late.
-- Each lane keeps a local mirror of its lease under `~/.plxnative/tv-lock/`, which is what makes
+- Each lane keeps a local mirror of its lease under `~/.nativejelly/tv-lock/`, which is what makes
   the hook free and what lets `require` skip the round trip for a minute. The television always
   holds the authority; the tools reconcile the two on every use.
 - `tools/tv-lock.sh selftest` runs the real protocol text under a local `sh` against a temp
@@ -187,9 +187,9 @@ belongs to.
   work that never touches the set teaches the reader to reach for the bypass. Add a case there
   before widening what the guard matches. It also grades `lane_from_command()` — the prefix, the
   hook's own environment, and the `cwd` fallback, each against a disposable mirror directory
-  rather than the real `~/.plxnative/tv-lock` — including that a comment or a heredoc BODY
-  mentioning `PLX_TV_LOCK_LANE=` must never be read as the prefix.
+  rather than the real `~/.nativejelly/tv-lock` — including that a comment or a heredoc BODY
+  mentioning `NJ_TV_LOCK_LANE=` must never be read as the prefix.
 
-The escape hatch is `PLX_TV_LOCK_BYPASS=1 <command>`, which both the tools and the hook honour. It
+The escape hatch is `NJ_TV_LOCK_BYPASS=1 <command>`, which both the tools and the hook honour. It
 is for a human who knows the set is theirs. Reaching for it because a lock said no is the one move
 this whole mechanism exists to prevent.

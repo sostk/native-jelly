@@ -15,8 +15,8 @@
 // it is only legal at the very start of a file or block. A regular comment compiles fine in
 // both places this file is read from.
 //
-// `crate::plex::identity`'s `version_is_the_package_or_the_next_minor_dev` test exercises the
-// end-to-end behavior (the emitted `PLX_VERSION` itself); this module is the unit-level half.
+// `crate::catalog::identity`'s `version_is_the_package_or_the_next_minor_dev` test exercises the
+// end-to-end behavior (the emitted `NJ_VERSION` itself); this module is the unit-level half.
 
 /// Parse a `RELEASE_LINE` file's content (`"X.Y"`, with or without a trailing newline) into its
 /// two integers, or `None` for anything else. Malformed content degrades to "absent" rather than
@@ -36,11 +36,11 @@ pub(crate) fn dev_patch(patch: u64, pkg: &str) -> u64 {
         .unwrap_or_else(|| panic!("Cargo.toml version {pkg:?} has no next patch"))
 }
 
-/// Whether `date` is the shape `PLX_NIGHTLY_DATE` must be — exactly 8 ASCII digits (`YYYYMMDD`) —
+/// Whether `date` is the shape `NJ_NIGHTLY_DATE` must be — exactly 8 ASCII digits (`YYYYMMDD`) —
 /// the nightly half of `build.rs::emit_version`'s arithmetic, split out for the same reason
 /// `dev_patch` is: `cargo test --lib` runs this, a build script's own `#[cfg(test)]` module never
 /// does. Not parsed into a real calendar date on purpose — `build.rs` only ever EMBEDS this string
-/// verbatim into `PLX_VERSION`, it never computes with it, so validating the shape is the whole
+/// verbatim into `NJ_VERSION`, it never computes with it, so validating the shape is the whole
 /// contract and a bad shape (`"2026-09-19"`, `"1"`, empty) is exactly what must fail the build
 /// rather than ship a malformed reported version silently.
 pub(crate) fn is_nightly_date(date: &str) -> bool {

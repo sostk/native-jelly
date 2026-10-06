@@ -80,7 +80,7 @@ pub const CONTENT_Y: f32 = 200.0;
 /// to cover the worst case, a large poster's `CARD_SHADOW_BLUR + CARD_SHADOW_DY` (44+18=62) plus a
 /// 1px AA margin, rounded up.
 pub const GLOW_PAD: f32 = 64.0;
-pub(crate) use plx_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
+pub(crate) use nj_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
 
 /// **The safe area itself** — the box every piece of REQUIRED content has to fit inside, as one
 /// value so no caller re-derives it from the two margins and gets a sign wrong.
@@ -371,8 +371,8 @@ pub fn classify(sym: c_uint, wcode: c_uint) -> Key {
 /// releases and scripted navigation have no raw SDL pair at all. Only `Other` needs raw fields
 /// to distinguish transport actions outside the small navigation alphabet. Screens must use
 /// this boundary instead of reclassifying raw fields and losing the machine's decision.
-pub fn classify_input(key: plx_machine::machine::Key, sym: c_uint, wcode: c_uint) -> Key {
-    use plx_machine::machine::Key as Canonical;
+pub fn classify_input(key: nj_machine::machine::Key, sym: c_uint, wcode: c_uint) -> Key {
+    use nj_machine::machine::Key as Canonical;
     match key {
         Canonical::Up => Key::Up,
         Canonical::Down => Key::Down,
@@ -387,7 +387,7 @@ pub fn classify_input(key: plx_machine::machine::Key, sym: c_uint, wcode: c_uint
 #[cfg(test)]
 mod canonical_input_tests {
     use super::*;
-    use plx_machine::machine::Key as Canonical;
+    use nj_machine::machine::Key as Canonical;
 
     #[test]
     fn canonical_keys_work_without_raw_codes_and_outrank_them() {
@@ -446,7 +446,7 @@ pub fn page_dir(sym: c_uint, wcode: c_uint) -> Option<c_int> {
 ///
 /// **Five sources in a lab build, four in every other, because the map has never been one:**
 /// 1. [`classify`] — every named [`Key`].
-/// 2. **The Lab Diagnostics trigger** ([`plx_platform::labcfg::is_trigger_key`]) — a key this build really
+/// 2. **The Lab Diagnostics trigger** ([`nj_platform::labcfg::is_trigger_key`]) — a key this build really
 ///    does bind, read from `lab.json` rather than written here. `false` at COMPILE time in every
 ///    build without the `lab-diagnostics` feature, which is every build anyone can install. It has
 ///    to be in this predicate or pressing it would also wake the player HUD and abort an armed
@@ -477,11 +477,11 @@ pub fn page_dir(sym: c_uint, wcode: c_uint) -> Option<c_int> {
 pub fn is_bound(sym: c_uint, wcode: c_uint) -> bool {
     classify(sym, wcode) != Key::Other
         // A LAB build binds one more key — the diagnostics trigger, which is configuration rather
-        // than a constant (`plx_platform::labcfg::config`). It has to be here or pressing it would also wake
+        // than a constant (`nj_platform::labcfg::config`). It has to be here or pressing it would also wake
         // the player HUD and abort an armed click, which is precisely the effect this predicate
         // exists to withhold from keys the app does not act on. Always `false` in every other
         // build, at compile time.
-        || plx_platform::labcfg::is_trigger_key(sym, wcode)
+        || nj_platform::labcfg::is_trigger_key(sym, wcode)
         || page_dir(sym, wcode).is_some()
         || sym == SDLK_BACKSPACE
         || sym == SDLK_CLEAR

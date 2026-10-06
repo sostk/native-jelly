@@ -31,9 +31,9 @@
 //! keymanager stages and a bounded array of candidate errno numbers (never candidate paths).
 
 use super::consent::{self, Permission, ONBOARDING_REPORT_SCOPE};
-use plx_net::net::{RequestError, RequestFailure};
-use crate::plex::session::async_persistence::{CompletionOutcome, Failure};
-use plx_platform::storage::wire::KeymanagerStage;
+use nj_net::net::{RequestError, RequestFailure};
+use crate::catalog::session::async_persistence::{CompletionOutcome, Failure};
+use nj_platform::storage::wire::KeymanagerStage;
 use serde_json::Value;
 
 /// Why server discovery ended with nothing to connect to.
@@ -151,7 +151,7 @@ impl IncidentKind {
 // (`LinkClass`), and the pure `classify` that coarsens it, are defined in `plex::probe`: the probe
 // grades its own transport failures in the same vocabulary and `plex` sits beneath this layer.
 // Re-exported, so every incident producer and reader keeps naming them here.
-pub(crate) use crate::plex::probe::{classify, LinkClass};
+pub(crate) use crate::catalog::probe::{classify, LinkClass};
 
 /// How many consecutive calls came back with no usable answer, bucketed — never the raw count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -368,7 +368,7 @@ pub(crate) struct IncidentContext {
     pub code_generation: Option<u8>,
     pub persistence: Option<PersistenceFailure>,
     #[serde(default)]
-    pub helper: Option<plx_platform::storage::wire::failure::HelperFailure>,
+    pub helper: Option<nj_platform::storage::wire::failure::HelperFailure>,
     #[serde(default)]
     pub candidate_errnos: [Option<i32>; 8],
     /// The key-service stage a protection failure stopped at.
@@ -377,9 +377,9 @@ pub(crate) struct IncidentContext {
     pub service_error_code: Option<i32>,
     /// Why discovery settled as insecure-only — only on
     /// [`DiscoveryClass::InsecureOnly`]. Every field closed; see
-    /// [`crate::plex::probe::InsecureEvidence`].
+    /// [`crate::catalog::probe::InsecureEvidence`].
     #[serde(default)]
-    pub insecure: Option<crate::plex::probe::InsecureEvidence>,
+    pub insecure: Option<crate::catalog::probe::InsecureEvidence>,
     /// What became of the "Connect without encryption?" offer for the server an insecure-only
     /// verdict speaks about — only when that server was eligible to be asked. A closed code; the
     /// server and its owner are never carried.
@@ -417,6 +417,7 @@ fn now_ms() -> u64 {
 /// sign-in's stored key, a profile roster, a wait's clock), a BADGE says what went wrong.
 /// `WifiSlash` stands alone — there is no server to blame when the TV itself has no link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub(crate) enum ReadoutGlyph {
     /// A clock, alert badge — a wait that ran out.
     ClockBadgeAlert,
@@ -472,6 +473,7 @@ impl ReadoutGlyph {
 /// agree here. `None` for `Timeout`/`TransportOther`/`Unknown` — the two callers diverge only on
 /// that "nothing specific happened" fallback, each picking its own glyph, so this returns `None`
 /// rather than guessing one. Exhaustive on [`LinkClass`], no wildcard arm.
+#[allow(dead_code)]
 fn plextv_link_glyph(link: LinkClass) -> Option<ReadoutGlyph> {
     use ReadoutGlyph as Glyph;
     match link {
@@ -550,7 +552,7 @@ impl IncidentContext {
     }
 
     /// The evidence behind an insecure-only discovery verdict.
-    pub(crate) fn with_insecure(mut self, evidence: crate::plex::probe::InsecureEvidence) -> Self {
+    pub(crate) fn with_insecure(mut self, evidence: crate::catalog::probe::InsecureEvidence) -> Self {
         self.insecure = Some(evidence);
         self
     }
@@ -650,6 +652,7 @@ impl IncidentContext {
     ///   failed rather than any named server or link, so this takes `CloudBadgeAlert`, the same
     ///   "something didn't work" mark an answered-but-broken plex.tv call wears, as the least
     ///   specific honest choice among the twelve.
+    #[allow(dead_code)]
     pub(crate) fn readout_glyph(&self) -> ReadoutGlyph {
         use ReadoutGlyph as Glyph;
         match self.kind {
@@ -881,9 +884,9 @@ pub(crate) fn event_body(
         "event_id": event_id,
         "platform": "native",
         "level": "error",
-        "release": concat!("plxnative@", env!("PLX_VERSION")),
+        "release": concat!("nativejelly@", env!("NJ_VERSION")),
         "environment": super::sender::ENVIRONMENT,
-        "sdk": {"name": "plxnative-handled", "version": env!("PLX_VERSION")},
+        "sdk": {"name": "nativejelly-handled", "version": env!("NJ_VERSION")},
         "logger": "onboarding",
         "transaction": "onboarding",
         "culprit": format!("onboarding::{kind}"),
@@ -925,6 +928,7 @@ pub(crate) fn event_body(
 /// input must never become able to send. `ctx: None` (no evidence was ever retained for this
 /// incident — a declined report keeps nothing, see `auth::owner::incident`) renders identically to
 /// evidence that carries none of the three: `unknown` all the way across either way.
+#[allow(dead_code)]
 pub(crate) fn storage_evidence_line(ctx: Option<&IncidentContext>) -> String {
     let persistence = ctx.and_then(|c| c.persistence).map_or("unknown", PersistenceFailure::code);
     let keymanager_stage =
@@ -953,7 +957,7 @@ pub(crate) fn report_standing(ctx: IncidentContext) -> Option<String> {
         return None;
     }
     let Some(event_id) = crate::diag::random_hex_id() else {
-        plx_base::eventlog::log("telemetry: no /dev/urandom — onboarding incident was not queued");
+        nj_base::eventlog::log("telemetry: no /dev/urandom — onboarding incident was not queued");
         return None;
     };
     let body = event_body(
@@ -983,7 +987,7 @@ fn queue_standing(record: &super::queue::Record, allowed: impl FnOnce() -> bool)
     match super::spool::append_watched_if(record, tenure, allowed) {
         Some(true) => true,
         Some(false) => {
-            plx_base::eventlog::log("telemetry: onboarding incident did not fit the durable spool");
+            nj_base::eventlog::log("telemetry: onboarding incident did not fit the durable spool");
             false
         }
         None => false, // consent/tenure changed, or no delivery watch could be admitted
@@ -1008,7 +1012,7 @@ pub(crate) fn send_one_off(ctx: IncidentContext) -> Option<String> {
         return None;
     }
     let Some(event_id) = crate::diag::random_hex_id() else {
-        plx_base::eventlog::log("telemetry: no /dev/urandom — one-off onboarding report was not queued");
+        nj_base::eventlog::log("telemetry: no /dev/urandom — one-off onboarding report was not queued");
         return None;
     };
     let body = event_body(&event_id, super::sentry::build_id(), None, ctx, ConsentKind::OneOff);
@@ -1059,9 +1063,9 @@ mod tests {
 
     #[test]
     fn helper_failure_report_has_closed_stage_and_candidate_errnos() {
-        use plx_platform::storage::wire::failure::{HelperFailure, Stage};
+        use nj_platform::storage::wire::failure::{HelperFailure, Stage};
         let mut failure = HelperFailure::new(Stage::Connect, Some(libc::ECONNREFUSED));
-        failure.activation = Some(plx_platform::storage::wire::failure::Detail::new(Stage::ActivationRegister, Some(-13)));
+        failure.activation = Some(nj_platform::storage::wire::failure::Detail::new(Stage::ActivationRegister, Some(-13)));
         let mut errnos = [None; 8];
         errnos[0] = Some(libc::EACCES);
         let context = IncidentContext::new(IncidentKind::SaveFailed, None)
@@ -1150,12 +1154,12 @@ mod tests {
         assert_eq!(details_only, vec![IncidentKind::LinkStalled]);
     }
 
-    fn protection_failure(service_code: Option<i32>) -> crate::plex::session::persistence::ProtectionFailure {
-        use plx_platform::storage::wire::{
+    fn protection_failure(service_code: Option<i32>) -> crate::catalog::session::persistence::ProtectionFailure {
+        use nj_platform::storage::wire::{
             AuthPreservation, ErrorCode, KeymanagerFailure, KeymanagerFailureCategory,
             KeymanagerOperation,
         };
-        crate::plex::session::persistence::ProtectionFailure {
+        crate::catalog::session::persistence::ProtectionFailure {
             failure: KeymanagerFailure {
                 operation: KeymanagerOperation::Seal,
                 stage: KeymanagerStage::Finish,
@@ -1170,7 +1174,7 @@ mod tests {
 
     #[test]
     fn a_persistence_completion_maps_to_its_closed_class() {
-        use crate::plex::session::async_persistence::PersistOutcome;
+        use crate::catalog::session::async_persistence::PersistOutcome;
         let ctx = || IncidentContext::new(IncidentKind::SaveFailed, None);
         let sealed = ctx().with_persistence(&CompletionOutcome::Failed(Failure::Protection(
             protection_failure(Some(-3961)),
@@ -1190,7 +1194,7 @@ mod tests {
         assert_eq!(write.keymanager_stage, None);
         assert_eq!(
             ctx().with_persistence(&CompletionOutcome::Uncertain {
-                stage: plx_platform::storage::CommitStage::Rename,
+                stage: nj_platform::storage::CommitStage::Rename,
                 errno: 5,
                 helper: None,
             })
@@ -1203,7 +1207,7 @@ mod tests {
         );
         assert_eq!(
             ctx().with_persistence(&CompletionOutcome::Failed(Failure::Admission(
-                plx_base::storage_worker::SubmitError::Full
+                nj_base::storage_worker::SubmitError::Full
             )))
             .persistence,
             Some(PersistenceFailure::Admission)
@@ -1236,7 +1240,7 @@ mod tests {
     /// An insecure-only verdict's evidence, every route bucket distinct so a key cannot be read
     /// off the wrong field.
     fn insecure_context() -> IncidentContext {
-        use crate::plex::probe::{AddressFamily, AddressScope, HttpsRoutes, InsecureEvidence, RouteOutcome};
+        use crate::catalog::probe::{AddressFamily, AddressScope, HttpsRoutes, InsecureEvidence, RouteOutcome};
         IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::InsecureOnly), None)
             .with_insecure(InsecureEvidence {
                 https: HttpsRoutes {
@@ -1552,9 +1556,9 @@ mod tests {
     #[test]
     fn a_queued_standing_report_is_watched_from_the_moment_the_spool_takes_it() {
         use super::super::delivery::{self, DeliveryState};
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         delivery::forget();
-        let dir = std::env::temp_dir().join(format!("plxnative-standing-watch-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nativejelly-standing-watch-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         super::super::spool::set_test_path(Some(dir.join("spool.bin")));
@@ -1578,9 +1582,9 @@ mod tests {
     fn completion_before_append_returns_is_not_lost() {
         use super::super::{delivery, spool};
         use delivery::DeliveryState;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         delivery::forget();
-        let dir = std::env::temp_dir().join(format!("plxnative-standing-race-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nativejelly-standing-race-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         spool::set_test_path(Some(dir.join("spool.bin")));
         let record = super::super::queue::Record {
@@ -1614,9 +1618,9 @@ mod tests {
     /// `consent::tests::report_permission_follows_the_accepted_and_declined_scope`.
     #[test]
     fn a_standing_report_needs_the_scope_and_never_carries_a_stall() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = consent::current();
-        let dir = std::env::temp_dir().join(format!("plxnative-incident-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nativejelly-incident-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         super::super::spool::set_test_path(Some(dir.join("spool.bin")));

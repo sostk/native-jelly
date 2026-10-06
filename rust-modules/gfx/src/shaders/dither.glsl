@@ -55,7 +55,7 @@
 //     surface, and on a full-screen wash that multiply WAS the dither's cost: a scrolling Library
 //     measured 45 fps with it and 60 without, dithered either way (2026-09-19, `tests/run.py --fps`,
 //     `docs/backdrop-blur-profiling.md`). The tile coordinate is linear in screen position, so the
-//     paired vertex shader computes it (`#define PLX_DITHER_NC`, `gfx::VS_*_DITHERED`) and the
+//     paired vertex shader computes it (`#define NJ_DITHER_NC`, `gfx::VS_*_DITHERED`) and the
 //     fetch reads the varying directly: no arithmetic word at all before the fetch.
 //
 // THE NOISE IS TPDF AT ±1 LSB and both halves live in the TILE (`gfx::noise_tex`): the texel stores

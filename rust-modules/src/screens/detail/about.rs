@@ -6,7 +6,7 @@
 use std::ffi::CString;
 
 use crate::metadata::Detail;
-use plx_machine::machine::{GroupId, Measure};
+use nj_machine::machine::{GroupId, Measure};
 use crate::ui::text_lift::{draw_focused, TextLift, CENTRE};
 use crate::ui::text_view::TextView;
 use crate::ui::{theme, Painter, Rect};
@@ -73,7 +73,7 @@ pub(crate) fn locate(key: u32, tracks_available: bool) -> Option<usize> {
 
 pub(crate) struct Rows {
     dirty: bool,
-    identity: Option<(crate::plex::ServerId, String)>,
+    identity: Option<(crate::catalog::ServerId, String)>,
     info: Vec<(&'static str, String)>,
     orig_audio: Option<String>,
     audio_list: String,
@@ -106,7 +106,7 @@ impl Rows {
         self.info.clear();
         let released = crate::ui::fmt::pretty_date(&d.aired, d.year);
         if !released.is_empty() {
-            self.info.push((plx_platform::i18n::msg::browse_detail_released(), released));
+            self.info.push((nj_platform::i18n::msg::browse_detail_released(), released));
         }
         let dur = if d.dur_ms > 0 {
             d.dur_ms
@@ -114,23 +114,23 @@ impl Rows {
             d.episodes.first().map(|e| e.dur_ms).unwrap_or(0)
         };
         if dur > 0 {
-            self.info.push((plx_platform::i18n::msg::browse_detail_runtime(), crate::ui::fmt::dur_long(dur)));
+            self.info.push((nj_platform::i18n::msg::browse_detail_runtime(), crate::ui::fmt::dur_long(dur)));
         }
         self.info.push((
-            plx_platform::i18n::msg::browse_detail_rated(),
+            nj_platform::i18n::msg::browse_detail_rated(),
             if d.rating.is_empty() {
-                plx_platform::i18n::msg::browse_detail_unrated().into()
+                nj_platform::i18n::msg::browse_detail_unrated().into()
             } else {
                 d.rating.clone()
             },
         ));
         if !d.countries.is_empty() {
             self.info
-                .push((plx_platform::i18n::msg::browse_detail_origins(), d.countries.join(", ")));
+                .push((nj_platform::i18n::msg::browse_detail_origins(), d.countries.join(", ")));
         }
         self.orig_audio = d.audio.first().map(|a| {
             if a.lang.is_empty() {
-                plx_platform::i18n::msg::browse_detail_unknown().into()
+                nj_platform::i18n::msg::browse_detail_unknown().into()
             } else {
                 a.lang.clone()
             }
@@ -141,7 +141,7 @@ impl Rows {
             .take(8)
             .map(|a| {
                 let lang = if a.lang.is_empty() {
-                    plx_platform::i18n::msg::browse_detail_unknown()
+                    nj_platform::i18n::msg::browse_detail_unknown()
                 } else {
                     &a.lang
                 };
@@ -152,17 +152,17 @@ impl Rows {
         self.access.clear();
         if !d.subs.is_empty() {
             self.access.push((
-                plx_platform::i18n::msg::widgets_badge_cc(),
-                plx_platform::i18n::msg::browse_detail_closed_captions(),
+                nj_platform::i18n::msg::widgets_badge_cc(),
+                nj_platform::i18n::msg::browse_detail_closed_captions(),
             ));
         }
         if d.subs.iter().any(|s| s.sdh) {
-            self.access.push((plx_platform::i18n::msg::widgets_badge_sdh(), plx_platform::i18n::msg::browse_detail_sdh()));
+            self.access.push((nj_platform::i18n::msg::widgets_badge_sdh(), nj_platform::i18n::msg::browse_detail_sdh()));
         }
         if d.audio.iter().any(|a| a.ad) {
             self.access.push((
-                plx_platform::i18n::msg::widgets_badge_ad(),
-                plx_platform::i18n::msg::browse_detail_audio_description(),
+                nj_platform::i18n::msg::widgets_badge_ad(),
+                nj_platform::i18n::msg::browse_detail_audio_description(),
             ));
         }
     }
@@ -216,11 +216,11 @@ impl Rows {
         tracks: bool,
         card_lift: &TextLift,
         lang_lift: &TextLift,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) {
         let x = crate::ui::consts::MARGIN_X;
         p.text(
-            plx_platform::i18n::msg::browse_detail_about_c().as_ptr(),
+            nj_platform::i18n::msg::browse_detail_about_c().as_ptr(),
             x,
             top,
             theme::size::HEADLINE,
@@ -240,7 +240,7 @@ impl Rows {
                 theme::size::HEADLINE,
                 theme::TEXT_PRIMARY,
                 1,
-                &plx_gfx::text::elide_by(&d.title, card.w - 2.0 * CARD_PAD, false, |t| {
+                &nj_gfx::text::elide_by(&d.title, card.w - 2.0 * CARD_PAD, false, |t| {
                     measure.width_str(t, theme::size::HEADLINE, true)
                 }),
             );
@@ -252,7 +252,7 @@ impl Rows {
                     theme::size::CAPTION,
                     theme::TEXT_TERTIARY,
                     0,
-                    &plx_gfx::text::elide_by(&d.genres.join(", "), card.w - 2.0 * CARD_PAD, false, |t| {
+                    &nj_gfx::text::elide_by(&d.genres.join(", "), card.w - 2.0 * CARD_PAD, false, |t| {
                         measure.width_str(t, theme::size::CAPTION, false)
                     }),
                 );
@@ -283,7 +283,7 @@ impl Rows {
             theme::size::HEADLINE,
             theme::TEXT_PRIMARY,
             1,
-            plx_platform::i18n::msg::browse_detail_information(),
+            nj_platform::i18n::msg::browse_detail_information(),
         );
         let mut yy = y + 68.0;
         for (label, value) in &self.info {
@@ -308,11 +308,11 @@ impl Rows {
                 theme::size::HEADLINE,
                 theme::TEXT_PRIMARY,
                 1,
-                plx_platform::i18n::msg::browse_detail_languages(),
+                nj_platform::i18n::msg::browse_detail_languages(),
             );
             let mut yy = y + 68.0;
             if let Some(orig) = &self.orig_audio {
-                yy += draw_pair(p, LANG_X, yy, plx_platform::i18n::msg::browse_detail_original_audio(), orig, measure);
+                yy += draw_pair(p, LANG_X, yy, nj_platform::i18n::msg::browse_detail_original_audio(), orig, measure);
             }
             if !self.audio_list.is_empty() {
                 text_at(
@@ -322,7 +322,7 @@ impl Rows {
                     theme::size::CAPTION,
                     theme::TEXT_TERTIARY,
                     0,
-                    plx_platform::i18n::msg::browse_detail_audio(),
+                    nj_platform::i18n::msg::browse_detail_audio(),
                 );
                 audio_view(&self.audio_list, measure)
                     .draw(p, Rect::new(LANG_X, yy + 34.0, LANG_W, 0.0));
@@ -346,7 +346,7 @@ impl Rows {
         p: Painter,
         x: f32,
         y: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) {
         text_at(
             p,
@@ -355,7 +355,7 @@ impl Rows {
             theme::size::HEADLINE,
             theme::TEXT_PRIMARY,
             1,
-            plx_platform::i18n::msg::browse_detail_accessibility(),
+            nj_platform::i18n::msg::browse_detail_accessibility(),
         );
         if self.access.is_empty() {
             text_at(
@@ -499,7 +499,7 @@ mod tests {
     fn a_same_identity_metadata_landing_invalidates_cached_about_rows() {
         let mut rows = Rows::new();
         let first = Detail {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             rk: "movie".into(),
             rating: "PG".into(),
             dur_ms: 60_000,
@@ -537,7 +537,7 @@ mod tests {
 
     fn movie_with_audio() -> Detail {
         Detail {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             rk: "movie".into(),
             rating: "PG".into(),
             summary: "word ".repeat(40),
@@ -568,7 +568,7 @@ mod tests {
     /// after it, stays exactly where it does at rest.
     #[test]
     fn a_focused_about_card_does_not_scale_its_siblings() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut rows = Rows::new();
         let d = movie_with_audio();
         rows.update(&d);
@@ -593,7 +593,7 @@ mod tests {
     /// the never-focused draw, for either block.
     #[test]
     fn leaving_a_lifted_block_leaves_no_plate_or_shadow_once_settled() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut rows = Rows::new();
         let d = movie_with_audio();
         rows.update(&d);

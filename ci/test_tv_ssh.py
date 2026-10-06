@@ -113,7 +113,7 @@ class TvSshTests(unittest.TestCase):
             "FAKE_LOG": str(self.log),
             "FAKE_MODE": mode,
             "FAKE_HOST": HOST,
-            "PLX_TV_ADDR": host,
+            "NJ_TV_ADDR": host,
         }
         env.update(extra_env or {})
         proc = subprocess.run(
@@ -172,7 +172,7 @@ class TvSshTests(unittest.TestCase):
         self.assert_no_leak(proc)
 
     def test_scp_key_rejected_falls_back(self):
-        proc = self.run_wrapper("key-denied", "scp", "pkg/plxnative", "tv:/media/x/plxnative.new")
+        proc = self.run_wrapper("key-denied", "scp", "pkg/nativejelly", "tv:/media/x/nativejelly.new")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         sshpass = [c for c in self.calls() if c.startswith("sshpass")]
         self.assertEqual(len(sshpass), 1, self.calls())
@@ -197,7 +197,7 @@ class TvSshTests(unittest.TestCase):
 
     def test_no_tv_configured_is_the_make_style_sentence(self):
         proc = self.run_wrapper("key-ok", "ssh", "tv", "true", host="",
-                                extra_env={"TV": "", "TV_HOST": "", "PLX_TV_NO_HOST_FILE": "1"})
+                                extra_env={"TV": "", "TV_HOST": "", "NJ_TV_NO_HOST_FILE": "1"})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("no TV configured", proc.stderr)
         self.assertEqual(self.calls(), [])

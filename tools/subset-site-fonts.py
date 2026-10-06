@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Subset pkg/appfont.ttf and pkg/appfont-bold.ttf into WOFF2 for plxnative.com, and check that
+"""Subset pkg/appfont.ttf and pkg/appfont-bold.ttf into WOFF2 for nativejelly.com, and check that
 the result actually covers every character the staged site renders.
 
     python3 tools/subset-site-fonts.py subset --out-dir _site/fonts

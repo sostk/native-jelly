@@ -6,7 +6,7 @@
 use crate::metadata::{extra_play_context, Detail, Extra};
 use crate::screens::registry::PlayIntent;
 use crate::ui::card_row::{self, CardRow, RowStyle, TileLabel};
-use plx_machine::machine::GroupId;
+use nj_machine::machine::GroupId;
 use crate::ui::widgets::Art;
 use crate::ui::{theme, Painter, Rect};
 
@@ -84,7 +84,7 @@ pub(crate) fn draw(
     row: &CardRow,
     top: f32,
     focused: Option<usize>,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let n = len(d);
     if n == 0 {
@@ -92,7 +92,7 @@ pub(crate) fn draw(
     }
     let lift = row.lift();
     p.text(
-        plx_platform::i18n::msg::browse_detail_extras_c().as_ptr(),
+        nj_platform::i18n::msg::browse_detail_extras_c().as_ptr(),
         crate::ui::consts::MARGIN_X,
         top - lift,
         theme::size::HEADLINE,
@@ -137,7 +137,7 @@ pub(crate) fn draw_focused(
     index: usize,
     top: f32,
     press: f32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let Some(extra) = d.extras.get(index) else {
         return;

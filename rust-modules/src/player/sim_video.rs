@@ -1,4 +1,4 @@
-//! **The simulator's picture** (`plxnative-simvideo`, with the clock sink armed): the video access
+//! **The simulator's picture** (`nativejelly-simvideo`, with the clock sink armed): the video access
 //! units the clock sink already accepts are ALSO piped to a system `ffmpeg` child process, decoded
 //! there, and the frame whose presentation time the sink's clock has reached is composited UNDER
 //! the finished UI frame — exactly the arithmetic the television's compositor applies to its
@@ -12,7 +12,7 @@
 //! **Why a child process, and why only in the simulator.** The host FFmpeg this crate links
 //! (`ci/build-ffmpeg.sh`) is built from the television's ONE component list, which has no video
 //! decoders — the TV decodes in hardware — and growing that list for a Mac would make the two
-//! builds diverge. A system `ffmpeg` binary (`PLXNATIVE_SIM_FFMPEG`, else `ffmpeg` on `PATH`) keeps
+//! builds diverge. A system `ffmpeg` binary (`NJ_SIM_FFMPEG`, else `ffmpeg` on `PATH`) keeps
 //! the decode entirely outside this process and this crate's link line. `hostsim`-only: the
 //! television build does not contain this file.
 //!
@@ -46,9 +46,9 @@ const FRAME_BYTES: usize = W * H * 4;
 fn armed() -> bool {
     static ONCE: OnceLock<bool> = OnceLock::new();
     *ONCE.get_or_init(|| {
-        let on = plx_base::devtrig::flag("simvideo");
+        let on = nj_base::devtrig::flag("simvideo");
         if on {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "simvideo: ARMED — video AUs are also decoded by a system ffmpeg and composited \
                  under the UI. A screenshot facility: nothing here measures the television.",
             );
@@ -118,7 +118,7 @@ fn reset(clear_picture: bool) {
     *SESSION.lock().unwrap_or_else(|e| e.into_inner()) = None;
     if clear_picture {
         *LATEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
 }
 
@@ -139,7 +139,7 @@ pub(crate) fn feed(au: &[u8], pts: i64) {
 }
 
 fn ffmpeg_path() -> std::ffi::OsString {
-    std::env::var_os("PLXNATIVE_SIM_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
+    std::env::var_os("NJ_SIM_FFMPEG").unwrap_or_else(|| "ffmpeg".into())
 }
 
 fn spawn() -> Option<Session> {
@@ -160,7 +160,7 @@ fn spawn() -> Option<Session> {
     let mut child = match spawned {
         Ok(child) => child,
         Err(e) => {
-            plx_base::eventlog::log(&format!("simvideo: could not start ffmpeg ({e}); no picture this session"));
+            nj_base::eventlog::log(&format!("simvideo: could not start ffmpeg ({e}); no picture this session"));
             return None;
         }
     };
@@ -197,13 +197,13 @@ fn spawn() -> Option<Session> {
                 Some((seq, Arc::new(std::mem::replace(&mut buf, vec![0u8; FRAME_BYTES]))));
             frames += 1;
             if frames == 1 {
-                plx_base::eventlog::log("simvideo: first picture decoded");
+                nj_base::eventlog::log("simvideo: first picture decoded");
             }
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
     });
     if writer.is_err() || reader.is_err() {
-        plx_base::eventlog::log("simvideo: could not spawn the pipe threads; no picture this session");
+        nj_base::eventlog::log("simvideo: could not spawn the pipe threads; no picture this session");
         let _ = child.kill();
         let _ = child.wait();
         return None;
@@ -226,9 +226,9 @@ pub(crate) fn composite_under() {
     TEX.with(|t| {
         let (mut tex, held) = t.get();
         if held != Some(n) {
-            tex = plx_gfx::gfx::upload_rgba(tex, W as i32, H as i32, rgba.as_ptr());
+            tex = nj_gfx::gfx::upload_rgba(tex, W as i32, H as i32, rgba.as_ptr());
             t.set((tex, Some(n)));
         }
-        plx_gfx::gfx::draw_under(tex, 0.0, 0.0, W as f32, H as f32);
+        nj_gfx::gfx::draw_under(tex, 0.0, 0.0, W as f32, H as f32);
     });
 }

@@ -143,8 +143,8 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::plex::ServerId;
-use plx_machine::machine::{Cx, Effects, Handled, Host, Machine};
+use crate::catalog::ServerId;
+use nj_machine::machine::{Cx, Effects, Handled, Host, Machine};
 
 use super::StoreEv;
 
@@ -275,7 +275,7 @@ impl MetadataStore {
 
     /// Route-unconditional landing/spawn pass across detail, season and alt-sources — the same
     /// three pumps `Machine::step`'s `StoreEv::Pump` arm already drives.
-    pub(crate) fn pump(&mut self, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump(&mut self, gate: &nj_machine::landgate::Gate) -> bool {
         let detail = self.pump_detail_with_gate(gate);
         let season = self.pump_season_with_gate(gate);
         let alt = crate::metadata::pump_alt_sources_with_gate(&mut self.state, &self.adapter, gate);
@@ -284,7 +284,7 @@ impl MetadataStore {
     }
 
     /// The async detail landing alone — `app/run.rs`'s own call site, pumped before season.
-    pub(crate) fn pump_detail_with_gate(&mut self, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump_detail_with_gate(&mut self, gate: &nj_machine::landgate::Gate) -> bool {
         let changed = crate::metadata::pump_detail_with_gate(&mut self.state, &self.adapter, gate);
         if changed { self.bump(); }
         changed
@@ -292,11 +292,11 @@ impl MetadataStore {
 
     #[cfg(test)]
     pub(crate) fn pump_detail(&mut self) -> bool {
-        self.pump_detail_with_gate(plx_machine::landgate::fixture_gate())
+        self.pump_detail_with_gate(nj_machine::landgate::fixture_gate())
     }
 
     /// The async season landing alone — `app/run.rs`'s own call site, pumped after detail.
-    pub(crate) fn pump_season_with_gate(&mut self, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump_season_with_gate(&mut self, gate: &nj_machine::landgate::Gate) -> bool {
         let changed = crate::metadata::pump_season_with_gate(&mut self.state, &self.adapter, gate);
         if changed { self.bump(); }
         changed
@@ -306,7 +306,7 @@ impl MetadataStore {
     pub(crate) fn pump_alt_sources_with_directory(
         &mut self,
         directory: crate::stores::browse::DirectoryView<'_>,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
     ) -> bool {
         let changed = crate::metadata::pump_alt_sources_with_directory_and_gate(
             &mut self.state, &self.adapter, directory, gate);
@@ -328,7 +328,7 @@ impl<H: Host> Machine<H> for MetadataStore {
                 self.run(c.clone());
             }
             StoreEv::Pump { .. } => {
-                self.pump(&plx_machine::landgate::Gate::default());
+                self.pump(&nj_machine::landgate::Gate::default());
             }
         }
         Handled::Yes
@@ -425,8 +425,8 @@ mod two_owner_tests {
     /// against the broken shape.
     #[test]
     fn a_landing_reaches_only_the_owner_whose_adapter_it_was_minted_from() {
-        let _guard = plx_base::testlock::serial();
-        let sid = crate::plex::ServerId::UNSET;
+        let _guard = nj_base::testlock::serial();
+        let sid = crate::catalog::ServerId::UNSET;
         let a_rk = "owner-a-item";
         let b_rk = "owner-b-item";
 

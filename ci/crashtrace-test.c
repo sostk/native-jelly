@@ -79,7 +79,7 @@ static int crash_child(const char *path, int sig, enum how how) {
         int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
         /* BOTH sinks, deliberately the same file: the tracer writes each line to both, so one file
          * receiving the record twice also proves neither descriptor is being dropped. */
-        plx_crash_install(fd, fd);
+        nj_crash_install(fd, fd);
         if (how == FAULT) {
             /* A real null dereference. `volatile` so no compiler decides this is undefined and
              * therefore deletable — which they do, and then the test would prove nothing. */
@@ -214,8 +214,8 @@ static const char *scan(const char *content, unsigned long pc, unsigned long lr)
     int sf = open(sink, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
     /* One sink, not two: the duplicate-write property is already asserted by the crash cases, and
      * counting occurrences here would double every number for no extra evidence. */
-    plx_crash_install(sf, -1);
-    plx_crash_scan_maps_file(maps, pc, lr);
+    nj_crash_install(sf, -1);
+    nj_crash_scan_maps_file(maps, pc, lr);
     close(sf);
 
     size_t len = 0;
@@ -237,7 +237,7 @@ static void map_line(char *out, size_t cap, const char *lo, const char *hi, cons
     snprintf(out, cap, "%s-%s r-xp 00000000 b3:35 12345 /media/developer/apps/%s%s\n", lo, hi, pads, path);
 }
 
-static const char *OURS = "com.sostk.nativejelly/plxnative";
+static const char *OURS = "com.sostk.nativejelly/nativejelly";
 
 static void maps_cases(void) {
     /* The ordinary case, first: one of our own mappings containing the PC. It must produce BOTH
@@ -315,8 +315,8 @@ static void maps_cases(void) {
         char sink[256];
         snprintf(sink, sizeof sink, "/tmp/plx-crashtrace-sink-none-%d", (int)getpid());
         int sf = open(sink, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
-        plx_crash_install(sf, -1);
-        plx_crash_scan_maps_file("/nonexistent/maps", 0x20000, 0);
+        nj_crash_install(sf, -1);
+        nj_crash_scan_maps_file("/nonexistent/maps", 0x20000, 0);
         close(sf);
         size_t len = 0;
         slurp(sink, &len);

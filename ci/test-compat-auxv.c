@@ -54,10 +54,10 @@ static int fake_close(int fd)
     if (close_error) { errno = close_error; return -1; }
     return 0;
 }
-#define PLX_AUXV_HOST_TEST
-#define PLX_AUXV_OPEN fake_open
-#define PLX_AUXV_READ fake_read
-#define PLX_AUXV_CLOSE fake_close
+#define NJ_AUXV_HOST_TEST
+#define NJ_AUXV_OPEN fake_open
+#define NJ_AUXV_READ fake_read
+#define NJ_AUXV_CLOSE fake_close
 #ifndef AUX_SOURCE
 #define AUX_SOURCE "../src/compat/getauxval.c"
 #endif

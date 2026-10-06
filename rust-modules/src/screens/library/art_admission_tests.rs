@@ -1,5 +1,5 @@
 use super::*;
-use plx_machine::machine::PosterKey;
+use nj_machine::machine::PosterKey;
 use crate::ui::tex::{Source, Warm};
 use std::cell::RefCell;
 
@@ -28,16 +28,16 @@ impl Source for ArtSpy {
 /// of the same cold slot and kept an otherwise settled screen decoding/uploading forever.
 #[test]
 fn scrolled_grid_admits_only_visible_art_and_never_rewarms_hidden_rows() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     // Source installation and observations are thread-local to this test. A descriptive draw
     // traverses the actual Part implementation while its primitive declarations avoid GL.
     crate::ui::tex::install(&ArtSpy);
     let painter = crate::ui::Painter::root();
     for episodes in [false, true] {
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::catalog::ServerId::from_raw(0);
         let mut fixture = Fixture::new();
         fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-            (0..1200).map(|i| Some(crate::pms::PmsMovie {
+            (0..1200).map(|i| Some(crate::catalog_fetch::PmsMovie {
                 sid, rk: i.to_string(), kind: if episodes { 3 } else { 0 },
                 thumb: format!("/poster/{i}"), still: format!("/still/{i}"),
                 ..Default::default()
@@ -81,7 +81,7 @@ fn scrolled_grid_admits_only_visible_art_and_never_rewarms_hidden_rows() {
             // The normal paint pass admits warm requests (discovery/source replay does not).
             // Translate the retained page outside the canvas so the production cull keeps all
             // primitives away from GL, but both hidden-card paths still execute normally.
-            assert!(!plx_gfx::gfx::blur_source_pass());
+            assert!(!nj_gfx::gfx::blur_source_pass());
             for _ in 0..12 {
                 let mut frame = DrawFrame::new(&cx, painter.translate(2.0 * SCR_W, 0.0));
                 page.pair.detail.draw(&mut frame, Rect::FULL);

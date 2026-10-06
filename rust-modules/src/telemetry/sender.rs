@@ -62,12 +62,12 @@ const fn non_empty(v: Option<&'static str>) -> Option<&'static str> {
 
 /// The production pair. Supplied only by the release workflow, out of GitHub repository variables —
 /// deliberately never read from the working copy, so a developer's machine cannot hold them.
-const SENTRY_DSN_PROD: Option<&str> = non_empty(option_env!("PLX_SENTRY_DSN"));
-const POSTHOG_KEY_PROD: Option<&str> = non_empty(option_env!("PLX_POSTHOG_KEY"));
+const SENTRY_DSN_PROD: Option<&str> = non_empty(option_env!("NJ_SENTRY_DSN"));
+const POSTHOG_KEY_PROD: Option<&str> = non_empty(option_env!("NJ_POSTHOG_KEY"));
 
 /// The development pair, from `pkg/telemetry.local.json` via `make telemetry-local`.
-const SENTRY_DSN_DEV: Option<&str> = non_empty(option_env!("PLX_SENTRY_DSN_DEV"));
-const POSTHOG_KEY_DEV: Option<&str> = non_empty(option_env!("PLX_POSTHOG_KEY_DEV"));
+const SENTRY_DSN_DEV: Option<&str> = non_empty(option_env!("NJ_SENTRY_DSN_DEV"));
+const POSTHOG_KEY_DEV: Option<&str> = non_empty(option_env!("NJ_POSTHOG_KEY_DEV"));
 
 const HAS_PROD: bool = SENTRY_DSN_PROD.is_some() || POSTHOG_KEY_PROD.is_some();
 const HAS_DEV: bool = SENTRY_DSN_DEV.is_some() || POSTHOG_KEY_DEV.is_some();
@@ -128,10 +128,10 @@ const POSTHOG_KEY: Option<&str> = if HAS_PROD {
 /// environment variable nobody reads.
 const POSTHOG_HOST: &str = "https://eu.i.posthog.com";
 
-/// Deadlines for a background flush. Deliberately shorter than [`net::API`](plx_net::net::API), which
+/// Deadlines for a background flush. Deliberately shorter than [`net::API`](nj_net::net::API), which
 /// is tuned for a call somebody is waiting on: a worker holding a thread for 25 s to report a crash
 /// that already happened has the priority backwards.
-const TIMEOUTS: plx_net::net::Timeouts = plx_net::net::Timeouts {
+const TIMEOUTS: nj_net::net::Timeouts = nj_net::net::Timeouts {
     connect_s: 6,
     total_s: 12,
     total_ms: 0,
@@ -353,7 +353,7 @@ pub(crate) fn send_one(r: &Record) -> (Verdict, Option<u64>) {
         // "silently dropped for want of a key", which is precisely the question a verification is
         // asking. One destination missing while the other is configured is the ordinary case here,
         // not an exotic one.
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "telemetry: no endpoint for {:?} in this build — record discarded",
             r.dest
         ));
@@ -361,13 +361,13 @@ pub(crate) fn send_one(r: &Record) -> (Verdict, Option<u64>) {
     };
     let body = wire_body(r);
     if body.is_empty() {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "telemetry: obsolete or unsupported {:?} record discarded before send",
             r.dest
         ));
         return (Verdict::Hopeless, None);
     }
-    match plx_net::net::post_ca(&url, &headers, &body, TIMEOUTS) {
+    match nj_net::net::post_ca(&url, &headers, &body, TIMEOUTS) {
         Some(resp) => {
             let v = classify(resp.status);
             // The response body is bounded and kept precisely so a rejection can be logged with the
@@ -377,11 +377,11 @@ pub(crate) fn send_one(r: &Record) -> (Verdict, Option<u64>) {
                 // line did not carry it, which is the difference between debugging a 400 and
                 // guessing at one — Sentry and PostHog both answer a malformed envelope with a
                 // sentence naming the field. Bounded hard and scrubbed like every other line
-                // (`plx_base::eventlog::log` runs `scrub_local` before the write), because it is third-party
+                // (`nj_base::eventlog::log` runs `scrub_local` before the write), because it is third-party
                 // text landing in the primary debugging surface.
                 let why = String::from_utf8_lossy(&resp.body);
                 let why: String = why.chars().filter(|c| !c.is_control()).take(160).collect();
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "telemetry: {:?} -> {} ({v:?}) {why}",
                     r.dest, resp.status
                 ));
@@ -689,7 +689,7 @@ mod tests {
     /// A background flush must not hold a worker as long as a call somebody is waiting on.
     #[test]
     fn a_background_flush_gives_up_sooner_than_an_interactive_call() {
-        assert!(TIMEOUTS.total_s < plx_net::net::API.total_s);
-        assert!(TIMEOUTS.connect_s <= plx_net::net::API.connect_s);
+        assert!(TIMEOUTS.total_s < nj_net::net::API.total_s);
+        assert!(TIMEOUTS.connect_s <= nj_net::net::API.connect_s);
     }
 }

@@ -36,7 +36,7 @@ fn drive(rig: &mut Bridge, fx: AppFx) {
 
 #[test]
 fn consent_decides_from_its_owned_state_and_not_the_published_snapshot() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let saved = PublishedSnapshot(consent::current());
     let published = decision("published-id");
     consent::install(published.clone());
@@ -84,7 +84,7 @@ fn consent_effect_is_an_addressed_delivery_before_the_owner_steps() {
     assert_eq!(rig.consent.current(), &initial, "AppFx routing must not step the owner inline");
     assert!(matches!(
         out.as_slice(),
-        [plx_machine::machine::Stamped {
+        [nj_machine::machine::Stamped {
             fx: Fx::Deliver(
                 MachineId::Consent,
                 Delivery::Machine(AppMsg::Consent(ConsentCmd::Record {
@@ -142,9 +142,9 @@ fn signing_out_through_consent_owner_leaves_nothing_for_the_next_account() {
         }
     }
 
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let dir = std::env::temp_dir().join(format!(
-        "plxnative-consent-owner-signout-{}",
+        "nativejelly-consent-owner-signout-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);

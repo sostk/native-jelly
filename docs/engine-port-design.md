@@ -35,7 +35,7 @@ After the port, exactly four threads touch player state:
 
 | Thread | What it runs | What it may touch |
 |---|---|---|
-| **M** main / `plex_run` | `acb_init`, `start`/`stop_bufferfeed`, `pump`, all transport writes | `Engine`, `SHARED`, `TX` |
+| **M** main / `nj_run` | `acb_init`, `start`/`stop_bufferfeed`, `pump`, all transport writes | `Engine`, `SHARED`, `TX` |
 | **D** demux | `stream_thread` | `SHARED` (atomics + `aq`), its own boxes |
 | **C** cue-preflight | `cues_thread` | `SHARED.cues`/`cues_ready`/`cues_abort`, its own boxes |
 | **L**/**K** load + library callback | `load_thread`, `sf_on_event`, `acb_on_event` | `SHARED` |
@@ -121,7 +121,7 @@ impl Shared {
     }
 }
 
-/// UI-facing transport state. Main-thread-only in practice (plex_run + pump +
+/// UI-facing transport state. Main-thread-only in practice (nj_run + pump +
 /// player_hud all run on M), but exposed as atomics so app.rs / player_hud.rs
 /// read/write it with plain .load()/.store() instead of the old extern static-mut
 /// + addr_of dance. Replaces the #[no_mangle] transport globals from playback.h.
@@ -456,7 +456,7 @@ static mut ENGINE: Option<Engine> = None;         // main-thread-only slot
 }
 ```
 
-`acb_init` (reads `/tmp/plxnative-ptype`, `getenv("APPID")`, `acb_create`, sets `ACB_OK`/`PTYPE`), `start_bufferfeed` (resolve URL from `route::url()` → `/tmp/plxnative-url` → sample → `route::demo_url()`; `aq_init`; spawn D via `SendMut(aq_ptr)`; spawn C unless `route::transcode_session()` is non-empty; spawn L with `payload.as_ptr() as usize`; `stage=Loading`; `TX.started=true`), and `stop_bufferfeed(keep_cues)` reproduce the C teardown **order exactly**:
+`acb_init` (reads `/tmp/nativejelly-ptype`, `getenv("APPID")`, `acb_create`, sets `ACB_OK`/`PTYPE`), `start_bufferfeed` (resolve URL from `route::url()` → `/tmp/nativejelly-url` → sample → `route::demo_url()`; `aq_init`; spawn D via `SendMut(aq_ptr)`; spawn C unless `route::transcode_session()` is non-empty; spawn L with `payload.as_ptr() as usize`; `stage=Loading`; `TX.started=true`), and `stop_bufferfeed(keep_cues)` reproduce the C teardown **order exactly**:
 
 ```
 cues_abort=true
@@ -483,7 +483,7 @@ The cue **join-before-free** invariant is preserved and now stronger: the `Vec` 
 | `bf_started, pl_paused, resumePausePending, pl_hud_until, pl_scrub_ns, g_seek_to_ns, g_playpos_ns, bf_frames`, `pl_dur_ns` | `#[no_mangle]` C globals, `static mut` externs in app.rs & player_hud.rs | **`player::TX.*` atomics + `player::{playpos_ns,frames,duration_ns,seek_pending,request_seek,is_started}()`**; the `#[no_mangle]` disappears (no C reader remains). `pl_dur_ns` is folded into `SHARED.duration_ns` |
 | `g_url, g_transcode_session` (route) | `#[no_mangle] pub static mut`, read by C playback | read by the Rust engine via `route::url()/set_url()/clear_url()/transcode_session()`; `#[no_mangle]` can drop (route cleanup) |
 
-**app.rs diff (`plex_run`)**: delete the `extern "C"` block and the `v_playpos/v_frames/v_seek/set_v_seek/get/getu/geti64` shims. Replace call sites:
+**app.rs diff (`nj_run`)**: delete the `extern "C"` block and the `v_playpos/v_frames/v_seek/set_v_seek/get/getu/geti64` shims. Replace call sites:
 - `acb_init()` → `player::acb_init()`; `start_bufferfeed()!=0` → `player::start_bufferfeed()`; `stop_bufferfeed(1)` → `player::stop_bufferfeed(true)`; `bufferfeed_pump(now)` → `player::pump(now)`; `playback_pause()/resume()` → `player::pause()/resume()`.
 - `pl_paused` toggle → `let p = player::TX.paused.load(Relaxed); player::TX.paused.store(!p, Relaxed);`
 - `pl_hud_until = x` → `player::TX.hud_until.store(x, Relaxed)`; `pl_scrub_ns` → `player::TX.scrub_ns`; `resumePausePending` → `player::TX.resume_pend`.
@@ -491,7 +491,7 @@ The cue **join-before-free** invariant is preserved and now stronger: the `Vec` 
 
 **player_hud.rs diff**: delete its `extern "C"` block (lines 16–21). `pl_scrub_ns` → `crate::player::TX.scrub_ns.load(Relaxed)`; `pl_dur_ns` → `crate::player::duration_ns()`; `pl_paused` → `crate::player::TX.paused.load(Relaxed)`; `g_playpos_ns` → `crate::player::playpos_ns()`. (`route::g_title`/`g_ctxline` reads are untouched.)
 
-**route.rs additions** (small, keeps URL/session ownership where it already is): `pub(crate) fn url() -> String`, `set_url(&str)`, `clear_url()`, `transcode_session() -> String`, `demo_url() -> String`, and `stop_transcode()` (moves the `/video/:/transcode/universal/stop` GET + `g_transcode_session[0]=0` out of the C stop path, using the existing `CFG`). `demo_url` is fed in by extending `plex_run(host,port,token)` → `plex_run(host,port,token,demo_url)` and `route::set_config(host,port,token,demo_url)`; the boot shim passes `DEMO_STREAM_URL` (the only remaining use of that C macro).
+**route.rs additions** (small, keeps URL/session ownership where it already is): `pub(crate) fn url() -> String`, `set_url(&str)`, `clear_url()`, `transcode_session() -> String`, `demo_url() -> String`, and `stop_transcode()` (moves the `/video/:/transcode/universal/stop` GET + `g_transcode_session[0]=0` out of the C stop path, using the existing `CFG`). `demo_url` is fed in by extending `nj_run(host,port,token)` → `nj_run(host,port,token,demo_url)` and `route::set_config(host,port,token,demo_url)`; the boot shim passes `DEMO_STREAM_URL` (the only remaining use of that C macro).
 
 **aq.rs additions** (accessors so `feed_stream` can read a popped node without re-exposing raw offsets):
 ```rust

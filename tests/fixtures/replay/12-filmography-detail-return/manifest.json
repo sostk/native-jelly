@@ -169,16 +169,16 @@
    },
    "settings": null,
    "triggers": [
-    "plxnative-app-init",
-    "plxnative-rec",
-    "plxnative-focus",
-    "plxnative-noidle",
-    "plxnative-detail",
-    "plxnative-detailsec",
-    "plxnative-detailok",
-    "plxnative-filmography",
-    "plxnative-personcredits",
-    "plxnative-nowan"
+    "nativejelly-app-init",
+    "nativejelly-rec",
+    "nativejelly-focus",
+    "nativejelly-noidle",
+    "nativejelly-detail",
+    "nativejelly-detailsec",
+    "nativejelly-detailok",
+    "nativejelly-filmography",
+    "nativejelly-personcredits",
+    "nativejelly-nowan"
    ],
    "version": 1
   },
@@ -188,15 +188,15 @@
  "schema": 3,
  "state_fp": 10119451143357529556,
  "triggers": [
-  "plxnative-app-init",
-  "plxnative-rec",
-  "plxnative-focus",
-  "plxnative-noidle",
-  "plxnative-detail",
-  "plxnative-detailsec",
-  "plxnative-detailok",
-  "plxnative-filmography",
-  "plxnative-personcredits",
-  "plxnative-nowan"
+  "nativejelly-app-init",
+  "nativejelly-rec",
+  "nativejelly-focus",
+  "nativejelly-noidle",
+  "nativejelly-detail",
+  "nativejelly-detailsec",
+  "nativejelly-detailok",
+  "nativejelly-filmography",
+  "nativejelly-personcredits",
+  "nativejelly-nowan"
  ]
 }

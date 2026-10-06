@@ -34,14 +34,14 @@ class BuildGcTests(unittest.TestCase):
         for key in list(env):
             if key.startswith("GIT_") or key in ("CARGO_TARGET_DIR", "SIM_TDIR"):
                 del env[key]
-        env.update(PLX_FLEET_DIR=str(fleet), PLX_BUILD_CACHE=str(cache),
-                   PLX_CACHE_MAX_DAYS="30", GIT_CONFIG_GLOBAL=os.devnull,
+        env.update(NJ_FLEET_DIR=str(fleet), NJ_BUILD_CACHE=str(cache),
+                   NJ_CACHE_MAX_DAYS="30", GIT_CONFIG_GLOBAL=os.devnull,
                    GIT_CONFIG_NOSYSTEM="1",
                    # `--auto`'s log and lock live under THIS fixture's own root — never the real
                    # ~/Library/Logs or /tmp/plx-build-gc-auto.lock, which a concurrent real
                    # `--auto` (the SessionEnd hook, launchd) could be holding on the very machine
                    # running this suite.
-                   PLX_GC_LOG=str(root / "gc.log"), PLX_GC_LOCK_DIR=str(root / "gc.lock"))
+                   NJ_GC_LOG=str(root / "gc.log"), NJ_GC_LOCK_DIR=str(root / "gc.lock"))
         subprocess.run(["git", "init", "-q", str(repo)], env=env, check=True)
         # Suppress unrelated compiler-named processes only. PGID checks use real pgrep;
         # PID checks remain the script's actual shell kill -0 builtin.
@@ -130,7 +130,7 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(None, None)
         repo, env = fixture[0], fixture[1]
         shutil.copy(ROOT / "tools/cargo-seed.py", repo / "tools/cargo-seed.py")
-        seeds = Path(env["PLX_BUILD_CACHE"]) / "cargo-seed"
+        seeds = Path(env["NJ_BUILD_CACHE"]) / "cargo-seed"
         old = time.time() - 40 * 86400
         for name, mtime in (("target", old), ("target-release", time.time())):
             (seeds / name).mkdir(parents=True)
@@ -151,7 +151,7 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(None, None)
         repo, env = fixture[0], fixture[1]
         shutil.copy(ROOT / "tools/cargo-seed.py", repo / "tools/cargo-seed.py")
-        seeds = Path(env["PLX_BUILD_CACHE"]) / "cargo-seed"
+        seeds = Path(env["NJ_BUILD_CACHE"]) / "cargo-seed"
         (seeds / "target").mkdir(parents=True)
         (seeds / "target" / "payload").write_text("third-party output\n")
         stamp = seeds / "target" / ".last-used"
@@ -169,17 +169,17 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(0, 0)
         repo, env = fixture[0], fixture[1]
         shutil.copy(ROOT / "tools/cargo-seed.py", repo / "tools/cargo-seed.py")
-        seeds = Path(env["PLX_BUILD_CACHE"]) / "cargo-seed"
+        seeds = Path(env["NJ_BUILD_CACHE"]) / "cargo-seed"
         (seeds / "target").mkdir(parents=True)
         stamp = seeds / "target" / ".last-used"
         stamp.touch()
         ten_days = time.time() - 10 * 86400
         os.utime(stamp, (ten_days, ten_days))
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999", "PLX_GC_IDLE_MIN": "0"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999", "NJ_GC_IDLE_MIN": "0"})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((seeds / "target").exists(), "--auto under pressure kept an idle seed")
-        log = Path(env["PLX_GC_LOG"]).read_text()
+        log = Path(env["NJ_GC_LOG"]).read_text()
         self.assertLess(log.index("stale:"), log.index("seed:"), "seed stage out of order:\n" + log)
 
     def test_dry_runs_never_mutate_trees_or_locks(self):
@@ -269,8 +269,8 @@ class BuildGcTests(unittest.TestCase):
                           "worktree missing from --worktrees output: " + diagnostic)
 
     def test_worktrees_removal_guards_empty_fleet_dir(self):
-        # Copilot review point: `FLEET_DIR=${PLX_FLEET_DIR-$HOME/plx-fleet}` only substitutes the
-        # default when PLX_FLEET_DIR is UNSET. A caller that exports it as the EMPTY STRING
+        # Copilot review point: `FLEET_DIR=${NJ_FLEET_DIR-$HOME/plx-fleet}` only substitutes the
+        # default when NJ_FLEET_DIR is UNSET. A caller that exports it as the EMPTY STRING
         # leaves FLEET_DIR empty, and the old code built `ext="$FLEET_DIR/$(basename "$w")"`
         # unconditionally — a ROOT-level path such as `/lane0`. Proving this safely, without ever
         # creating or testing a real root-level directory, means watching CONTROL FLOW rather
@@ -282,14 +282,14 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(0, 0)
         roots = self._add_worktrees(fixture, 1, prefix="lane", add_target=False)
         repo, env, _, _ = fixture
-        env = dict(env, PLX_FLEET_DIR="")
+        env = dict(env, NJ_FLEET_DIR="")
         result = subprocess.run(["sh", "-x", "tools/build-gc.sh", "--worktrees"], cwd=repo,
                                 env=env, text=True, capture_output=True, timeout=20)
         trace = result.stdout + result.stderr
         name = roots[0].name
         self.assertEqual(result.returncode, 0, trace)
         self.assertNotIn(f"ext=/{name}", trace,
-                         "built a root-anchored external path from an empty PLX_FLEET_DIR: "
+                         "built a root-anchored external path from an empty NJ_FLEET_DIR: "
                          + trace)
         self.assertFalse(roots[0].exists(), "worktree was not actually removed: " + trace)
 
@@ -328,7 +328,7 @@ class BuildGcTests(unittest.TestCase):
             live.wait(timeout=5)
 
     def test_live_external_lane_tree_survives_even_with_its_worktree_gone(self):
-        # `fleet-plan` points a worker's CARGO_TARGET_DIR at $PLX_FLEET_DIR/<lane>, and the
+        # `fleet-plan` points a worker's CARGO_TARGET_DIR at $NJ_FLEET_DIR/<lane>, and the
         # documented teardown order is: remove the worktrees, then `--orphans`. A lane whose last
         # build is still running is then an external tree with no worktree — which is exactly what
         # `--orphans` is built to delete. Its cwd cannot name a checkout git still lists, so the
@@ -403,18 +403,18 @@ class BuildGcTests(unittest.TestCase):
             return path
 
         old_files = [
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa", old, executable=True),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.d", old),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.codehash-cgu.00.rcgu.o", old),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.codehash-cgu.01.rcgu.o", old),
+            touch("nativejelly_modules-aaaaaaaaaaaaaaaa", old, executable=True),
+            touch("nativejelly_modules-aaaaaaaaaaaaaaaa.d", old),
+            touch("nativejelly_modules-aaaaaaaaaaaaaaaa.codehash-cgu.00.rcgu.o", old),
+            touch("nativejelly_modules-aaaaaaaaaaaaaaaa.codehash-cgu.01.rcgu.o", old),
         ]
         newest_core = [
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb", fresh, executable=True),
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.d", fresh),
+            touch("nativejelly_modules-bbbbbbbbbbbbbbbb", fresh, executable=True),
+            touch("nativejelly_modules-bbbbbbbbbbbbbbbb.d", fresh),
         ]
         newest_stale_objects = [
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.codehash-cgu.00.rcgu.o", old),
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.codehash-cgu.01.rcgu.o", old),
+            touch("nativejelly_modules-bbbbbbbbbbbbbbbb.codehash-cgu.00.rcgu.o", old),
+            touch("nativejelly_modules-bbbbbbbbbbbbbbbb.codehash-cgu.01.rcgu.o", old),
         ]
         return fixture, old_files, newest_core, newest_stale_objects
 
@@ -424,8 +424,8 @@ class BuildGcTests(unittest.TestCase):
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("would remove", diagnostic)
-        self.assertIn("plxnative_modules-aaaaaaaaaaaaaaaa (4 files)", diagnostic)
-        self.assertIn("plxnative_modules-bbbbbbbbbbbbbbbb rcgu.o objects (2 files)", diagnostic)
+        self.assertIn("nativejelly_modules-aaaaaaaaaaaaaaaa (4 files)", diagnostic)
+        self.assertIn("nativejelly_modules-bbbbbbbbbbbbbbbb rcgu.o objects (2 files)", diagnostic)
         for p in old_files + newest_core + newest_stale_objects:
             self.assertTrue(p.exists(), "-n deleted a file: " + diagnostic)
 
@@ -444,16 +444,16 @@ class BuildGcTests(unittest.TestCase):
     def test_stale_keeps_a_hash_younger_than_the_threshold_even_if_superseded(self):
         # A THIRD hash, younger than the (overridden, tiny) threshold: even though it is neither
         # the newest for its crate nor old enough, it must survive — the "keep anything younger
-        # than $PLX_GC_STALE_HOURS" clause is independent of the newest-hash rule.
+        # than $NJ_GC_STALE_HOURS" clause is independent of the newest-hash rule.
         fixture, old_files, newest_core, newest_stale_objects = self._stale_deps_fixture()
         repo, env, _, _ = fixture
         deps = repo / "rust-modules/target/debug/deps"
-        young_but_superseded = deps / "plxnative_modules-cccccccccccccccc"
+        young_but_superseded = deps / "nativejelly_modules-cccccccccccccccc"
         young_but_superseded.write_bytes(b"")
         young_but_superseded.chmod(0o755)
         recent = time.time() - 2 * 3600
         os.utime(young_but_superseded, (recent, recent))
-        env = dict(env, PLX_GC_STALE_HOURS="3")
+        env = dict(env, NJ_GC_STALE_HOURS="3")
         result = subprocess.run(["sh", "tools/build-gc.sh", "--stale"], cwd=repo, env=env,
                                 text=True, capture_output=True, timeout=20)
         diagnostic = result.stdout + result.stderr
@@ -464,7 +464,7 @@ class BuildGcTests(unittest.TestCase):
             self.assertFalse(p.exists(), "superseded hash survived --stale: " + diagnostic)
 
     # --- `--auto` ----------------------------------------------------------------------------
-    # `PLX_GC_TEST_FREE_KIB` stands in for `df`, and `PLX_GC_MIN_FREE_GIB`/`PLX_GC_IDLE_MIN`
+    # `NJ_GC_TEST_FREE_KIB` stands in for `df`, and `NJ_GC_MIN_FREE_GIB`/`NJ_GC_IDLE_MIN`
     # (both in the units the script itself takes) drive the staging and idle-guard decisions
     # without ever touching a real disk or a real clock.
 
@@ -475,7 +475,7 @@ class BuildGcTests(unittest.TestCase):
         # sentinels[2] is a stale FFmpeg cache entry --auto must never touch (no --cache stage).
         fixture = self.fixture(0, 0)
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "999999999", "PLX_GC_MIN_FREE_GIB": "1"})
+            "NJ_GC_TEST_FREE_KIB": "999999999", "NJ_GC_MIN_FREE_GIB": "1"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("already above threshold", diagnostic)
@@ -492,15 +492,15 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(0, 0)
         roots = self._add_worktrees(fixture, 2, prefix="lane", add_target=True)
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999",
-            "PLX_GC_IDLE_MIN": "0"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999",
+            "NJ_GC_IDLE_MIN": "0"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         for wt in roots:
             self.assertFalse((wt / "rust-modules/target").exists(),
                              "idle lane target survived a below-threshold --auto: " + diagnostic)
         repo, env, _, _ = fixture
-        log = Path(env["PLX_GC_LOG"]).read_text()
+        log = Path(env["NJ_GC_LOG"]).read_text()
         order = [s for s in ("orphans:", "incremental:", "worktrees:", "lanes")
                  if s in log]
         self.assertEqual(order, ["orphans:", "incremental:", "worktrees:", "lanes"],
@@ -514,7 +514,7 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(0, 0)
         roots = self._add_worktrees(fixture, 1, prefix="lane", add_target=True)
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("recently active, skipped", diagnostic)
@@ -522,7 +522,7 @@ class BuildGcTests(unittest.TestCase):
                         "a lane touched seconds ago was reclaimed: " + diagnostic)
 
     def test_auto_idle_guard_checks_the_external_tree_too(self):
-        # A lane's `cargo build` writes into `$PLX_FLEET_DIR/<lane>/target`, not into the
+        # A lane's `cargo build` writes into `$NJ_FLEET_DIR/<lane>/target`, not into the
         # worktree — `fleet-plan` exports `CARGO_TARGET_DIR` precisely so `git worktree remove`
         # stays meaningful. So a worktree that has sat untouched past the idle window, while its
         # lane is still mid-build (the only fresh mtime is in the external tree), must still be
@@ -548,13 +548,13 @@ class BuildGcTests(unittest.TestCase):
             except (FileNotFoundError, NotADirectoryError, OSError):
                 pass
         repo, env, sentinels, _ = fixture
-        fleet = Path(env["PLX_FLEET_DIR"])
+        fleet = Path(env["NJ_FLEET_DIR"])
         ext_target = fleet / wt.name / "target"
         ext_target.mkdir(parents=True)
         (ext_target / "sentinel").write_text("synthetic build output\n")
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999",
-            "PLX_GC_IDLE_MIN": "30"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999",
+            "NJ_GC_IDLE_MIN": "30"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("recently active, skipped", diagnostic)
@@ -568,15 +568,15 @@ class BuildGcTests(unittest.TestCase):
         # without racing each other.
         fixture = self.fixture(0, 0)
         repo, env, sentinels, _ = fixture
-        lock_dir = Path(env["PLX_GC_LOCK_DIR"])
+        lock_dir = Path(env["NJ_GC_LOCK_DIR"])
         lock_dir.mkdir(parents=True)
         (lock_dir / "pid").write_text(str(os.getpid()) + "\n")
         result = self.run_auto(fixture, extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertTrue(sentinels[1].exists(), "reclaimed while another --auto held the lock: " + diagnostic)
-        log = Path(env["PLX_GC_LOG"])
+        log = Path(env["NJ_GC_LOG"])
         if log.exists():
             self.assertIn("lock held", log.read_text())
 
@@ -584,8 +584,8 @@ class BuildGcTests(unittest.TestCase):
         fixture = self.fixture(0, 0)
         roots = self._add_worktrees(fixture, 1, prefix="lane", add_target=True)
         result = self.run_auto(fixture, "-n", extra_env={
-            "PLX_GC_TEST_FREE_KIB": "1", "PLX_GC_MIN_FREE_GIB": "999999",
-            "PLX_GC_IDLE_MIN": "0"})
+            "NJ_GC_TEST_FREE_KIB": "1", "NJ_GC_MIN_FREE_GIB": "999999",
+            "NJ_GC_IDLE_MIN": "0"})
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("would remove", diagnostic)
@@ -594,7 +594,7 @@ class BuildGcTests(unittest.TestCase):
         _, env, sentinels, _ = fixture
         for s in sentinels:
             self.assertTrue(s.exists(), "-n deleted a sentinel: " + diagnostic)
-        self.assertFalse(Path(env["PLX_GC_LOCK_DIR"]).exists(),
+        self.assertFalse(Path(env["NJ_GC_LOCK_DIR"]).exists(),
                          "-n took the single-instance lock: " + diagnostic)
 
 
@@ -651,7 +651,7 @@ class InstallDiskWatchTests(unittest.TestCase):
                                 cwd=lane, env=env, text=True, capture_output=True, timeout=20)
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
-        plist = home / "Library/LaunchAgents/com.plxnative.build-gc.plist"
+        plist = home / "Library/LaunchAgents/com.nativejelly.build-gc.plist"
         self.assertTrue(plist.exists(), diagnostic)
         contents = plist.read_text()
         self.assertIn(str(main / "tools/build-gc.sh"), contents,

@@ -3,13 +3,13 @@
 //! LG Cloud Test Lab rents physical sets on webOS/SoC combinations we do not own. It gives a
 //! picture and a virtual remote, and **no console, no ssh, no stdout and no way to download a
 //! file**. So a bug can be reproduced on a k8hpp webOS 10 set, watched happening, and the agent
-//! fixing it cannot see one line of `plxnative-events.log`. Every other diagnostic surface in this
+//! fixing it cannot see one line of `nativejelly-events.log`. Every other diagnostic surface in this
 //! repository assumes ssh (`crate::dev`'s ~44 `/tmp` triggers, the remote FIFO, the capture
 //! listener, `make -s print-eventlog`) and is therefore unreachable there.
 //!
 //! This module is the bridge: a **bounded ring of the log lines the app already writes**, plus the
 //! structured state `crate::player::Diag` already carries, uploaded over pinned TLS to a receiver
-//! on the developer's Mac (`tools/plxnative-lab`), triggered by a remote button, a menu row or the
+//! on the developer's Mac (`tools/nativejelly-lab`), triggered by a remote button, a menu row or the
 //! optional authenticated command channel. `docs/lab-diagnostics.md` is the design note; read it
 //! before extending any of this.
 //!
@@ -22,7 +22,7 @@
 //!    no config read, no socket, no thread.
 //! 2. **Call sites carry no `#[cfg]`.** The event log's tap, `app.rs`'s key ladder,
 //!    `ui::consts::is_bound` and the two menus all call plain functions that fold away (`labcfg`'s
-//!    two answers, for `ui/`, `appkit/` and `screens/`). That is `plx_base::devtrig`'s shape and it is
+//!    two answers, for `ui/`, `appkit/` and `screens/`). That is `nj_base::devtrig`'s shape and it is
 //!    deliberate: hand-written `#[cfg]` PAIRS at call sites are the one hazard
 //!    `.claude/hooks/release-config-check.py` exists for, and the gating lives in two files
 //!    (`lab/mod.rs`, `labcfg/mod.rs`) instead of eight.
@@ -39,10 +39,10 @@
 //! shell, read a file, call an arbitrary URL or control webOS outside this SDL process. Both
 //! directions are initiated by the television as pinned, authenticated HTTPS POSTs.
 
-// `lab.json`'s reader, `is_trigger_key` and `menu_row_enabled` live in `plx_platform::labcfg` (platform):
+// `lab.json`'s reader, `is_trigger_key` and `menu_row_enabled` live in `nj_platform::labcfg` (platform):
 // `ui/` and `screens/` ask those two questions and may not name this module.
 #[cfg(feature = "lab-diagnostics")]
-use plx_platform::labcfg::config;
+use nj_platform::labcfg::config;
 
 #[cfg(feature = "lab-diagnostics")]
 pub(crate) mod control;
@@ -71,18 +71,18 @@ pub(crate) struct ControlCommand {
 pub(crate) fn boot() {
     #[cfg(feature = "lab-diagnostics")]
     {
-        plx_base::eventlog::ring::start_clock();
+        nj_base::eventlog::ring::start_clock();
         match config::get() {
-            Some(c) => plx_base::eventlog::log(&format!(
+            Some(c) => nj_base::eventlog::log(&format!(
                 "lab: armed session={} endpoint={} control={} triggers={:?} ring={}rec/{}KiB",
                 c.session,
                 c.endpoint,
                 if c.control { "on" } else { "off" },
                 c.trigger_wcodes,
-                plx_base::eventlog::ring::MAX_RECORDS,
-                plx_base::eventlog::ring::MAX_BYTES / 1024
+                nj_base::eventlog::ring::MAX_RECORDS,
+                nj_base::eventlog::ring::MAX_BYTES / 1024
             )),
-            None => plx_base::eventlog::log(&format!("lab: INERT — {}", config::why_not())),
+            None => nj_base::eventlog::log(&format!("lab: INERT — {}", config::why_not())),
         }
     }
 }
@@ -117,7 +117,7 @@ pub(crate) fn command_done(_id: u32, _ok: bool) {
 pub(crate) fn key_press(_sym: u32, _wcode: u32, _ps: &crate::route::PlaybackSession) -> bool {
     #[cfg(feature = "lab-diagnostics")]
     {
-        if plx_platform::labcfg::is_trigger_key(_sym, _wcode) {
+        if nj_platform::labcfg::is_trigger_key(_sym, _wcode) {
             request_upload("key", _ps);
             return true;
         }

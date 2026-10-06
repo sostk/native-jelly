@@ -1,4 +1,4 @@
-//! **plx_platform::i18n::msg::settings_plaintext_question() — the one question, and every surface that asks it**
+//! **nj_platform::i18n::msg::settings_plaintext_question() — the one question, and every surface that asks it**
 //! (PLX-NATIVE-10).
 //!
 //! Four surfaces ask it: the sign-in read-out, Home's and a Library source's failure read-out
@@ -23,10 +23,10 @@ use std::cell::Cell;
 use std::ffi::{CStr, CString};
 
 use crate::auth::{self, PlaintextVerdict, ReadoutSurface, SessionCmd};
-use crate::plex::session::PlaintextChoice;
-use crate::plex::ServerId;
+use crate::catalog::session::PlaintextChoice;
+use crate::catalog::ServerId;
 use crate::ui::decision_alert::{Choice, DecisionAlert, Tone};
-use plx_machine::machine::{
+use nj_machine::machine::{
     Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Host, InputEvent,
     InputKind, Key, MachineId,
 };
@@ -37,7 +37,7 @@ use crate::ui::screen::{
 use crate::ui::{Painter, Rect};
 
 /// The shared question and verbs, resolved from this launch's locale.
-pub(crate) use plx_platform::i18n::msg::{
+pub(crate) use nj_platform::i18n::msg::{
     settings_plaintext_connect_c as connect,
     browse_action_retry_c as try_again,
     settings_plaintext_not_now_c as not_now,
@@ -110,7 +110,7 @@ impl PlaintextQuestion {
     pub(crate) fn answer(&mut self, alert: &mut DecisionAlert, allow: bool) -> Option<SessionCmd> {
         alert.dismiss();
         let subject = self.subject.take()?;
-        plx_base::eventlog::log(if allow {
+        nj_base::eventlog::log(if allow {
             "plaintext: user allowed an unencrypted connection on this network"
         } else {
             "plaintext: user declined an unencrypted connection"
@@ -418,12 +418,12 @@ impl OfferWatch {
     /// Re-read the offer for `machine` (`near` says whether another will do); `true` when what
     /// the read-out shows changed.
     pub(crate) fn refresh(&mut self, machine: Option<&str>, near: Near) -> bool {
-        let key = (crate::plex::grant::revision(), machine.map(str::to_owned));
+        let key = (crate::catalog::grant::revision(), machine.map(str::to_owned));
         if self.seen.as_ref() == Some(&key) {
             return false;
         }
         self.seen = Some(key);
-        let offers = crate::plex::grant::offers();
+        let offers = crate::catalog::grant::offers();
         let at = offers.iter().position(|v| Some(v.machine_id.as_str()) == machine)
             .or_else(|| (near == Near::First && !offers.is_empty()).then_some(0));
         let next = at.and_then(|i| offers.into_iter().nth(i)).map(|v| {
@@ -451,9 +451,9 @@ impl OfferWatch {
 /// carries the server — that it is connected without encryption now.
 pub(crate) fn settings_detail(on: bool, connected: bool) -> &'static str {
     match (on, connected) {
-        (false, _) => plx_platform::i18n::msg::settings_plaintext_denied(),
-        (true, true) => plx_platform::i18n::msg::settings_plaintext_connected(),
-        (true, false) => plx_platform::i18n::msg::settings_plaintext_allowed(),
+        (false, _) => nj_platform::i18n::msg::settings_plaintext_denied(),
+        (true, true) => nj_platform::i18n::msg::settings_plaintext_connected(),
+        (true, false) => nj_platform::i18n::msg::settings_plaintext_allowed(),
     }
 }
 
@@ -473,9 +473,9 @@ mod tests {
     /// the UI library cannot name them.)
     #[test]
     fn every_answer_fits_its_pill_in_every_language() {
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         use crate::ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);

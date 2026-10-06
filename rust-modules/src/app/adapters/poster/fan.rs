@@ -9,17 +9,17 @@
 //! never baked.
 //!
 //! **Rendered once.** The poster worker bakes on the CPU into ONE image, persists it as PNG under
-//! a stamp-keyed [`plx_platform::imgcache::classify_baked`] entry, and delivers it as an ordinary
+//! a stamp-keyed [`nj_platform::imgcache::classify_baked`] entry, and delivers it as an ordinary
 //! decoded poster through the store's normal admission, upload and LRU. The members' pixels live
 //! only for the duration of one bake on one worker (three ~375 KB decodes plus the 540 KB output)
 //! and never become GL textures. A warm disk hit decodes the baked PNG and fetches nothing.
 //!
 //! A custom poster (`/library/metadata/{rk}/thumb/…`) is untouched: only a path that
-//! [`crate::plex::collections::composite_parts`] reads as a composite is rerouted, at key
+//! [`crate::catalog::collections::composite_parts`] reads as a composite is rerouted, at key
 //! build time, to the synthetic `/plx/fan/{rk}/{stamp}` key this module parses back. The server's
 //! composite is never a fallback: no usable member art is [`Got::Final`].
 
-use crate::plex::collections::composite_parts;
+use crate::catalog::collections::composite_parts;
 
 /// The store key prefix of a baked fan. Not a server path: the worker recognises it before any
 /// request is built, and it carries no token by construction.
@@ -103,7 +103,7 @@ impl Rgba {
 }
 
 /// One fanned member: its decoded poster and, when the server sent a non-black one, its
-/// `UltraBlurColors` in [`crate::plex::models::UltraBlurColors::corners`]' ring order (0–1).
+/// `UltraBlurColors` in [`crate::catalog::models::UltraBlurColors::corners`]' ring order (0–1).
 pub(super) struct Member {
     pub poster: Rgba,
     pub blur: Option<[[f32; 3]; 4]>,
@@ -300,7 +300,7 @@ pub(super) trait FanIo {
 /// is one opaque [`FAN_W`]×[`FAN_H`] image, delivered as an ordinary decoded poster.
 pub(super) fn bake(io: &mut dyn FanIo) -> Got<Rgba> {
     if let Some(bytes) = io.cached() {
-        match plx_gfx::img::img_decode_owned(&bytes) {
+        match nj_gfx::img::img_decode_owned(&bytes) {
             Some((w, h, px)) if w == FAN_W && h == FAN_H => {
                 return Got::Ok(Rgba { w, h, px })
             }
@@ -337,7 +337,7 @@ pub(super) fn bake(io: &mut dyn FanIo) -> Got<Rgba> {
     // A member that failed transiently would freeze a degraded fan on disk until the stamp
     // moves; show it now, but let the next demand bake the whole one.
     if !transient {
-        if let Some(png) = plx_gfx::img::img_encode_png(out.w, out.h, &out.px) {
+        if let Some(png) = nj_gfx::img::img_encode_png(out.w, out.h, &out.px) {
             io.persist(&png);
         }
     }

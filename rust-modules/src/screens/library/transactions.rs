@@ -15,7 +15,7 @@ pub(super) struct SectionTarget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct GridTarget {
     pub epoch: u32,
-    pub sid: crate::plex::ServerId,
+    pub sid: crate::catalog::ServerId,
     pub section: i64,
     pub query: u32,
 }
@@ -80,8 +80,8 @@ impl PendingTransactions {
 
 pub(super) const SHAPE: &str = "PendingTransactions{section:Option<{epoch:u32,index:u32,identity:{sid:u32,key:u64},kind:u32}>,grid:Option<{target:{epoch:u32,sid:u32,section:u64,query:u32},action:Sort{key:str,desc:bool}|Unwatched{desired:bool}|Genre{id:Option<str>}|LibraryType{code:u32}}>}";
 
-impl plx_machine::machine::LogicalState for PendingTransactions {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for PendingTransactions {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         let Self { section, grid } = self;
         c.option(section.as_ref(), |c, target| {
             let SectionTarget { epoch, index, identity, kind } = target;
@@ -112,7 +112,7 @@ mod tests {
             epoch: 7,
             index,
             identity: LibrarySectionIdentity {
-                sid: crate::plex::ServerId::from_raw(2),
+                sid: crate::catalog::ServerId::from_raw(2),
                 key: 40 + index as i64,
             },
             kind: SecKind::Movie,
@@ -122,7 +122,7 @@ mod tests {
     fn grid(query: u32) -> GridTarget {
         GridTarget {
             epoch: 7,
-            sid: crate::plex::ServerId::from_raw(2),
+            sid: crate::catalog::ServerId::from_raw(2),
             section: 42,
             query,
         }

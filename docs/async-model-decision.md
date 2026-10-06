@@ -274,7 +274,7 @@ the loop, and a lingering worker is invisible once the UI has moved on.
 
 **What the re-evaluation did find, and what shipped instead.** The five copies disagree on one
 invariant: `std::thread::spawn` **panics** when the OS refuses a thread, and all but two sites used
-it, from the SDL loop — so an EAGAIN unwinds out of `plex_run` through the C shim and kills the
+it, from the SDL loop — so an EAGAIN unwinds out of `nj_run` through the C shim and kills the
 app. Worse, each site had
 just armed an in-flight flag, so the survivable version is a spinner that can never resolve —
 exactly the shape of `browse.rs`'s already-fixed `reset()` latch bug. **The piece worth sharing was
@@ -341,7 +341,7 @@ several instances no longer guarantees for every caller by construction.
 ### Step 4 — `MainThread` token, LANDED (2026-07-29)
 
 Shipped in the form finding #4 argued for — **a `!Send` ZST passed as an argument**, minted once
-at the top of `plex_run` — and *not* as a marker field on a state type, which that finding refuted
+at the top of `nj_run` — and *not* as a marker field on a state type, which that finding refuted
 by compiling the counterexample (`static mut` carries no `Sync` bound, so a `!Send` field inside
 one is still readable from `thread::spawn`).
 
@@ -360,7 +360,7 @@ flagged as unused, precisely because it reached the static directly instead of t
 
 **Superseded for the slot, 2026-09-10 (UI restructure phase 9).** `ENGINE` is no longer a `static
 mut` and the four accessors are gone: the slot is a FIELD, `App.adapters.player`, and
-`player::adapter::PlayerAdapter::new` **consumes** the one token `plex_run` mints. So the token is
+`player::adapter::PlayerAdapter::new` **consumes** the one token `nj_run` mints. So the token is
 no longer an argument that ASSERTS main-thread confinement for the session — holding
 `&mut PlayerAdapter` IS the confinement, and the borrow checker keeps it. The seam half of this
 finding is unchanged: `ffi.rs`'s wrappers still take `&MainThread`, reached as `pa.mt()`. What the

@@ -26,12 +26,12 @@ use super::frame::{Budget, RenderSet};
 use super::geom::IndexElem;
 use super::hit::PointerKind;
 use super::input::{InputMachine, PressEvent};
-use plx_machine::machine::{
+use nj_machine::machine::{
     Addr, Cx, Delivery, Edge, Effects, EntryId, FocusKey, FocusRead, Fx, GroupId, Handled, Host,
     InputEvent, InputKind, InputOwner, InstanceId, Key, MachineId, Measure, NavOp, PressArm,
     PressFrom, PresentHandle, PressRead, RequestId, Stamped, StoreOrd, SystemInput, Tick, TimerId,
 };
-use plx_machine::present::Present;
+use nj_machine::present::Present;
 use super::screen::{
     Activate, At, Dir, DrawFrame, EdgeRule, ElemKind, Enter, Focusable, FocusSource, FocusTarget,
     GroupSpec, HitSource, Mounter, Placed, ReturnState, Screen, ScreenArg, ScreenEvent, Step, Stop,
@@ -161,7 +161,7 @@ pub trait Tap<H: Host> {
     fn input(&mut self, _f: u64, _ev: &InputEvent<H::Elem>) {}
     fn result(&mut self, _f: u64, _addr: &Addr, _msg: &H::Msg) {}
     fn effect(&mut self, _f: u64, _s: &Stamped<H>) {}
-    fn present(&mut self, _f: u64, _bit: bool, _why: Option<plx_machine::present::Provenance>) {}
+    fn present(&mut self, _f: u64, _bit: bool, _why: Option<nj_machine::present::Provenance>) {}
     /// After the frame's drains, on a frame that had events: the logical-state hash.
     fn state(&mut self, _f: u64, _hash: u64) {}
     /// After the drains: the engine's resolved focus for the input owner, as
@@ -299,7 +299,7 @@ impl<K: Copy> CxParts<K> {
 pub struct FrameReport {
     pub presented: bool,
     /// The frame presented ONLY because the video plane is bound: nothing changed on it. The
-    /// simulator's ingest does not report such a frame to `plx_machine::idle` as damage, which would read,
+    /// simulator's ingest does not report such a frame to `nj_machine::idle` as damage, which would read,
     /// to the settled capture, as a screen that never comes to rest under a paused player.
     pub video_only: bool,
     pub steps_pre: u32,
@@ -361,7 +361,7 @@ pub struct Dispatcher<H: Host> {
     /// The cold-open instrument (spec §8.4). It lives here rather than beside the loop's other
     /// instruments because both of its events are the dispatcher's — a mount at nav commit and a
     /// draw in the page/surface pass — and neither is visible from outside one `FrameReport`.
-    cold: plx_base::diag::heartbeat::ColdOpens,
+    cold: nj_base::diag::heartbeat::ColdOpens,
     render_breach_logged: bool,
     /// The input owner answered `Handled::No` to a BACK: resolve it over its stack at commit.
     pending_back: bool,
@@ -591,7 +591,7 @@ where
     }
 
     /// …and its `ScreenId`, the identity every argument of one screen shares.
-    pub fn top_id(&self) -> Option<plx_machine::machine::ScreenId> {
+    pub fn top_id(&self) -> Option<nj_machine::machine::ScreenId> {
         use super::screen::ScreenArg;
         self.top_arg().map(|a| a.id())
     }
@@ -702,7 +702,7 @@ where
     /// TWO terms, and both are required. The top page must ANSWER
     /// [`RenderStrategy::VideoPlane`] — a declaration about what it draws, not about where it is —
     /// and the plane must actually be BOUND, which arrives as the gate's
-    /// [`PresentEvent::VideoPlane`](plx_machine::present::PresentEvent::VideoPlane) input from the one
+    /// [`PresentEvent::VideoPlane`](nj_machine::present::PresentEvent::VideoPlane) input from the one
     /// machine that owns that bit. Either term alone is wrong: the player page is up for the whole
     /// pre-bind spinner and the whole post-unbind read-out, where our surface holds an ordinary
     /// picture. A bound plane under the detail page is the trailer preview, which stays
@@ -752,7 +752,7 @@ where
         tap: &mut dyn Tap<H>,
         draw: bool,
     ) -> FrameReport {
-        let _frame_scope = plx_base::task::FrameScope::enter();
+        let _frame_scope = nj_base::task::FrameScope::enter();
         self.frame += 1;
         self.last_tick = tick;
         self.prepared = false;
@@ -929,10 +929,10 @@ where
             let Dispatcher { nav, present, .. } = self;
             let mut ph = PresentHandle::of(present);
             nav.tabs.stack.tick(tick, &mut ph);
-            present.set_scope(plx_machine::present::Scope::Surface);
+            present.set_scope(nj_machine::present::Scope::Surface);
             let mut ph = PresentHandle::of(present);
             nav.modals.tick(tick, &mut ph);
-            present.set_scope(plx_machine::present::Scope::Page);
+            present.set_scope(nj_machine::present::Scope::Page);
         }
         let (host_update, host_render) = self.nav.modals.host_policy();
         report.host_update = Some(host_update);
@@ -1008,20 +1008,20 @@ where
 
         // 6. the pre-commit drain
         let parts = self.parts(tick);
-        report.steps_pre = plx_base::diag::spans::span("dpre", || self.drain(rig, &parts, MAX_STEPS_PRE, &mut report, tap));
+        report.steps_pre = nj_base::diag::spans::span("dpre", || self.drain(rig, &parts, MAX_STEPS_PRE, &mut report, tap));
         report.queue_hwm = report.queue_hwm.max(queued_before);
 
         // 7. NAV COMMIT — one per frame — then the post-commit drain on its own budget
         let owner_before = self.owner();
-        plx_base::diag::spans::span("dcommit", || self.commit(rig, &parts, &mut report));
+        nj_base::diag::spans::span("dcommit", || self.commit(rig, &parts, &mut report));
         let parts = self.parts(tick); // the owner may have changed at commit
         if parts.owner != owner_before {
             // an owner change cancels the press (§7.4)
             self.input.cancel_press();
         }
-        report.steps_post = plx_base::diag::spans::span("dpost", || self.drain(rig, &parts, MAX_STEPS_POST, &mut report, tap));
+        report.steps_post = nj_base::diag::spans::span("dpost", || self.drain(rig, &parts, MAX_STEPS_POST, &mut report, tap));
         // §7.3 step 6: after every landing and before draw, the owner's reconcile
-        plx_base::diag::spans::span("drecon", || self.reconcile(rig, &parts, &mut report, tap));
+        nj_base::diag::spans::span("drecon", || self.reconcile(rig, &parts, &mut report, tap));
         let continuation = tap.focus_continuation(f, self.engine_page(), self.focus_record());
         // Engine continuations were applied per call and checked by the tap. Only Legacy
         // consumes an unchecked final target. Avoid a replay-only layout query here.
@@ -1052,7 +1052,7 @@ where
         tap.focus(f, self.focus_record());
         let timers_fired = report.steps_pre > 0 && event_frame;
         if event_frame || timers_fired {
-            let h = plx_base::diag::spans::span("dhash", || self.state_hash());
+            let h = nj_base::diag::spans::span("dhash", || self.state_hash());
             tap.state(f, h);
             report.state_hash = Some(h);
         }
@@ -1092,7 +1092,7 @@ where
         let why = self.present.why();
         report.underlay_moving = self.present.page_moving();
         self.page_quiescent = !report.underlay_moving
-            && !plx_machine::idle::page_layout_moving()
+            && !nj_machine::idle::page_layout_moving()
             && !self.budget.has_queued_work();
         report.video_only = self.present.video_plane()
             && !self.present.changed()
@@ -1107,7 +1107,7 @@ where
         // 9. prepare (only if presenting), then opaque_route on EVERY frame. The activity table:
         //    the top page prepares unless its host fold is Cached or Replaced; every surface does.
         if will_present {
-            plx_base::diag::spans::span("dprep", || self.prepare_pass(rig, tick));
+            nj_base::diag::spans::span("dprep", || self.prepare_pass(rig, tick));
         }
         rig.opaque_route(self.present.video_plane());
         #[cfg(debug_assertions)]
@@ -1192,7 +1192,7 @@ where
     /// legacy loop draws its own pages and reserves this call for the dispatcher's surfaces
     /// and its OWNED pages).
     pub fn draw(&mut self, rig: &mut dyn Rig<H>, pages: bool) -> FrameReport {
-        let _frame_scope = plx_base::task::FrameScope::enter();
+        let _frame_scope = nj_base::task::FrameScope::enter();
         let tick = self.last_tick;
         if !self.prepared {
             self.prepare_pass(rig, tick);
@@ -1255,7 +1255,7 @@ where
     ) -> FrameReport {
         let tick = self.last_tick;
         if !self.prepared {
-            plx_base::diag::spans::span("prep", || self.prepare_pass(rig, tick));
+            nj_base::diag::spans::span("prep", || self.prepare_pass(rig, tick));
         }
         let mut report = FrameReport::default();
         self.draw_with(rig, tick, &mut report, pages, Some(glass), ceiling);
@@ -1275,16 +1275,16 @@ where
         // §9: armed for the LENGTH OF THE DRAW, and restored rather than cleared, exactly as the
         // page freeze is. Every framebuffer-sampling door is refused while it is up.
         let video_plane = self.video_plane_frame();
-        let was_video_plane = plx_gfx::gfx::set_video_plane_frame(video_plane);
-        if !plx_gfx::gfx::blur_source_pass() { rig.clear_opaque_region(); }
+        let was_video_plane = nj_gfx::gfx::set_video_plane_frame(video_plane);
+        if !nj_gfx::gfx::blur_source_pass() { rig.clear_opaque_region(); }
         let parts = self.parts(tick);
-        let source_pass = backdrop::source_walk() || plx_gfx::gfx::blur_source_pass();
+        let source_pass = backdrop::source_walk() || nj_gfx::gfx::blur_source_pass();
         let eligible = pages && host_render == HostRender::Live
             && self.page_image_possible(video_plane);
         let page_quiescent = self.page_quiescent
-            && !plx_gfx::text::prewarm_pending()
+            && !nj_gfx::text::prewarm_pending()
             && !self.present.page_moving()
-            && !plx_machine::idle::page_layout_moving()
+            && !nj_machine::idle::page_layout_moving()
             && !self.budget.has_queued_work();
         let mut image = self.page_image;
         let paint = if eligible {
@@ -1304,10 +1304,10 @@ where
                 // The held-image compositor needs another present, but it is not PAGE-owned
                 // motion. Attributing it to Page would make the quiescence predicate observe its
                 // own hold and keep the image forever.
-                self.present.set_scope(plx_machine::present::Scope::Surface);
-                PresentHandle::of(&mut self.present).note(plx_machine::present::PresentEvent::Motion);
-                self.present.set_scope(plx_machine::present::Scope::Page);
-                plx_machine::idle::invalidate();
+                self.present.set_scope(nj_machine::present::Scope::Surface);
+                PresentHandle::of(&mut self.present).note(nj_machine::present::PresentEvent::Motion);
+                self.present.set_scope(nj_machine::present::Scope::Page);
+                nj_machine::idle::invalidate();
             }
         }
         let Dispatcher { nav, input, page_snapshot, page_image, page_stops, .. } = self;
@@ -1342,7 +1342,7 @@ where
             source_pass,
         );
         if let Some(target) = warm {
-            plx_gfx::text::clear_prewarm();
+            nj_gfx::text::clear_prewarm();
             let entry = match target {
                 PrewarmTarget::Pending => nav.tabs.stack.pending_target_mut(),
                 PrewarmTarget::HeldTop => nav.tabs.stack.top_mut(),
@@ -1363,7 +1363,7 @@ where
                     // the outgoing page while its destination only records text. The walk
                     // measures ahead of any frame that draws the page, so it is speculative to
                     // the recorder (`rec::speculative`).
-                    plx_base::diag::spans::span("warm", || plx_gfx::gfx::without_frame_clear(|| {
+                    nj_base::diag::spans::span("warm", || nj_gfx::gfx::without_frame_clear(|| {
                         super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
                     }));
                 }
@@ -1435,7 +1435,7 @@ where
                     }
                     set.pages += 1;
                     set.bytes += inst.screen.render_report().bytes;
-                    if Z::CHROME < ceiling && top_entry == Some(e.id) && e.arg.chrome() == plx_machine::machine::Chrome::TabBar
+                    if Z::CHROME < ceiling && top_entry == Some(e.id) && e.arg.chrome() == nj_machine::machine::Chrome::TabBar
                         && inst.screen.focus_source() == FocusSource::Engine {
                         let mut chrome_parts = parts.clone();
                         chrome_parts.owner = InputOwner::Entry(e.id);
@@ -1481,10 +1481,10 @@ where
         let mut warm_budget_us = super::containers::transition::TEXT_PREWARM_BUDGET_US;
         if warm.is_some() {
             let start = rig.now_us();
-            plx_base::diag::spans::span("warmdrain", || plx_gfx::text::drain_prewarm(warm_budget_us, || rig.now_us()));
+            nj_base::diag::spans::span("warmdrain", || nj_gfx::text::drain_prewarm(warm_budget_us, || rig.now_us()));
             warm_budget_us = warm_budget_us.saturating_sub(rig.now_us().saturating_sub(start));
-        } else if !plx_gfx::gfx::blur_source_pass() {
-            plx_gfx::text::clear_prewarm();
+        } else if !nj_gfx::gfx::blur_source_pass() {
+            nj_gfx::text::clear_prewarm();
         }
         set.frame_cache_bytes = page_snapshot.resident_bytes();
         if host_render == HostRender::Cached {
@@ -1529,7 +1529,7 @@ where
                     // Recorded on the capture frame, drained only on the held frames after it.
                     drain_surface_text |= !s.motion.capture_frame();
                     capture_surface |= s.motion.capture_frame();
-                    backdrop::draw_span("surf", || plx_gfx::gfx::without_frame_clear(|| {
+                    backdrop::draw_span("surf", || nj_gfx::gfx::without_frame_clear(|| {
                         super::rec::speculative(|| super::record_walk(|| inst.screen.draw(&mut f)))
                     }));
                 } else {
@@ -1545,20 +1545,20 @@ where
                 set.surfaces.push((s.entry.id, render.textures));
                 set.bytes += render.bytes;
                 // an Opaque surface's ground has drawn: the fold REPLACES the host from here
-                if !plx_gfx::gfx::blur_source_pass() { s.ground_ready = inst.screen.ground_ready(); }
+                if !nj_gfx::gfx::blur_source_pass() { s.ground_ready = inst.screen.ground_ready(); }
             }
         }
         if drain_surface_text && !capture_surface && !source_pass && warm_budget_us > 0 {
-            plx_base::diag::spans::span("warmdrain", || plx_gfx::text::drain_prewarm(warm_budget_us, || rig.now_us()));
+            nj_base::diag::spans::span("warmdrain", || nj_gfx::text::drain_prewarm(warm_budget_us, || rig.now_us()));
         }
         // the hit map swaps only on a presented frame (§7.6); a legacy page registers nothing
         let hit_page = self.hit_page();
-        plx_gfx::gfx::set_video_plane_frame(was_video_plane);
-        if !plx_gfx::gfx::blur_source_pass() {
+        nj_gfx::gfx::set_video_plane_frame(was_video_plane);
+        if !nj_gfx::gfx::blur_source_pass() {
             self.input.hit.fill(if hit_page { stops } else { Vec::new() });
             self.input.hit.swap();
         }
-        if plx_gfx::gfx::blur_source_pass() { report.render_set = set; return; }
+        if nj_gfx::gfx::blur_source_pass() { report.render_set = set; return; }
         set.extra_bytes = super::tex::resident_bytes() + glass.as_ref().map_or(0, |g|g.sources.borrow().resident_bytes());
         if let Err(breach) = set.check() {
             // The policy itself is `frame::on_breach` — assert on the host, log once on a
@@ -1585,7 +1585,7 @@ where
     /// and queued press/input/keyboard-request payloads, in a fixed order. Incremental hashing is the optimisation
     /// the spec names; this is the definition it must equal.
     pub fn state_hash(&self) -> u64 {
-        let mut c = plx_machine::machine::Canon::new();
+        let mut c = nj_machine::machine::Canon::new();
         self.nav.write(&mut c);
         self.input.write_with(&mut c, &|k, c| {
             c.u32(k.index().unwrap_or(u32::MAX));
@@ -1823,9 +1823,9 @@ where
                 let back = matches!(
                     ev,
                     ScreenEvent::Input(InputEvent {
-                        kind: plx_machine::machine::InputKind::Key {
-                            key: plx_machine::machine::Key::Back,
-                            edge: plx_machine::machine::Edge::Down,
+                        kind: nj_machine::machine::InputKind::Key {
+                            key: nj_machine::machine::Key::Back,
+                            edge: nj_machine::machine::Edge::Down,
                             ..
                         },
                         ..
@@ -1847,27 +1847,27 @@ where
                     .iter()
                     .any(|s| s.entry.inst.as_ref().map_or(false, |i| i.id == id));
                 present.set_scope(if is_surface {
-                    plx_machine::present::Scope::Surface
+                    nj_machine::present::Scope::Surface
                 } else {
-                    plx_machine::present::Scope::Page
+                    nj_machine::present::Scope::Page
                 });
-                // …and the `plx_machine::idle` half of the same attribution, which is the one a screen's
+                // …and the `nj_machine::idle` half of the same attribution, which is the one a screen's
                 // OWN springs reach: an owned screen animates through `gfx::spring`, which reports
-                // to `plx_machine::idle` and not to this gate (the Library notes no `Motion` at all). Held
+                // to `nj_machine::idle` and not to this gate (the Library notes no `Motion` at all). Held
                 // for the body — a guard, so the early return below cannot leak the scope.
                 let _own = is_surface.then(crate::ui::popover::own_motion);
                 let Some(inst) = nav.instance_mut(id) else {
-                    present.set_scope(plx_machine::present::Scope::Page);
+                    present.set_scope(nj_machine::present::Scope::Page);
                     report.dropped_deliveries += 1;
                     return;
                 };
                 let Split { views, measure, .. } = rig.split();
                 let cx = addressed.cx::<H>(views, measure);
                 let mut fx = Effects::new(out, to, present);
-                let handled = plx_base::diag::spans::span("dstep", || inst.screen.step(&ev, &cx, &mut fx));
+                let handled = nj_base::diag::spans::span("dstep", || inst.screen.step(&ev, &cx, &mut fx));
                 drop(fx);
                 drop(cx);
-                present.set_scope(plx_machine::present::Scope::Page);
+                present.set_scope(nj_machine::present::Scope::Page);
                 // §7.3 step 1: the owner had first refusal; an unhandled BACK is the container's.
                 // This is the ONE place a BACK becomes `pending_back`, and it is reached by two
                 // roads: the physical key, and an `EdgeRule::Nav(NavOpKind::Back)` that
@@ -1879,7 +1879,7 @@ where
                     self.pending_back = true;
                 }
                 // the engine's half: after the owner's refusal, and after an Enter / a hold
-                plx_base::diag::spans::span("dafter", || self.after_step(rig, &addressed, id, &ev, handled, out, tap));
+                nj_base::diag::spans::span("dafter", || self.after_step(rig, &addressed, id, &ev, handled, out, tap));
                 // WillLeave and Unmount are queued after structural commit. Keep the engine's
                 // read snapshot available until the retiring body's final step has consumed it.
                 if matches!(ev, ScreenEvent::Unmount) {
@@ -2031,7 +2031,7 @@ where
                         //    the same provenance; `sym`/`wcode` are 0 because no hardware key
                         //    produced this event and inventing a code would let a screen match
                         //    on one that never came off the remote.
-                        Outcome::Edge(EdgeRule::Nav(plx_machine::machine::NavOpKind::Back)) => {
+                        Outcome::Edge(EdgeRule::Nav(nj_machine::machine::NavOpKind::Back)) => {
                             if let ScreenEvent::Input(iev) = ev {
                                 out.push(Stamped {
                                     from: MachineId::Input,
@@ -2052,7 +2052,7 @@ where
                                 });
                             }
                         }
-                        Outcome::Edge(EdgeRule::Nav(plx_machine::machine::NavOpKind::Dismiss)) => {
+                        Outcome::Edge(EdgeRule::Nav(nj_machine::machine::NavOpKind::Dismiss)) => {
                             self.park(Stamped {
                                 from: MachineId::Input,
                                 fx: Fx::Nav(NavOp::Dismiss(entry)),
@@ -2546,7 +2546,7 @@ mod product_resolution_contract_tests {
             d.input.hit.fill(vec![Stop {key:FocusKey{entry:owner,elem:88},rect:Rect::FULL,rest_rect:Rect::FULL,
                 clip:Rect::FULL,hover:super::super::screen::Hover::Focus,activate:Activate::Press}]);
             d.input.hit.swap();
-            d.frame_with(&mut rig,Tick::default(),vec![InputEvent{at:Tick::default(),source:plx_machine::machine::Source::Replay,
+            d.frame_with(&mut rig,Tick::default(),vec![InputEvent{at:Tick::default(),source:nj_machine::machine::Source::Replay,
                 kind:InputKind::Pointer{x:10.0,y:10.0,hit:Some(77)}}],vec![],&mut tap,false);
             assert_eq!(tap.pointers,1);
             assert_eq!(d.focus(),Some(FocusKey{entry:owner,elem:77}));
@@ -2561,11 +2561,11 @@ mod product_resolution_contract_tests {
 mod cold_open_tests {
     use super::*;
     use crate::ui::fixture::{tick, FixtureArg, FixtureHost, FixtureRig};
-    use plx_machine::machine::MachineId;
+    use nj_machine::machine::MachineId;
 
     #[test]
     fn one_mount_produces_exactly_one_cold_open_line_naming_that_screen() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut d: Dispatcher<FixtureHost> = Dispatcher::new();
         let mut rig = FixtureRig::new();
 
@@ -2594,8 +2594,8 @@ mod cold_open_tests {
         assert_eq!(r2.mounted.len(), 1);
         assert!(!r2.presented && r2.drawn.is_empty(), "the mount frame drew nothing");
         assert!(d.take_cold_open_lines().is_empty(), "a mount that has not drawn owes no line");
-        d.present.note(plx_machine::present::PresentEvent::Damage(
-            plx_machine::present::Provenance::Input,
+        d.present.note(nj_machine::present::PresentEvent::Damage(
+            nj_machine::present::Provenance::Input,
         ));
         let r3 = d.frame(&mut rig, tick(64), vec![], vec![], &mut NoTap);
         assert!(r3.presented, "damage opened the gate");
@@ -2613,7 +2613,7 @@ mod edge_back_tests {
     use super::*;
     use crate::ui::containers::modal::{Phase, Style};
     use crate::ui::fixture::{key, tick, FixtureArg, FixtureFx, FixtureHost, FixtureMeasure, FixtureMsg, FixtureView, FixtureViews};
-    use plx_machine::machine::{Canon, LogicalState, Machine, NavOpKind};
+    use nj_machine::machine::{Canon, LogicalState, Machine, NavOpKind};
     use crate::ui::screen::{AxisMask, GroupKind, RenderStrategy, Seat};
 
     /// The one group the test screen contributes.
@@ -2864,7 +2864,7 @@ mod edge_back_tests {
 
     #[test]
     fn receiving_entries_keep_their_own_focus_read_through_cover_and_retirement() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut d, mut rig) = booted();
         d.nav.tabs.stack.transition = Box::new(crate::ui::containers::transition::Immediate);
         let home = d.nav.top_page().unwrap().id;
@@ -2873,7 +2873,7 @@ mod edge_back_tests {
         d.input.engine.remember_projected(modal, GroupId(901), 29);
         let id = d.nav.instance_of(home).unwrap();
         d.emit(MachineId::Nav, Fx::Deliver(MachineId::Instance(id),
-            Delivery::Screen(ScreenEvent::WillLeave(plx_machine::machine::Leave::Deeper))));
+            Delivery::Screen(ScreenEvent::WillLeave(nj_machine::machine::Leave::Deeper))));
         d.frame(&mut rig, tick(32), vec![], vec![], &mut NoTap);
         assert!(probe(&d, home).contains("read_memory=Some(17)"), "covered page must not read modal memory");
         d.request(MachineId::Nav, NavOp::Replace(FixtureArg::Page(1)));
@@ -2884,7 +2884,7 @@ mod edge_back_tests {
 
     #[test]
     fn deep_page_unwind_releases_retired_entries_and_focus() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         for dip in [false, true] {
             let (mut d, mut rig) = booted();
             d.nav.tabs.stack.transition = if dip {
@@ -2933,7 +2933,7 @@ mod edge_back_tests {
 
     #[test]
     fn carried_unmounts_finish_before_production_pruning_forgets_retired_bodies() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut d, mut rig) = booted();
         d.nav.tabs.stack.transition = Box::new(crate::ui::containers::transition::Immediate);
         let mut entries = vec![d.nav.top_page().unwrap().id];
@@ -2968,7 +2968,7 @@ mod edge_back_tests {
 
     #[test]
     fn covered_top_page_can_refresh_its_own_group_memory_but_retired_page_cannot() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (mut d, mut rig) = booted();
         d.nav.tabs.stack.transition = Box::new(crate::ui::containers::transition::Immediate);
         let home = d.nav.top_page().unwrap().id;

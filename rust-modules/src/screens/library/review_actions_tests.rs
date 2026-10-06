@@ -2,7 +2,7 @@ use super::super::*;
 use super::*;
 use crate::ui::fixture::FixtureMeasure;
 use crate::ui::focus::{FocusEngine, Outcome};
-use plx_machine::machine::{FocusRead, Host, InputOwner, PressRead, Tick};
+use nj_machine::machine::{FocusRead, Host, InputOwner, PressRead, Tick};
 use crate::ui::screen::ScreenArg;
 include!("query_tests.rs");
 
@@ -13,11 +13,11 @@ impl LogicalState for Arg {
     fn probe(&self, _: &mut String) {}
 }
 impl ScreenArg for Arg {
-    fn chrome(&self) -> plx_machine::machine::Chrome {
-        plx_machine::machine::Chrome::None
+    fn chrome(&self) -> nj_machine::machine::Chrome {
+        nj_machine::machine::Chrome::None
     }
-    fn id(&self) -> plx_machine::machine::ScreenId {
-        plx_machine::machine::ScreenId(1)
+    fn id(&self) -> nj_machine::machine::ScreenId {
+        nj_machine::machine::ScreenId(1)
     }
     fn title(&self) -> Option<&str> {
         None
@@ -64,12 +64,12 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::catalog::ServerId::from_raw(0);
         let listing = crate::stores::browse::ListingSnapshot::fixture(
             sid,
             (0..36)
                 .map(|i| {
-                    Some(crate::pms::PmsMovie {
+                    Some(crate::catalog_fetch::PmsMovie {
                         sid,
                         rk: format!("{}", i + 1),
                         title: format!("s{i:04x}"),
@@ -128,7 +128,7 @@ impl Fixture {
 
 #[test]
 fn fresh_bookmarks_follow_stable_items_then_slots_and_keep_the_returned_card_visible() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for scenario in 0..4 {
         let mut fixture = Fixture::new();
         let original = fixture.screen();
@@ -155,13 +155,13 @@ fn fresh_bookmarks_follow_stable_items_then_slots_and_keep_the_returned_card_vis
             }
         };
         fixture.listing = crate::stores::browse::ListingSnapshot::fixture(
-            crate::plex::ServerId::from_raw(0),
+            crate::catalog::ServerId::from_raw(0),
             items,
             vec![("A".into(), 18), ("Z".into(), 18)],
         )
         .with_cursor(crate::stores::browse::Cursor {
             at: crate::stores::browse::CursorAt::ItemKey {
-                sid: crate::plex::ServerId::from_raw(if scenario == 3 { 1 } else { 0 }),
+                sid: crate::catalog::ServerId::from_raw(if scenario == 3 { 1 } else { 0 }),
                 rk: if scenario == 2 { "36" } else { "18" }.into(),
                 slot,
             },
@@ -170,7 +170,7 @@ fn fresh_bookmarks_follow_stable_items_then_slots_and_keep_the_returned_card_vis
         let mut page = fixture.screen();
         let mut engine = FocusEngine::new();
         let mut output = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         assert!(page.seed_cursor(
             &fixture.cx(None),
             &mut Effects::new(
@@ -220,7 +220,7 @@ fn fresh_bookmarks_follow_stable_items_then_slots_and_keep_the_returned_card_vis
 
 #[test]
 fn leaving_with_a_foreign_frame_snapshot_cannot_bookmark_that_section() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     let mut engine = FocusEngine::new();
@@ -237,7 +237,7 @@ fn leaving_with_a_foreign_frame_snapshot_cannot_bookmark_that_section() {
             original.clone().with_section(epoch, section)
         } else {
             crate::stores::browse::ListingSnapshot::fixture(
-                crate::plex::ServerId::from_raw(sid),
+                crate::catalog::ServerId::from_raw(sid),
                 vec![None; 36],
                 Vec::new(),
             )
@@ -246,9 +246,9 @@ fn leaving_with_a_foreign_frame_snapshot_cannot_bookmark_that_section() {
         let mut cx = fixture.cx(Some(grid));
         cx.focus = engine.read(OWNER);
         let mut output = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         page.step(
-            &ScreenEvent::WillLeave(plx_machine::machine::Leave::ForGood),
+            &ScreenEvent::WillLeave(nj_machine::machine::Leave::ForGood),
             &cx,
             &mut Effects::new(
                 &mut output,
@@ -265,7 +265,7 @@ fn leaving_with_a_foreign_frame_snapshot_cannot_bookmark_that_section() {
 
 #[test]
 fn live_engine_memory_wins_over_a_stale_store_bookmark_and_saves_from_toolbar() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.listing = fixture.listing.clone().with_cursor(crate::stores::browse::Cursor {
         at: crate::stores::browse::CursorAt::SlotIndex(17),
@@ -284,7 +284,7 @@ fn live_engine_memory_wins_over_a_stale_store_bookmark_and_saves_from_toolbar() 
     let mut cx = fixture.cx(engine.current(OWNER));
     cx.focus = engine.read(OWNER);
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     assert!(page.seed_cursor(
         &cx,
         &mut Effects::new(
@@ -315,12 +315,12 @@ fn live_engine_memory_wins_over_a_stale_store_bookmark_and_saves_from_toolbar() 
 
 #[test]
 fn a_late_listing_keeps_its_bookmark_seed_pending_until_the_card_is_placeable() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for fetch in [SecFetch::Loading, SecFetch::Failed] {
         let mut fixture = Fixture::new();
         let saved = crate::stores::browse::Cursor {
             at: crate::stores::browse::CursorAt::ItemKey {
-                sid: crate::plex::ServerId::from_raw(0),
+                sid: crate::catalog::ServerId::from_raw(0),
                 rk: "18".into(),
                 slot: 17,
             },
@@ -328,7 +328,7 @@ fn a_late_listing_keeps_its_bookmark_seed_pending_until_the_card_is_placeable() 
         };
         let loaded = fixture.listing.clone().with_cursor(saved.clone());
         fixture.listing = crate::stores::browse::ListingSnapshot::fixture(
-            crate::plex::ServerId::from_raw(0),
+            crate::catalog::ServerId::from_raw(0),
             Vec::new(),
             Vec::new(),
         )
@@ -337,7 +337,7 @@ fn a_late_listing_keeps_its_bookmark_seed_pending_until_the_card_is_placeable() 
         // Two favorite rows make the document's first block available before its grid arrives.
         let mut sections = fixture.directory.view().sections().to_vec();
         sections.push(crate::stores::browse::SectionView {
-            sid: Some(crate::plex::ServerId::from_raw(1)),
+            sid: Some(crate::catalog::ServerId::from_raw(1)),
             key: 2,
             kind: SecKind::Movie,
             row: crate::stores::browse::SrcRow {
@@ -350,7 +350,7 @@ fn a_late_listing_keeps_its_bookmark_seed_pending_until_the_card_is_placeable() 
         fixture.directory = crate::stores::browse::DirectorySnapshot::fixture(1, 0, sections);
         let mut page = fixture.screen();
         let mut output = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         page.step(
             &ScreenEvent::Tick(Tick::default()),
             &fixture.cx(None),
@@ -382,11 +382,11 @@ fn a_late_listing_keeps_its_bookmark_seed_pending_until_the_card_is_placeable() 
 
 #[test]
 fn switch_diagnostic_requests_type_sort_filter_and_rail_actions() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut sections = fixture.directory.view().sections().to_vec();
     sections.push(crate::stores::browse::SectionView {
-        sid: Some(crate::plex::ServerId::from_raw(0)),
+        sid: Some(crate::catalog::ServerId::from_raw(0)),
         key: 2,
         kind: SecKind::Show,
         row: crate::stores::browse::SrcRow {
@@ -400,7 +400,7 @@ fn switch_diagnostic_requests_type_sort_filter_and_rail_actions() {
     let mut page = fixture.screen();
     let cx = fixture.cx(None);
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     page.command(
         LibraryCmd::SwitchStep(0),
         &cx,
@@ -452,7 +452,7 @@ fn switch_diagnostic_requests_type_sort_filter_and_rail_actions() {
 
 #[test]
 fn rail_keyboard_ok_and_back_return_the_exact_engine_remembered_item() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for key in [Key::Ok, Key::Back] {
         let fixture = Fixture::new();
         let mut page = fixture.screen();
@@ -472,7 +472,7 @@ fn rail_keyboard_ok_and_back_return_the_exact_engine_remembered_item() {
             panic!("enter rail")
         };
         let mut output = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         page.step(
             &ScreenEvent::FocusMoved { from, to, by },
             &fixture.cx(Some(to)),
@@ -484,9 +484,9 @@ fn rail_keyboard_ok_and_back_return_the_exact_engine_remembered_item() {
         );
         assert!(output.iter().all(|e| !matches!(e.fx, Fx::Remember { .. })));
         output.clear();
-        let event = ScreenEvent::Input(plx_machine::machine::InputEvent {
+        let event = ScreenEvent::Input(nj_machine::machine::InputEvent {
             at: Tick::default(),
-            source: plx_machine::machine::Source::Script,
+            source: nj_machine::machine::Source::Script,
             kind: InputKind::Key {
                 key,
                 sym: 0,
@@ -523,7 +523,7 @@ fn rail_keyboard_ok_and_back_return_the_exact_engine_remembered_item() {
 
 #[test]
 fn rapid_filter_activations_invert_the_pending_desired_value() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut menu = LibraryMenu::new(
         EntryId(99),
@@ -532,7 +532,7 @@ fn rapid_filter_activations_invert_the_pending_desired_value() {
             kind: LibraryMenuKind::Filter,
             target: SectionAddress {
                 epoch: 1,
-                sid: crate::plex::ServerId::from_raw(0),
+                sid: crate::catalog::ServerId::from_raw(0),
                 section: 1,
             },
             anchor: [0; 4],
@@ -547,7 +547,7 @@ fn rapid_filter_activations_invert_the_pending_desired_value() {
         .unwrap()
         .0;
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     for _ in 0..2 {
         menu.step(
             &ScreenEvent::Activate(elem),
@@ -590,7 +590,7 @@ fn rapid_filter_activations_invert_the_pending_desired_value() {
     }
     let mut commits = Vec::new();
     page.step(
-        &ScreenEvent::WillLeave(plx_machine::machine::Leave::Deeper),
+        &ScreenEvent::WillLeave(nj_machine::machine::Leave::Deeper),
         &cx,
         &mut Effects::new(
             &mut commits,

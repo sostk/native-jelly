@@ -8,8 +8,8 @@
 use super::models::*;
 use super::{convert, ids, seat, url};
 use crate::http::Method;
-use crate::plex::collections::CollectionOutcome;
-use crate::plex::{
+use crate::catalog::collections::CollectionOutcome;
+use crate::catalog::{
     Client, Hub, LibrarySection, MediaContainer, Meta, MetaType, Metadata, SectionQuery,
     SortOption, Tag,
 };
@@ -36,7 +36,7 @@ impl Q {
     }
     pub(crate) fn s(mut self, k: &str, v: &str) -> Self {
         if !v.is_empty() {
-            self.parts.push(format!("{k}={}", crate::plex::urlenc_str(v)));
+            self.parts.push(format!("{k}={}", crate::catalog::urlenc_str(v)));
         }
         self
     }
@@ -142,7 +142,7 @@ impl<'a> Jf<'a> {
         seat::get(self.c.origin()).unwrap_or_default()
     }
 
-    pub(crate) fn origin(&self) -> &crate::plex::Origin {
+    pub(crate) fn origin(&self) -> &crate::catalog::Origin {
         self.c.origin()
     }
 
@@ -154,10 +154,10 @@ impl<'a> Jf<'a> {
     pub(crate) fn identity(&self) -> url::DeviceIdentity {
         let s = self.seat();
         url::DeviceIdentity {
-            client: crate::plex::identity::PRODUCT.to_string(),
-            device: crate::plex::identity::device_name().to_string(),
+            client: crate::catalog::identity::PRODUCT.to_string(),
+            device: crate::catalog::identity::device_name().to_string(),
             device_id: url::device_id(self.c.client_id(), self.device_user.as_deref().unwrap_or(&s.device_user)),
-            version: crate::plex::identity::VERSION.to_string(),
+            version: crate::catalog::identity::VERSION.to_string(),
         }
     }
 
@@ -452,7 +452,7 @@ impl<'a> Jf<'a> {
                 .s("Fields", PLAYABLE_FIELDS).b("EnableResumable", true))
                 .and_then(|r| r.items.into_iter().next())
             {
-                m.on_deck = Some(crate::plex::OnDeckHub { metadata: Some(Box::new(convert::item(&next, 0))) });
+                m.on_deck = Some(crate::catalog::OnDeckHub { metadata: Some(Box::new(convert::item(&next, 0))) });
             }
         }
         Some(m)
@@ -757,7 +757,7 @@ impl<'a> Jf<'a> {
             }
         };
         let r = self.send(&path, Method::Get, None)?;
-        (r.ok() && !r.body.is_empty() && r.body.len() <= crate::plex::SIDECAR_MAX_BYTES).then_some(r.body)
+        (r.ok() && !r.body.is_empty() && r.body.len() <= crate::catalog::SIDECAR_MAX_BYTES).then_some(r.body)
     }
 }
 
@@ -782,7 +782,7 @@ fn parse<T: DeserializeOwned>(path: &str, body: &[u8]) -> Option<T> {
     match serde_json::from_slice::<T>(body) {
         Ok(v) => Some(v),
         Err(e) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "jf: GET {} answered {} bytes that will not parse — {e}",
                 path.split('?').next().unwrap_or(path),
                 body.len()

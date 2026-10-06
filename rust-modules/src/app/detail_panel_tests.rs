@@ -20,20 +20,20 @@ use super::test_support::{frame};
 /// empty modal stack — `assert_eq!(d.nav.modals.surfaces.len(), 1)` fails at 0.
 #[test]
 fn a_detail_panel_parks_across_a_push_and_returns_with_the_same_instance() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     // Metadata is owned per-`Bridge` now, so `rig`'s own store drops with it — there is no
     // process-wide metadata state left for a `Cleanup` to clear. Server registration is still
     // process-global, so that reset stays.
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    crate::plex::reset_servers_for_test();
-    let here = crate::plex::register_for_test("park-here", "127.0.0.1", 1, "t", "c1");
-    let other = crate::plex::register_for_test("park-other", "127.0.0.2", 2, "t", "c2");
+    crate::catalog::reset_servers_for_test();
+    let here = crate::catalog::register_for_test("park-here", "127.0.0.1", 1, "t", "c1");
+    let other = crate::catalog::register_for_test("park-other", "127.0.0.2", 2, "t", "c2");
 
     // Naming the page IS naming the item since the fold: the argument carries the identity, so
     // a frame on `detail_arg("m1")` mounts that detail page and a frame on `person_arg("p1")`
@@ -172,10 +172,10 @@ fn panel_sel(d: &Dispatcher<AppHost>, entry: EntryId) -> i32 {
 #[test]
 fn an_alt_sources_anchor_travels_on_its_arg() {
     use crate::screens::alt_sources::{AltSourcesArg, AltSourcesScreen};
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let arg = |x: f32, y: f32| AltSourcesArg {
         host: InstanceId(1),
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::catalog::ServerId::UNSET,
         rk: "m1".into(),
         anchor: [x, y, 300.0, 60.0].map(f32::to_bits),
     };
@@ -201,7 +201,7 @@ fn an_alt_sources_anchor_travels_on_its_arg() {
     assert!(b.y < 880.0, "…and above the low one, which has no room below");
 
     // the canonical form carries it: two anchors, two states, no float equality anywhere
-    let canon = |arg: AltSourcesArg| plx_machine::machine::LogicalState::hash(&arg);
+    let canon = |arg: AltSourcesArg| nj_machine::machine::LogicalState::hash(&arg);
     assert_ne!(canon(arg(320.0, 200.0)), canon(arg(700.0, 880.0)));
     assert_eq!(
         canon(arg(320.0, 200.0)),

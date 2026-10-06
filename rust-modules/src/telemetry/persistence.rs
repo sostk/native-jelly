@@ -5,16 +5,16 @@
 //! files are consulted only when `consent.json` is genuinely absent.
 
 use super::consent::Consent;
-use plx_platform::storage::{Record, RecordKey, RecordState, RecordStore};
+use nj_platform::storage::{Record, RecordKey, RecordState, RecordStore};
 #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test))))]
-use plx_platform::storage::StoreError;
+use nj_platform::storage::StoreError;
 use std::path::{Path, PathBuf};
 
 #[cfg(any(
     all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)),
     test
 ))]
-use plx_platform::storage::{
+use nj_platform::storage::{
     client::{self, Load as HelperLoad},
     state::{self, Generation, MigrationProgress},
     wire::{CommitStatus, Domain, MigrationMutation, Response, WireMutation},
@@ -60,7 +60,7 @@ pub(crate) fn last_outcome() -> PersistOutcome {
 
 #[cfg(test)]
 pub(crate) fn redirect_root_for_test(root: Option<PathBuf>) {
-    plx_base::paths::redirect_persistent_state_root_for_test(root);
+    nj_base::paths::redirect_persistent_state_root_for_test(root);
 }
 
 /// Which thread most recently ran the blocking disk/storage-helper work in [`record`] or
@@ -81,7 +81,7 @@ fn note_call_thread() {
 }
 
 fn root() -> PathBuf {
-    plx_base::paths::persistent_state_root()
+    nj_base::paths::persistent_state_root()
 }
 
 /// Snapshot the canonical destination before an asynchronous operation is queued. In production
@@ -90,7 +90,7 @@ fn root() -> PathBuf {
 /// Persist a decision to the canonical record and, once that is durable, retire the legacy files.
 ///
 /// This is blocking disk/storage-helper I/O — a genuine round trip on the television. Callers
-/// must run it off the frame thread (`plx_base::storage_worker`), never inline from a dispatch path;
+/// must run it off the frame thread (`nj_base::storage_worker`), never inline from a dispatch path;
 /// see `telemetry::transition::commit`.
 pub(crate) fn record(consent: &Consent) -> PersistOutcome {
     #[cfg(test)]
@@ -110,12 +110,12 @@ pub(crate) fn forget() -> PersistOutcome {
 
 #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test))))]
 fn store() -> Result<impl RecordStore, StoreError> {
-    plx_platform::storage::open(root())
+    nj_platform::storage::open(root())
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test))))]
 fn store_at(root: PathBuf) -> Result<impl RecordStore, StoreError> {
-    plx_platform::storage::open(root)
+    nj_platform::storage::open(root)
 }
 
 #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test))))]
@@ -136,7 +136,7 @@ fn cleanup_failure_message(stage: &str, path: &Path, error: &std::io::Error) -> 
 }
 
 fn log_cleanup_failure(stage: &str, path: &Path, error: &std::io::Error) {
-    plx_base::eventlog::log(&cleanup_failure_message(stage, path, error));
+    nj_base::eventlog::log(&cleanup_failure_message(stage, path, error));
 }
 
 /// Sweep telemetry/consent's own legacy candidates once the shared account ClearTenure DB8
@@ -153,13 +153,13 @@ fn remove_legacy_sources(paths: impl IntoIterator<Item = PathBuf>) -> CleanupRes
     let mut parents = std::collections::BTreeSet::new();
     let mut result = CleanupResult::Complete;
     for path in paths {
-        match plx_platform::storage::remove_file_or_prove_absent(&path) {
-            Ok(plx_platform::storage::RemoveDisposition::Removed) => {
+        match nj_platform::storage::remove_file_or_prove_absent(&path) {
+            Ok(nj_platform::storage::RemoveDisposition::Removed) => {
                 if let Some(parent) = path.parent() {
                     parents.insert(parent.to_path_buf());
                 }
             }
-            Ok(plx_platform::storage::RemoveDisposition::Absent) => {}
+            Ok(nj_platform::storage::RemoveDisposition::Absent) => {}
             Err(error) => {
                 log_cleanup_failure("remove_legacy", &path, &error);
                 result = CleanupResult::Failed;
@@ -188,7 +188,7 @@ pub(crate) fn load(legacy: &[PathBuf]) -> Consent {
     #[cfg(not(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test))))]
     {
     #[cfg(not(test))]
-    if plx_base::paths::ensure_persistent_state_root().is_err() {
+    if nj_base::paths::ensure_persistent_state_root().is_err() {
         publish(PersistOutcome {
             write: PersistResult::Failed,
             cleanup: CleanupResult::NotAttempted,
@@ -323,7 +323,7 @@ fn helper_commit(
             conflict: false,
         },
         Ok(Response::Reconcile {
-            status: plx_platform::storage::wire::ReconcileStatus::Applied,
+            status: nj_platform::storage::wire::ReconcileStatus::Applied,
             applied: Some(_),
             ..
         }) => HelperCommit {
@@ -336,7 +336,7 @@ fn helper_commit(
             ..
         })
         | Ok(Response::Reconcile {
-            status: plx_platform::storage::wire::ReconcileStatus::Unknown,
+            status: nj_platform::storage::wire::ReconcileStatus::Unknown,
             ..
         }) => HelperCommit {
             result: PersistResult::Uncertain,
@@ -398,7 +398,7 @@ enum PreviousCanonical {
     Blocked,
 }
 
-/// Decode the complete `plxnative-record` wrapper used by the JSON canonical store that preceded
+/// Decode the complete `nativejelly-record` wrapper used by the JSON canonical store that preceded
 /// DB8. A corrupt/future record is terminal and is never treated like an absent legacy source.
 #[cfg(any(
     all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)),
@@ -418,7 +418,7 @@ fn previous_canonical_consent_at(root: PathBuf) -> PreviousCanonical {
         Err(_) => PreviousCanonical::Blocked,
         Ok(metadata) if !metadata.is_dir() => PreviousCanonical::Blocked,
         Ok(_) => {
-            let Ok(store) = plx_platform::storage::open(root) else {
+            let Ok(store) = nj_platform::storage::open(root) else {
                 return PreviousCanonical::Blocked;
             };
             match store.load(RecordKey::Consent) {
@@ -602,7 +602,7 @@ enum LegacyRead {
 }
 
 fn read_legacy(path: &Path) -> LegacyRead {
-    match plx_platform::storage::read_owned_bytes(path) {
+    match nj_platform::storage::read_owned_bytes(path) {
         Ok(None) => LegacyRead::Missing,
         Ok(Some((bytes, trusted))) if trusted => {
             let Ok(consent) = serde_json::from_slice::<Consent>(&bytes) else {
@@ -625,8 +625,8 @@ fn load_legacy_and_migrate(store: &impl RecordStore, legacy: &[PathBuf]) -> Cons
             LegacyRead::Untrusted => {
                 let barrier = store.commit(RecordKey::Consent, &Record::cleared(1));
                 let write = match barrier {
-                    Ok(plx_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
-                    Ok(plx_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
+                    Ok(nj_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
+                    Ok(nj_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
                     Err(_) => PersistResult::Failed,
                 };
                 let cleanup = if write == PersistResult::Durable {
@@ -684,8 +684,8 @@ fn load_legacy_and_migrate(store: &impl RecordStore, legacy: &[PathBuf]) -> Cons
     };
     let record = Record::data(1, payload);
     let write = match store.commit(RecordKey::Consent, &record) {
-        Ok(plx_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
-        Ok(plx_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
+        Ok(nj_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
+        Ok(nj_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
         Err(_) => PersistResult::Failed,
     };
     if write != PersistResult::Durable {
@@ -792,8 +792,8 @@ pub(super) fn record_at(
         }
     };
     let result = match store.commit(RecordKey::Consent, &Record::data(revision, payload)) {
-        Ok(plx_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
-        Ok(plx_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
+        Ok(nj_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
+        Ok(nj_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
         Err(_) => PersistResult::Failed,
     };
     let temp_cleanup = if result == PersistResult::Durable {
@@ -948,8 +948,8 @@ pub(super) fn forget_at(legacy: &[PathBuf], canonical_root: PathBuf) -> PersistO
         None => 1,
     };
     let result = match store.commit(RecordKey::Consent, &Record::cleared(revision)) {
-        Ok(plx_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
-        Ok(plx_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
+        Ok(nj_platform::storage::CommitReceipt::Durable) => PersistResult::Durable,
+        Ok(nj_platform::storage::CommitReceipt::Uncertain { .. }) => PersistResult::Uncertain,
         Err(_) => PersistResult::Failed,
     };
     let temp_cleanup = if result == PersistResult::Durable {
@@ -982,7 +982,7 @@ pub(super) fn forget_at(legacy: &[PathBuf], canonical_root: PathBuf) -> PersistO
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_platform::storage::JsonStore;
+    use nj_platform::storage::JsonStore;
     use std::collections::BTreeMap;
     use std::os::unix::fs::PermissionsExt;
 
@@ -994,7 +994,7 @@ mod tests {
     impl Fixture {
         fn new(name: &str) -> Self {
             let dir = std::env::temp_dir().join(format!(
-                "plxnative-consent-persistence-{name}-{}",
+                "nativejelly-consent-persistence-{name}-{}",
                 std::process::id()
             ));
             let _ = std::fs::remove_dir_all(&dir);
@@ -1048,7 +1048,7 @@ mod tests {
     /// observed runtime failure.
     #[test]
     fn cleanup_after_combined_clear_removes_every_legacy_candidate() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("combined-clear");
         let a = legacy_path(&fixture, "a-telemetry.json");
         let b = legacy_path(&fixture, "b-telemetry.json");
@@ -1081,7 +1081,7 @@ mod tests {
 
     #[test]
     fn migration_preserves_ids_declines_and_exact_legacy_payload() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("migration");
         let source = legacy_path(&fixture, "telemetry.json");
         let bytes = serde_json::to_vec(&old_yes()).unwrap();
@@ -1117,7 +1117,7 @@ mod tests {
 
     #[test]
     fn previous_json_wrapper_yields_nested_consent_and_tombstone() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("prior-wrapper");
         let store = JsonStore::new(fixture.root.clone()).unwrap();
         assert_eq!(
@@ -1125,7 +1125,7 @@ mod tests {
                 RecordKey::Consent,
                 &Record::data(4, serde_json::to_string(&old_yes()).unwrap()),
             ),
-            Ok(plx_platform::storage::CommitReceipt::Durable)
+            Ok(nj_platform::storage::CommitReceipt::Durable)
         );
         match previous_canonical_consent_at(fixture.root.clone()) {
             PreviousCanonical::Data(consent) => assert_eq!(consent, old_yes()),
@@ -1133,7 +1133,7 @@ mod tests {
         }
         assert_eq!(
             store.commit(RecordKey::Consent, &Record::cleared(5)),
-            Ok(plx_platform::storage::CommitReceipt::Durable)
+            Ok(nj_platform::storage::CommitReceipt::Durable)
         );
         assert!(matches!(
             previous_canonical_consent_at(fixture.root.clone()),
@@ -1143,14 +1143,14 @@ mod tests {
 
     #[test]
     fn canonical_cleared_tombstone_beats_an_old_legacy_yes_after_reboot() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("cleared");
         let source = legacy_path(&fixture, "telemetry.json");
         std::fs::write(&source, serde_json::to_vec(&old_yes()).unwrap()).unwrap();
         let store = JsonStore::new(fixture.root.clone()).unwrap();
         assert_eq!(
             store.commit(RecordKey::Consent, &Record::cleared(9)),
-            Ok(plx_platform::storage::CommitReceipt::Durable)
+            Ok(nj_platform::storage::CommitReceipt::Durable)
         );
         let loaded = load(std::slice::from_ref(&source));
         assert!(!loaded.any() && !loaded.answered());
@@ -1162,7 +1162,7 @@ mod tests {
 
     #[test]
     fn corrupt_canonical_record_blocks_legacy_fallback() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("corrupt");
         let source = legacy_path(&fixture, "telemetry.json");
         std::fs::write(&source, serde_json::to_vec(&old_yes()).unwrap()).unwrap();
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[test]
     fn failed_migration_write_keeps_the_legacy_source() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("failed");
         let source = legacy_path(&fixture, "telemetry.json");
         std::fs::write(&source, serde_json::to_vec(&old_yes()).unwrap()).unwrap();
@@ -1185,7 +1185,7 @@ mod tests {
 
     #[test]
     fn writable_legacy_yes_is_barriered_off_across_two_launches() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("widened-two-launches");
         let source = legacy_path(&fixture, "telemetry.json");
         std::fs::write(&source, serde_json::to_vec(&old_yes()).unwrap()).unwrap();
@@ -1204,7 +1204,7 @@ mod tests {
 
     #[test]
     fn failed_untrusted_barrier_leaves_writable_source_untrusted_on_next_launch() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("widened-barrier-failure");
         let source = legacy_path(&fixture, "telemetry.json");
         std::fs::write(&source, serde_json::to_vec(&old_yes()).unwrap()).unwrap();
@@ -1226,7 +1226,7 @@ mod tests {
 
     #[test]
     fn conflicting_trusted_legacy_decisions_fail_closed() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let fixture = Fixture::new("conflict");
         let first = legacy_path(&fixture, "first.json");
         let second = legacy_path(&fixture, "second.json");
@@ -1248,7 +1248,7 @@ mod tests {
 #[cfg(test)]
 mod upgrade_tests {
     use super::*;
-    use plx_platform::storage::wire::{ErrorCode, Request};
+    use nj_platform::storage::wire::{ErrorCode, Request};
     use serde_json::Value;
     use std::os::unix::fs::PermissionsExt;
 
@@ -1292,7 +1292,7 @@ mod upgrade_tests {
         puts: usize,
         refuse_puts: bool,
     }
-    impl plx_platform::storage::keymanager::Rpc for Db8 {
+    impl nj_platform::storage::keymanager::Rpc for Db8 {
         fn call(&mut self, uri: &str, payload: &Value) -> Result<Value, ErrorCode> {
             match uri {
                 "luna://com.palm.db/get" => Ok(
@@ -1312,13 +1312,13 @@ mod upgrade_tests {
         }
     }
 
-    fn backend(record: Option<Value>) -> plx_platform::storage::backend::Backend<Db8> {
-        plx_platform::storage::backend::Backend::new(
+    fn backend(record: Option<Value>) -> nj_platform::storage::backend::Backend<Db8> {
+        nj_platform::storage::backend::Backend::new(
             Db8 {
                 record,
                 ..Default::default()
             },
-            plx_platform::storage::state::Flavor::Stable,
+            nj_platform::storage::state::Flavor::Stable,
             "com.sostk.nativejelly.storage".into(),
         )
     }
@@ -1327,12 +1327,12 @@ mod upgrade_tests {
         serde_json::from_str(DB8_066).unwrap()
     }
 
-    fn helper_load(b: &mut plx_platform::storage::backend::Backend<Db8>, legacy: &[PathBuf]) -> Consent {
+    fn helper_load(b: &mut nj_platform::storage::backend::Backend<Db8>, legacy: &[PathBuf]) -> Consent {
         let mut transport = |request: Request| Ok(b.dispatch(request));
         load_helper(&mut transport, legacy)
     }
 
-    fn helper_record(b: &mut plx_platform::storage::backend::Backend<Db8>, consent: &Consent) -> PersistOutcome {
+    fn helper_record(b: &mut nj_platform::storage::backend::Backend<Db8>, consent: &Consent) -> PersistOutcome {
         let mut transport = |request: Request| Ok(b.dispatch(request));
         record_helper(&mut transport, consent, &[])
     }
@@ -1377,7 +1377,7 @@ mod upgrade_tests {
 
     #[test]
     fn every_published_06_decision_survives_a_db8_import_and_the_next_launch() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (label, bytes) in published() {
             let dir = Dir::new("db8-matrix");
             let source = dir.legacy(bytes);
@@ -1395,7 +1395,7 @@ mod upgrade_tests {
 
     #[test]
     fn every_published_06_decision_survives_the_host_store_migration_and_a_rewrite() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (label, bytes) in published() {
             let dir = Dir::new("host-matrix");
             let source = dir.legacy(bytes);
@@ -1409,7 +1409,7 @@ mod upgrade_tests {
 
     #[test]
     fn a_066_db8_record_reopens_every_consent_field_without_writing() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _dir = Dir::new("db8-066");
         let mut b = backend(Some(db8_066()));
         let loaded = helper_load(&mut b, &[]);
@@ -1419,7 +1419,7 @@ mod upgrade_tests {
 
     #[test]
     fn a_066_host_store_record_reopens_every_consent_field() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let dir = Dir::new("json-066");
         std::fs::write(dir.0.join("state/consent.json"), JSON_STORE_066).unwrap();
         std::fs::set_permissions(dir.0.join("state/consent.json"), std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -1430,7 +1430,7 @@ mod upgrade_tests {
     /// policy version, silently dropping the accepted/declined scopes and downgrading 6 to 4.
     #[test]
     fn a_07_settings_answer_over_a_066_record_keeps_scopes_declines_and_policy_version() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _dir = Dir::new("db8-edit");
         let mut b = backend(Some(db8_066()));
         let loaded = helper_load(&mut b, &[]);
@@ -1446,7 +1446,7 @@ mod upgrade_tests {
 
     #[test]
     fn a_refused_db8_import_keeps_the_legacy_source_and_the_next_launch_completes_it() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let dir = Dir::new("db8-interrupted");
         let source = dir.legacy(GENERATED_DECLINE_065);
         let mut b = backend(None);
@@ -1465,29 +1465,29 @@ mod upgrade_tests {
     /// Commit `interfering` through the same helper immediately before the first consent commit
     /// reaches it, the way a Session worker commit can land between consent's read and write.
     fn record_racing(
-        b: &mut plx_platform::storage::backend::Backend<Db8>,
+        b: &mut nj_platform::storage::backend::Backend<Db8>,
         consent: &Consent,
-        interfering: fn(&plx_platform::storage::client::Snapshot) -> plx_platform::storage::wire::WireMutation,
+        interfering: fn(&nj_platform::storage::client::Snapshot) -> nj_platform::storage::wire::WireMutation,
     ) -> PersistOutcome {
         let mut raced = false;
         let mut transport = |request: Request| {
             if !raced && matches!(request, Request::Commit { .. }) {
                 raced = true;
                 let mut inner = |r: Request| Ok(b.dispatch(r));
-                let plx_platform::storage::client::Load::Present(snapshot) =
-                    plx_platform::storage::client::load_with(&mut inner).unwrap()
+                let nj_platform::storage::client::Load::Present(snapshot) =
+                    nj_platform::storage::client::load_with(&mut inner).unwrap()
                 else {
                     panic!("fixture is present")
                 };
-                let other = plx_platform::storage::client::commit_with(
+                let other = nj_platform::storage::client::commit_with(
                     &mut inner,
                     Some((&snapshot.db_rev, snapshot.state.expected())),
-                    plx_platform::storage::state::Generation::random().unwrap(),
+                    nj_platform::storage::state::Generation::random().unwrap(),
                     interfering(&snapshot),
                 );
                 assert!(matches!(
                     other,
-                    Ok(plx_platform::storage::wire::Response::Commit { applied: Some(_), .. })
+                    Ok(nj_platform::storage::wire::Response::Commit { applied: Some(_), .. })
                 ));
             }
             Ok(b.dispatch(request))
@@ -1497,7 +1497,7 @@ mod upgrade_tests {
 
     #[test]
     fn a_session_commit_landing_mid_write_does_not_drop_the_decision() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _dir = Dir::new("db8-race");
         let mut b = backend(Some(db8_066()));
         let loaded = helper_load(&mut b, &[]);
@@ -1505,15 +1505,15 @@ mod upgrade_tests {
         let outcome = record_racing(&mut b, &next, |snapshot| {
             let mut public = snapshot.state.public.clone();
             public.preferences["playback_quality"] = "original".into();
-            plx_platform::storage::wire::WireMutation::UpdatePreferences {
+            nj_platform::storage::wire::WireMutation::UpdatePreferences {
                 payload: serde_json::to_value(public).unwrap(),
             }
         });
         assert_eq!(outcome.write, PersistResult::Durable, "a same-tenure conflict is retried");
         assert_eq!(helper_load(&mut b, &[]), next, "the withdrawal survives the next launch");
         let mut transport = |request: Request| Ok(b.dispatch(request));
-        let plx_platform::storage::client::Load::Present(snapshot) =
-            plx_platform::storage::client::load_with(&mut transport).unwrap()
+        let nj_platform::storage::client::Load::Present(snapshot) =
+            nj_platform::storage::client::load_with(&mut transport).unwrap()
         else {
             panic!("present")
         };
@@ -1522,12 +1522,12 @@ mod upgrade_tests {
 
     #[test]
     fn a_decision_racing_a_sign_out_is_not_written_into_the_cleared_tenure() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _dir = Dir::new("db8-race-clear");
         let mut b = backend(Some(db8_066()));
         let loaded = helper_load(&mut b, &[]);
         let next = super::super::consent::apply(&loaded, true, true, || Some("f".repeat(32)));
-        let outcome = record_racing(&mut b, &next, |_| plx_platform::storage::wire::WireMutation::ClearTenure {});
+        let outcome = record_racing(&mut b, &next, |_| nj_platform::storage::wire::WireMutation::ClearTenure {});
         assert_ne!(outcome.write, PersistResult::Durable);
         let after = helper_load(&mut b, &[]);
         assert!(!after.answered() && after.errors_id.is_none() && after.install_id.is_none());
@@ -1535,25 +1535,25 @@ mod upgrade_tests {
 
     #[test]
     fn a_decision_racing_a_fresh_sign_in_is_not_written_into_the_new_account() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _dir = Dir::new("db8-race-signin");
         let mut b = backend(Some(db8_066()));
         let loaded = helper_load(&mut b, &[]);
         let next = super::super::consent::apply(&loaded, true, true, || Some("f".repeat(32)));
         let outcome = record_racing(&mut b, &next, |snapshot| {
-            let account = crate::plex::session::Session {
+            let account = crate::catalog::session::Session {
                 client_id: "synthetic-client-id".into(),
                 account_token: "synthetic-next-account".into(),
                 ..Default::default()
             };
-            let (mut public, protected) = crate::plex::session::split_canonical(&account).unwrap();
+            let (mut public, protected) = crate::catalog::session::split_canonical(&account).unwrap();
             public.consent = snapshot.state.public.consent.clone();
             public.scopes = snapshot.state.public.scopes.clone();
             public.ids = snapshot.state.public.ids.clone();
-            plx_platform::storage::wire::WireMutation::ReplaceAuth {
+            nj_platform::storage::wire::WireMutation::ReplaceAuth {
                 public: serde_json::to_value(public).unwrap(),
-                payload: plx_platform::storage::wire::SecretString(protected),
-                protection: plx_platform::storage::wire::ProtectionRequest::Db8AclOnlyExplicit,
+                payload: nj_platform::storage::wire::SecretString(protected),
+                protection: nj_platform::storage::wire::ProtectionRequest::Db8AclOnlyExplicit,
             }
         });
         assert_ne!(outcome.write, PersistResult::Durable);
@@ -1563,24 +1563,24 @@ mod upgrade_tests {
 
     #[test]
     fn a_db8_sign_out_outranks_a_reappeared_legacy_yes() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let dir = Dir::new("db8-cleared");
         let mut b = backend(Some(db8_066()));
         let mut transport = |request: Request| Ok(b.dispatch(request));
-        let plx_platform::storage::client::Load::Present(snapshot) =
-            plx_platform::storage::client::load_with(&mut transport).unwrap()
+        let nj_platform::storage::client::Load::Present(snapshot) =
+            nj_platform::storage::client::load_with(&mut transport).unwrap()
         else {
             panic!("fixture is present")
         };
-        let cleared = plx_platform::storage::client::commit_with(
+        let cleared = nj_platform::storage::client::commit_with(
             &mut transport,
             Some((&snapshot.db_rev, snapshot.state.expected())),
-            plx_platform::storage::state::Generation::random().unwrap(),
-            plx_platform::storage::wire::WireMutation::ClearTenure {},
+            nj_platform::storage::state::Generation::random().unwrap(),
+            nj_platform::storage::wire::WireMutation::ClearTenure {},
         );
         assert!(matches!(
             cleared,
-            Ok(plx_platform::storage::wire::Response::Commit { applied: Some(_), .. })
+            Ok(nj_platform::storage::wire::Response::Commit { applied: Some(_), .. })
         ));
         let source = dir.legacy(GENERATED_DECLINE_065);
         let after = helper_load(&mut b, std::slice::from_ref(&source));

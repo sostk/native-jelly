@@ -23,7 +23,7 @@
 //! this text); tests hand it the shipped faces' real advances.
 use crate::ui::icons::{self, Icon};
 use crate::ui::label::{HAlign, Label, VAlign};
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -245,7 +245,7 @@ fn balanced(words: &[&str], column: f32, sz: c_int, m: &dyn Measure) -> Vec<Stri
 
 /// Elide `text` to `w` at `sz` with a trailing ellipsis.
 fn elide(text: &str, w: f32, sz: c_int, m: &dyn Measure) -> String {
-    plx_gfx::text::elide_by(text, w, false, |t| m.width_str(t, sz, true))
+    nj_gfx::text::elide_by(text, w, false, |t| m.width_str(t, sz, true))
 }
 
 /// Set line `text` at `sz`, or — a single word wider than the column — shrink it toward `floor`
@@ -358,7 +358,7 @@ fn fitted(name: &str, style: &NameStyle, rest: Rect, band: f32) -> Rc<FittedName
 /// Draw `fit`'s lines centred on `cx`, line 0's cap top at `top`; a shrunk line shares its block
 /// line's baseline.
 fn draw_lines(p: Painter, fit: &FittedName, cx: f32, top: f32, col: [f32; 4]) {
-    let cap = plx_machine::machine::Measure::cap_h(&crate::ui::widgets::LegacyMeasure, fit.sz);
+    let cap = nj_machine::machine::Measure::cap_h(&crate::ui::widgets::LegacyMeasure, fit.sz);
     for (i, line) in fit.lines.iter().enumerate() {
         let Ok(text) = CString::new(line.text.as_str()) else { continue };
         let baseline = top + i as f32 * fit.pitch + cap;
@@ -445,7 +445,7 @@ pub(crate) fn draw_fan_name(p: Painter, rest: Rect, r: Rect, name: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_base::fontcov::advances::ShippedMeasure;
+    use nj_base::fontcov::advances::ShippedMeasure;
 
     fn tile(w: f32) -> Rect { Rect::new(0.0, 0.0, w, w * 1.5) }
     fn fit(name: &str, w: f32) -> FittedName {

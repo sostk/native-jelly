@@ -68,7 +68,7 @@
 //! `ratingKey` 4 and a section 1 (`docs/shared-servers.md` §1). Matching on one would confidently
 //! offer a different film — which is why the STORE is ADDRESSED on the `(server, ratingKey)` PAIR:
 //! a resolve outliving the page that asked for it is the normal case, not the exotic one. The
-//! store, the cross-source resolve that fills it and the headless `/tmp/plxnative-shared` stand-in
+//! store, the cross-source resolve that fills it and the headless `/tmp/nativejelly-shared` stand-in
 //! all live in `crate::metadata`, beside the detail fetch whose landing kicks them; this module
 //! ORDERS, MARKS and DRAWS and owns nothing else.
 //!
@@ -84,11 +84,11 @@ use std::borrow::Cow;
 use std::convert::Infallible;
 
 use crate::metadata::AltCopy;
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 use crate::screens::registry::{AppLike, AppMsg, ContentArg, PageMemory};
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind,
     InstanceId, Key, LogicalState, Machine, MachineId, NavOp,
 };
@@ -224,7 +224,7 @@ pub(crate) struct AltRow {
 /// What the sub-line calls a source with no owner: the signed-in account's own server. A PERSON in
 /// every case, which is the design's rule for every browsing surface — the machine name never
 /// appears outside the Sources list.
-fn own_account() -> &'static str { plx_platform::i18n::msg::browse_account_own() }
+fn own_account() -> &'static str { nj_platform::i18n::msg::browse_account_own() }
 
 /// Build the panel's rows from `list`, given the copy the page is standing on (`here_sid` +
 /// `here_rk`). PURE — every ordering and marking decision in this module is here, and the host
@@ -244,7 +244,7 @@ pub(crate) fn rows(list: &[AltCopy], here_sid: ServerId, here_rk: &str) -> Vec<A
     // not — and they are the ones that decide which row wears the tick and which press does nothing.
     let here = list
         .iter()
-        .position(|c| crate::plex::same_item((c.sid, &c.rk), (here_sid, here_rk)));
+        .position(|c| crate::catalog::same_item((c.sid, &c.rk), (here_sid, here_rk)));
     let mut idx: Vec<usize> = (0..list.len()).collect();
     idx.sort_by(|&a, &b| {
         let (ca, cb) = (&list[a], &list[b]);
@@ -311,7 +311,7 @@ pub(crate) enum Action {
 /// What one row's OK means, decided once when the row is declared, so the "the row you are on is
 /// not a destination" rule is host-testable and no press ever indexes a list.
 pub(crate) fn action_for(row: &AltRow, here_sid: ServerId, here_rk: &str) -> Action {
-    if crate::plex::same_item((row.sid, &row.rk), (here_sid, here_rk)) || row.rk.is_empty() {
+    if crate::catalog::same_item((row.sid, &row.rk), (here_sid, here_rk)) || row.rk.is_empty() {
         return Action::None;
     }
     Action::Open {
@@ -432,7 +432,7 @@ impl AltSourcesScreen {
         }
     }
 
-    pub(crate) fn frame(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    pub(crate) fn frame(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         let [x, y, w, h] = self.arg.anchor.map(f32::from_bits);
         panel_at(Rect::new(x, y, w, h), self.form.table.measured_width(measure), self.form.table.measured_height())
     }
@@ -478,7 +478,7 @@ impl<H: AppLike<Memory = PageMemory> + crate::screens::registry::MetadataLike> M
             }
             ScreenEvent::StoreChanged(ord, _) => {
                 if *ord == crate::stores::StoreId::Metadata.ord() && self.refresh(H::metadata(cx)) {
-                    fx.invalidate(plx_machine::present::Provenance::Landing(fx.from()));
+                    fx.invalidate(nj_machine::present::Provenance::Landing(fx.from()));
                 }
                 Handled::Yes
             }
@@ -500,7 +500,7 @@ impl<H: AppLike<Memory = PageMemory> + crate::screens::registry::MetadataLike> M
                 if let Some(i) = self.form.index_of_key(RowKey(to.elem)) {
                     self.form.table.sel = i as i32;
                 }
-                fx.invalidate(plx_machine::present::Provenance::Input);
+                fx.invalidate(nj_machine::present::Provenance::Input);
                 Handled::Yes
             }
             // The engine's OK arm, for a `Bare` element, delivers `Activate` directly rather than
@@ -662,7 +662,7 @@ impl<H: AppLike<Memory = PageMemory> + crate::screens::registry::MetadataLike> S
         let r = self.frame(f.measure);
         let p = f.painter.alpha(appear).translate(0.0, RISE * (1.0 - appear));
         let measure = f.measure;
-        // Named for `/tmp/plxnative-cpuprof` beside the page's own phases, so a slow frame while
+        // Named for `/tmp/nativejelly-cpuprof` beside the page's own phases, so a slow frame while
         // this panel is up can be read as the PANEL or as the host under it.
         let field = f.underlay;
         crate::ui::profile::phase("dt.alt", || {

@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "vendor": "sostk",
   "type": "native",
-  "main": "plxnative",
+  "main": "nativejelly",
   "title": "Native Jelly",
   "appDescription": "Unofficial native Jellyfin client - not affiliated with Jellyfin",
   "icon": "icon.png",

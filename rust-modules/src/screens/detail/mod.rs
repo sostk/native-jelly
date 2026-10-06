@@ -25,7 +25,7 @@ mod identity_tests;
 
 use crate::metadata::{Detail, Extra, Spot};
 use crate::screens::registry::PlayIntent;
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 use crate::stores::metadata::MetadataCmd;
 use crate::stores::viewstate::ViewStateCmd;
 use crate::stores::{StoreCmd, StoreId};
@@ -33,11 +33,11 @@ use crate::ui::card_row::{self, CardRow, RowStyle};
 use crate::ui::frame::Budget;
 use crate::ui::hero_logo::{HeroLogo, LogoRung};
 use crate::ui::label::HAlign;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
     Leave, LogicalState, Machine, Tick,
 };
-use plx_machine::present::{PresentEvent, Provenance};
+use nj_machine::present::{PresentEvent, Provenance};
 use crate::ui::text_lift::{lifted, TextLift, TEXT_LIFT_SCALE, TOP_CENTRE};
 use crate::ui::screen::{
     Activate, At, AxisMask, By, Dir, DrawFrame, EdgeRule, ElemKind, Enter, FocusSource, Focusable,
@@ -141,7 +141,7 @@ pub(crate) struct DetailScreen {
     preview_base_scrim: f32,
     /// 0 = full hero position/size, 1 = fully collapsed to the top-left compact spot while a
     /// trailer plays in the background. A geometric transform, so it is a critically-damped
-    /// [`Spring`] rather than the linear [`ease`] the alpha scalars above use — `plx_machine::idle` sees it
+    /// [`Spring`] rather than the linear [`ease`] the alpha scalars above use — `nj_machine::idle` sees it
     /// for free through `Spring::step`'s own `note_spring` call.
     preview_logo: Spring,
     /// The `preview_cache_rk()` this hero already autoplayed a trailer to COMPLETION for, this
@@ -220,12 +220,12 @@ pub(crate) struct DetailScreen {
     /// fallback used only before/if `metadata::current()` has a `Detail` for this item (see
     /// [`selected`](Self::selected)'s callers); it is never re-read from the catalog afterward, so
     /// a hub republish while this page is open does not change what it reports.
-    selected: Option<crate::pms::PmsMovie>,
+    selected: Option<crate::catalog_fetch::PmsMovie>,
     /// Skeleton spinner clock, in ms — cached each tick from [`spin_phase`](Self::spin_phase)'s
     /// `advance`. Render-only, never hashed.
     spin_ms: f32,
     /// The underlying clock for [`spin_ms`](Self::spin_ms) (`motion::Phase`, phase 12 D4).
-    spin_phase: plx_machine::motion::Phase,
+    spin_phase: nj_machine::motion::Phase,
     /// Vertical section geometry for this frame. Synopsis height and the episode strip's
     /// `block_h` are O(text) and used to be re-asked from every `place` in `record_stops`.
     /// Cleared at the start of `tick` so a present reuses one walk; missed when
@@ -372,7 +372,7 @@ impl Drop for LayoutPin<'_> {
 }
 
 impl DetailScreen {
-    pub(crate) fn new(entry: EntryId, sid: ServerId, rk: String, hubs: crate::pms::HubsView<'_>) -> Self {
+    pub(crate) fn new(entry: EntryId, sid: ServerId, rk: String, hubs: crate::catalog_fetch::HubsView<'_>) -> Self {
         let selected = hubs.find(sid, &rk).cloned();
         let mut ground = AmbientWash::flat(theme::SURFACE_APP);
         if let Some(m) = selected.as_ref().filter(|m| m.has_blur) {
@@ -427,7 +427,7 @@ impl DetailScreen {
             ground,
             selected,
             spin_ms: 0.0,
-            spin_phase: plx_machine::motion::Phase::default(),
+            spin_phase: nj_machine::motion::Phase::default(),
             layout: Cell::new(None),
             layout_pinned: Cell::new(false),
             spot_facts: SpotFacts::default(),
@@ -621,7 +621,7 @@ impl DetailScreen {
         &self,
         focus: Option<FocusKey<u32>>,
         meta: crate::metadata::MetadataView<'a>,
-    ) -> Option<&'a crate::pms::PmsMovie> {
+    ) -> Option<&'a crate::catalog_fetch::PmsMovie> {
         let key = focus.filter(|k| k.entry == self.entry)?.elem;
         let d = self.detail(meta)?;
         match self.locate(key, meta)? {
@@ -706,15 +706,15 @@ impl DetailScreen {
 
     fn detail<'a>(&self, meta: crate::metadata::MetadataView<'a>) -> Option<&'a Detail> {
         meta.current().filter(|d| {
-            crate::plex::same_item((d.sid, d.rk.as_str()), (self.sid, self.rk.as_str()))
+            crate::catalog::same_item((d.sid, d.rk.as_str()), (self.sid, self.rk.as_str()))
         })
     }
 
-    fn selected(&self) -> Option<&crate::pms::PmsMovie> {
+    fn selected(&self) -> Option<&crate::catalog_fetch::PmsMovie> {
         self.selected.as_ref()
     }
 
-    fn hero_chain(&self, measure: &dyn plx_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) -> crate::ui::detail_layout::HeroChain {
+    fn hero_chain(&self, measure: &dyn nj_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) -> crate::ui::detail_layout::HeroChain {
         if let Some(d) = self.detail(meta) {
             return self.ensure_layout(d, measure).chain;
         }
@@ -724,7 +724,7 @@ impl DetailScreen {
     fn compute_hero_chain(
         &self,
         d: Option<&Detail>,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) -> crate::ui::detail_layout::HeroChain {
         let (lead, synopsis) = hero_blurb(d, self.selected());
         let synopsis_h = crate::ui::hero_synopsis(&synopsis, &lead)
@@ -739,7 +739,7 @@ impl DetailScreen {
 
     /// Pin [`layout`](Self::layout) for one walk ([`LayoutPin`]). Validates first, so a pinned
     /// read can never serve geometry measured from an item the walk is not drawing.
-    fn pin_layout(&self, meta: crate::metadata::MetadataView<'_>, measure: &dyn plx_machine::machine::Measure) -> LayoutPin<'_> {
+    fn pin_layout(&self, meta: crate::metadata::MetadataView<'_>, measure: &dyn nj_machine::machine::Measure) -> LayoutPin<'_> {
         let was = self.layout_pinned.get();
         if !was {
             if let Some(d) = self.detail(meta) {
@@ -750,7 +750,7 @@ impl DetailScreen {
         LayoutPin { screen: self, was }
     }
 
-    fn ensure_layout(&self, d: &Detail, measure: &dyn plx_machine::machine::Measure) -> LayoutCache {
+    fn ensure_layout(&self, d: &Detail, measure: &dyn nj_machine::machine::Measure) -> LayoutCache {
         if self.layout_pinned.get() {
             if let Some(c) = self.layout.get() {
                 return c;
@@ -775,7 +775,7 @@ impl DetailScreen {
     fn section_block_h(
         section: i32,
         d: &Detail,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) -> f32 {
         match section {
             1 => season::ROW_H,
@@ -835,7 +835,7 @@ impl DetailScreen {
     fn build_layout(
         &self,
         d: &Detail,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         stamp: LayoutStamp,
     ) -> LayoutCache {
         let chain = self.compute_hero_chain(Some(d), measure);
@@ -869,7 +869,7 @@ impl DetailScreen {
         }
     }
 
-    fn content_top(&self, measure: &dyn plx_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) -> f32 {
+    fn content_top(&self, measure: &dyn nj_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) -> f32 {
         if let Some(d) = self.detail(meta) {
             self.ensure_layout(d, measure).content_top
         } else {
@@ -913,7 +913,7 @@ impl DetailScreen {
 
     /// Where a section sits THIS FRAME — the settled flow plus whatever the shelves above it are
     /// still holding open.
-    fn section_top(&self, section: i32, d: &Detail, measure: &dyn plx_machine::machine::Measure) -> f32 {
+    fn section_top(&self, section: i32, d: &Detail, measure: &dyn nj_machine::machine::Measure) -> f32 {
         self.section_top_settled(section, d, measure) + self.band_lift(d, Some(section))
     }
 
@@ -925,7 +925,7 @@ impl DetailScreen {
         &self,
         section: i32,
         d: &Detail,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) -> f32 {
         let c = self.ensure_layout(d, measure);
         let si = section as usize;
@@ -942,7 +942,7 @@ impl DetailScreen {
         &self,
         section: i32,
         d: &Detail,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         at: At,
     ) -> f32 {
         match at {
@@ -951,7 +951,7 @@ impl DetailScreen {
         }
     }
 
-    fn block_h(&self, section: i32, d: &Detail, measure: &dyn plx_machine::machine::Measure) -> f32 {
+    fn block_h(&self, section: i32, d: &Detail, measure: &dyn nj_machine::machine::Measure) -> f32 {
         let c = self.ensure_layout(d, measure);
         let si = section as usize;
         if (1..section::SLOTS).contains(&si) && c.seen & (1 << si) != 0 {
@@ -2008,7 +2008,7 @@ impl DetailScreen {
 }
 
 impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for DetailScreen {
-    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<plx_machine::machine::FocusKey<u32>>) {
+    fn redraw_focused(&self, f: &mut DrawFrame<'_, '_, H>, focus: Option<nj_machine::machine::FocusKey<u32>>) {
         DetailScreen::redraw_focused::<H>(self, f, focus)
     }
     fn name(&self) -> &'static str {
@@ -2032,9 +2032,9 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Screen<H> for Deta
         let _layout = self.pin_layout(meta, measure);
         let preview = crate::player::preview::view();
         if preview_punch_through(preview.picture) {
-            plx_gfx::gfx::frame_clear_through();
+            nj_gfx::gfx::frame_clear_through();
         } else {
-            plx_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
+            nj_gfx::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         }
         let p = f.painter;
         let nav_page_alpha = f.nav_page_alpha;
@@ -2282,7 +2282,7 @@ impl DetailScreen {
         &self,
         p: Painter,
         d: Option<&Detail>,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         preview: crate::player::preview::View,
         meta: crate::metadata::MetadataView<'_>,
     ) {
@@ -2301,7 +2301,7 @@ impl DetailScreen {
         let art = crate::ui::widgets::WashArt {
             tex: texture,
             rect: Rect::FULL.cover(width, height),
-            uv: plx_gfx::gfx::UV_FULL,
+            uv: nj_gfx::gfx::UV_FULL,
             tint: theme::with_a(theme::dim(theme::TINT_WHITE, 1.0 - sf * 0.55), art_alpha),
         };
         let visible = hero_alpha(self.scroll.pos, HERO_FADE);
@@ -2356,7 +2356,7 @@ impl DetailScreen {
         let title = d
             .map(|d| d.title.as_str())
             .or_else(|| self.selected().map(|m| m.title.as_str()))
-            .unwrap_or(plx_platform::i18n::msg::browse_library_loading());
+            .unwrap_or(nj_platform::i18n::msg::browse_library_loading());
         let chrome = p.alpha(self.preview_chrome);
         // NOT `self.preview_chrome * self.preview_synopsis`: synopsis_target already tracks
         // chrome_target exactly (both states — background autoplay, full-trailer — target the
@@ -2438,7 +2438,7 @@ impl DetailScreen {
         );
     }
 
-    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn plx_machine::machine::Measure) {
+    fn draw_identity_line(&self, p: Painter, d: &Detail, y: f32, measure: &dyn nj_machine::machine::Measure) {
         let ordinal = (d.kind == "episode" && d.season > 0 && d.index > 0)
             .then(|| crate::ui::fmt::episode_ordinal(d.season, d.index))
             .unwrap_or_default();
@@ -2451,7 +2451,7 @@ impl DetailScreen {
                 parts.push(&ordinal);
             }
         } else {
-            parts.push(if d.is_show { plx_platform::i18n::msg::browse_kind_tv_show() } else { plx_platform::i18n::msg::browse_kind_movie() });
+            parts.push(if d.is_show { nj_platform::i18n::msg::browse_kind_tv_show() } else { nj_platform::i18n::msg::browse_kind_movie() });
             parts.extend(d.genres.iter().take(2).map(String::as_str));
         }
         if !d.rating.is_empty() {
@@ -2470,7 +2470,7 @@ impl DetailScreen {
         if x > crate::ui::consts::MARGIN_X {
             x += theme::space::SM;
         }
-        let (top, base) = plx_gfx::text::text_cap_band(theme::size::BODY, 0);
+        let (top, base) = nj_gfx::text::text_cap_band(theme::size::BODY, 0);
         let cy = y + (top + base) * 0.5;
         if let Some(res) = crate::ui::fmt::resolution(&d.video_resolution, d.width, d.height) {
             x += crate::ui::widgets::badge(
@@ -2484,9 +2484,9 @@ impl DetailScreen {
             ) + theme::space::XS;
         }
         for (present, label) in [
-            (!d.subs.is_empty(), plx_platform::i18n::msg::widgets_badge_cc()),
-            (d.subs.iter().any(|s| s.sdh), plx_platform::i18n::msg::widgets_badge_sdh()),
-            (d.audio.iter().any(|s| s.ad), plx_platform::i18n::msg::widgets_badge_ad()),
+            (!d.subs.is_empty(), nj_platform::i18n::msg::widgets_badge_cc()),
+            (d.subs.iter().any(|s| s.sdh), nj_platform::i18n::msg::widgets_badge_sdh()),
+            (d.audio.iter().any(|s| s.ad), nj_platform::i18n::msg::widgets_badge_ad()),
         ] {
             if present {
                 x += crate::ui::widgets::keyline_chip(p, x, cy, label, theme::TEXT_SECONDARY, measure)
@@ -2500,9 +2500,9 @@ impl DetailScreen {
         p: Painter,
         d: &Detail,
         y: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
     ) {
-        let (top, base) = plx_gfx::text::text_cap_band(theme::size::LABEL, 1);
+        let (top, base) = nj_gfx::text::text_cap_band(theme::size::LABEL, 1);
         let cy = y + (top + base) * 0.5;
         let mut x = crate::ui::consts::MARGIN_X;
         let mut i = 0;
@@ -2564,7 +2564,7 @@ impl DetailScreen {
         let palette = if picture {
             ControlPalette::default()
         } else {
-            plx_gfx::gfx::sample_control_ground(row, may_read)
+            nj_gfx::gfx::sample_control_ground(row, may_read)
                 .map(ControlPalette::ambient)
                 .unwrap_or_default()
         };
@@ -2622,7 +2622,7 @@ impl DetailScreen {
         }
     }
 
-    fn draw_compact_title(&self, p: Painter, d: &Detail, hero_visible: f32, measure: &dyn plx_machine::machine::Measure) {
+    fn draw_compact_title(&self, p: Painter, d: &Detail, hero_visible: f32, measure: &dyn nj_machine::machine::Measure) {
         if hero_visible >= 0.99 {
             return;
         }
@@ -2813,7 +2813,7 @@ mod may_sample_control_ground_tests {
 
 fn hero_blurb<'a>(
     d: Option<&'a Detail>,
-    row: Option<&'a crate::pms::PmsMovie>,
+    row: Option<&'a crate::catalog_fetch::PmsMovie>,
 ) -> (String, String) {
     if let Some(d) = d {
         if d.is_show {
@@ -3047,7 +3047,7 @@ impl LogicalState for DetailScreen {
 }
 
 impl DetailScreen {
-    fn reveal_focus(&mut self, focus: Option<FocusKey<u32>>, measure: &dyn plx_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) {
+    fn reveal_focus(&mut self, focus: Option<FocusKey<u32>>, measure: &dyn nj_machine::machine::Measure, meta: crate::metadata::MetadataView<'_>) {
         if self.return_waiting(meta) { return; }
         let Some(located) = focus.filter(|key| key.entry == self.entry).and_then(|key| self.locate(key.elem, meta)) else { return };
         let Some(detail) = self.detail(meta) else { return };
@@ -3407,7 +3407,7 @@ impl DetailScreen {
         // Collapsed to the top-left compact spot for the whole time a picture is up (background
         // AND full-trailer alike — full-trailer fades the logo's alpha via `chrome`, from wherever
         // this transform already left it, rather than animating it back toward the hero position
-        // while also fading). `Spring::step` reports its own motion to `plx_machine::idle` — no `fx.note`
+        // while also fading). `Spring::step` reports its own motion to `nj_machine::idle` — no `fx.note`
         // needed here, unlike the linear `ease()` scalars above.
         self.preview_logo
             .step(f32::from(view.picture), crate::ui::consts::K_SCALE, dt);
@@ -3923,7 +3923,7 @@ impl DetailScreen {
 }
 
 /// A presented preview must leave the framebuffer transparent. The player route punches this
-/// hole from the loop; this page stays mounted, so an opaque [`plx_gfx::gfx::frame_clear`] is a
+/// hole from the loop; this page stays mounted, so an opaque [`nj_gfx::gfx::frame_clear`] is a
 /// full-screen sheet over the plane (sound, no picture).
 fn preview_punch_through(picture: bool) -> bool {
     picture

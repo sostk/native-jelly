@@ -6,14 +6,14 @@
 /// An item's or person's identity travels with the navigation entry, never in a screen global.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ContentArg {
-    Detail { sid: crate::plex::ServerId, rk: String },
-    Person { sid: crate::plex::ServerId, key: String, guid: String, name: String, thumb: String },
-    Filmography { sid: crate::plex::ServerId, key: String },
-    Collection(crate::plex::collections::CollectionRef),
+    Detail { sid: crate::catalog::ServerId, rk: String },
+    Person { sid: crate::catalog::ServerId, key: String, guid: String, name: String, thumb: String },
+    Filmography { sid: crate::catalog::ServerId, key: String },
+    Collection(crate::catalog::collections::CollectionRef),
 }
 
-impl plx_machine::machine::LogicalState for ContentArg {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for ContentArg {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         match self {
             Self::Detail { sid, rk } => { c.u32(0).u32(u32::from(sid.raw())).str(rk); }
             Self::Person { sid, key, guid, name, thumb } => { c.u32(1).u32(u32::from(sid.raw())).str(key).str(guid).str(name).str(thumb); }

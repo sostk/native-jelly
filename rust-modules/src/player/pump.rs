@@ -1,12 +1,12 @@
 //! player::pump — the main-thread pump (was bufferfeed_pump). Runs each frame from
-//! plex_run: the pending-seek handler, the ACB-bind state machine (Stage), and the
+//! nj_run: the pending-seek handler, the ACB-bind state machine (Stage), and the
 //! feed dispatch. All ACB/Starfish control calls happen here on the main thread.
 use super::engine::{
     arm_live_clock_prime, drain_aq, feed_both_lanes, feed_sample, Engine, Source,
 };
 use super::shared::{HlsPauseCompletion, HlsPrimeKind, HlsSeekPause, Stage};
 use super::{ACB_OK, SHARED, TX};
-use plx_base::task::MainThread;
+use nj_base::task::MainThread;
 use std::os::raw::c_char;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::time::Duration;
@@ -537,7 +537,7 @@ fn finish_preview_open_failure(
     if crate::player::preview::abandoning() {
         return;
     }
-    let seam_absent = cfg!(feature = "hostsim") && !plx_base::devtrig::flag("clocksink");
+    let seam_absent = cfg!(feature = "hostsim") && !nj_base::devtrig::flag("clocksink");
     if seam_absent {
         crate::player::preview::note_admission_refused();
     } else {
@@ -1494,11 +1494,11 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             // the addresses). The rule's stated consequence, `SOUND_ERROR_019`, is a literal that
             // exists in NO library on this device.
             //
-            // Ran behind `/tmp/plxnative-atmosacb` first, then measured, then made the default:
+            // Ran behind `/tmp/nativejelly-atmosacb` first, then measured, then made the default:
             // `rv=1` accepted, 1600 audio AUs fed with `reply=O` and no error of any kind, and the
             // television's own read-out — "Dolby Vision / Dolby Atmos", both lines — photographed
-            // in a DISPLAY capture at 11 s. `/tmp/plxnative-noatmosacb` is the way back out.
-            if crate::route::stream_immersive(ps) && !plx_base::devtrig::flag("noatmosacb") {
+            // in a DISPLAY capture at 11 s. `/tmp/nativejelly-noatmosacb` is the way back out.
+            if crate::route::stream_immersive(ps) && !nj_base::devtrig::flag("noatmosacb") {
                 let rv = unsafe { super::sink().plane_send_atmos(mt, id.as_ptr()) };
                 super::log(&format!("atmos: acb setMediaAudioData rv={rv}"));
             }
@@ -1548,9 +1548,9 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         if stream {
             // Two-lane feed, then the prime attempt — the ordering and the reason both live in
             // `feed_both_lanes`, so this call site cannot drift from them.
-            plx_base::diag::spans::span("feed", || feed_both_lanes(mt, eng));
+            nj_base::diag::spans::span("feed", || feed_both_lanes(mt, eng));
         } else {
-            plx_base::diag::spans::span("feed", || feed_sample(mt, eng));
+            nj_base::diag::spans::span("feed", || feed_sample(mt, eng));
         }
     }
 
@@ -1631,7 +1631,7 @@ mod tests {
     /// not when the fetch completes.
     #[test]
     fn a_stopped_native_clock_reaches_the_terminal_boundary_the_arithmetic_never_will() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         // Segment 9 demuxed: 48 video AUs at 24 fps and 94 AAC frames, ending the tenth 2 s
         // segment of the stream (`hls: segment=9 ... v=48 a=94`, log line 235).
         SHARED.hls_video_tail_ns.store(29_958_000_000, Release);
@@ -1762,7 +1762,7 @@ mod tests {
     /// rather than as a gap the size of the seek.
     #[test]
     fn a_seek_leaves_no_silence_observation_behind() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let restore = SHARED.dg_vpres_at.swap(0, Relaxed);
         assert_eq!(
             native_clock_silence_ms(),
@@ -1796,7 +1796,7 @@ mod tests {
     /// resets the mailbox. Returns what was carried, the mailbox after the re-arm, and whether the
     /// reducer still owed the seek intent.
     fn run_carry(pending_seek: i64, pressed: Option<i64>) -> (Option<i64>, i64, bool) {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         TX.reset();
         crate::route::reject_user_seek();
         if let Some(target) = pressed {

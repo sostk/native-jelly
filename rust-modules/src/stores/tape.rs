@@ -1,6 +1,6 @@
 //! Resource boundary for the controlled content domain: the record/replay tape the Metadata,
 //! Person and Collection stores call through. It lives with the stores it serves (and names only
-//! data modules, `plex` and `plx_machine::landgate`), so the data layer reaches no application module.
+//! data modules, `plex` and `nj_machine::landgate`), so the data layer reaches no application module.
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
@@ -59,7 +59,7 @@ pub(crate) fn admit(request: Value, launch: impl FnOnce() -> bool) -> bool {
             let key = request["slot"].as_u64().and_then(|v| u32::try_from(v).ok())
                 .zip(request["gen"].as_u64().and_then(|v| u32::try_from(v).ok()));
             if let Some(key) = key {
-                if t.person.values().copied().sum::<u32>() >= 4 * (crate::plex::MAX_SERVERS * 3 + 2) as u32 {
+                if t.person.values().copied().sum::<u32>() >= 4 * (crate::catalog::MAX_SERVERS * 3 + 2) as u32 {
                     t.failure = Some("person admission evidence capacity exceeded");
                 } else { *t.person.entry(key).or_default() += 1; }
             } else { t.failure = Some("invalid person admission binding"); }
@@ -110,7 +110,7 @@ fn person_completion(t: &mut Tape, slot: u32, data: &Value) -> Result<(), &'stat
 /// tape answers ([`poll`]) and the landing is reported to the gate itself; otherwise the landing
 /// gate schedules the take. The one spelling of that choice for the Person and Collection stores.
 pub(crate) fn take_store_landing<T: serde::Serialize + serde::de::DeserializeOwned>(
-    gate: &plx_machine::landgate::Gate, id: super::StoreId, store: &str, slot: u32,
+    gate: &nj_machine::landgate::Gate, id: super::StoreId, store: &str, slot: u32,
     fetch: &super::Fetch<T>) -> Option<T> {
     if active() {
         let reply = poll(store, slot, || fetch.take());
@@ -241,12 +241,12 @@ pub(crate) fn validate_admission(value: &Value, client: u32) -> Result<(), &'sta
             && r["sid"] == 0 && r["client"] == client && r["rk"].as_str().is_some_and(|s| !s.is_empty()) => {}
         Some("person") => {
             let slot = r["slot"].as_u64().ok_or("invalid person admission slot")?;
-            if slot >= (crate::plex::MAX_SERVERS * 3 + 2) as u64
+            if slot >= (crate::catalog::MAX_SERVERS * 3 + 2) as u64
                 || !r["guid"].is_string() || r["arg"].as_array().is_none_or(|v|
                     v.is_empty() || v.iter().any(|v| !v.is_string())) {
                 return Err("invalid person admission");
             }
-            let global = slot >= (crate::plex::MAX_SERVERS * 3) as u64;
+            let global = slot >= (crate::catalog::MAX_SERVERS * 3) as u64;
             if global {
                 if !keys(r, &["store","slot","gen","arg","guid"]) { return Err("invalid global person admission"); }
             } else if !keys(r, &["store","slot","gen","arg","guid","local","client","sid"])
@@ -282,8 +282,8 @@ mod tests {
 
     #[test]
     fn p2_person_slot_kinds_are_exhaustive_and_duplicate_mail_is_rejected() {
-        let _guard = plx_base::testlock::serial();
-        let last_local = (crate::plex::MAX_SERVERS * 3) as u32;
+        let _guard = nj_base::testlock::serial();
+        let last_local = (crate::catalog::MAX_SERVERS * 3) as u32;
         for slot in 0..last_local + 2 {
             let expected = if slot == last_local { "Profile" }
                 else if slot == last_local + 1 { "Credits" }
@@ -311,8 +311,8 @@ mod tests {
 
     #[test]
     fn p2_person_null_variant_mutation_cannot_be_graded() {
-        let _guard = plx_base::testlock::serial();
-        let slot = (crate::plex::MAX_SERVERS * 3 + 1) as u32;
+        let _guard = nj_base::testlock::serial();
+        let slot = (crate::catalog::MAX_SERVERS * 3 + 1) as u32;
         let request = json!({"store":"person","slot":slot,"gen":7,"arg":["person"],"guid":"guid"});
         let admission = json!({"content_resource":true,"request":request,"admitted":true});
         for (kind, gen, admitted, valid) in [

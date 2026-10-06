@@ -12,15 +12,15 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 
 use crate::person::{Credit, Department};
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 use crate::ui::card_row;
 use crate::ui::consts::*;
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Effects, EntryId, GroupId, Handled, InputEvent, InputKind, Key, LogicalState,
     Machine, Measure, Tick,
 };
-use plx_machine::present::{PresentEvent, Provenance};
+use nj_machine::present::{PresentEvent, Provenance};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
 use crate::ui::screen::{
     Activate, At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, FocusSource, Focusable, GroupKind,
@@ -60,7 +60,7 @@ fn route_layout(measure: &dyn Measure) -> RouteLayout {
     RouteLayout::screen_for_title(
         COPY_W,
         RouteLayout::screen().content.w,
-        plx_platform::i18n::msg::browse_person_filmography(),
+        nj_platform::i18n::msg::browse_person_filmography(),
         measure,
     )
 }
@@ -227,7 +227,7 @@ impl FilmographyScreen {
         person: crate::person::PersonView<'_>,
     ) -> Self {
         let person = person.current().filter(|person| {
-            crate::plex::same_item((person.sid, person.key.as_str()), (sid, key.as_str()))
+            crate::catalog::same_item((person.sid, person.key.as_str()), (sid, key.as_str()))
         });
         let mut screen = Self {
             entry,
@@ -261,7 +261,7 @@ impl FilmographyScreen {
 
     fn person<'a, H: PersonLike>(&self, cx: &Cx<'a, H>) -> Option<&'a crate::person::Person> {
         H::person(cx).current().filter(|p| {
-            crate::plex::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
+            crate::catalog::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
         })
     }
 
@@ -280,7 +280,7 @@ impl FilmographyScreen {
         self.dept().map(|d| d.rows.as_slice()).unwrap_or(&[])
     }
 
-    fn current_row(&self, focus: Option<plx_machine::machine::FocusKey<u32>>) -> Option<usize> {
+    fn current_row(&self, focus: Option<nj_machine::machine::FocusKey<u32>>) -> Option<usize> {
         let k = focus.filter(|k| k.entry == self.entry)?;
         match self.locate(k.elem)? {
             Located::Row(i) if i < self.rows().len() => Some(i),
@@ -288,7 +288,7 @@ impl FilmographyScreen {
         }
     }
 
-    fn current_tab(&self, focus: Option<plx_machine::machine::FocusKey<u32>>) -> Option<usize> {
+    fn current_tab(&self, focus: Option<nj_machine::machine::FocusKey<u32>>) -> Option<usize> {
         let k = focus.filter(|k| k.entry == self.entry)?;
         match self.locate(k.elem)? {
             Located::Tab(i) if i < self.model.len() => Some(i),
@@ -298,7 +298,7 @@ impl FilmographyScreen {
 
     fn focused_target(
         &self,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
     ) -> Option<(ServerId, &str)> {
         let i = self.current_row(focus)?;
         self.rows()
@@ -345,13 +345,13 @@ impl FilmographyScreen {
             .copied()
     }
 
-    fn focus_key(&self, located: Located) -> plx_machine::machine::FocusKey<u32> {
+    fn focus_key(&self, located: Located) -> nj_machine::machine::FocusKey<u32> {
         let elem = match located {
             Located::Tab(i) => self.elem_for_tab(i),
             Located::Row(i) => self.elem_for_row(i),
         }
         .unwrap_or(FIRST_ELEM);
-        plx_machine::machine::FocusKey {
+        nj_machine::machine::FocusKey {
             entry: self.entry,
             elem,
         }
@@ -498,7 +498,7 @@ impl FilmographyScreen {
 
     fn rebuild_from(
         &mut self,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
         person: Option<&crate::person::Person>,
     ) {
         self.dirty = false;
@@ -517,7 +517,7 @@ impl FilmographyScreen {
         self.tab_c = self
             .model
             .iter()
-            .map(|d| CString::new(format!("{} · {}", d.title, plx_platform::i18n::current().number(d.total as i64))).unwrap_or_default())
+            .map(|d| CString::new(format!("{} · {}", d.title, nj_platform::i18n::current().number(d.total as i64))).unwrap_or_default())
             .collect();
         let sel = self
             .current_row(focus)
@@ -528,7 +528,7 @@ impl FilmographyScreen {
 
     fn rebuild<H: PersonLike>(
         &mut self,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
         cx: &Cx<'_, H>,
     ) {
         self.rebuild_from(focus, self.person(cx));
@@ -542,7 +542,7 @@ impl FilmographyScreen {
                 let server_name = c
                     .local
                     .as_ref()
-                    .and_then(|(sid, _)| crate::plex::server_facts(*sid).map(|f| f.name.clone()));
+                    .and_then(|(sid, _)| crate::catalog::server_facts(*sid).map(|f| f.name.clone()));
                 credit_row(c, server_name)
             })
             .collect();
@@ -580,10 +580,10 @@ impl FilmographyScreen {
         card_row::reveal(self.tab_hscroll.pos, lo, hi, f32::MAX)
     }
 
-    fn step_preview<H: plx_machine::machine::Host>(
+    fn step_preview<H: nj_machine::machine::Host>(
         &mut self,
         t: Tick,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
         fx: &mut Effects<'_, H>,
     ) -> bool {
         let dt = t.dt();
@@ -606,7 +606,7 @@ impl FilmographyScreen {
             // bug — this settle timer never reported `Motion` — is fixed by the explicit `note`
             // below, with no change to the number itself.
             self.pv_still = self.pv_still + dt;
-            fx.present().note(plx_machine::present::PresentEvent::Motion);
+            fx.present().note(nj_machine::present::PresentEvent::Motion);
             if self.pv_still >= PV_SETTLE && !self.pv_fade.is_swapping() {
                 self.pv_fade.reload();
             }
@@ -653,7 +653,7 @@ impl FilmographyScreen {
 
     fn activate_focus<H: ContentLike>(
         &mut self,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
         fx: &mut Effects<'_, H>,
     ) {
         if let Some(i) = self.current_tab(focus) {
@@ -661,7 +661,7 @@ impl FilmographyScreen {
             return;
         }
         if let Some((sid, rk)) = self.focused_target(focus) {
-            fx.push(plx_machine::machine::Fx::App(AppFx::Content(
+            fx.push(nj_machine::machine::Fx::App(AppFx::Content(
                 ContentReq::Push(ContentArg::Detail {
                     sid,
                     rk: rk.to_string(),
@@ -679,8 +679,8 @@ impl FilmographyScreen {
         self.ground_ready = opaque_ground_ready(f.page_alpha);
         let layout = route_layout(f.measure);
         let total: usize = self.model.iter().map(|d| d.total).sum();
-        let title = plx_platform::i18n::msg::browse_person_filmography();
-        let copy = plx_platform::i18n::msg::browse_person_credits(total as i64);
+        let title = nj_platform::i18n::msg::browse_person_filmography();
+        let copy = nj_platform::i18n::msg::browse_person_credits(total as i64);
         layout.draw_narrative(
             p,
             Some(&self.name),
@@ -847,7 +847,7 @@ impl<H: ContentLike + PersonLike> Focusable<H> for FilmographyScreen {
 
     fn neighbour(
         &self,
-        current: plx_machine::machine::FocusKey<u32>,
+        current: nj_machine::machine::FocusKey<u32>,
         dir: Dir,
         _cx: &Cx<'_, H>,
     ) -> Step<u32> {
@@ -896,9 +896,9 @@ impl<H: ContentLike + PersonLike> Focusable<H> for FilmographyScreen {
 
     fn reconcile(
         &self,
-        want: plx_machine::machine::FocusKey<u32>,
+        want: nj_machine::machine::FocusKey<u32>,
         _cx: &Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
+    ) -> nj_machine::machine::FocusKey<u32> {
         match self.locate(want.elem) {
             Some(Located::Tab(i)) if !self.model.is_empty() => {
                 self.focus_key(Located::Tab(i.min(self.model.len() - 1)))
@@ -907,7 +907,7 @@ impl<H: ContentLike + PersonLike> Focusable<H> for FilmographyScreen {
                 self.focus_key(Located::Row(i.min(self.rows().len() - 1)))
             }
             _ if !self.model.is_empty() => self.focus_key(Located::Tab(self.selected_tab())),
-            _ => plx_machine::machine::FocusKey {
+            _ => nj_machine::machine::FocusKey {
                 entry: self.entry,
                 elem: FIRST_ELEM,
             },
@@ -919,7 +919,7 @@ impl<H: ContentLike + PersonLike> Focusable<H> for FilmographyScreen {
         group: GroupId,
         from: Placed,
         cx: &Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
+    ) -> nj_machine::machine::FocusKey<u32> {
         if group == LIST_GROUP {
             return self.focus_key(Located::Row(0));
         }
@@ -983,7 +983,7 @@ impl<H: ContentLike + PersonLike> Machine<H> for FilmographyScreen {
             }
             ScreenEvent::Activate(elem) => {
                 self.activate_focus(
-                    Some(plx_machine::machine::FocusKey {
+                    Some(nj_machine::machine::FocusKey {
                         entry: self.entry,
                         elem: *elem,
                     }),
@@ -1003,7 +1003,7 @@ impl<H: ContentLike + PersonLike> Machine<H> for FilmographyScreen {
                 kind: InputKind::Key { key: Key::Back, .. },
                 ..
             }) => {
-                fx.push(plx_machine::machine::Fx::App(AppFx::Content(
+                fx.push(nj_machine::machine::Fx::App(AppFx::Content(
                     ContentReq::Back,
                 )));
                 Handled::Yes
@@ -1018,7 +1018,7 @@ impl<H: ContentLike + PersonLike> Machine<H> for FilmographyScreen {
             // restores its focus from ReturnState; resetting here would lose the exact route the
             // legacy person→filmography→detail→BACK flow preserved.
             ScreenEvent::Enter(_) | ScreenEvent::Cover | ScreenEvent::Uncover => Handled::Yes,
-            ScreenEvent::WillLeave(plx_machine::machine::Leave::ForGood) | ScreenEvent::Unmount => {
+            ScreenEvent::WillLeave(nj_machine::machine::Leave::ForGood) | ScreenEvent::Unmount => {
                 self.ground.reset();
                 self.ground_ready = false;
                 Handled::Yes
@@ -1064,7 +1064,7 @@ impl<H: ContentLike + PersonLike> Screen<H> for FilmographyScreen {
         self.ground_ready
     }
 
-    fn memory_at(&self, _focus: Option<plx_machine::machine::FocusKey<u32>>) -> PageMemory {
+    fn memory_at(&self, _focus: Option<nj_machine::machine::FocusKey<u32>>) -> PageMemory {
         PageMemory::Filmography(self.memory())
     }
 
@@ -1081,7 +1081,7 @@ impl<H: ContentLike + PersonLike> Screen<H> for FilmographyScreen {
 mod tests {
     use super::*;
     use crate::ui::fixture::FixtureMeasure;
-    use plx_machine::machine::{
+    use nj_machine::machine::{
         Edge, FocusRead, Host, InputOwner, PressId, PressRead, Source, Stamped, Tick,
     };
 
@@ -1119,7 +1119,7 @@ mod tests {
         }
     }
 
-    fn screen(entry: u32, _serial: &plx_base::testlock::Serial) -> FilmographyScreen {
+    fn screen(entry: u32, _serial: &nj_base::testlock::Serial) -> FilmographyScreen {
         let mut s =
             FilmographyScreen::new(
                 EntryId(entry), ServerId::UNSET, format!("person-{entry}"),
@@ -1181,13 +1181,13 @@ mod tests {
         s.sync_rows(0, false);
     }
 
-    fn focus(s: &FilmographyScreen, located: Located) -> plx_machine::machine::FocusKey<u32> {
+    fn focus(s: &FilmographyScreen, located: Located) -> nj_machine::machine::FocusKey<u32> {
         s.focus_key(located)
     }
 
     fn cx<'a>(
         measure: &'a FixtureMeasure,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
     ) -> Cx<'a, FilmographyHost> {
         Cx {
             views: crate::person::PersonView::default(),
@@ -1202,15 +1202,15 @@ mod tests {
     fn step_screen(
         s: &mut FilmographyScreen,
         ev: &ScreenEvent<FilmographyHost>,
-        focus: Option<plx_machine::machine::FocusKey<u32>>,
+        focus: Option<nj_machine::machine::FocusKey<u32>>,
     ) -> (Handled, Vec<Stamped<FilmographyHost>>, bool) {
         let measure = FixtureMeasure;
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut out = Vec::new();
         let handled = {
             let mut fx = Effects::new(
                 &mut out,
-                plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+                nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
                 &mut present,
             );
             Machine::<FilmographyHost>::step(s, ev, &cx(&measure, focus), &mut fx)
@@ -1220,7 +1220,7 @@ mod tests {
 
     fn has_content(out: &[Stamped<FilmographyHost>], pred: impl Fn(&ContentReq) -> bool) -> bool {
         out.iter().any(|st| match &st.fx {
-            plx_machine::machine::Fx::App(AppFx::Content(req)) => pred(req),
+            nj_machine::machine::Fx::App(AppFx::Content(req)) => pred(req),
             _ => false,
         })
     }
@@ -1229,7 +1229,7 @@ mod tests {
     /// navigation; TableView receives only the render projection on Tick.
     #[test]
     fn the_cursor_lives_in_the_engine_and_nowhere_in_logical_state() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(7, &_serial);
         let measure = FixtureMeasure;
         let first = focus(&s, Located::Row(0));
@@ -1297,7 +1297,7 @@ mod tests {
     /// and slid independently while the row scrolled back.
     #[test]
     fn the_focus_plate_stays_on_its_label_while_the_department_row_scrolls_and_back() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(5, &_serial);
         s.model = [
             "Actor", "Producer", "Executive Producer", "Director", "Writer", "Appearances",
@@ -1311,7 +1311,7 @@ mod tests {
         let measure = FixtureMeasure;
         let n = s.model.len();
         let path: Vec<usize> = (0..n).chain((0..n).rev()).collect();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut out: Vec<Stamped<FilmographyHost>> = Vec::new();
         let (mut ms, mut scrolled, mut graded) = (0u32, 0.0f32, 0);
         for &i in &path {
@@ -1323,7 +1323,7 @@ mod tests {
                 {
                     let mut fx = Effects::new(
                         &mut out,
-                        plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+                        nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
                         &mut present,
                     );
                     s.tick(c.tick, &c, &mut fx);
@@ -1363,7 +1363,7 @@ mod tests {
     /// Replaces the legacy left-cut pointer test through the engine's placed clip.
     #[test]
     fn a_tab_stop_is_clipped_at_the_content_columns_left_edge() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(3, &_serial);
         s.tab_hscroll.jump(650.0);
         let measure = FixtureMeasure;
@@ -1383,7 +1383,7 @@ mod tests {
 
     #[test]
     fn a_held_dpad_does_not_swap_the_preview() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(4, &_serial);
         s.preview = Some(("Actor".to_string(), "catalog-Film 0".to_string()));
         s.pv_want = s.preview.clone();
@@ -1392,7 +1392,7 @@ mod tests {
         // auto-repeat cadence with the same integer-ms `Tick.ms` sequence a real frame loop
         // produces, which is what `step_preview` itself now reads.
         const DT_US: u32 = 16_667;
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut out: Vec<Stamped<FilmographyHost>> = Vec::new();
         let mut ms: u32 = 0;
         let mut last_repeat_ms: u32 = 0;
@@ -1403,11 +1403,11 @@ mod tests {
             let row_focus = focus(s, Located::Row(row));
             let mut fx = Effects::new(
                 &mut out,
-                plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+                nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
                 &mut present,
             );
             s.step_preview(
-                plx_machine::machine::Tick { ms, dt_us: DT_US },
+                nj_machine::machine::Tick { ms, dt_us: DT_US },
                 Some(row_focus),
                 &mut fx,
             );
@@ -1444,18 +1444,18 @@ mod tests {
     /// countdown toward swapping the preview art.
     #[test]
     fn a_settling_preview_reports_motion_from_inside_advance() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(5, &_serial);
         s.preview = Some(("Actor".to_string(), "catalog-Film 0".to_string()));
         s.pv_want = s.preview.clone();
         let row_focus = focus(&s, Located::Row(1));
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let _ = present.take(0);
         let mut out: Vec<Stamped<FilmographyHost>> = Vec::new();
         for ms in [16, 32, 48] {
             let mut fx = Effects::new(
                 &mut out,
-                plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+                nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
                 &mut present,
             );
             let waiting = s.step_preview(Tick { ms, dt_us: 16_667 }, Some(row_focus), &mut fx);
@@ -1469,7 +1469,7 @@ mod tests {
 
     #[test]
     fn only_a_joined_credit_exposes_a_real_target_and_no_catalog_item() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(9, &_serial);
         select(&mut s, "Writer");
         let held = focus(&s, Located::Row(0));
@@ -1486,8 +1486,8 @@ mod tests {
     #[test]
     fn holding_a_joined_credit_does_not_activate_it_on_release() {
         use crate::ui::input::{InputMachine, PressEvent};
-        use plx_machine::machine::{InstanceId, MachineId, PressArm, PressFrom};
-        let _serial = plx_base::testlock::serial();
+        use nj_machine::machine::{InstanceId, MachineId, PressArm, PressFrom};
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(9, &_serial);
         select(&mut s, "Writer");
         let key = focus(&s, Located::Row(0));
@@ -1519,7 +1519,7 @@ mod tests {
 
     #[test]
     fn cached_credit_activation_targets_participate_in_logical_state() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(9, &_serial);
         select(&mut s, "Writer");
         let key = focus(&s, Located::Row(0));
@@ -1533,7 +1533,7 @@ mod tests {
 
     #[test]
     fn pending_preview_identity_and_commit_deadline_participate_in_logical_state() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(9, &_serial);
         let before = s.hash();
         s.pv_want = Some(("Writer".into(), "catalog-Film 0".into()));
@@ -1548,7 +1548,7 @@ mod tests {
 
     #[test]
     fn live_return_hydrates_the_request_time_department_and_preview() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(9, &_serial);
         select(&mut s, "Writer");
         let saved = s.memory();
@@ -1563,7 +1563,7 @@ mod tests {
 
     #[test]
     fn switching_department_resets_the_list_render_anchor() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(5, &_serial);
         s.table.sel = 8;
         let from = focus(&s, Located::Tab(0));
@@ -1585,7 +1585,7 @@ mod tests {
 
     #[test]
     fn back_emits_modal_dismissal_through_the_content_contract() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(6, &_serial);
         let ev = ScreenEvent::Input(InputEvent {
             at: Tick::default(),
@@ -1606,7 +1606,7 @@ mod tests {
 
     #[test]
     fn joined_row_commit_pushes_detail_and_external_row_does_nothing() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut s = screen(10, &_serial);
         select(&mut s, "Writer");
         let held = focus(&s, Located::Row(0));
@@ -1629,14 +1629,14 @@ mod tests {
 
     #[test]
     fn independent_instances_do_not_share_department_or_preview() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut a = screen(20, &_serial);
         let b = screen(21, &_serial);
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut out = Vec::new();
         let mut fx = Effects::<FilmographyHost>::new(
             &mut out,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(1)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(1)),
             &mut present,
         );
         a.pick_tab(1, &mut fx);
@@ -1649,7 +1649,7 @@ mod tests {
 
     #[test]
     fn restore_preserves_department_preview_and_table_motion() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut original = screen(30, &_serial);
         select(&mut original, "Writer");
         original.preview = Some(("Writer".to_string(), "catalog-Written".to_string()));
@@ -1713,7 +1713,7 @@ mod tests {
 
     #[test]
     fn heartbeat_stays_person_for_the_separately_mounted_modal() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let s = screen(40, &_serial);
         assert_eq!(Screen::<FilmographyHost>::name(&s), "person");
     }
@@ -1728,7 +1728,7 @@ mod tests {
 
     #[test]
     fn restore_holds_stable_department_and_preview_until_async_model_arrives() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut source = screen(50, &_serial);
         select(&mut source, "Writer");
         source.preview = Some(("Writer".to_string(), "catalog-Written".to_string()));
@@ -1758,8 +1758,8 @@ mod tests {
     /// and server name are server text, so what is judged is the trailing value.
     #[test]
     fn every_credit_row_fits_the_table_in_every_language() {
-        use plx_base::fontcov::advances::ShippedMeasure;
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_base::fontcov::advances::ShippedMeasure;
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let credits = [
             credit("A Film With A Rather Long Title Indeed", "An Unusually Long Role Name", 2020, None),
             credit("Undated", "", 0, None),

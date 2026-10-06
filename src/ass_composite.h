@@ -1,5 +1,5 @@
-#ifndef PLX_ASS_COMPOSITE_H
-#define PLX_ASS_COMPOSITE_H
+#ifndef NJ_ASS_COMPOSITE_H
+#define NJ_ASS_COMPOSITE_H
 
 #include <stdint.h>
 #include <string.h>

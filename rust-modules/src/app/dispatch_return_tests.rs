@@ -14,11 +14,11 @@ use crate::stores::{StoreCmd, StoreId, StoreWork};
 use crate::ui::dispatch::{CxParts, Dispatcher, FrameReport, NoTap, Rig, Split};
 use crate::ui::fixture::{FixtureArg, FixtureMeasure};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Effects, FocusKey, Fx, GroupId, Handled, Host, InstanceId, LogicalState, Machine,
     MachineId, NavOp, Stamped, Tick, TimerId,
 };
-use plx_machine::present::Present;
+use nj_machine::present::Present;
 use crate::ui::screen::{
     At, Dir, DrawFrame, Focusable, GroupSpec, Mounter, Placed, ReturnState, Screen, ScreenEvent,
     Step,
@@ -114,7 +114,7 @@ fn booted() -> (Dispatcher<ProbeHost>, ProbeRig) {
     (d, rig)
 }
 fn housekeeping() -> Vec<AppFx> {
-    let target = SectionAddress { epoch: 0, sid: crate::plex::ServerId::from_raw(0), section: 1 };
+    let target = SectionAddress { epoch: 0, sid: crate::catalog::ServerId::from_raw(0), section: 1 };
     vec![
         AppFx::Store(StoreId::Browse, StoreCmd::Browse(BrowseCmd::Addressed {
             target, work: LibraryWork::Want { lo: 0, hi: 24 },
@@ -134,7 +134,7 @@ fn drain(d: &mut Dispatcher<ProbeHost>, rig: &mut ProbeRig, max: u32) {
 
 #[test]
 fn housekeeping_never_captures_page_memory_at_emission_or_execution() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for absorb in [false, true] {
         let (mut d, mut rig) = booted();
         rig.probe.value.set(525);
@@ -147,7 +147,7 @@ fn housekeeping_never_captures_page_memory_at_emission_or_execution() {
 
 #[test]
 fn interleaved_housekeeping_keeps_navigation_bookmarks_at_emission_time_across_carry() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for absorb in [false, true] {
         let (mut d, mut rig) = booted();
         rig.probe.value.set(11);

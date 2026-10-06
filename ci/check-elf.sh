@@ -8,7 +8,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-BIN="${1:-pkg/plxnative}"
+BIN="${1:-pkg/nativejelly}"
 # macOS ships no readelf; fall back to the NDK's, which is on any machine that can build this.
 NDK_BIN="${WEBOS_SDK:-$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot}/bin"
 if [ -z "${READELF:-}" ]; then
@@ -86,7 +86,7 @@ LOAD_BASE=$(awk '/^  LOAD/{print $3}' <<<"$PHEADERS" | LC_ALL=C sort | sed -n '1
   || fail "lowest PT_LOAD is $LOAD_BASE, not $WANT_BASE — update telemetry::sentry::IMAGE_ADDR and re-verify that a real crash still symbolicates"
 
 # (2) The BUILD ID. It is the only thing that pairs a stripped binary a stranger's television
-# faulted in with the pkg/plxnative.debug a release uploaded. `-Wl,--build-id=sha1` is
+# faulted in with the pkg/nativejelly.debug a release uploaded. `-Wl,--build-id=sha1` is
 # unconditional on every link and `strip` preserves it, so an absent one means the flag was lost.
 NOTES=$("$READELF" -n "$BIN") || fail "readelf -n failed"
 grep -qi 'Build ID: *[0-9a-f]\{40\}' <<<"$NOTES" \

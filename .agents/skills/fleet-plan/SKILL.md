@@ -58,17 +58,17 @@ rather than by anything failing loudly. `tools/tv-lock.sh` came out of a second 
 lock schedules; it does not plan.** Two lanes that both want the set still run in series, and that
 queue is invisible in the plan you wrote.
 
-- **A LANE IS A CHECKOUT** — `tools/tv-lock.sh:62`, `LANE="${PLX_TV_LOCK_LANE:-$REPO}"`. What that
+- **A LANE IS A CHECKOUT** — `tools/tv-lock.sh:62`, `LANE="${NJ_TV_LOCK_LANE:-$REPO}"`. What that
   means for planning: **a second worktree on the same Mac is a second lane**, however the prompt
-  describes it. Do not set `PLX_TV_LOCK_LANE` to make two worktrees share one lease — that is
+  describes it. Do not set `NJ_TV_LOCK_LANE` to make two worktrees share one lease — that is
   spelling "we are one lane" at the mechanism whose entire job is to disagree.
 - **`FLAVOR` does not buy you a second lane.** Two installs live on one set, but
   `docs/two-installs.md` §3.2: *"One hardware video plane and one decoder… Two installs cannot play
   at once."* The lease is one directory on the television, with no flavour in it — deliberately.
 - **Everyone else goes to the simulator** — the **`ui-sim`** skill. N instances run at once, and it
   answers layout, focus, navigation, every screen and the whole Plex data layer. Give each lane
-  **its own `SIM_DIR`**: it defaults to `/tmp/plxnative-sim` (`Makefile:845`) and is passed straight
-  through as that instance's `PLXNATIVE_RUNTIME_DIR`, so two lanes on the default share one token
+  **its own `SIM_DIR`**: it defaults to `/tmp/nativejelly-sim` (`Makefile:845`) and is passed straight
+  through as that instance's `NJ_RUNTIME_DIR`, so two lanes on the default share one token
   file, one remote FIFO and one event log.
 - Say the assignment **out loud in every prompt**, including the lanes that don't get it. "No
   device access" is information a worker acts on; silence is a worker that tries `make deploy`,
@@ -166,7 +166,7 @@ code beside it. A lane without one costs a few gigabytes.
 What keeps that in check:
 
 - **`make disk`** (`tools/build-gc.sh`) reports every checkout's derived trees, the external lane
-  trees under `$PLX_FLEET_DIR`, and the free space, in one table; `tools/build-gc.sh
+  trees under `$NJ_FLEET_DIR`, and the free space, in one table; `tools/build-gc.sh
   --orphans | --incremental | --lanes | --worktrees | --all` reclaims. Nothing it deletes is
   anything but `make` output or a lane worktree already fully on `main`. Run it when a lane starts
   failing for space, before launching a fleet, and `--worktrees` followed by `--orphans` after
@@ -191,11 +191,11 @@ What keeps that in check:
   the checkout's path — and are about 40% of a lane's target bytes (0.9 GB for a `make check`-only
   lane, 1.3 GB with the ARM release tree as well; the storage helper's tree and `make sim`'s are not
   seeded: the helper's absolute linker path is part of every unit's fingerprint, and the simulator
-  has not been proven). The seed lives under `$PLX_BUILD_CACHE/cargo-seed/`, is filled at the end of
+  has not been proven). The seed lives under `$NJ_BUILD_CACHE/cargo-seed/`, is filled at the end of
   a green `make check` or an ARM build, and is cloned into a target dir only when that dir does not exist yet. The app
   crate is never in it (cargo judges a path package by mtime alone, so a cloned app artifact could
   be linked silently), and it clones or does nothing: on another volume, off APFS, with
-  `PLX_CARGO_SEED=off`, or when the toolchain, `Cargo.lock` or a cargo config differ from the
+  `NJ_CARGO_SEED=off`, or when the toolchain, `Cargo.lock` or a cargo config differ from the
   seed's, the lane builds cold exactly as before. Builds are still per-checkout. **`du` counts a
   clone's blocks in full**, in the seed and in every lane cloned from it, so `make disk` overstates
   what is on the volume once lanes are seeded: `df` is the truth. `tools/build-gc.sh --cache` prunes
@@ -203,7 +203,7 @@ What keeps that in check:
   free space is below the threshold, so a seed whose donor lanes are gone does not hold ~1.3 GB
   for a month.
 - **The FFmpeg build tree is machine-wide and keyed by its configure flags**, under
-  `$PLX_BUILD_CACHE` (default `~/.cache/plxnative`); see the vendor bullet below.
+  `$NJ_BUILD_CACHE` (default `~/.cache/nativejelly`); see the vendor bullet below.
 
 **The rule: workers run `make check` and nothing that cross-compiles. ONE integrator does the
 cross-build, once, at the end.** Because `make check` now serializes machine-wide, several lanes
@@ -213,7 +213,7 @@ the Makefile) but do not expect N lanes' `make check` calls to finish in paralle
 `make lint` (three named clippy lints) plus
 `cargo test --lib`, `ci/flavor.py --selftest` and `tests/test_harness.py` — all four invoke their
 tool directly, so none of them enters `ci/build-ffmpeg.sh`. The FFmpeg build is reached down exactly
-one chain — `pkg/plxnative` → the Rust staticlib → `pkg/.ffabi-ok` → the header rule at
+one chain — `pkg/nativejelly` → the Rust staticlib → `pkg/.ffabi-ok` → the header rule at
 `Makefile:416` — which means a bare `make`, `make all`, `make deploy`, `make ipk` and `make test`
 all build it and `make check` cannot. (`make macapp` does **not**: `ci/mkmacapp.py` never mentions
 FFmpeg. It costs a fourth cargo target dir, 125 MB, and nothing else.)
@@ -278,7 +278,7 @@ cp "$MAIN/tests/manifest.local.json" "$WT/tests/"        # only for ./tests/run.
   (280 MB, plus the builder's MAC addresses and home path in FFmpeg's configure logs) into a branch
   bound for a public repository**. The `.gitignore` entry that now catches it says so. **You no
   longer need to do anything at all**: since 2026-09-03 `ci/build-ffmpeg.sh` puts the 122 MB source
-  and object tree in a machine-wide cache under `$PLX_BUILD_CACHE` (default `~/.cache/plxnative`),
+  and object tree in a machine-wide cache under `$NJ_BUILD_CACHE` (default `~/.cache/nativejelly`),
   keyed by the configure flags, so a lane that cross-builds compiles nothing and copies out a
   3.8 MB prefix. Measured the day it landed: a cold worktree's `make pkg/.ffabi-ok` went from
   ~2 minutes and 122 MB to **3 seconds and 3.8 MB**.
@@ -330,7 +330,7 @@ cannot be reached once they are running — a hazard you meant to mention is a h
 
    ```sh
    tools/tv-lock.sh acquire --why "clean up after a collision"
-   tools/tv-session.sh down                # closes the app, clears every plxnative-* trigger, relaunches
+   tools/tv-session.sh down                # closes the app, clears every nativejelly-* trigger, relaunches
    tools/tv-lock.sh release
    ```
 

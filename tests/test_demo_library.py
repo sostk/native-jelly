@@ -359,7 +359,7 @@ class Qr(unittest.TestCase):
 
 
 class PlexTvStandIn(unittest.TestCase):
-    """`plxnative-plextv` points the sign-in at the mock: the pin never links."""
+    """`nativejelly-plextv` points the sign-in at the mock: the pin never links."""
 
     def setUp(self):
         self.pms = mock_pms.MockPms(mock_pms.Library())

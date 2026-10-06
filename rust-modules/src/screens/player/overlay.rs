@@ -45,7 +45,7 @@ use crate::appkit::chapters_panel::{chapter_count, ChaptersPart};
 use crate::ui::consts;
 use crate::ui::frame::Budget;
 use crate::appkit::info_panel::InfoPanelPart;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, LogicalState,
     Machine, NavOp,
 };
@@ -281,7 +281,7 @@ impl PlayerOverlayScreen {
 
     pub(crate) fn new(ps: &crate::route::PlaybackSession, meta: crate::metadata::MetadataView<'_>, entry: EntryId, kind: OverlayKind) -> Self {
         let panel = match kind {
-            OverlayKind::Tracks { tab } => Panel::Tracks(plx_base::diag::spans::span("tmnew", || {
+            OverlayKind::Tracks { tab } => Panel::Tracks(nj_base::diag::spans::span("tmnew", || {
                 crate::appkit::track_menu::TrackMenuState::new(ps, meta, tab, subtitle_yours_langs(ps, meta))
             })),
             OverlayKind::Info => Panel::Info(crate::appkit::info_panel::InfoPanelState::new()),
@@ -352,7 +352,7 @@ impl PlayerOverlayScreen {
         }
     }
 
-    /// Resolve `/tmp/plxnative-menupick`'s second field to an absolute row: a plain row number
+    /// Resolve `/tmp/nativejelly-menupick`'s second field to an absolute row: a plain row number
     /// parses as itself (the original contract); the Audio tab's `"boost"`/`"loudness"` are tried
     /// as NAMED targets through [`crate::appkit::track_menu::TrackMenuState::row_for_audio_target`].
     /// `None` when neither applies — an unparseable number, a name on the wrong tab, or an
@@ -368,7 +368,7 @@ impl PlayerOverlayScreen {
         }
     }
 
-    /// Resolve a `"track:N"` target of `/tmp/plxnative-menupick` to the subtitle's index in the
+    /// Resolve a `"track:N"` target of `/tmp/nativejelly-menupick` to the subtitle's index in the
     /// item's list ([`crate::appkit::track_menu::TrackMenuState::sub_track_for_target`]) — root tracks
     /// first, then the ones behind Other languages. `None` for any other target.
     pub(crate) fn resolve_menupick_track(&self, target: &str) -> Option<usize> {
@@ -432,7 +432,7 @@ impl PlayerOverlayScreen {
         }
     }
 
-    /// **The headless track pick** (`/tmp/plxnative-menupick=<tab>,<row>`): seat the cursor on
+    /// **The headless track pick** (`/tmp/nativejelly-menupick=<tab>,<row>`): seat the cursor on
     /// `row` and confirm it, exactly as a viewer's DOWN…DOWN…OK would. It is a method rather than
     /// two calls at the trigger's site because the panel's state is an INSTANCE now — the trigger
     /// presents the surface and the body is mounted at nav commit, a frame later — so the loop

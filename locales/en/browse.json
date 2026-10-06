@@ -324,7 +324,7 @@
     "description": "browse login slow"
   },
   "browse.login.title": {
-    "value": "Sign in to Plex",
+    "value": "Sign in to Jellyfin",
     "description": "browse login title"
   },
   "browse.login.instructions": {
@@ -384,7 +384,7 @@
     "description": "browse login finding"
   },
   "browse.login.connecting": {
-    "value": "Connecting to Plex…",
+    "value": "Connecting to Jellyfin…",
     "description": "browse login connecting"
   },
   "browse.person.eyebrow": {
@@ -674,26 +674,26 @@
     "description": "browse auth timeout"
   },
   "browse.auth.no_servers": {
-    "value": "This Plex account has no server yet.",
+    "value": "This Jellyfin account has no server yet.",
     "description": "browse auth no_servers"
   },
   "browse.auth.no_servers_signed_in_as": {
-    "value": "Signed in as {account}.\nThis Plex account has no server yet.",
+    "value": "Signed in as {account}.\nThis Jellyfin account has no server yet.",
     "args": {
       "account": "str"
     },
     "description": "Sign-in read-out reason when the account has no server: two sentences on two lines (the line break is deliberate and the read-out honours it); {account} is the signed-in account's name, shortened to fit the first line. Without a name the plain no_servers reason is used."
   },
   "browse.auth.refused": {
-    "value": "Your Plex server refused the connection — check its network access settings.",
+    "value": "Your Jellyfin server refused the connection — check its network access settings.",
     "description": "browse auth refused"
   },
   "browse.auth.unreachable": {
-    "value": "Couldn't reach any Plex server — check the connection.",
+    "value": "Couldn't reach any Jellyfin server — check the connection.",
     "description": "browse auth unreachable"
   },
   "browse.auth.plex_unreachable": {
-    "value": "Couldn’t reach Plex. Check your internet connection. An internet connection is needed to sign in.",
+    "value": "Couldn’t reach Jellyfin. Check your internet connection. An internet connection is needed to sign in.",
     "description": "browse auth plex_unreachable"
   },
   "browse.auth.switch_failed": {
@@ -705,7 +705,7 @@
     "description": "browse auth offline_profile"
   },
   "browse.auth.insecure": {
-    "value": "Found your Plex server, but couldn't connect to it securely (HTTPS). Check that your server allows secure connections, then try again.",
+    "value": "Found your Jellyfin server, but couldn't connect to it securely (HTTPS). Check that your server allows secure connections, then try again.",
     "description": "browse auth insecure"
   },
   "browse.auth.no_access": {
@@ -1422,7 +1422,7 @@
     "description": "Diagnostics panel: open http failed"
   },
   "browse.diagnostics.no_plex_pass": {
-    "value": "{version} · no Plex Pass",
+    "value": "{version}",
     "args": {
       "version": "str"
     },
@@ -1478,27 +1478,27 @@
     }
   },
   "browse.auth.discovery_trouble": {
-    "value": "Plex isn't responding. Still trying…",
+    "value": "Jellyfin isn't responding. Still trying…",
     "description": "browse auth discovery_trouble"
   },
   "browse.auth.signin_refused": {
-    "value": "Plex didn't accept this sign-in. Try again.",
+    "value": "Jellyfin didn't accept this sign-in. Try again.",
     "description": "browse auth signin_refused"
   },
   "browse.auth.servers_unreachable": {
-    "value": "plex.tv listed your servers, but none of them answered. Make sure your Plex Media Server is on and online, then try again.",
+    "value": "The directory listed your servers, but none of them answered. Make sure your Jellyfin server is on and online, then try again.",
     "description": "browse auth servers_unreachable"
   },
   "browse.auth.plex_tls": {
-    "value": "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.",
+    "value": "This TV couldn't make a secure connection to the Jellyfin server. Check the TV's date and time, then try again.",
     "description": "browse auth plex_tls"
   },
   "browse.auth.plex_unavailable": {
-    "value": "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.",
+    "value": "The Jellyfin server is having trouble right now, so it wasn't checked. Try again in a few minutes.",
     "description": "browse auth plex_unavailable"
   },
   "browse.auth.profile_signin_refused": {
-    "value": "plex.tv refused {profile}’s sign-in. Try again.",
+    "value": "The server refused {profile}’s sign-in. Try again.",
     "description": "browse auth profile_signin_refused",
     "args": {
       "profile": "str"
@@ -1518,8 +1518,8 @@
   },
   "browse.auth.plex_dns_retry": {
     "value": {
-      "one": "This TV couldn't find plex.tv, so your servers weren't checked. We tried once. Check the TV's internet connection, then try again.",
-      "other": "This TV couldn't find plex.tv, so your servers weren't checked. We tried {count} times. Check the TV's internet connection, then try again."
+      "one": "This TV couldn't find the Jellyfin server, so it wasn't checked. We tried once. Check the TV's internet connection, then try again.",
+      "other": "This TV couldn't find the Jellyfin server, so it wasn't checked. We tried {count} times. Check the TV's internet connection, then try again."
     },
     "description": "Discovery failed after this many attempts; complete retry explanation and remedy",
     "args": {
@@ -1528,8 +1528,8 @@
   },
   "browse.auth.plex_connect_retry": {
     "value": {
-      "one": "This TV couldn't reach plex.tv, so your servers weren't checked. We tried once. Check the TV's internet connection, then try again.",
-      "other": "This TV couldn't reach plex.tv, so your servers weren't checked. We tried {count} times. Check the TV's internet connection, then try again."
+      "one": "This TV couldn't reach the Jellyfin server, so it wasn't checked. We tried once. Check the TV's internet connection, then try again.",
+      "other": "This TV couldn't reach the Jellyfin server, so it wasn't checked. We tried {count} times. Check the TV's internet connection, then try again."
     },
     "description": "Discovery failed after this many attempts; complete retry explanation and remedy",
     "args": {
@@ -1537,27 +1537,27 @@
     }
   },
   "browse.auth.plaintext_offer": {
-    "value": "Your Plex server is on this network but can’t be reached securely. Select Connect to connect without encryption.",
+    "value": "Your Jellyfin server is on this network but can’t be reached securely. Select Connect to connect without encryption.",
     "description": "browse auth plaintext_offer"
   },
   "browse.auth.plaintext_allowed": {
-    "value": "Your Plex server is on this network but can’t be reached securely. Select Try again to connect without encryption.",
+    "value": "Your Jellyfin server is on this network but can’t be reached securely. Select Try again to connect without encryption.",
     "description": "browse auth plaintext_allowed"
   },
   "browse.auth.plaintext_declined_signin": {
-    "value": "You chose not to connect to your Plex server without encryption. Select Try again to be asked again.",
+    "value": "You chose not to connect to your Jellyfin server without encryption. Select Try again to be asked again.",
     "description": "browse auth plaintext_declined_signin"
   },
   "browse.auth.plaintext_revoked_signin": {
-    "value": "Unencrypted connections to your Plex server are off. Select Try again to be asked again.",
+    "value": "Unencrypted connections to your Jellyfin server are off. Select Try again to be asked again.",
     "description": "browse auth plaintext_revoked_signin"
   },
   "browse.auth.plaintext_declined_signed_in": {
-    "value": "You chose not to connect to your Plex server without encryption. Allow it in Settings → Unencrypted connections.",
+    "value": "You chose not to connect to your Jellyfin server without encryption. Allow it in Settings → Unencrypted connections.",
     "description": "browse auth plaintext_declined_signed_in"
   },
   "browse.auth.plaintext_revoked_signed_in": {
-    "value": "Unencrypted connections to your Plex server are off. Turn them on in Settings → Unencrypted connections.",
+    "value": "Unencrypted connections to your Jellyfin server are off. Turn them on in Settings → Unencrypted connections.",
     "description": "browse auth plaintext_revoked_signed_in"
   },
   "browse.auth.plaintext_shared_offer": {
@@ -1603,7 +1603,7 @@
     }
   },
   "browse.auth.plaintext_remote": {
-    "value": "Your Plex server answered only without encryption, from outside this network. Check Remote Access in its settings.",
+    "value": "Your Jellyfin server answered only without encryption, from outside this network. Check Remote Access in its settings.",
     "description": "browse auth plaintext_remote"
   },
   "browse.auth.plaintext_shared_remote": {
@@ -1622,27 +1622,27 @@
   },
   "browse.preferences.stale": {
     "value": "Your profile or preferences changed. Reload settings and try again.",
-    "description": "Plex account preferences: stale error"
+    "description": "Account preferences: stale error"
   },
   "browse.preferences.refused": {
     "value": "The server did not authorize this account request. Sign in again and retry.",
-    "description": "Plex account preferences: refused error"
+    "description": "Account preferences: refused error"
   },
   "browse.preferences.timed_out": {
     "value": "The server took too long to respond. Please retry.",
-    "description": "Plex account preferences: timed out error"
+    "description": "Account preferences: timed out error"
   },
   "browse.preferences.unavailable": {
     "value": "Could not reach the server. Check your connection and retry.",
-    "description": "Plex account preferences: unavailable error"
+    "description": "Account preferences: unavailable error"
   },
   "browse.preferences.invalid_response": {
     "value": "The server returned an unexpected response. Please retry.",
-    "description": "Plex account preferences: invalid response error"
+    "description": "Account preferences: invalid response error"
   },
   "browse.preferences.invalid_preference": {
     "value": "This preference value is not supported.",
-    "description": "Plex account preferences: invalid preference error"
+    "description": "Account preferences: invalid preference error"
   },
   "browse.auth.roster_unreachable": {
     "value": "Couldn’t load profiles — check the connection.",
@@ -1650,7 +1650,7 @@
   },
   "browse.auth.roster_refused": {
     "value": "Switching profiles isn’t available from this profile.",
-    "description": "Read-out on the profile picker when Plex refuses to list profiles for the current profile."
+    "description": "Read-out on the profile picker when the server refuses to list profiles for the current profile."
   },
   "browse.auth.switch_retry": {
     "value": "Couldn't switch profile. Try again.",
@@ -1670,7 +1670,7 @@
   },
   "browse.auth.rediscover_failed": {
     "value": "Couldn't restart server discovery. Try again.",
-    "description": "Sign-in error when the search for Plex servers could not be restarted."
+    "description": "Sign-in error when the search for Jellyfin servers could not be restarted."
   },
   "browse.auth.signed_out": {
     "value": "You're signed out — sign in to use profiles.",
@@ -1726,7 +1726,7 @@
   },
   "browse.diagnostics.field.server": {
     "value": "Server",
-    "description": "Row label in the playback diagnostics read-out (the Plex Media Server version). It is right-aligned into a narrow gutter at the dense diagnostic size, so it must stay short (about 12 characters)."
+    "description": "Row label in the playback diagnostics read-out (the Jellyfin server version). It is right-aligned into a narrow gutter at the dense diagnostic size, so it must stay short (about 12 characters)."
   },
   "browse.diagnostics.field.connection": {
     "value": "Connection",
@@ -1934,11 +1934,11 @@
     "description": "Diagnostics suffix: the measurement's uncertainty as a percentage. es and be put a no-break space before the percent sign."
   },
   "browse.diagnostics.plex_pass": {
-    "value": "{version} · Plex Pass",
+    "value": "{version}",
     "args": {
       "version": "str"
     },
-    "description": "Diagnostics: the server version, and that its owner has Plex Pass (a product name; keep it untranslated)."
+    "description": "Diagnostics: the server version, and the Jellyfin server version."
   },
   "browse.library.no_collections": {
     "value": "No collections in {library}",
@@ -2041,7 +2041,7 @@
     "args": {
       "year": "str"
     },
-    "description": "System toast shown once per app run when the app had to recognise the Plex server by its remembered key because the server's certificate failed its date check (most likely because the television's clock is wrong, but an expired certificate on a correct clock engages it too). Hedged on purpose (\"looks wrong\"): the app cannot know the clock is the cause. {year} is the four-digit year the television believes it is, written as plain digits. The toast wraps at roughly 40 characters per line and shows up to three lines, so keep the whole sentence at 120 characters or fewer and hedge it in every language."
+    "description": "System toast shown once per app run when the app had to recognise the Jellyfin server by its remembered key because the server's certificate failed its date check (most likely because the television's clock is wrong, but an expired certificate on a correct clock engages it too). Hedged on purpose (\"looks wrong\"): the app cannot know the clock is the cause. {year} is the four-digit year the television believes it is, written as plain digits. The toast wraps at roughly 40 characters per line and shows up to three lines, so keep the whole sentence at 120 characters or fewer and hedge it in every language."
   },
   "browse.clock.notice": {
     "value": "TV clock looks wrong. Connected by the remembered key.",
@@ -2049,10 +2049,10 @@
   },
   "browse.clock.no_key": {
     "value": "This TV’s clock looks wrong. Connect the TV to the internet once, then try again.",
-    "description": "Reason line under the failed Home or Library read-out when the Plex server's certificate failed its date check and the app holds no remembered key for that server, so a wrong television clock is the likely cause. Hedged on purpose (\"looks wrong\"): the app cannot know the clock is the cause. Sits in a slot that shows two lines of about 70 characters each; keep the whole sentence under 140 characters."
+    "description": "Reason line under the failed Home or Library read-out when the Jellyfin server's certificate failed its date check and the app holds no remembered key for that server, so a wrong television clock is the likely cause. Hedged on purpose (\"looks wrong\"): the app cannot know the clock is the cause. Sits in a slot that shows two lines of about 70 characters each; keep the whole sentence under 140 characters."
   },
   "browse.clock.key_changed": {
     "value": "Your server’s key has changed. Connect the TV to the internet once so the app can check it again.",
-    "description": "Reason line under the failed Home or Library read-out when the Plex server presented a different key than the one the app remembered, so the app will not trust it while the television's clock cannot be checked. Same two-line slot as the no-key line; keep the whole sentence under 140 characters."
+    "description": "Reason line under the failed Home or Library read-out when the Jellyfin server presented a different key than the one the app remembered, so the app will not trust it while the television's clock cannot be checked. Same two-line slot as the no-key line; keep the whole sentence under 140 characters."
   }
 }

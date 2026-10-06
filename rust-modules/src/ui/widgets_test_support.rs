@@ -22,10 +22,10 @@ use crate::ui::tile::Resume;
 /// same at every point of the unfurl, which is why one number can stand for the band.
 pub(super) fn band_region(w: f32) -> f32 {
     let (h, y) = (TAB_PILL_H + 2.0 * TAB_TRACK_PAD, TOP_BAR_Y - TAB_TRACK_PAD);
-    let track = plx_gfx::gfx::blur_region((crate::ui::consts::SCR_W - w) * 0.5, y, w, h);
+    let track = nj_gfx::gfx::blur_region((crate::ui::consts::SCR_W - w) * 0.5, y, w, h);
     let cap = chip_cap(1.0, CHIP_NAME_MAX);
-    let chip = plx_gfx::gfx::blur_region(cap.x, cap.y, cap.w, cap.h);
-    let u = plx_gfx::gfx::blur_region_union(track, chip);
+    let chip = nj_gfx::gfx::blur_region(cap.x, cap.y, cap.w, cap.h);
+    let u = nj_gfx::gfx::blur_region_union(track, chip);
     u[2] * u[3]
 }
 
@@ -56,14 +56,14 @@ pub(super) fn row(watched: bool, in_progress: bool) -> TileFacts<'static> {
 // Pure over `theme` tokens and the real corner springs, as the block above is.
 
 pub(super) fn ground_hash(ground: &PageGround) -> u64 {
-    let mut c = plx_machine::machine::Canon::new();
+    let mut c = nj_machine::machine::Canon::new();
     ground.write_motion(&mut c);
     c.finish()
 }
 
 pub(super) struct StatusMetrics;
 
-impl plx_machine::machine::Measure for StatusMetrics {
+impl nj_machine::machine::Measure for StatusMetrics {
     fn width(&self, _: &core::ffi::CStr, size: i32, bold: bool) -> f32 {
         // the status note wraps in the reason rung's regular face; everything else measured is
         // the action pill
@@ -175,9 +175,9 @@ pub(super) fn span_of(w: &[f32], i: usize) -> (f32, f32) {
 }
 
 /// The capsule/strip tests drive `Capsule::step`, whose landing frame `Spring::jump`s — and
-/// `Spring::jump` reports to `plx_machine::idle`'s process-global dirty flag. So they are serial by
+/// `Spring::jump` reports to `nj_machine::idle`'s process-global dirty flag. So they are serial by
 /// obligation, not precaution (`xfade.rs`'s rule): under parallel libtest they intermittently
 /// failed OTHER modules' "a settled screen asks for nothing" assertions.
-pub(super) fn serial_for_motion() -> plx_base::testlock::Serial {
-    plx_base::testlock::serial()
+pub(super) fn serial_for_motion() -> nj_base::testlock::Serial {
+    nj_base::testlock::serial()
 }

@@ -1,17 +1,17 @@
-//! The `plxnative-playurl` trigger: a stream to play and the Load payload declaration to play it
+//! The `nativejelly-playurl` trigger: a stream to play and the Load payload declaration to play it
 //! with, parsed beside the one module that acts on it ([`super::engine`]'s `start_bufferfeed`).
 //!
 //! It is a TYPED dev trigger. Its value is a JSON object whose decision half is a
-//! [`crate::metadata::Dovi`], so it can live neither with the trigger primitives (`plx_base::devtrig`
+//! [`crate::metadata::Dovi`], so it can live neither with the trigger primitives (`nj_base::devtrig`
 //! is a base-layer module and names no application type) nor in `crate::dev` (the application
-//! layer, which the player may not name). It is parsed here from `plx_base::devtrig::read`, and a
+//! layer, which the player may not name). It is parsed here from `nj_base::devtrig::read`, and a
 //! release build still folds it away at COMPILE time exactly as before: `read` is `None` without
 //! the `devtriggers` feature, so [`playurl`] answers `None` and no declaration can be injected.
 
 /// A stream to play and **the Load payload declaration to play it with**, with no library item
-/// behind it — `/tmp/plxnative-playurl`, the player-PIPELINE test tier's one entry point.
+/// behind it — `/tmp/nativejelly-playurl`, the player-PIPELINE test tier's one entry point.
 ///
-/// This is the trigger that makes the pipeline testable without Plex. `plxnative-url` already
+/// This is the trigger that makes the pipeline testable without Plex. `nativejelly-url` already
 /// hands the engine a URL, and everything downstream of it — `stream.rs`, `ff.rs`, `aq.rs`, the
 /// pump's `Feed()`, the ACB bind — is byte-identical to a real playback. What it CANNOT do is say
 /// what the stream *is*: the Starfish `Load` payload takes its codecs from `route::stream_vcodec`
@@ -137,7 +137,7 @@ impl PlayDovi {
 /// An `Err` rather than a defaulted object on malformed input, for `crate::dev`'s `parse_servers`' reason: a
 /// run whose declaration was silently dropped grades as "the payload is wrong", when the fault is
 /// a typo in the harness. An empty `url` is an `Err` too — an all-defaults object would send the
-/// engine looking for `plxnative-url` instead and the case would play something else entirely.
+/// engine looking for `nativejelly-url` instead and the case would play something else entirely.
 #[cfg(any(feature = "devtriggers", test))]
 fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
     let p: PlayUrl = serde_json::from_str(s).map_err(|e| e.to_string())?;
@@ -147,7 +147,7 @@ fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
     Ok(p)
 }
 
-/// This boot's URL-and-declaration, if one was armed — `/tmp/plxnative-playurl`.
+/// This boot's URL-and-declaration, if one was armed — `/tmp/nativejelly-playurl`.
 ///
 /// `None` = not armed; `Some(Err)` = armed but unreadable, which the caller logs.
 ///
@@ -157,7 +157,7 @@ fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
 /// `servers` is memoized for the opposite reason — credentials are a property of the boot.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn playurl() -> Option<Result<PlayUrl, String>> {
-    plx_base::devtrig::read("playurl").map(|s| parse_playurl(&s))
+    nj_base::devtrig::read("playurl").map(|s| parse_playurl(&s))
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn playurl() -> Option<Result<PlayUrl, String>> {
@@ -247,7 +247,7 @@ mod tests {
     }
 
     /// An empty `url` must be an Err, not an all-defaults object: on `Ok` the engine would take
-    /// the empty URL, fall through to `plxnative-url` or a local sample, and PLAY SOMETHING ELSE —
+    /// the empty URL, fall through to `nativejelly-url` or a local sample, and PLAY SOMETHING ELSE —
     /// a case grading a stream it was never pointed at. Same class as `dev::parse_servers`' untagged
     /// ordering trap, in different clothes.
     #[test]

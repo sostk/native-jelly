@@ -1,13 +1,13 @@
 //! **One library's own shelves** — the `Library Recommended` rows its server's owner arranged,
 //! quoted rather than composed.
 //!
-//! `GET /hubs/sections/{id}` ([`crate::plex::Client::library_hubs`], verified live 2026-09-05;
+//! `GET /hubs/sections/{id}` ([`crate::catalog::Client::library_hubs`], verified live 2026-09-05;
 //! `docs/pms-api.md` §3a is the record and five of its findings contradict the OpenAPI spec). The
 //! Library screen draws these above its A–Z grid, in one continuous scroll.
 //!
 //! ## Why this is a FIELD on `SecState` and not a store of its own
 //!
-//! The obvious shape was a sibling of [`crate::pms`] keyed by `(ServerId, section_key)` with its
+//! The obvious shape was a sibling of [`crate::catalog_fetch`] keyed by `(ServerId, section_key)` with its
 //! own LRU. [`super::SecState`] is *already* the per-library-section aggregate — it owns that
 //! section's query, verdict, items, focus and scroll — so a second store meant a second section
 //! identity, a second generation gate, a second mailbox and a second retry policy for one library,
@@ -19,7 +19,7 @@
 //!
 //! The grid and the hubs land independently, and **the shelf count sets the grid's absolute
 //! offset** — a late 12-shelf landing would move a focused grid row by 6,588px. "Commit when the
-//! fetch is terminal" does not work, because [`crate::pms::backoff_secs`] is an INFINITE ladder
+//! fetch is terminal" does not work, because [`crate::catalog_fetch::backoff_secs`] is an INFINITE ladder
 //! (2/4/8/16/30s and then 30s forever): terminal never arrives on a dead server, and an ordinary
 //! fail-then-succeed would still shift the grid under a reader.
 //!
@@ -55,8 +55,8 @@
 //! dormancy at all — and the screen that draws the shelves is what woke it.
 #![allow(dead_code)] // the accessors are Landing 3's; see the Dormant note above
 
-use crate::plex::ServerId;
-use crate::pms::{listable, parse_item, PmsMovie, MAX_SHELF_ITEMS};
+use crate::catalog::ServerId;
+use crate::catalog_fetch::{listable, parse_item, PmsMovie, MAX_SHELF_ITEMS};
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -76,11 +76,11 @@ const MAX_SHELVES: usize = 12;
 /// is. The one conversion in this module is [`backoff_frames`].
 const FIRST_PAINT_FRAMES: u32 = 240;
 
-/// [`crate::pms::backoff_secs`]' 2/4/8/16/30s ladder in this module's unit. The ladder is shared —
+/// [`crate::catalog_fetch::backoff_secs`]' 2/4/8/16/30s ladder in this module's unit. The ladder is shared —
 /// hoisted as a PURE function only, deliberately: `pms`'s `landed_ok`/`landed_fail` beside it carry
 /// Home-specific logging, stale-build retention and endpoint-refresh policy that mean nothing here.
 fn backoff_frames(fails: u32) -> u32 {
-    (crate::pms::backoff_secs(fails) * 60.0) as u32
+    (crate::catalog_fetch::backoff_secs(fails) * 60.0) as u32
 }
 
 /// One published shelf: the owner's own row, with its items already filtered and capped.
@@ -94,8 +94,8 @@ pub(crate) struct Shelf {
     /// `/library/collections/{rk}/children` — the collection its linked heading opens.
     pub(crate) key: String,
     /// Where a promoted `custom.collection.*` shelf's linked heading leads, classified once at
-    /// parse ([`crate::plex::collections::promoted_collection_link`]); `None` for every other hub.
-    pub(crate) link: Option<crate::plex::collections::CollectionRef>,
+    /// parse ([`crate::catalog::collections::promoted_collection_link`]); `None` for every other hub.
+    pub(crate) link: Option<crate::catalog::collections::CollectionRef>,
     /// Every item the hub's listing holds (`plex::Hub::total`), which `items` caps — a linked
     /// collection heading's "· N". 0 when the server named no total.
     pub(crate) total: usize,
@@ -221,7 +221,7 @@ pub(crate) struct SecHubs {
     ///
     /// It is cleared when a worker is successfully CLAIMED, never when one is merely attempted.
     owed: bool,
-    /// Consecutive failures, for [`crate::pms::backoff_secs`]' ladder.
+    /// Consecutive failures, for [`crate::catalog_fetch::backoff_secs`]' ladder.
     fails: u32,
     /// Frames left before another attempt may spawn.
     retry_left: u32,
@@ -302,7 +302,7 @@ impl SecHubs {
     /// **The FIRST landing stages too, and that is a correction (2026-09-05).** It used to commit
     /// itself whenever nothing had been published, on the reasoning that inside the first-paint
     /// window there is no layout yet to protect. That reasoning is about the first FRAMES and the
-    /// window is four SECONDS: `/tmp/plxnative-library` boots straight into this screen, two
+    /// window is four SECONDS: `/tmp/nativejelly-library` boots straight into this screen, two
     /// presses reach the grid, and the shelves then inserted themselves above a grid row somebody
     /// was already looking at — the exact 6,588px jump the rest of this machine exists to prevent,
     /// arriving through the one path that did not ask. Whether the ground may move is the SCREEN's
@@ -403,7 +403,7 @@ impl super::BrowseState {
         let Some(sid) = self.section_sid(sec) else {
             return;
         };
-        let Some(client) = crate::plex::client_for(sid) else {
+        let Some(client) = crate::catalog::client_for(sid) else {
             return;
         };
         let token_gen = client.token_gen();
@@ -412,7 +412,7 @@ impl super::BrowseState {
         }
         let epoch = self.table_epoch();
         let worker_adapter = Arc::clone(&adapter);
-        let spawned = plx_base::task::spawn_small("libhubs", move || {
+        let spawned = nj_base::task::spawn_small("libhubs", move || {
             let shelves = catch_unwind(|| {
                 let mc = client.library_hubs(key, HUB_FETCH_COUNT)?;
                 Some(parse_hubs(&mc, sid, key))
@@ -436,7 +436,7 @@ impl super::BrowseState {
     }
 
     pub(crate) fn hubs_land(&mut self, adapter: &Arc<super::BrowseAdapter>,
-        gate: &plx_machine::landgate::Gate) -> bool {
+        gate: &nj_machine::landgate::Gate) -> bool {
         let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             adapter.hubs.result.lock().unwrap_or_else(|e| e.into_inner()).take()
         });
@@ -449,7 +449,7 @@ impl super::BrowseState {
         }
         let still_current = self
             .section_sid(result.sec)
-            .and_then(crate::plex::client_for)
+            .and_then(crate::catalog::client_for)
             .map(|client| {
                 std::ptr::eq(client, result.client) && client.token_gen() == result.token_gen
             })
@@ -465,7 +465,7 @@ impl super::BrowseState {
         };
         match result.shelves {
             Some(shelves) => {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "libhubs: section {} landed {} shelves",
                     result.sec,
                     shelves.len()
@@ -473,7 +473,7 @@ impl super::BrowseState {
                 state.hubs.land_ok(shelves);
             }
             None => {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "libhubs: section {} failed ({} in a row)",
                     result.sec,
                     state.hubs.fails + 1
@@ -482,7 +482,7 @@ impl super::BrowseState {
                 state.hubs.owed = true;
             }
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         true
     }
 
@@ -588,7 +588,7 @@ fn edit_watched(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str, on: bool
     if !shelves
         .iter()
         .flat_map(|shelf| shelf.items.iter())
-        .any(|item| crate::plex::same_item((item.sid, &item.rk), (sid, rk)))
+        .any(|item| crate::catalog::same_item((item.sid, &item.rk), (sid, rk)))
     {
         return false;
     }
@@ -596,8 +596,8 @@ fn edit_watched(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str, on: bool
         .iter_mut()
         .flat_map(|shelf| shelf.items.iter_mut())
     {
-        if crate::plex::same_item((item.sid, &item.rk), (sid, rk)) {
-            crate::pms::set_watched(item, on);
+        if crate::catalog::same_item((item.sid, &item.rk), (sid, rk)) {
+            crate::catalog_fetch::set_watched(item, on);
         }
     }
     true
@@ -608,7 +608,7 @@ fn drop_from_deck(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> boo
         .iter()
         .filter(|shelf| shelf.is_continue)
         .flat_map(|shelf| shelf.items.iter())
-        .any(|item| crate::plex::same_item((item.sid, &item.rk), (sid, rk)))
+        .any(|item| crate::catalog::same_item((item.sid, &item.rk), (sid, rk)))
     {
         return false;
     }
@@ -618,7 +618,7 @@ fn drop_from_deck(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> boo
         let before = shelf.items.len();
         shelf
             .items
-            .retain(|item| !crate::plex::same_item((item.sid, &item.rk), (sid, rk)));
+            .retain(|item| !crate::catalog::same_item((item.sid, &item.rk), (sid, rk)));
         hit |= shelf.items.len() != before;
     }
     shelves.retain(|shelf| !shelf.items.is_empty());
@@ -664,7 +664,7 @@ pub(crate) fn seed_named_shelves_for_owner_test(
             .map(|(id, key, title)| Shelf {
                 id: (*id).into(),
                 key: (*key).into(),
-                link: crate::plex::collections::promoted_collection_link(sid, id, key, title, section),
+                link: crate::catalog::collections::promoted_collection_link(sid, id, key, title, section),
                 total: per_row,
                 title: (*title).into(),
                 is_continue: shelf_is_continue(id, key),
@@ -729,7 +729,7 @@ pub(crate) fn seed_landscape_for_owner_test(
 pub(super) struct HubResult {
     epoch: u32,
     sec: usize,
-    client: &'static crate::plex::Client,
+    client: &'static crate::catalog::Client,
     token_gen: u32,
     /// `None` is a FAILED fetch — kept distinguishable from a successful answer that happens to be
     /// empty, which on this endpoint is a common and legitimate reply.
@@ -741,12 +741,12 @@ pub(super) struct HubResult {
 /// One response into published shelves. **Pure**, so every rule below is host-graded against the
 /// fixture in this module's tests rather than inferred from a screenshot.
 ///
-/// The filter is [`crate::pms`]'s: allow only the types this product can list, require a title
+/// The filter is [`crate::catalog_fetch`]'s: allow only the types this product can list, require a title
 /// and a thumb, and read the ITEM's own `type` rather than the hub's — which can be `mixed`. An
 /// EMPTY hub is dropped entirely, which §3a measured as the common case (one movie section
 /// answered with 6 hubs of which 5 were empty), so this is required rather than tidy: a client
 /// that draws what it is given draws five headings over nothing.
-pub(crate) fn parse_hubs(mc: &crate::plex::MediaContainer, sid: ServerId, section: i64) -> Vec<Shelf> {
+pub(crate) fn parse_hubs(mc: &crate::catalog::MediaContainer, sid: ServerId, section: i64) -> Vec<Shelf> {
     let mut out = Vec::new();
     for hub in &mc.hub {
         if out.len() >= MAX_SHELVES {
@@ -771,12 +771,12 @@ pub(crate) fn parse_hubs(mc: &crate::plex::MediaContainer, sid: ServerId, sectio
             landscape: is_episode_shelf(&items),
             id: hub.hub_identifier.clone(),
             key: hub.key.clone(),
-            link: crate::plex::collections::promoted_collection_link(
+            link: crate::catalog::collections::promoted_collection_link(
                 sid, &hub.hub_identifier, &hub.key, &hub.title, section,
             ),
             total: hub.total(),
-            title: crate::plex::hub_title::localized_hub_title(
-                crate::plex::hub_title::Scope::Section,
+            title: crate::catalog::hub_title::localized_hub_title(
+                crate::catalog::hub_title::Scope::Section,
                 &hub.hub_identifier,
                 &hub.title,
             ),
@@ -868,7 +868,7 @@ mod tests {
         first
             .remembered
             .push((super::super::SecKind::Movie, "machine-a".into(), 7));
-        first.recorded = Some(crate::plex::session::HomePins {
+        first.recorded = Some(crate::catalog::session::HomePins {
             user: "profile-a".into(),
             asked: true,
             on: Vec::new(),
@@ -999,8 +999,8 @@ mod tests {
     /// The one parse seam these tests need: the wire envelope, exactly as `Client::get_json`
     /// unwraps it, so the fixtures below are graded through the real deserializer rather than a
     /// hand-built container that could not have come off a socket.
-    fn container(json: &str) -> crate::plex::MediaContainer {
-        serde_json::from_slice::<crate::plex::Envelope>(json.as_bytes())
+    fn container(json: &str) -> crate::catalog::MediaContainer {
+        serde_json::from_slice::<crate::catalog::Envelope>(json.as_bytes())
             .expect("the fixture parses")
             .media_container
     }
@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!(mixed.items[1].kind, 3, "an episode");
     }
 
-    /// The section-scope half of issue #12's fix (`crate::plex::hub_title`): a library's own
+    /// The section-scope half of issue #12's fix (`crate::catalog::hub_title`): a library's own
     /// `/hubs/sections/{id}` Recently Added hub (`tv.recentlyadded.1`/`movie.recentlyadded.1`,
     /// PMS's own title is a plain "Recently Added" here — §3a) renders THIS client's `be` catalog
     /// string under a `be` UI, the same unconditional override Home already gets, while a hub
@@ -1078,7 +1078,7 @@ mod tests {
     /// against a plain `hub.title.clone()` before the override was wired in.
     #[test]
     fn a_be_ui_localizes_the_section_recently_added_hub_and_leaves_an_unknown_one_alone() {
-        let _thread_locale = plx_platform::i18n::language_on_this_thread_for_test(plx_platform::i18n::Preference::Be);
+        let _thread_locale = nj_platform::i18n::language_on_this_thread_for_test(nj_platform::i18n::Preference::Be);
         let json = r#"{"MediaContainer":{"Hub":[
           {"hubIdentifier":"tv.recentlyadded.1","title":"Recently Added","type":"mixed",
            "Metadata":[{"ratingKey":"2001","type":"show","title":"Beta","thumb":"/t/2001"}]},
@@ -1223,7 +1223,7 @@ mod tests {
 
     #[test]
     fn publication_revision_observes_in_place_deck_removal() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         seed_shelves_for_owner_test(&mut state, sec, &["movie.inprogress.1"], 3);
         let before = state.hubs_snapshot(sec);
@@ -1245,7 +1245,7 @@ mod tests {
 
     #[test]
     fn publication_revision_tracks_commits_not_staging_or_snapshot_reads() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         let before = state.hubs_snapshot(sec);
         let revision = before.view().revision();
@@ -1268,7 +1268,7 @@ mod tests {
 
     #[test]
     fn publication_revision_changes_for_visible_watch_edits_but_not_staged_only_edits() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         let before = state.hubs_snapshot(sec);
         let revision = before.view().revision();
@@ -1317,7 +1317,7 @@ mod tests {
 
     #[test]
     fn snapshot_acquisition_shares_the_publication_and_captures_its_real_identity() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (state, sec) = seeded_section();
         let sid = state.section_sid(sec).unwrap();
         let section = state.sections()[sec].key;
@@ -1354,7 +1354,7 @@ mod tests {
 
     #[test]
     fn a_retained_snapshot_survives_commit_staged() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         state.state_mut(sec)
             .unwrap()
@@ -1383,7 +1383,7 @@ mod tests {
 
     #[test]
     fn watched_edits_are_copy_on_write_and_an_unmatched_edit_copies_nothing() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         let (sid, rk) = {
             let section = state.state_mut(sec).unwrap();
@@ -1437,7 +1437,7 @@ mod tests {
 
     #[test]
     fn a_retained_snapshot_survives_reset_and_the_reused_index_gets_a_new_identity() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let (mut state, sec) = seeded_section();
         let retained = state.hubs_snapshot(sec);
         let old = retained.view();
@@ -1475,7 +1475,7 @@ mod tests {
 
     /// **A landing INSIDE the window still asks whether the ground may move.** It used to commit
     /// itself, on the reasoning that a page with no layout yet has nothing to protect — but the
-    /// window is four SECONDS, and `/tmp/plxnative-library` plus two presses is a viewer standing
+    /// window is four SECONDS, and `/tmp/nativejelly-library` plus two presses is a viewer standing
     /// in the grid well inside it. So the first paint takes the same permission every later one
     /// does; at the head that is granted in the same frame the landing pumps, which is why nothing
     /// waits in the ordinary case.
@@ -1582,8 +1582,8 @@ mod tests {
     /// is precisely which of the two sets that function reaches.
     #[test]
     fn removing_from_the_deck_reaches_the_staged_set_as_well() {
-        let _g = plx_base::testlock::serial();
-        let _t = crate::plex::session::TempSession::new("deckstage");
+        let _g = nj_base::testlock::serial();
+        let _t = crate::catalog::session::TempSession::new("deckstage");
         _t.watching("u-deckstage");
         let mut state = super::super::BrowseState::default();
         super::super::seed_two_source_table_for_owner_test(&mut state);

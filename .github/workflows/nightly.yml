@@ -232,7 +232,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          ipk="plxnative-v${LABEL}.ipk"
+          ipk="nativejelly-v${LABEL}.ipk"
           cp raw/com.sostk.nativejelly.nightly_*_arm.ipk "dist/$ipk"
           ( cd dist && sha256sum "$ipk" > nightly.sha256 )
           # The LGPL corresponding source for the bundled FFmpeg — required here for the same
@@ -240,7 +240,7 @@ jobs:
           # regardless of which install it is.
           cp raw/ffmpeg-*.tar.xz dist/
           cp raw/build-ffmpeg.sh dist/
-          cp raw/plxnative-source-*.tar.gz* dist/
+          cp raw/nativejelly-source-*.tar.gz* dist/
           echo "ipk=$ipk" >> "$GITHUB_OUTPUT"
         id: stage
       - name: Render release notes
@@ -273,7 +273,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$TAG" \
-            "dist/$IPK" dist/nightly.sha256 dist/ffmpeg-*.tar.xz dist/build-ffmpeg.sh dist/plxnative-source-*.tar.gz* \
+            "dist/$IPK" dist/nightly.sha256 dist/ffmpeg-*.tar.xz dist/build-ffmpeg.sh dist/nativejelly-source-*.tar.gz* \
             --target "$SHA" \
             --title "PlxNative $LABEL" \
             --prerelease \

@@ -15,7 +15,7 @@ pub(crate) struct GlassPlan {
     /// frame's material. The strip borrows it during paint; the Bridge never owns a second copy.
     tab: TabBand,
     /// The dev backdrop-glass load dial and the blurred-transition prototype beside it
-    /// (`/tmp/plxnative-glassload`, `/tmp/plxnative-navblur`).
+    /// (`/tmp/nativejelly-glassload`, `/tmp/nativejelly-navblur`).
     dial: Dial,
 }
 
@@ -44,7 +44,7 @@ impl GlassPlan {
         &mut self.tab
     }
 
-    pub(crate) fn tab_face(&self) -> Option<plx_gfx::gfx::GlassFace> {
+    pub(crate) fn tab_face(&self) -> Option<nj_gfx::gfx::GlassFace> {
         self.tab.face()
     }
 
@@ -59,16 +59,16 @@ impl GlassPlan {
     }
 
     #[cfg(test)]
-    pub(crate) fn set_tab_face_for_test(&mut self, face: plx_gfx::gfx::GlassFace) {
+    pub(crate) fn set_tab_face_for_test(&mut self, face: nj_gfx::gfx::GlassFace) {
         self.tab.set_face(face);
     }
 
-    /// Arm the load dial from `/tmp/plxnative-glassload`'s content.
+    /// Arm the load dial from `/tmp/nativejelly-glassload`'s content.
     pub(crate) fn configure_dial(&mut self, spec: &str) {
         self.dial.configure(spec);
     }
 
-    /// Arm the blurred-transition prototype from `/tmp/plxnative-navblur`'s content.
+    /// Arm the blurred-transition prototype from `/tmp/nativejelly-navblur`'s content.
     pub(crate) fn configure_navblur(&mut self, spec: &str) {
         self.dial.configure_navblur(spec);
     }
@@ -114,7 +114,7 @@ mod tests {
     /// pair made impossible to assert.
     #[test]
     fn the_dial_travels_with_the_plan_it_was_armed_on() {
-        let _g = plx_base::testlock::serial(); // the published step snapshot is process-wide
+        let _g = nj_base::testlock::serial(); // the published step snapshot is process-wide
         let mut armed = GlassPlan::new();
         let untouched = GlassPlan::new();
         assert!(!armed.dial.armed(), "a fresh plan is disarmed");
@@ -152,11 +152,11 @@ mod tests {
     /// plan at its fresh values; a process static or Bridge-owned field cannot satisfy this.
     #[test]
     fn two_glass_plans_own_independent_tab_bands() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut a = GlassPlan::new();
         let b = GlassPlan::new();
         a.seed_tab_density_for_test(0.73);
-        a.set_tab_face_for_test(plx_gfx::gfx::GlassFace {
+        a.set_tab_face_for_test(nj_gfx::gfx::GlassFace {
             scrim_top: [0.1, 0.2, 0.3, 0.4],
             scrim_bot: [0.5, 0.6, 0.7, 0.8],
             rim: [0.0; 4], rim_lit: [0.0; 4], rim_w: 1.0,

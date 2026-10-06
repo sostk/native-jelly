@@ -7,7 +7,7 @@ use super::test_support::*;
 
 #[test]
 fn collection_rows_have_their_own_kind_and_unknown_types_are_not_listable() {
-    let row = |kind: &str| crate::plex::Metadata {
+    let row = |kind: &str| crate::catalog::Metadata {
         kind: kind.into(), rating_key: "42".into(), title: "Not a movie".into(),
         thumb: "/poster".into(), ..Default::default()
     };
@@ -24,7 +24,7 @@ fn collection_rows_have_their_own_kind_and_unknown_types_are_not_listable() {
 /// `childCount` into it, so a show's season count never masquerades as one.
 #[test]
 fn a_collection_row_carries_its_member_count() {
-    let row = |kind: &str, child_count: i64| crate::plex::Metadata {
+    let row = |kind: &str, child_count: i64| crate::catalog::Metadata {
         kind: kind.into(), rating_key: "50001".into(), title: "Trilogy".into(), child_count,
         ..Default::default()
     };
@@ -38,7 +38,7 @@ fn a_collection_row_carries_its_member_count() {
 /// bar, the item menu) trusts the row.
 #[test]
 fn a_collection_row_has_no_watch_or_resume_state() {
-    let row = crate::plex::Metadata {
+    let row = crate::catalog::Metadata {
         kind: "collection".into(), rating_key: "50001".into(), title: "Trilogy".into(),
         view_count: 2, view_offset: 60_000, duration: 120_000, leaf_count: 3, viewed_leaf_count: 3,
         ..Default::default()
@@ -52,7 +52,7 @@ fn a_collection_row_has_no_watch_or_resume_state() {
 #[test]
 #[should_panic(expected = "requires its server in the retained Browse directory")]
 fn a_directory_scoped_hubs_fixture_refuses_an_empty_browse_publication() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut o = Owner::default();
     let directory = crate::stores::browse::DirectorySnapshot::default();
     seed_for_directory_test(
@@ -61,7 +61,7 @@ fn a_directory_scoped_hubs_fixture_refuses_an_empty_browse_publication() {
 
 #[test]
 fn every_catalog_commit_advances_the_published_generation() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     let before = o.state.catalog_gen;
@@ -72,7 +72,7 @@ fn every_catalog_commit_advances_the_published_generation() {
 
 #[test]
 fn retained_home_publication_survives_commit_and_reset_without_copying_items() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut o = Owner::default();
     seed_for_test(&mut o.state, &o.adapter, 3, HubState::Ready);
     let first = hubs_snapshot(&o.state);
@@ -128,7 +128,7 @@ fn home_group_falls_back_to_provider_key_not_label_or_position() {
 #[test]
 fn an_episode_keeps_its_own_still_without_a_show_poster() {
     let ep = |gp: &str| {
-        let it = crate::plex::Metadata {
+        let it = crate::catalog::Metadata {
             kind: "episode".into(),
             rating_key: "9".into(),
             title: "The Meeting".into(),
@@ -158,7 +158,7 @@ fn an_episode_keeps_its_own_still_without_a_show_poster() {
 
     // a MOVIE carries no still: its `thumb` already IS its own artwork
     let film = parse_item(
-        &crate::plex::Metadata {
+        &crate::catalog::Metadata {
             kind: "movie".into(),
             rating_key: "4".into(),
             title: "Snatch".into(),
@@ -172,7 +172,7 @@ fn an_episode_keeps_its_own_still_without_a_show_poster() {
 
 #[test]
 fn a_flat_season_listing_keeps_its_show_title_and_own_poster() {
-    let season: crate::plex::Metadata = serde_json::from_str(r#"{
+    let season: crate::catalog::Metadata = serde_json::from_str(r#"{
         "type":"season", "ratingKey":"17", "title":"Season 2", "index":2,
         "parentRatingKey":"9", "parentTitle":"Example Show", "thumb":"/season/poster"
     }"#).unwrap();
@@ -192,7 +192,7 @@ fn a_flat_season_listing_keeps_its_show_title_and_own_poster() {
 /// the wrong film from the item menu and the wrong backdrop on the detail page.
 #[test]
 fn a_catalog_row_is_found_by_its_server_and_key_never_by_the_key_alone() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     let (a, b) = (sid(0), sid(1));
@@ -243,7 +243,7 @@ fn a_catalog_row_is_found_by_its_server_and_key_never_by_the_key_alone() {
 /// the state machine must come back as a fresh boot's (Loading, no source, no backoff owed).
 #[test]
 fn reset_wipes_the_catalog_and_re_arms_the_fetch() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     seed(&mut o.state, vec![src(0, "", HubState::Ready, Some(build_test(4)))]);
     reset(&mut o.state, &o.adapter);

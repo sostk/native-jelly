@@ -33,10 +33,10 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
-CRATE = "plxnative_modules"
+CRATE = "nativejelly_modules"
 # The layer crates split out of the app crate (docs/module-layers.md), each a dependency of it and
 # each held to the same rule: an rlib, never an archive. One archive is linked, and it is the app's.
-LAYER_CRATES = ("plx_base", "plx_machine", "plx_net", "plx_platform", "plx_gfx")
+LAYER_CRATES = ("nj_base", "nj_machine", "nj_net", "nj_platform", "nj_gfx")
 NIGHTLY = os.environ.get("RUST_NIGHTLY", "nightly")
 # What the workspace needs for cargo to resolve (not compile) the app package: the manifest and
 # lockfile, the `.cargo/config.toml` that cargo finds from the working directory, and the sources
@@ -130,7 +130,7 @@ class ParserTests(unittest.TestCase):
                               for u in self.graph(types, name=layer)["units"]]}
         self.assertEqual(layer_offences(layers()), [])
         self.assertEqual(layer_offences(layers(("staticlib",))), [(layer, "staticlib") for layer in LAYER_CRATES])
-        self.assertEqual(layer_offences(layers(skip=("plx_machine",))), [("plx_machine", "no library unit at all")])
+        self.assertEqual(layer_offences(layers(skip=("nj_machine",))), [("nj_machine", "no library unit at all")])
         self.assertEqual(layer_offences(self.graph()), [(layer, "no library unit at all") for layer in LAYER_CRATES])
 
     def test_other_crates_may_be_archives(self):

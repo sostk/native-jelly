@@ -256,7 +256,7 @@ pub fn set_saved_preference(value: Preference) {
 
 #[cfg(any(test, feature = "test-support"))]
 pub fn saved_preference_for_test(value: Preference) -> Preference {
-    plx_base::testlock::assert_held("saved language preference");
+    nj_base::testlock::assert_held("saved language preference");
     let previous = saved_preference();
     set_saved_preference(value);
     previous
@@ -344,13 +344,13 @@ pub fn initialize(preference: Preference, controlled: bool) {
         .map(|v| (v.ui.as_deref(), v.fmt.as_deref(), v.clock.as_deref()))
         .unwrap_or_default();
     #[cfg(feature = "hostsim")]
-    let simulated_format = std::env::var("PLXNATIVE_FORMAT_LOCALE").ok();
+    let simulated_format = std::env::var("NJ_FORMAT_LOCALE").ok();
     #[cfg(feature = "hostsim")]
     let fmt = simulated_format.as_deref().or(fmt);
     #[allow(unused_mut)]
     let mut cx = LocaleContext::resolve(preference, ui, fmt, clock, env.as_deref());
     #[cfg(feature = "hostsim")]
-    if let Ok(forced) = std::env::var("PLXNATIVE_LOCALE") {
+    if let Ok(forced) = std::env::var("NJ_LOCALE") {
         cx = LocaleContext::resolve(
             Preference::from_tag(&forced),
             Some(&forced),
@@ -362,7 +362,7 @@ pub fn initialize(preference: Preference, controlled: bool) {
             cx.language = Language::Pseudo;
         }
     }
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "locale: source={} preference={} ui={} format={} clock={:?}",
         if info.is_some() {
             "settings"
@@ -377,7 +377,7 @@ pub fn initialize(preference: Preference, controlled: bool) {
         cx.clock()
     ));
     if CURRENT.set(cx).is_err() {
-        plx_base::eventlog::log("locale: initialization already completed");
+        nj_base::eventlog::log("locale: initialization already completed");
     }
 }
 #[derive(Default)]
@@ -407,12 +407,12 @@ fn platform_locale() -> Option<SystemLocale> {
         crate::tv::LocaleReply::Reply(raw) => {
             let info = parse_reply(&raw);
             if info.is_none() {
-                plx_base::eventlog::log("locale: settings refused or returned malformed localeInfo");
+                nj_base::eventlog::log("locale: settings refused or returned malformed localeInfo");
             }
             info
         }
         crate::tv::LocaleReply::Unavailable => {
-            plx_base::eventlog::log("locale: settings unavailable; using fallback");
+            nj_base::eventlog::log("locale: settings unavailable; using fallback");
             None
         }
     }

@@ -19,7 +19,7 @@ pub(crate) enum SearchCmd {
     /// Sign-out / profile switch: drop the query and every shelf.
     Reset,
     /// The optimistic half of a view-state write, on the result shelves.
-    SetWatchedLocal { sid: crate::plex::ServerId, rk: String, on: bool },
+    SetWatchedLocal { sid: crate::catalog::ServerId, rk: String, on: bool },
 }
 
 /// One Search owner: logical state, the worker adapter all current fetches capture, and notice.
@@ -115,7 +115,7 @@ impl SearchStore {
         &mut self,
         dt: f32,
         directory: crate::stores::browse::DirectoryView<'_>,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
     ) -> bool {
         let changed = self.state.pump_with_directory_and_gate(&self.adapter, dt, directory, gate);
         if changed {

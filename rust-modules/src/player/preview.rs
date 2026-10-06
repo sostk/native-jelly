@@ -45,7 +45,7 @@
 //! the plan is about 958 KiB (`ui/frame/render_set.rs`). 958 / 64 is 14.96, so the ceiling is 14
 //! admitted Loads, under the ratio rather than on it. Do not quote 14 as a television result.
 
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 
 /// Admitted Loads per process, from the source arithmetic above. Not a device measurement.
 pub(crate) const CYCLE_BUDGET: u32 = 14;
@@ -442,8 +442,8 @@ pub(crate) fn defer_media_join(loading: bool, thread_finished: bool) -> bool {
     loading && !thread_finished
 }
 
-plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-nopreview` — disable background trailer autoplay. Latched: `enabled()`
+nj_base::devtrig::latched_flag!(
+    /// `/tmp/nativejelly-nopreview` — disable background trailer autoplay. Latched: `enabled()`
     /// runs on `preview_tick`'s every-frame path (via `blocked`) while the detail hero holds
     /// focus, and a `devtrig::flag` read is a `stat(2)` syscall per call.
     fn nopreview_armed = "nopreview";
@@ -454,7 +454,7 @@ pub(crate) fn enabled() -> bool {
     // never takes `session::IO`, which on the television guards a `recv(2)` round trip to the
     // storage helper, measured at ~27 ms/frame here before the cache existed (2026-09-18, the
     // detail-page 60->26 fps regression). See the doc on `session::IO`/`session::CACHE`.
-    !nopreview_armed() && crate::plex::session::peek().trailer_autoplay()
+    !nopreview_armed() && crate::catalog::session::peek().trailer_autoplay()
 }
 
 fn slot() -> &'static std::sync::Mutex<Machine> {
@@ -1045,10 +1045,10 @@ mod tests {
     #[test]
     #[cfg(feature = "hostsim")]
     fn seek_refuses_and_touches_no_user_seek_bookkeeping_with_no_live_preview() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut ps = crate::route::PlaybackSession::IDLE;
         let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe {
-            plx_base::task::MainThread::assume()
+            nj_base::task::MainThread::assume()
         });
         assert!(!pa.is_live(), "test requires an empty native-session slot");
         let before = crate::player::TX.seek_reqs.load(std::sync::atomic::Ordering::Relaxed);
@@ -1126,7 +1126,7 @@ mod tests {
 
     #[test]
     fn a_relay_link_is_not_a_direct_play() {
-        let policy = crate::plex::link_policy(Some(crate::plex::probe::Location::Relay));
+        let policy = crate::catalog::link_policy(Some(crate::catalog::probe::Location::Relay));
         assert!(!accepts_direct_play(policy.direct_play, true, false));
         assert!(accepts_direct_play(true, true, false));
         assert!(!accepts_direct_play(true, true, true));

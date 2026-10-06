@@ -55,7 +55,7 @@ def ladder():
     """size -> rung name, parsed from gfx/tokens.rs `mod size`."""
     if not os.path.isfile(THEME):
         sys.exit(f"font-hint-audit: the size ladder's home is missing: {THEME}\n"
-                 "  (it lives in the plx_gfx crate; if the file moved again, update THEME at the top of this script)")
+                 "  (it lives in the nj_gfx crate; if the file moved again, update THEME at the top of this script)")
     src = open(THEME).read()
     found = re.search(r"pub mod size \{(.*?)\n\}", src, re.S)
     if not found:

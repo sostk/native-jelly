@@ -493,7 +493,7 @@
     "description": "Player diagnostic reason; preserve technical device paths and protocol endpoints."
   },
   "widgets.panel.audio_only_no_pass": {
-    "value": "server sent audio only — it found no usable video transcode target (server has no Plex Pass)",
+    "value": "server sent audio only — it found no usable video transcode target",
     "description": "Player diagnostic reason; preserve technical device paths and protocol endpoints."
   },
   "widgets.panel.audio_only": {
@@ -614,11 +614,11 @@
   },
   "widgets.tracks.boost_dialog": {
     "value": "Boost dialog",
-    "description": "Audio panel of the player's track selector (Plex Pass only, issue #266). Toggle row label; the On/Off read-out comes from the row's own switch state, not this string."
+    "description": "Audio panel of the player's track selector Toggle row label; the On/Off read-out comes from the row's own switch state, not this string."
   },
   "widgets.tracks.normalize_loudness": {
     "value": "Normalize loudness",
-    "description": "Audio panel of the player's track selector (Plex Pass only, issue #266). Toggle row label; the On/Off read-out comes from the row's own switch state, not this string."
+    "description": "Audio panel of the player's track selector Toggle row label; the On/Off read-out comes from the row's own switch state, not this string."
   },
   "widgets.tracks.enh_note_sidecar": {
     "value": "Subtitles won't change.",
@@ -739,7 +739,7 @@
   },
   "widgets.verdict.forced_unauthorized": {
     "value": "Force Direct Play is on, and the server didn’t allow the original file to play.",
-    "description": "Playback failure detail while Force Direct Play is on: the Plex server did not allow playing the original file."
+    "description": "Playback failure detail while Force Direct Play is on: the Jellyfin server did not allow playing the original file."
   },
   "widgets.verdict.forced_open": {
     "value": "Force Direct Play is on, and the original file couldn’t be opened.",

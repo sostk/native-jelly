@@ -17,7 +17,7 @@
     "destination disagreeing, which is the one failure a provenance-derived field must not have.",
     "",
     "The PRODUCTION pair is NOT here and must never be: it exists only as the repository",
-    "variables PLX_SENTRY_DSN and PLX_POSTHOG_KEY, injected by .github/workflows/release.yml.",
+    "variables NJ_SENTRY_DSN and NJ_POSTHOG_KEY, injected by .github/workflows/release.yml.",
     "Supplying both pairs to one build is a compile error, not a warning.",
     "",
     "There is NO sentry_auth_token here either, and that is the mechanism rather than a",

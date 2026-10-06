@@ -4,7 +4,7 @@
 //! route::title_cptr/ctxline_cptr. The video-overlay subtitle draws below stay on the raw text/tex
 //! primitives (they composite directly over the video plane, outside the transport HUD).
 #![allow(dead_code)]
-use plx_gfx::gfx::{delete_tex, upload_rgba};
+use nj_gfx::gfx::{delete_tex, upload_rgba};
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::theme;
 use crate::ui::widgets::{
@@ -104,7 +104,7 @@ impl ClockWarm {
             self.strings.extend(clocks.into_iter().filter_map(|(s, bold)| Some((CString::new(s).ok()?, bold))));
         }
         for (s, bold) in &self.strings {
-            plx_gfx::text::queue_prewarm(s.as_ptr(), theme::size::CAPTION, *bold);
+            nj_gfx::text::queue_prewarm(s.as_ptr(), theme::size::CAPTION, *bold);
         }
     }
 }
@@ -206,7 +206,7 @@ pub(crate) fn subtitle_ink() -> [f32; 4] {
     subtitle_ink_for(crate::player::subtitle_tone())
 }
 
-fn subtitle_ink_for(tone: crate::plex::session::SubtitleTone) -> [f32; 4] {
+fn subtitle_ink_for(tone: crate::catalog::session::SubtitleTone) -> [f32; 4] {
     theme::SUBTITLE_INKS
         .get(tone.index() as usize)
         .copied()
@@ -216,8 +216,8 @@ fn subtitle_ink_for(tone: crate::plex::session::SubtitleTone) -> [f32; 4] {
 /// The face-size multiplier for the viewer's Settings > Playback pick, applied to the plain-text
 /// caption's 36 px base face ([`draw_subtitle_message`]) and its line pitch/wrap width together,
 /// so a larger caption still wraps before it runs off either edge.
-fn subtitle_size_scale(size: crate::plex::session::SubtitleSize) -> f32 {
-    use crate::plex::session::SubtitleSize;
+fn subtitle_size_scale(size: crate::catalog::session::SubtitleSize) -> f32 {
+    use crate::catalog::session::SubtitleSize;
     match size {
         SubtitleSize::Small => 0.78,
         SubtitleSize::Medium => 1.0,
@@ -229,8 +229,8 @@ fn subtitle_size_scale(size: crate::plex::session::SubtitleSize) -> f32 {
 /// How far ABOVE [`SUB_BASE_Y`]/[`SUB_CEIL_Y`] the viewer's Position pick lifts the plain-text
 /// caption ([`draw_subtitle_message`]) — Low is the baseline every build before this preference
 /// drew, so it lifts nothing.
-fn subtitle_position_lift(position: crate::plex::session::SubtitlePosition) -> f32 {
-    use crate::plex::session::SubtitlePosition;
+fn subtitle_position_lift(position: crate::catalog::session::SubtitlePosition) -> f32 {
+    use crate::catalog::session::SubtitlePosition;
     match position {
         SubtitlePosition::Low => 0.0,
         SubtitlePosition::Middle => 160.0,
@@ -614,7 +614,7 @@ pub(crate) const CTRL_ROW_W: f32 = 3.0 * BTN_S + 2.0 * BTN_GAP;
 ///
 /// The measured width is memoised per label, avoiding repeated capability calls and string
 /// preparation for fixed labels in addition to the native font-metric cache.
-pub(crate) fn ctrl_slot(row: &mut TransportRow, label: &str, measure: &dyn plx_machine::machine::Measure) -> Rect {
+pub(crate) fn ctrl_slot(row: &mut TransportRow, label: &str, measure: &dyn nj_machine::machine::Measure) -> Rect {
     let memo = &mut row.widths;
     let w = match memo.iter().find(|(l, _)| l == label) {
         Some((_, w)) => *w,
@@ -632,11 +632,11 @@ pub(crate) fn ctrl_slot(row: &mut TransportRow, label: &str, measure: &dyn plx_m
 
 /// [`ctrl_slot`]'s width without writing the memo — the cached width when the draw has measured
 /// `label`, else the same measurement it would cache.
-pub(crate) fn ctrl_slot_w(row: &TransportRow, label: &str, measure: &dyn plx_machine::machine::Measure) -> f32 {
+pub(crate) fn ctrl_slot_w(row: &TransportRow, label: &str, measure: &dyn nj_machine::machine::Measure) -> f32 {
     row.widths.iter().find(|(l, _)| l == label).map_or_else(|| ctrl_slot_measure(label, measure), |(_, w)| *w)
 }
 
-fn ctrl_slot_measure(label: &str, measure: &dyn plx_machine::machine::Measure) -> f32 {
+fn ctrl_slot_measure(label: &str, measure: &dyn nj_machine::machine::Measure) -> f32 {
     const PAD_X: f32 = 34.0;
     (measure.width_str(label, theme::size::BODY, true) + 2.0 * PAD_X).max(CTRL_ROW_W)
 }
@@ -702,7 +702,7 @@ impl ControlSlot {
     ///
     /// Read-only over `row`'s label-width memo ([`ctrl_slot_w`]): `place` is `&self`, and a width
     /// the draw has not cached yet is measured the same way the draw measures it.
-    pub(crate) fn item_rect(self, row: &TransportRow, idx: c_int, measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
+    pub(crate) fn item_rect(self, row: &TransportRow, idx: c_int, measure: &dyn nj_machine::machine::Measure) -> Option<Rect> {
         if idx < 0 || idx >= self.items() {
             return None;
         }
@@ -879,12 +879,12 @@ pub(crate) fn transport_hidden(ps: &crate::route::PlaybackSession) -> bool {
 /// reason: two independent derivations of one three-way choice is how the two indicators drifted
 /// apart in the first place.
 pub(crate) fn busy(ps: &crate::route::PlaybackSession) -> Busy {
-    // dev: `/tmp/plxnative-failtest` forces the failure read-out — the other half of
+    // dev: `/tmp/nativejelly-failtest` forces the failure read-out — the other half of
     // `player::failtest_arm`, which shapes WHICH failure. It is forced HERE, on the one impure
     // sampler, rather than in `player::state()`: the pump acts on that state, and a dev switch
     // that made the engine believe it had failed would be testing a different thing than the
     // screen. `busy_surface` stays pure and ungated, so what draws is still the real rule.
-    if plx_base::devtrig::flag("failtest") {
+    if nj_base::devtrig::flag("failtest") {
         return Busy::Readout(StatusKind::Failed, crate::player::error_caption(ps));
     }
     busy_surface(ps, crate::player::state(ps), crate::player::seen_frame())
@@ -1017,7 +1017,7 @@ pub(crate) fn draw_readout(
     busy: Busy,
     now: u32,
     failure_focus: usize,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let Busy::Readout(kind, caption) = busy else {
         return;
@@ -1078,7 +1078,7 @@ pub(crate) struct FailureReadout {
 /// A control's label. Sentence case, as every `StatusOverlay` row is (the sign-in read-out's *Try
 /// again*): these are capsule buttons, not the ALL-CAPS clickable TEXT marks.
 pub(crate) fn failure_action_label(a: crate::player::FailureAction) -> &'static std::ffi::CStr {
-    use plx_platform::i18n::msg;
+    use nj_platform::i18n::msg;
     use crate::player::FailureAction as A;
     match a {
         A::PlayAutomatically => msg::widgets_failure_play_auto_c(),
@@ -1107,19 +1107,19 @@ impl FailureReadout {
     pub(crate) fn now(ps: &crate::route::PlaybackSession) -> Self {
         let mut e = crate::player::error_now(ps);
         if e.kind == crate::player::FailureKind::JailMissingRtkmem {
-            use plx_platform::tv::sandbox::State;
+            use nj_platform::tv::sandbox::State;
             match ps.repair_status {
                 State::Idle => {}
                 State::Running => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_running();
-                    e.detail = plx_platform::i18n::msg::widgets_repair_wait().into();
+                    e.readout = nj_platform::i18n::msg::widgets_repair_running();
+                    e.detail = nj_platform::i18n::msg::widgets_repair_wait().into();
                 }
                 State::Repaired => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_completed();
-                    e.detail = plx_platform::i18n::msg::widgets_repair_reopen().into();
+                    e.readout = nj_platform::i18n::msg::widgets_repair_completed();
+                    e.detail = nj_platform::i18n::msg::widgets_repair_reopen().into();
                 }
                 State::Failed(reason) => {
-                    e.readout = plx_platform::i18n::msg::widgets_repair_failed();
+                    e.readout = nj_platform::i18n::msg::widgets_repair_failed();
                     e.detail = repair_failure_message(reason).into();
                 }
             }
@@ -1146,7 +1146,7 @@ impl FailureReadout {
         let policy = e.kind == FailureKind::PlaybackPolicy && !e.detail.is_empty();
         let reason: &str = if policy { &e.detail } else { e.readout };
         let note: Option<String> = if e.no_pass {
-            Some(plx_platform::i18n::msg::widgets_failure_no_pass(PLEX_PASS))
+            Some(nj_platform::i18n::msg::widgets_failure_no_pass(PLEX_PASS))
         } else if policy || e.detail.is_empty() {
             None
         } else {
@@ -1182,7 +1182,7 @@ impl FailureReadout {
     }
 
     fn overlay(&self, labels: &[&'static std::ffi::CStr], focus: Option<usize>) -> StatusOverlay<'_> {
-        StatusOverlay::new(Rect::FULL, plx_platform::i18n::msg::widgets_status_failed_c(), StatusKind::Failed)
+        StatusOverlay::new(Rect::FULL, nj_platform::i18n::msg::widgets_status_failed_c(), StatusKind::Failed)
             .page(self.glyph)
             .reason(&self.reason)
             .row(labels)
@@ -1195,12 +1195,12 @@ impl FailureReadout {
     }
 
     /// Each control's rect, by row index — the geometry the draw uses.
-    pub(crate) fn frames(&self, measure: &dyn plx_machine::machine::Measure) -> [Option<Rect>; crate::ui::widgets::STATUS_ROW_MAX] {
+    pub(crate) fn frames(&self, measure: &dyn nj_machine::machine::Measure) -> [Option<Rect>; crate::ui::widgets::STATUS_ROW_MAX] {
         let labels = self.labels();
         self.overlay(&labels, None).row_frames_measured(measure)
     }
 
-    fn draw(&self, p: Painter, focus: usize, measure: &dyn plx_machine::machine::Measure) {
+    fn draw(&self, p: Painter, focus: usize, measure: &dyn nj_machine::machine::Measure) {
         let labels = self.labels();
         self.overlay(&labels, Some(focus.min(labels.len().saturating_sub(1))))
             .draw_measured(&hud_env(), p, measure);
@@ -1262,8 +1262,8 @@ pub(crate) fn ctrl_row_hit_rect() -> Rect {
 }
 
 /// One bottom tab's rect, matching the left-to-right layout [`draw_hud`] lays the pills out with.
-pub(crate) fn tab_hit_rect(idx: i32, has_chapters: bool, measure: &dyn plx_machine::machine::Measure) -> Option<Rect> {
-    let tabs: &[&str] = if has_chapters { &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()] } else { &[plx_platform::i18n::msg::widgets_player_info()] };
+pub(crate) fn tab_hit_rect(idx: i32, has_chapters: bool, measure: &dyn nj_machine::machine::Measure) -> Option<Rect> {
+    let tabs: &[&str] = if has_chapters { &[nj_platform::i18n::msg::widgets_player_info(), nj_platform::i18n::msg::widgets_player_chapters()] } else { &[nj_platform::i18n::msg::widgets_player_info()] };
     let label = *tabs.get(idx as usize)?;
     let ph = BTN_S;
     let py = (SB_Y + SCR_H) * 0.5 - ph * 0.5;
@@ -1286,16 +1286,16 @@ pub(crate) fn failure_row_drawn(busy: Busy) -> bool {
 }
 
 /// Product copy is resolved here; the worker's technical error identity stays unchanged.
-fn repair_failure_message(reason: plx_platform::tv::sandbox::Failure) -> &'static str {
-    use plx_platform::tv::sandbox::Failure;
+fn repair_failure_message(reason: nj_platform::tv::sandbox::Failure) -> &'static str {
+    use nj_platform::tv::sandbox::Failure;
     match reason {
-        Failure::StartFailed => plx_platform::i18n::msg::widgets_repair_start_failed(),
-        Failure::HbcUnavailable => plx_platform::i18n::msg::widgets_repair_hbc_unavailable(),
-        Failure::NotRoot => plx_platform::i18n::msg::widgets_repair_not_root(),
-        Failure::CommandFailed => plx_platform::i18n::msg::widgets_repair_command_failed(),
-        Failure::Timeout => plx_platform::i18n::msg::widgets_repair_timeout(),
-        Failure::Unreadable => plx_platform::i18n::msg::widgets_repair_unreadable(),
-        Failure::Unsupported => plx_platform::i18n::msg::widgets_repair_unsupported(),
+        Failure::StartFailed => nj_platform::i18n::msg::widgets_repair_start_failed(),
+        Failure::HbcUnavailable => nj_platform::i18n::msg::widgets_repair_hbc_unavailable(),
+        Failure::NotRoot => nj_platform::i18n::msg::widgets_repair_not_root(),
+        Failure::CommandFailed => nj_platform::i18n::msg::widgets_repair_command_failed(),
+        Failure::Timeout => nj_platform::i18n::msg::widgets_repair_timeout(),
+        Failure::Unreadable => nj_platform::i18n::msg::widgets_repair_unreadable(),
+        Failure::Unsupported => nj_platform::i18n::msg::widgets_repair_unsupported(),
     }
 }
 
@@ -1303,7 +1303,7 @@ fn draw_failed_readout(
     ps: &crate::route::PlaybackSession,
     p: Painter,
     focus: usize,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     // The GROUND, first: a full-bleed opaque black, one quad. Without it the read-out stood on
     // whatever the video plane happened to be holding: `app.rs` clears the graphics plane to alpha
@@ -1387,7 +1387,7 @@ fn draw_clock(
     col: [f32; 4],
     lo: f32,
     hi: f32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) -> (f32, f32) {
     let template: String = text
         .chars()
@@ -1591,7 +1591,7 @@ impl Playbar {
 
 /// The playbar: scrubber, playhead knob, elapsed/remaining clocks and the state read-out. The
 /// player HUD and the detail page's full-trailer transport both draw it, so the two cannot drift.
-pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::machine::Measure) {
+pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn nj_machine::machine::Measure) {
     let e = hud_env();
     let white = theme::TEXT_PRIMARY;
     let dim = theme::TEXT_SECONDARY;
@@ -1725,7 +1725,7 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn plx_machine::
             TransportMark::Working | TransportMark::None => None,
         };
         let ink = glyph.map_or((0.0, 1.0), crate::ui::icons::ink_x);
-        let icy = ty + plx_gfx::text::text_height(theme::size::CAPTION, 1) * 0.5; // vertical center of the clock line
+        let icy = ty + nj_gfx::text::text_height(theme::size::CAPTION, 1) * 0.5; // vertical center of the clock line
                                                                                 // scaled so every member of the family lands the SAME height of ink in this one box
         let bs = glyph.map_or(isz, |g| {
             isz * crate::ui::icons::band(crate::ui::icons::Icon::Pause)
@@ -1776,7 +1776,7 @@ pub(crate) fn draw_hud(
     tab: i32,
     now: u32,
     transport: bool,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
     meta: crate::metadata::MetadataView<'_>,
 ) {
     // A FAILURE owns the frame, and it outranks every branch below — including the Up Next card,
@@ -1865,9 +1865,9 @@ pub(crate) fn draw_hud(
 
     // bottom tabs as pills — Chapters only appears when the item actually has chapters
     let tabs: &[&str] = if crate::appkit::chapters_panel::has_chapters(meta) {
-        &[plx_platform::i18n::msg::widgets_player_info(), plx_platform::i18n::msg::widgets_player_chapters()]
+        &[nj_platform::i18n::msg::widgets_player_info(), nj_platform::i18n::msg::widgets_player_chapters()]
     } else {
-        &[plx_platform::i18n::msg::widgets_player_info()]
+        &[nj_platform::i18n::msg::widgets_player_info()]
     };
     // tabs match the transport control buttons' height (BTN_S), centred vertically between the
     // play bar (scrubber, at SB_Y) and the bottom edge of the screen
@@ -1935,8 +1935,8 @@ mod tests {
     /// the presenting side's (`app::run::prepare_window`), ahead of the clear.
     #[test]
     fn the_transport_clocks_are_rasterised_before_the_draw_and_one_second_ahead() {
-        let _g = plx_base::testlock::serial();
-        plx_gfx::text::reset_prewarm_for_test();
+        let _g = nj_base::testlock::serial();
+        nj_gfx::text::reset_prewarm_for_test();
         let sz = theme::size::CAPTION;
         let mut warm = ClockWarm::default();
         // 1:23.4 into a 2:00 item: the draw shows "1:23" (bold) and "-0:36" (regular).
@@ -1944,32 +1944,32 @@ mod tests {
         assert_eq!((fmt_time(pos, false), fmt_time(dur - pos, true)), ("1:23".into(), "-0:36".into()));
         warm.queue(pos, dur);
         // `prepare` may run on a frame the loop then does not present: it records, uploads nothing.
-        assert!(plx_gfx::text::prewarm_pending(), "prepare queued the clocks");
-        assert!(!plx_gfx::text::prewarm_resident_for_test(b"1:23", sz, 1), "prepare itself uploaded");
+        assert!(nj_gfx::text::prewarm_pending(), "prepare queued the clocks");
+        assert!(!nj_gfx::text::prewarm_resident_for_test(b"1:23", sz, 1), "prepare itself uploaded");
         // Four strings against a three-string frame budget: the second presented frame finishes them.
-        while plx_gfx::text::prewarm_pending() {
+        while nj_gfx::text::prewarm_pending() {
             crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
         }
         for (text, bold) in [("1:23", 1), ("-0:36", 0), ("1:24", 1), ("-0:35", 0)] {
             assert!(
-                plx_gfx::text::prewarm_resident_for_test(text.as_bytes(), sz, bold),
+                nj_gfx::text::prewarm_resident_for_test(text.as_bytes(), sz, bold),
                 "{text:?} (bold={bold}) was left for the draw to rasterise after the back-buffer wait"
             );
         }
 
         // The draw empties the queue every frame, so the offer is repeated every prepared frame —
         // and an undrained offer must come back rather than be remembered as done.
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         warm.queue(pos + 16_000_000, dur);
-        assert!(plx_gfx::text::prewarm_pending(), "the same second was not offered again");
+        assert!(nj_gfx::text::prewarm_pending(), "the same second was not offered again");
 
         // The end of the item: nothing below zero, and no string the clock cannot show.
-        plx_gfx::text::reset_prewarm_for_test();
+        nj_gfx::text::reset_prewarm_for_test();
         warm.queue(dur + 5_000_000_000, dur);
         crate::ui::panel_motion::PanelMotion::drain_queued_text_for_test();
-        assert!(plx_gfx::text::prewarm_resident_for_test(b"-0:00", sz, 0));
-        assert!(plx_gfx::text::prewarm_resident_for_test(b"2:05", sz, 1));
-        plx_gfx::text::reset_prewarm_for_test();
+        assert!(nj_gfx::text::prewarm_resident_for_test(b"-0:00", sz, 0));
+        assert!(nj_gfx::text::prewarm_resident_for_test(b"2:05", sz, 1));
+        nj_gfx::text::reset_prewarm_for_test();
     }
 
     use crate::metadata::{Marker, MarkerKind};
@@ -2268,7 +2268,7 @@ mod tests {
     /// never coverage (the outline depends on it) and never hue (it tints image subtitles).
     #[test]
     fn the_subtitle_tones_are_a_strictly_darkening_opaque_grey_ladder_from_white() {
-        use crate::plex::session::SubtitleTone;
+        use crate::catalog::session::SubtitleTone;
         assert_eq!(theme::SUBTITLE_INKS.len(), SubtitleTone::LADDER.len());
         assert_eq!(subtitle_ink_for(SubtitleTone::White), [1.0, 1.0, 1.0, 1.0]);
         let mut prev = f32::MAX;
@@ -2507,7 +2507,7 @@ mod tests {
             busy_surface(&ps, S::Buffering, false),
             Busy::Readout(StatusKind::Working, c"Buffering\u{2026}")
         );
-        // tapping RIGHT during pre-roll (or `/tmp/plxnative-autoseek`): no picture to mark up
+        // tapping RIGHT during pre-roll (or `/tmp/nativejelly-autoseek`): no picture to mark up
         assert_eq!(
             busy_surface(&ps, S::Seeking, false),
             Busy::Readout(StatusKind::Working, c"Seeking\u{2026}")
@@ -2558,7 +2558,7 @@ mod tests {
     /// footer never meets the row.
     #[test]
     fn the_diagnostics_footer_sits_below_the_row_inside_the_safe_bottom_band() {
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         let verdict = crate::route::PlayVerdict::Forced(crate::route::ForcedFailure::Video).text().to_owned();
         let e = crate::player::failtest_policy_shape_for_test(&verdict);
         let r = readout_of(&e);
@@ -2576,9 +2576,9 @@ mod tests {
     /// draw, measured with the device's advances, stays inside the read-out's width.
     #[test]
     fn every_failure_row_fits_the_screen_in_every_language() {
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         use crate::ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, Preference};
         use crate::player::FailureAction as A;
         let rows: [&[A]; 3] = [
             &[A::PlayAutomatically, A::TryAgain, A::Back],
@@ -2606,9 +2606,9 @@ mod tests {
     /// Every Force verdict fits the read-out's two-line reason slot, in every shipped language.
     #[test]
     fn every_forced_verdict_fits_the_reason_slot_in_every_language() {
-        use plx_base::fontcov::advances::ShippedMeasure;
+        use nj_base::fontcov::advances::ShippedMeasure;
         use crate::ui::fit::HEADROOM;
-        use plx_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
+        use nj_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);

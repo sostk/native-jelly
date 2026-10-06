@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use plx_base::checkpoint::{Checkpoint, NoCheckpoint, Pacer};
+use nj_base::checkpoint::{Checkpoint, NoCheckpoint, Pacer};
 
 static FD_GATE: Mutex<()> = Mutex::new(());
 
@@ -169,12 +169,12 @@ impl HttpStream {
 /// `X-Plex-Token=…` to what it is given, and the poster store's paths arrive with one already in
 /// them (`Client::fetch_built`, where the built path *is* the LRU key, so the key and the request
 /// have to be the same bytes). The event log is this app's support channel: a user is asked to paste
-/// `/tmp/plxnative-events.log` into a public issue thread, so a line carrying a query string is a
+/// `/tmp/nativejelly-events.log` into a public issue thread, so a line carrying a query string is a
 /// credential leak rather than a possible one — the same rule, for the same reason, that
 /// `app::diagnostics` applies to the diagnostics panel. The endpoint on its own is what makes a line
 /// diagnosable ("which request failed") and it carries no secret.
 ///
-/// `plx_base::eventlog::redact_tokens` catches a line that gets this wrong on the way out; the policy is that
+/// `nj_base::eventlog::redact_tokens` catches a line that gets this wrong on the way out; the policy is that
 /// nothing built here needs it.
 fn log_endpoint(path: &str) -> &str {
     match path.find('?') {
@@ -248,7 +248,7 @@ pub fn note_short_body(method: &str, path: &str, hs: &HttpStream, recv_err: bool
         hs.chunked != 0,
         recv_err,
     ) {
-        plx_base::eventlog::log(&line);
+        nj_base::eventlog::log(&line);
     }
 }
 
@@ -267,7 +267,7 @@ pub fn hs_status(hs: *const HttpStream) -> c_int {
 pub const HTTP_READ_DEADLINE: c_int = -2;
 
 /// Internal read result for a caller whose [`Checkpoint`] answered
-/// [`Flow::Stop`](plx_base::checkpoint::Flow::Stop). Distinct from `-1` and [`HTTP_READ_DEADLINE`]: it is neither a
+/// [`Flow::Stop`](nj_base::checkpoint::Flow::Stop). Distinct from `-1` and [`HTTP_READ_DEADLINE`]: it is neither a
 /// transport failure nor a clock this module owns, so nothing here redials or closes on it.
 pub const HTTP_READ_STOPPED: c_int = -3;
 
@@ -359,7 +359,7 @@ unsafe fn wait_fd(
                         Bound::Recheck => {}
                     }
                 }
-                plx_base::checkpoint::wait_ms_until(at, c_int::MAX)
+                nj_base::checkpoint::wait_ms_until(at, c_int::MAX)
             }
         };
         let mut pfd = libc::pollfd {
@@ -809,9 +809,9 @@ unsafe fn connect_timeout_cause(
         let (wait_ms, recheck) = if now >= end {
             (0, false)
         } else {
-            let left_ms = plx_base::checkpoint::wait_ms_until(end, c_int::MAX);
+            let left_ms = nj_base::checkpoint::wait_ms_until(end, c_int::MAX);
             match slice {
-                Some(at) if at < end => (plx_base::checkpoint::wait_ms_until(at, left_ms), true),
+                Some(at) if at < end => (nj_base::checkpoint::wait_ms_until(at, left_ms), true),
                 _ => (left_ms, false),
             }
         };
@@ -963,7 +963,7 @@ fn host_header(host: &str, port: c_int) -> String {
 /// levers, none of them this file's to pull, are an interruptible resolver or an application-owned
 /// resolution worker.
 unsafe fn resolve(host: &str, port: c_int) -> Option<AddrList> {
-    // The offline reproduction (`/tmp/plxnative-nowan`): a name that would have gone to the
+    // The offline reproduction (`/tmp/nativejelly-nowan`): a name that would have gone to the
     // resolver is refused here, exactly where a dead resolver would have refused it. A literal is
     // untouched — the plaintext transport never needed DNS for one, which is the whole point of
     // the twin `probe::candidates` synthesizes.
@@ -1353,7 +1353,7 @@ fn http_open_with_timeouts_body(
                 // The host is on the line because "which name failed to resolve" is the only
                 // question this failure raises, and it is not a secret the way a query string is
                 // (`log_endpoint`) — `player::engine` and `plex::servers` already log `host=…:port`.
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "stream: {method} {} DNS FAILED host={host_s}",
                     log_endpoint(&path_s)
                 ));
@@ -1487,7 +1487,7 @@ unsafe fn perform_http_request(
     // HTTP/1.1 keep-alive is the default; omitting Connection lets the server reuse this
     // socket for the next HLS segment instead of forcing a fresh TCP handshake each time.
     let req = format!(
-        "{method} {path_s} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: plxnative/0.1\r\n{accept}{extra_s}\r\n"
+        "{method} {path_s} HTTP/1.1\r\nHost: {host_hdr}\r\nUser-Agent: nativejelly/0.1\r\n{accept}{extra_s}\r\n"
     );
     let mut wire = req.into_bytes();
     wire.extend_from_slice(body);
@@ -1631,7 +1631,7 @@ unsafe fn perform_http_request(
         //
         // `status=0` is not a code any server sent: it is what the parse above leaves when the
         // status line was not `HTTP/1.x` followed by exactly three digits.
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "stream: {method} {} status={}",
             log_endpoint(path_s),
             hs.status

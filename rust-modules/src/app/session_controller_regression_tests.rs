@@ -7,7 +7,7 @@ mod tests {
     use super::super::*;
     use crate::auth::{Phase, Picker, SessionCmd, SessionInit, LoginProgress};
     use crate::auth::owner::{ReplyTo, SessionEnvelope, SessionEvent, SessionOp, SessionWork};
-    use crate::plex::session::{Session, ServerRef, UserRef, HomeUserRef};
+    use crate::catalog::session::{Session, ServerRef, UserRef, HomeUserRef};
 
     const INITIAL_EPOCH: u64 = u32::MAX as u64 + 40;
 
@@ -244,16 +244,16 @@ mod tests {
 
     // Endpoint lifetimes: completion guards own physical reservations, the Session owner owns
     // logical pending entries, and transferred envelopes retain receipts until main ACKs them.
-    fn endpoint_rig() -> (Bridge, crate::plex::ServerId) {
+    fn endpoint_rig() -> (Bridge, crate::catalog::ServerId) {
         let mut saved = stored(false);
-        saved.sources.push(crate::plex::session::SourceRef {
+        saved.sources.push(crate::catalog::session::SourceRef {
             machine_id: "stored-server".into(), address: "127.0.0.1".into(), port: 32400,
             origin_url: "http://127.0.0.1:32400".into(), token: "synthetic-server-token".into(),
             owned: true, ..Default::default()
         });
         let mut rig = rig(saved);
         // Legacy admission used 32 slots; the real registry bounds requests to MAX_SERVERS (16).
-        let sid = crate::plex::ServerId::from_raw(15);
+        let sid = crate::catalog::ServerId::from_raw(15);
         rig.session_adapter.fixture_resources().endpoints.insert(
             sid.raw(),
             crate::auth::owner::EndpointCapture {
@@ -266,7 +266,7 @@ mod tests {
         (rig, sid)
     }
 
-    fn endpoint_drop(rig: &mut Bridge, d: &mut Dispatcher<AppHost>, sid: crate::plex::ServerId) -> u32 {
+    fn endpoint_drop(rig: &mut Bridge, d: &mut Dispatcher<AppHost>, sid: crate::catalog::ServerId) -> u32 {
         let req = rig.session.snapshot_init().next_req.checked_add(1).unwrap();
         rig.session_adapter.inject_fixture_work(req, move |output, input| {
             let SessionWork::Endpoint { lifecycle, machine_id, .. } = input else {
@@ -291,8 +291,8 @@ mod tests {
         let mut records = rig.session_adapter.take_results();
         assert_eq!(records.len(), 1);
         let record = records.pop().unwrap();
-        assert_eq!(record.addr, plx_machine::machine::Addr {
-            to: MachineId::Session, req: plx_machine::machine::RequestId(req),
+        assert_eq!(record.addr, nj_machine::machine::Addr {
+            to: MachineId::Session, req: nj_machine::machine::RequestId(req),
         });
         assert_eq!(record.key.epoch, epoch);
         assert!(record.key.op == SessionOp::Endpoint(15));
@@ -302,7 +302,7 @@ mod tests {
         record
     }
 
-    fn endpoint_still_pending(rig: &mut Bridge, d: &mut Dispatcher<AppHost>, sid: crate::plex::ServerId, req: u32) {
+    fn endpoint_still_pending(rig: &mut Bridge, d: &mut Dispatcher<AppHost>, sid: crate::catalog::ServerId, req: u32) {
         let before = rig.session.subhash();
         let next = rig.session.snapshot_init().next_req;
         command(rig, d, SessionCmd::RequestEndpoint { sid });
@@ -389,8 +389,8 @@ mod tests {
     mod active_worker_reservation {
         use crate::app::adapters::session::SessionAdapter;
         use crate::auth::owner::{SessionOp, SessionWorkKey, SESSION_TOTAL_RESERVATIONS};
-        use plx_machine::landing::AdmissionError;
-        use plx_machine::machine::RequestId;
+        use nj_machine::landing::AdmissionError;
+        use nj_machine::machine::RequestId;
         use std::sync::mpsc::{sync_channel, SyncSender};
         use std::time::Duration;
 
@@ -529,7 +529,7 @@ mod tests {
                     "candidate":{"machine_id":"generation-server", "token":"synthetic-token",
                         "name":"Generation", "credit":"", "owned":true,
                         "origin":"https://192-0-2-10.h.plex.direct:32400", "address":"192.0.2.10",
-                        "location":crate::plex::probe::Location::Local, "ipv6":false}
+                        "location":crate::catalog::probe::Location::Local, "ipv6":false}
                 }})).unwrap();
                 output.progress(crate::auth::AuthProgress::Registry(activation)).unwrap();
                 // Synthetic valid activation-contract observation, then real producer Drop.
@@ -541,8 +541,8 @@ mod tests {
             let records = rig.session_adapter.take_results();
             assert_eq!(records.len(), 4);
             for record in &records {
-                assert_eq!(record.addr, plx_machine::machine::Addr {
-                    to: MachineId::Session, req: plx_machine::machine::RequestId(req),
+                assert_eq!(record.addr, nj_machine::machine::Addr {
+                    to: MachineId::Session, req: nj_machine::machine::RequestId(req),
                 });
                 assert_eq!(record.key.epoch, epoch);
                 assert!(epoch > u64::from(u32::MAX));

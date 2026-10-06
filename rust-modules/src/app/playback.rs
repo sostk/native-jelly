@@ -145,7 +145,7 @@ pub(crate) fn retry_failed_playback(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
     meta: &mut crate::stores::metadata::MetadataStore,
-    direct_play: Option<crate::plex::session::DirectPlayMode>,
+    direct_play: Option<crate::catalog::session::DirectPlayMode>,
 ) -> bool {
     // URL/dev-trigger playback has no Plex descriptor.  Check BEFORE teardown: extinguishing its
     // Error Engine and only then discovering it cannot be rebuilt would replace an actionable
@@ -163,7 +163,7 @@ pub(crate) fn retry_failed_playback(
         .max(0);
     crate::player::stop_bufferfeed(ps, pa);
     if crate::route::retry_current_play(ps, meta, resume_ns, direct_play) {
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         true
     } else {
         log("playback retry: current source cannot be resolved again");
@@ -184,13 +184,13 @@ pub(crate) fn play_automatically(
     pa: &mut crate::player::adapter::PlayerAdapter,
     meta: &mut crate::stores::metadata::MetadataStore,
 ) -> bool {
-    use crate::plex::session::DirectPlayMode;
+    use crate::catalog::session::DirectPlayMode;
     crate::route::restore_direct_play_mode(DirectPlayMode::Auto);
-    let _ = plx_base::storage_worker::submit_retained(|| {
+    let _ = nj_base::storage_worker::submit_retained(|| {
         if !crate::route::set_direct_play_mode(DirectPlayMode::Auto) {
             log("play automatically: the Direct Play preference was not saved");
         }
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     });
     retry_failed_playback(ps, pa, meta, Some(DirectPlayMode::Auto))
 }
@@ -265,7 +265,7 @@ pub(crate) fn enter_player(
     }
 }
 
-/// The ONE start-playback ritual (detail OK, home episode OK, and the plxnative-autoplay/
+/// The ONE start-playback ritual (detail OK, home episode OK, and the nativejelly-autoplay/
 /// -detailplay/-play dev triggers all share it): arm the resume point BEFORE the first
 /// Load (direct-play av_seek / transcode &offset restart), start the engine, record the
 /// Stop/BACK/EOS return target, reset the HUD focus cursor, and show the HUD. A missed step
@@ -287,11 +287,11 @@ pub(crate) fn start_playback(
 /// return state: acceptance cannot invent where a session returns to.
 pub(super) trait PlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::pms::PmsMovie) -> bool;
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie) -> bool;
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
         meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool;
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
-        sid: crate::plex::ServerId, rk: &str);
+        sid: crate::catalog::ServerId, rk: &str);
     fn prepare_start(&mut self, ps: &mut crate::route::PlaybackSession,
         pa: &mut crate::player::adapter::PlayerAdapter, resume_ns: i64) -> bool;
 }
@@ -299,7 +299,7 @@ pub(super) trait PlaybackResources {
 /// The HUD's context line for a catalog movie, `"2019 · PG-13 · 2h 15m"` — what
 /// `route::request_play_movie` takes as its `ctx`. Formatted here rather than in `route` because
 /// the runtime is `ui::fmt`'s and `route` may not name `ui`.
-pub(crate) fn movie_ctx(m: &crate::pms::PmsMovie) -> String {
+pub(crate) fn movie_ctx(m: &crate::catalog_fetch::PmsMovie) -> String {
     let rating = if m.rating.is_empty() { "NR" } else { &m.rating };
     format!(
         "{} \u{b7} {} \u{b7} {}",
@@ -315,7 +315,7 @@ pub(crate) fn movie_ctx(m: &crate::pms::PmsMovie) -> String {
 /// fetch and nothing else, and a slot warmed tens of minutes early must NOT be carrying the
 /// evict-protection a draw takes (see `ui::tex::warm_on`). At the tile's OWN 480×270 —
 /// `(server, path, w, h, png)` IS the store key, so a warm at any other size buys nothing.
-pub(crate) fn warm_up_next_still(sid: crate::plex::ServerId, thumb: &str) {
+pub(crate) fn warm_up_next_still(sid: crate::catalog::ServerId, thumb: &str) {
     crate::ui::widgets::warm_tex_on(sid.raw(), thumb, 480, 270, 0);
 }
 
@@ -323,7 +323,7 @@ pub(super) struct LivePlaybackResources;
 
 impl PlaybackResources for LivePlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::pms::PmsMovie) -> bool {
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie) -> bool {
         crate::route::request_play_movie(ps, meta, item, &movie_ctx(item))
     }
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
@@ -331,7 +331,7 @@ impl PlaybackResources for LivePlaybackResources {
         request_loaded_episode(ps, meta, rk)
     }
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
-        sid: crate::plex::ServerId, rk: &str) {
+        sid: crate::catalog::ServerId, rk: &str) {
         meta.run(crate::stores::metadata::MetadataCmd::SetNowPlaying(None));
         meta.run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
     }
@@ -500,7 +500,7 @@ pub(crate) unsafe fn commit_info_press(
 /// `route::commit_audio_selection`/`commit_subtitle_selection` take the playback session's `&mut`,
 /// which no screen has (§2.2) — the panel returns a
 /// [`TrackCommit`](crate::appkit::track_menu::TrackCommit) and this is where it lands, from the
-/// overlay's `PlayerReq` and from the headless `plxnative-menupick` trigger alike.
+/// overlay's `PlayerReq` and from the headless `nativejelly-menupick` trigger alike.
 pub(crate) fn commit_track(
     ps: &mut crate::route::PlaybackSession,
     commit: crate::appkit::track_menu::TrackCommit,
@@ -559,9 +559,9 @@ pub(crate) fn player_requests(
             }
             PlayerReq::RepairSandbox => {
                 if ps.jail_load_blocked {
-                    pa.repair_sandbox(repair, plx_platform::tv::sandbox::blocks_native_video());
+                    pa.repair_sandbox(repair, nj_platform::tv::sandbox::blocks_native_video());
                     ps.repair_status = repair.state();
-                    plx_machine::idle::invalidate();
+                    nj_machine::idle::invalidate();
                 }
             }
             PlayerReq::ExtendHud(ms) => {
@@ -835,7 +835,7 @@ pub(crate) fn play_up_next(
     // the finished episode created, so it lives on that episode's server.
     let sid = bridge.metadata_view().playing()
         .map(|p| p.sid)
-        .unwrap_or_else(crate::plex::current_server);
+        .unwrap_or_else(crate::catalog::current_server);
     bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RetirePlaying);
     bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid: sid, rk: rk.to_string() });
     start_playback(
@@ -860,7 +860,7 @@ pub(crate) fn play_up_next(
 pub(crate) unsafe fn play_item_now(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog_fetch::PmsMovie,
     from_start: bool,
     from: Origin,
     hud_ms: u32,
@@ -876,7 +876,7 @@ pub(crate) unsafe fn play_item_now(
 pub(super) fn play_item_now_with<R: PlaybackResources>(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog_fetch::PmsMovie,
     from_start: bool,
     from: Origin,
     hud_ms: u32,
@@ -971,7 +971,7 @@ fn apply_info_action(
                 // down below.
                 let sid = bridge.metadata_view().playing()
                     .map(|p| p.sid)
-                    .unwrap_or_else(crate::plex::current_server);
+                    .unwrap_or_else(crate::catalog::current_server);
                 exit_player(ps, pa, refresh_hubs_at, pages);
                 // A LANDING, not a navigation, so the page is SHOWN rather than pushed blindly:
                 // the exit above has usually already put this very page on top (the show playback
@@ -1163,7 +1163,7 @@ mod paused_seek_tests {
     /// Every state this touches is a crate global, so the body holds `testlock::serial()`.
     #[test]
     fn a_scrub_commit_taken_while_paused_arms_the_repause_instead_of_resuming() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let was_paused = crate::player::TX.paused.load(Relaxed);
         crate::player::TX.paused.store(true, Relaxed);
         let mut repause_at = 0i64;
@@ -1188,7 +1188,7 @@ mod paused_seek_tests {
     /// armed the override unconditionally, which would re-pause a film nobody had paused.
     #[test]
     fn a_scrub_commit_taken_while_playing_arms_no_repause() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let was_paused = crate::player::TX.paused.load(Relaxed);
         crate::player::TX.paused.store(false, Relaxed);
         set_resume_pend(false);
@@ -1282,7 +1282,7 @@ mod delete_local_data_tests {
 mod player_return_tests {
     use super::super::bridge::{self, AppHost, Bridge};
     use super::{enter_player, return_from_player, Origin};
-    use crate::plex::ServerId;
+    use crate::catalog::ServerId;
     use crate::screens::registry::{AppArg, ContentArg, PageMemory};
     use crate::ui::dispatch::Dispatcher;
     use crate::ui::fixture::tick;
@@ -1313,7 +1313,7 @@ mod player_return_tests {
 
     impl Pages {
         fn new() -> Self {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
             Self {
                 d: Dispatcher::<AppHost>::new(),
                 rig: Bridge::for_test(|| 0),
@@ -1339,7 +1339,7 @@ mod player_return_tests {
             self.d.top_arg().cloned().expect("a page is on top")
         }
 
-        fn top_entry(&self) -> plx_machine::machine::EntryId {
+        fn top_entry(&self) -> nj_machine::machine::EntryId {
             self.d.nav.top_page().expect("a page is on top").id
         }
 
@@ -1353,7 +1353,7 @@ mod player_return_tests {
         }
 
         /// One real key press, through the app's own frame.
-        fn press(&mut self, key: plx_machine::machine::Key) {
+        fn press(&mut self, key: nj_machine::machine::Key) {
             self.t += 16;
             let at = tick(self.t);
             bridge::frame(&mut self.d, &mut self.rig, at, vec![crate::ui::fixture::key(key, at)]);
@@ -1361,7 +1361,7 @@ mod player_return_tests {
         }
 
         /// The `Spot` an entry's return memory is holding.
-        fn spot_of(&self, entry: plx_machine::machine::EntryId) -> crate::metadata::Spot {
+        fn spot_of(&self, entry: nj_machine::machine::EntryId) -> crate::metadata::Spot {
             match &self.d.nav.entry(entry).expect("the entry is on the stack").ret.memory {
                 PageMemory::Detail(memory) => memory.spot.clone(),
                 other => panic!("a detail entry remembers a detail page, not {other:?}"),
@@ -1384,8 +1384,8 @@ mod player_return_tests {
     /// the page that comes back is compared to the page that was left, as an argument.
     #[test]
     fn a_session_returns_to_the_screen_it_was_launched_from() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-launch");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-launch");
         for launched_from in [
             AppArg::Home,
             AppArg::Library,
@@ -1414,7 +1414,7 @@ mod player_return_tests {
                 "…and to the SAME entry, not a second copy of that kind of page",
             );
         }
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// A detail return names the SAME ITEM that was mounted — the whole reason the origin was a
@@ -1428,8 +1428,8 @@ mod player_return_tests {
     /// picks one of them.
     #[test]
     fn a_detail_return_names_the_item_that_was_mounted() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-detail");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-detail");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(B, "7"));
@@ -1441,7 +1441,7 @@ mod player_return_tests {
         p.back_out();
         assert_eq!(p.top_entry(), ours, "the exit named the entry that was mounted");
         assert!(p.top().same_instance(&detail(A, "7")));
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **The page comes back at the spot it was left at** — the half the old module could not
@@ -1455,13 +1455,13 @@ mod player_return_tests {
     /// comes back at `col = 0` grades nothing.
     #[test]
     fn the_page_underneath_keeps_the_spot_it_was_left_at() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-spot");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-spot");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
         let page = p.top_entry();
-        p.press(plx_machine::machine::Key::Right);
+        p.press(nj_machine::machine::Key::Right);
         let left_on = p.d.focus().expect("the detail page holds the cursor");
         p.play(Origin::Here);
         let spot = p.spot_of(page);
@@ -1482,7 +1482,7 @@ mod player_return_tests {
             Some(left_on),
             "…and so did the cursor, which is what the spot is a description of",
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **Up Next must not rewrite the return page.** An auto-advance starts a NEW item while the
@@ -1494,8 +1494,8 @@ mod player_return_tests {
     /// with no seed, and land the exit on Home from the second episode onward.
     #[test]
     fn auto_advance_keeps_the_page_the_user_came_from() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-upnext");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-upnext");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
@@ -1516,7 +1516,7 @@ mod player_return_tests {
             show,
             "four auto-advances later, still the show page",
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **The push is the product's dip, and the player is asked for twice inside it** — once by
@@ -1527,8 +1527,8 @@ mod player_return_tests {
     /// that nobody seeded (`show_page(Player)`'s foreground restore) inherits nothing.
     #[test]
     fn a_second_play_inside_the_push_keeps_the_origin_and_leaves_no_seed() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-dip");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-dip");
         let mut p = Pages::new();
         p.d.nav.tabs.stack.transition = Box::new(crate::ui::containers::transition::PageDip::new());
         p.stand_on(AppArg::Home);
@@ -1554,7 +1554,7 @@ mod player_return_tests {
             None,
             "an unseeded player mount inherits no origin from the earlier session",
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// **An origin that is no longer on the stack falls back to Home** — the anti-strand floor
@@ -1564,8 +1564,8 @@ mod player_return_tests {
     /// one holds an `EntryId` that names nothing.
     #[test]
     fn an_origin_that_is_gone_falls_back_to_home() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-strand");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-strand");
         let mut p = Pages::new();
         p.stand_on(AppArg::Home);
         p.stand_on(detail(A, "7"));
@@ -1599,13 +1599,13 @@ mod player_return_tests {
             "a stranded return lands on Home rather than on nothing: {:?}",
             p.top().id(),
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     #[test]
     fn a_guid_only_person_returns_to_its_retained_entry() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-guid-only");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-guid-only");
         let mut p = Pages::new();
         let arg = AppArg::Content(ContentArg::Person { sid: A, key: String::new(),
             guid: "plex://person/synthetic-person".into(), name: String::new(), thumb: String::new() });
@@ -1616,21 +1616,21 @@ mod player_return_tests {
         p.back_out();
         assert_eq!(p.top_entry(), before, "a GUID is sufficient identity for the retained Person");
         assert!(p.top().same_instance(&arg));
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     /// A live content entry carrying no item/person identity is not the stale-entry case. The
     /// production return boundary rejects each ContentArg shape explicitly and chooses Home.
     #[test]
     fn an_identityless_content_origin_falls_back_to_home() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("player-return-identityless");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("player-return-identityless");
         for origin in [
             AppArg::Content(ContentArg::Detail { sid: A, rk: String::new() }),
             AppArg::Content(ContentArg::Person { sid: A, key: String::new(), guid: String::new(),
                 name: String::new(), thumb: String::new() }),
             AppArg::Content(ContentArg::Filmography { sid: A, key: String::new() }),
-            AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef::by_tag(A, 0, 0, ""))),
+            AppArg::Content(ContentArg::Collection(crate::catalog::collections::CollectionRef::by_tag(A, 0, 0, ""))),
         ] {
             let mut p = Pages::new();
             p.stand_on(AppArg::Home).stand_on(origin);
@@ -1641,6 +1641,6 @@ mod player_return_tests {
             p.back_out();
             assert!(matches!(p.top(), AppArg::Home));
         }
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 }

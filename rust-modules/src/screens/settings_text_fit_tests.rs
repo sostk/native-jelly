@@ -5,13 +5,13 @@
 //! ends in `…` on the television. The Belarusian root shipped exactly that way ("Неабавязковыя
 //! справаздачы, звесткі пра прыватнасць і лака…"), invisible in the simulator because its newer
 //! SDL_ttf sums fractional advances while the device rounds each glyph to a whole pixel.
-//! [`plx_base::fontcov::advances::ShippedMeasure`] measures the shipped faces the device's way, so
+//! [`nj_base::fontcov::advances::ShippedMeasure`] measures the shipped faces the device's way, so
 //! these assertions are about the television, not the Mac. The Legal notices and Privacy & data
 //! pages carry the same guard in their own modules (`legal.rs`, `consent_text_fit_tests.rs`).
 
 use super::*;
-use plx_base::fontcov::advances::ShippedMeasure;
-use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+use nj_base::fontcov::advances::ShippedMeasure;
+use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
 use crate::ui::route_screen::RouteLayout;
 use crate::ui::table::TableView;
 
@@ -27,7 +27,7 @@ fn base_root_inputs() -> RootInputs {
     RootInputs {
         signed_in: true, multi_user: false, library_count: 0,
         auto_sign_in: false, trailer_autoplay: true,
-        language: plx_platform::i18n::Preference::System, plaintext: Vec::new(),
+        language: nj_platform::i18n::Preference::System, plaintext: Vec::new(),
     }
 }
 
@@ -83,7 +83,7 @@ fn every_settings_row_fits_its_column_in_every_language() {
                         &RootInputs { plaintext: vec![PlaintextRowInput {
                             machine: ServerMachineId("machine".into()),
                             name: if named { "some-server-machine-name-that-is-very-long".into() }
-                                  else { plx_platform::i18n::msg::settings_plaintext_server().into() },
+                                  else { nj_platform::i18n::msg::settings_plaintext_server().into() },
                             named, on, connected,
                         }], ..base_root_inputs() }, &mut out);
                 }
@@ -97,7 +97,7 @@ fn every_settings_row_fits_its_column_in_every_language() {
 /// string never measures narrower.
 #[test]
 fn the_shipped_measure_sums_whole_pixel_advances_like_the_device() {
-    use plx_machine::machine::Measure;
+    use nj_machine::machine::Measure;
     let m = ShippedMeasure;
     let a = m.width_str("Privacy & data", theme::size::CAPTION, false);
     let b = m.width_str("Privacy & data, and more", theme::size::CAPTION, false);

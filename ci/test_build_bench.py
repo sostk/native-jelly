@@ -45,7 +45,7 @@ log = os.environ["FAKE_LOG"]
 with open(log, "a") as f:
     f.write(json.dumps({"args": args, "cwd": os.getcwd(), "incr": os.environ.get("CARGO_INCREMENTAL"),
                         "tdir": os.environ.get("CARGO_TARGET_DIR"), "rustflags": os.environ.get("RUSTFLAGS"),
-                        "runtime": bool(os.environ.get("PLXNATIVE_RUNTIME_DIR"))}) + "\n")
+                        "runtime": bool(os.environ.get("NJ_RUNTIME_DIR"))}) + "\n")
 def read(p):
     try:
         return open(p).read()
@@ -63,12 +63,12 @@ if "--no-run" in args:
     open(state, "w").write(sig)
     print("   Compiling noise on stdout that is not JSON")
     print(json.dumps({"reason": "compiler-artifact", "package_id": "registry+x#serde@1.0.0", "fresh": True}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/base#plx_base@0.0.0", "fresh": fresh}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/machine#plx_machine@0.0.0", "fresh": fresh}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/platform#plx_platform@0.0.0", "fresh": fresh}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/gfx#plx_gfx@0.0.0", "fresh": fresh}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/net#plx_net@0.0.0", "fresh": fresh}))
-    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules#plxnative-modules@0.7.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/base#nj_base@0.0.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/machine#nj_machine@0.0.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/platform#nj_platform@0.0.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/gfx#nj_gfx@0.0.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules/net#nj_net@0.0.0", "fresh": fresh}))
+    print(json.dumps({"reason": "compiler-artifact", "package_id": "path+file:///r/rust-modules#nativejelly-modules@0.7.0", "fresh": fresh}))
 elif args[:2] == ["test", "--lib"]:
     print("running 5432 tests")
     print("test result: ok. 5300 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 1.00s")
@@ -78,7 +78,7 @@ elif args[0] == "rustc":
     tdir = args[args.index("--target-dir") + 1]
     out = os.path.join(tdir, tgt, "release")
     os.makedirs(out, exist_ok=True)
-    open(os.path.join(out, "libplxnative_modules.a"), "wb").write(b"!<arch>\nfake archive")
+    open(os.path.join(out, "libnativejelly_modules.a"), "wb").write(b"!<arch>\nfake archive")
     print(json.dumps({"reason": "compiler-artifact", "fresh": False}))
 '''
 FAKE_RUSTC = "#!/bin/sh\necho 'rustc 1.99.0-nightly (fake 2026-01-01)'\n"
@@ -88,7 +88,7 @@ FAKE_SYSCTL = ('#!/bin/sh\ncase "$2" in\n'
                '  *) echo "Fake CPU";;\nesac\n')
 SCRATCH_MAKEFILE = r'''print-bench-config:
 	@printf '%s\n' 'RUST_NIGHTLY=nightly' 'RUST_TDIR=target' 'RUST_TARGET=arm-unknown-linux-gnueabi' \
-	  'RUST_FEATFLAGS=' 'RUST_LIB=rust-modules/target/arm-unknown-linux-gnueabi/release/libplxnative_modules.a' \
+	  'RUST_FEATFLAGS=' 'RUST_LIB=rust-modules/target/arm-unknown-linux-gnueabi/release/libnativejelly_modules.a' \
 	  'RUST_ENV=RUSTFLAGS="-C target-cpu=fake -C x"' 'TEST_FAST_TDIR=target-fast' 'RELEASE=$(RELEASE)'
 '''
 LEAF = "rust-modules/base/src/cbuf.rs"
@@ -194,16 +194,16 @@ class ShapeTests(unittest.TestCase):
             self.assertFalse(any(s["app_rebuilt"] for s in by_id["noop"]["samples"]))
             self.assertTrue(all(s["app_rebuilt"] for s in by_id["leaf"]["samples"]))
             self.assertTrue(all(s["machine_rebuilt"] and s["app_rebuilt"] for s in by_id["machine"]["samples"]))
-            self.assertIn("plx_machine rebuilt: yes", md)
+            self.assertIn("nj_machine rebuilt: yes", md)
             self.assertTrue(all(s["platform_rebuilt"] and s["app_rebuilt"] for s in by_id["platform"]["samples"]))
-            self.assertIn("plx_platform rebuilt: yes", md)
+            self.assertIn("nj_platform rebuilt: yes", md)
             self.assertTrue(all(s["gfx_rebuilt"] and s["app_rebuilt"] for s in by_id["gfx"]["samples"]))
-            self.assertIn("plx_gfx rebuilt: yes", md)
+            self.assertIn("nj_gfx rebuilt: yes", md)
             self.assertTrue(all(s["net_rebuilt"] and s["app_rebuilt"] for s in by_id["net"]["samples"]))
-            self.assertIn("plx_net rebuilt: yes", md)
+            self.assertIn("nj_net rebuilt: yes", md)
             self.assertEqual(by_id["tests"]["samples"][0]["passed"], 5425)
             self.assertEqual(doc["sizes"]["count"], 1)
-            self.assertNotIn("PLX_", out.read_text())
+            self.assertNotIn("NJ_", out.read_text())
             sb.assert_sources_untouched(self)
 
     def test_rounds_interleave_the_scenarios(self):
@@ -226,7 +226,7 @@ class ShapeTests(unittest.TestCase):
     def test_cargo_is_called_the_way_the_makefile_does(self):
         with Sandbox() as sb:
             (sb.repo / "rust-modules" / "target-fast").mkdir(parents=True)
-            lib = sb.repo / "rust-modules/target/arm-unknown-linux-gnueabi/release/libplxnative_modules.a"
+            lib = sb.repo / "rust-modules/target/arm-unknown-linux-gnueabi/release/libnativejelly_modules.a"
             lib.parent.mkdir(parents=True)
             lib.write_bytes(b"old")
             proc = sb.run("--runs", "1", "--only", "noop,leaf-inc,tests,arm")
@@ -402,8 +402,8 @@ class MakefileWiringTests(unittest.TestCase):
         self.assertEqual(shlex.split(m.group(1)), want)
 
     def test_print_bench_config_reports_the_recipes_values_and_no_credential(self):
-        proc = self.make("-s", "print-bench-config", env={"PLX_SENTRY_DSN": "https://secret-dsn.invalid/1",
-                                                          "PLX_POSTHOG_KEY": "phc_secretvalue"})
+        proc = self.make("-s", "print-bench-config", env={"NJ_SENTRY_DSN": "https://secret-dsn.invalid/1",
+                                                          "NJ_POSTHOG_KEY": "phc_secretvalue"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
         cfg = dict(line.split("=", 1) for line in proc.stdout.splitlines())
         for key in ("RUST_NIGHTLY", "RUST_TDIR", "RUST_TARGET", "RUST_FEATFLAGS", "RUST_LIB", "RUST_ENV",
@@ -413,7 +413,7 @@ class MakefileWiringTests(unittest.TestCase):
         self.assertEqual(cfg["RELEASE"], "")
         self.assertTrue(cfg["RUST_ENV"].startswith("RUSTFLAGS="))
         self.assertNotIn("secret", proc.stdout)
-        self.assertNotIn("PLX_", proc.stdout)
+        self.assertNotIn("NJ_", proc.stdout)
 
     def test_make_refuses_release_without_starting_anything(self):
         for goal in ("build-bench", "build-bench-quick"):
@@ -425,7 +425,7 @@ class MakefileWiringTests(unittest.TestCase):
     def test_dry_run_goes_through_the_lock_with_the_make_environment(self):
         proc = self.make("-n", "build-bench-quick", "ARGS=--runs 2")
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertRegex(proc.stdout, r"tools/check-lock\.py -- env PLX_BENCH_VIA_MAKE=1[\s\S]*tools/build-bench\.py --quick --runs 2")
+        self.assertRegex(proc.stdout, r"tools/check-lock\.py -- env NJ_BENCH_VIA_MAKE=1[\s\S]*tools/build-bench\.py --quick --runs 2")
         full = self.make("-n", "build-bench").stdout
         self.assertNotIn("--quick", full)
 

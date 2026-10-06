@@ -82,17 +82,17 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
           xvfb-run -a -s '-screen 0 1920x1080x24' python3 tools/sim-smoke.py \
-            --binary "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/release/plxnative-sim" \
-            --runtime "$RUNNER_TEMP/plxnative-sim-runtime" \
+            --binary "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/release/nativejelly-sim" \
+            --runtime "$RUNNER_TEMP/nativejelly-sim-runtime" \
             --assets "$GITHUB_WORKSPACE/pkg" \
-            --output "$RUNNER_TEMP/plxnative-linux.png" \
+            --output "$RUNNER_TEMP/nativejelly-linux.png" \
             --core-dir "$RUNNER_TEMP/cores"
       - name: Preserve Linux capture
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simulator-linux-${{ github.sha }}
-          path: ${{ runner.temp }}/plxnative-linux.png
+          path: ${{ runner.temp }}/nativejelly-linux.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Preserve Linux event log and core on failure
@@ -101,9 +101,9 @@ jobs:
         with:
           name: simulator-linux-crash-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/plxnative-sim-runtime/plxnative-events.log
+            ${{ runner.temp }}/nativejelly-sim-runtime/nativejelly-events.log
             ${{ runner.temp }}/cores
-            rust-modules/target-sim-ci/release/plxnative-sim
+            rust-modules/target-sim-ci/release/nativejelly-sim
           if-no-files-found: ignore
           retention-days: 7
 
@@ -134,16 +134,16 @@ jobs:
       - name: Replay all committed product recordings
         run: |
           python3 tests/replay_fixtures.py \
-            --sim "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/debug/plxnative-sim" \
-            --output "$RUNNER_TEMP/plxnative-replay"
+            --sim "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/debug/nativejelly-sim" \
+            --output "$RUNNER_TEMP/nativejelly-replay"
       - name: Preserve replay evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simulator-replay-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/plxnative-replay/**/plxnative-events.log
-            ${{ runner.temp }}/plxnative-replay/**/sim.out
+            ${{ runner.temp }}/nativejelly-replay/**/nativejelly-events.log
+            ${{ runner.temp }}/nativejelly-replay/**/sim.out
           if-no-files-found: ignore
           retention-days: 7
       - name: Install nightly Rust
@@ -161,16 +161,16 @@ jobs:
       - name: Launch and capture 1080p frame
         run: |
           python3 tools/sim-smoke.py \
-            --binary "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/debug/plxnative-sim" \
-            --runtime "$RUNNER_TEMP/plxnative-sim-runtime" \
+            --binary "$GITHUB_WORKSPACE/rust-modules/target-sim-ci/debug/nativejelly-sim" \
+            --runtime "$RUNNER_TEMP/nativejelly-sim-runtime" \
             --assets "$GITHUB_WORKSPACE/pkg" \
-            --output "$RUNNER_TEMP/plxnative-macos.png"
+            --output "$RUNNER_TEMP/nativejelly-macos.png"
       - name: Preserve macOS capture
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simulator-macos-${{ github.sha }}
-          path: ${{ runner.temp }}/plxnative-macos.png
+          path: ${{ runner.temp }}/nativejelly-macos.png
           if-no-files-found: ignore
           retention-days: 7
 

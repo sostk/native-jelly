@@ -32,7 +32,7 @@
 // `rgb8`, and the two stops the renderer itself paints with (`NEUTRAL_500`, the app ground, and
 // `NEUTRAL_1000`, the scrim ink behind `SCRIM_INK`), are written down in `gfx::tokens` (module-layers
 // step L5) and imported here, so a code still exists in exactly one place.
-use plx_gfx::gfx::tokens::{rgb8, NEUTRAL_500};
+use nj_gfx::gfx::tokens::{rgb8, NEUTRAL_500};
 
 // Cool — blue-leaning: everything that is text, and artwork that has not loaded.
 const COOL_0: [f32; 4] = rgb8(0xf7, 0xfa, 0xfc);
@@ -158,7 +158,7 @@ pub const SUBTITLE_INKS: [[f32; 4]; 6] =
 // The ladder is DEFINED in `gfx::tokens` (module-layers step L5): `text` warms exactly these faces and
 // the `gfx` layer may not name `ui`. Re-exported as a module, so `theme::size::BODY` and
 // `use theme::size::*` hold, and `tools/font-hint-audit.py` reads the rungs from there.
-pub use plx_gfx::gfx::tokens::size;
+pub use nj_gfx::gfx::tokens::size;
 
 /// The **spacing scale** — the vertical/horizontal *gap* axis of the design system, the sibling of
 /// [`size`]. Gaps between stacked elements come from a named rung, never a hand-tuned pixel offset,
@@ -401,7 +401,7 @@ pub const SURFACE_APP: [f32; 4] = NEUTRAL_500;
 pub const PLANE_COVER: [f32; 4] = SURFACE_APP;
 // GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha): [`SURFACE_APP`] itself (both are
 // the `NEUTRAL_500` stop), defined in `gfx::tokens` because `gfx` clears with it.
-pub use plx_gfx::gfx::tokens::CLEAR_RGB;
+pub use nj_gfx::gfx::tokens::CLEAR_RGB;
 /// Opaque menu panel / fade mask / badge knockout interior.
 pub const SURFACE_PANEL: [f32; 4] = NEUTRAL_650;
 /// Near-opaque sheet/card gradient — top stop. [`SURFACE_PANEL`]'s own stop at .985, so the sheet
@@ -471,7 +471,7 @@ impl Material {
         }
     }
 
-    /// `/tmp/plxnative-material=<ultrathin|thin|regular|thick|ultrathick>` — the panel's material,
+    /// `/tmp/nativejelly-material=<ultrathin|thin|regular|thick|ultrathick>` — the panel's material,
     /// swept. Absent, [`PANEL_MATERIAL`] stands.
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s.trim().to_ascii_lowercase().as_str() {
@@ -548,7 +548,7 @@ mod material_tests {
         );
     }
 
-    /// Every name the sweep accepts round-trips, so `plxnative-material` cannot silently fall back
+    /// Every name the sweep accepts round-trips, so `nativejelly-material` cannot silently fall back
     /// to the default on a typo it half-recognises.
     #[test]
     fn every_material_parses_from_its_own_name() {
@@ -604,7 +604,7 @@ pub const SKELETON_BOT: [f32; 4] = COOL_900;
 
 // ── Scrims (near-black; alpha supplied per call) ─────────────────────────────
 // Hero/scroll scrim ink; use via [`scrim`]. Defined in `gfx::tokens` (the renderer paints with it).
-pub use plx_gfx::gfx::tokens::SCRIM_INK;
+pub use nj_gfx::gfx::tokens::SCRIM_INK;
 /// Pure-black scrim ink (HUD bottom, subtitle outline, modal); use via [`scrim_black`].
 pub const SCRIM_BLACK_INK: [f32; 3] = [BLACK[0], BLACK[1], BLACK[2]];
 
@@ -693,7 +693,7 @@ pub mod underlay {
     /// `1 - DIM_PANEL * (1 - TINT)` = 0.70 for the middle-of-the-frame role. One number for every
     /// role, because the frost on top (`PANEL_MATERIAL`, .85) is what makes the panel read as the
     /// panel material; this only decides how much of the page's hue shows through it, and where.
-    /// `/tmp/plxnative-paneltint=<w>` sweeps it on a devtriggers build.
+    /// `/tmp/nativejelly-paneltint=<w>` sweeps it on a devtriggers build.
     pub const PANEL_TINT: f32 = 0.70;
     /// **The brightest the field may be under a panel**, Rec.709 over display codes — the same
     /// measure and the same number as the page ground's ceiling (`widgets::GROUND_LUMA`), and for
@@ -705,7 +705,7 @@ pub mod underlay {
 }
 // `with_a` is defined in `gfx::tokens` (module-layers step L5) beside the card constants that use it;
 // it is how a role spells a stop on the white/black alpha ramps: `with_a(WHITE, 0.20)`.
-pub use plx_gfx::gfx::tokens::with_a;
+pub use nj_gfx::gfx::tokens::with_a;
 /// Blend `a` toward `b` by `t` (rgb only; keeps `a`'s alpha) — for a token that is a *mix* of two
 /// roles rather than one of them, e.g. an ambient wash sitting `t` of the way from [`SURFACE_APP`]
 /// to an item's artwork colour. A screen that lerps channels in a loop wants this instead. `const`
@@ -944,7 +944,7 @@ pub const GLASS_RIM_LIGHT: [f32; 4] = with_a(WHITE, 0.28);
 /// where the ramp flattens into [`GLASS_RIM_LIGHT`] and there is no travel at all — matches the
 /// look slightly better and the number slightly worse; the extra tenth is kept because this is a
 /// television seen from three metres, and it is the case where the ground is BRIGHT that the ramp
-/// was built for. `/tmp/plxnative-rimmax` sweeps it without a rebuild.
+/// was built for. `/tmp/nativejelly-rimmax` sweeps it without a rebuild.
 ///
 /// (`line/face` stays far from the reference at every rung, and that is NOT this constant's to fix:
 /// our face is 50 where theirs is 89, which is the density policy, not the edge.)
@@ -1090,7 +1090,7 @@ pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.36);
 /// tab bar's −27% on its own page — i.e. ours is CLOSER to its backdrop than the reference is to
 /// its own, which is the opposite of the story these numbers were first told to support.
 ///
-/// So the constant stays where it was. `/tmp/plxnative-trackmax` sweeps it, and the honest way to
+/// So the constant stays where it was. `/tmp/nativejelly-trackmax` sweeps it, and the honest way to
 /// make this bar lighter is [`super::widgets::TRACK_INK_CONTRAST`] — the 4:1 promise is what puts
 /// the density where it is, and `the_lift_never_spends_the_labels_contrast` marks the boundary: the
 /// guarantee survives a ceiling of .62 and dies at .60.
@@ -1301,7 +1301,7 @@ pub const CARD_SHEEN_W: f32 = 1.0;
 // shader test and the design-system mirror read them today, so the re-export has no user in a
 // non-test build — hence the allow.)
 #[allow(unused_imports)]
-pub use plx_gfx::gfx::tokens::{
+pub use nj_gfx::gfx::tokens::{
     CARD_GLARE_A, CARD_GLARE_EASE, CARD_GLARE_PX, CARD_GLOSS_A, CARD_GLOSS_DIR, CARD_GLOSS_FADE,
     CARD_GLOW_A, CARD_GLOW_BAND_PX, CARD_GLOW_BOT_A, CARD_GLOW_BOT_PX, CARD_GLOW_TOP_A,
     CARD_GLOW_TOP_PX,

@@ -40,12 +40,6 @@ This is an unofficial, third-party client. It is **not** affiliated with, endors
 by the Jellyfin project. "Jellyfin" and the Jellyfin logo belong to the Jellyfin project and are
 used here only to describe what this software interoperates with.
 
-## Plex
-
-Code inherited from PlxNative can still talk to Plex Media Server. This project is **not**
-affiliated with, endorsed by, or sponsored by Plex GmbH or Plex, Inc. "Plex" is their trademark and
-is used here only to describe what that code interoperates with.
-
 ## Other marks
 
 "LG" and "webOS" are trademarks of LG Electronics; "Rotten Tomatoes" of Fandango Media; "IMDb" of

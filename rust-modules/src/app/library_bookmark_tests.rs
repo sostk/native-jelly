@@ -8,7 +8,7 @@ use super::test_support::{frame, frame_with_tap};
 #[test]
 fn bookmark_commands_are_addressed_and_identical_snapshots_are_quiet() {
     use crate::stores::browse::{BrowseCmd, LibraryWork, SectionAddress};
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let stores = crate::stores::Stores::default();
     stores.browse.borrow_mut().seed_two_source_table_for_test();
     let mut directory = crate::stores::browse::DirectorySnapshot::default();
@@ -104,7 +104,7 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
     #[derive(Default)]
     struct Saves(Vec<(crate::stores::browse::SectionAddress, crate::stores::browse::Cursor)>);
     impl crate::ui::dispatch::Tap<AppHost> for Saves {
-        fn effect(&mut self, _: u64, effect: &plx_machine::machine::Stamped<AppHost>) {
+        fn effect(&mut self, _: u64, effect: &nj_machine::machine::Stamped<AppHost>) {
             if let Fx::App(AppFx::Store(
                 _,
                 crate::stores::StoreCmd::Browse(crate::stores::browse::BrowseCmd::Addressed {
@@ -117,22 +117,22 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
             }
         }
     }
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-bookmark-return");
+    let session = crate::catalog::session::TempSession::new("library-bookmark-return");
     session.watching("u-library-bookmark-return");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let sid =
-        crate::plex::register_for_test("bookmark-own", "127.0.0.1", 9, "synthetic", "fixture");
+        crate::catalog::register_for_test("bookmark-own", "127.0.0.1", 9, "synthetic", "fixture");
     let shared =
-        crate::plex::register_for_test("bookmark-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+        crate::catalog::register_for_test("bookmark-shared", "127.0.0.1", 10, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);

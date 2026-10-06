@@ -24,10 +24,10 @@
  *     the app dir is itself named ...com.sostk.nativejelly/, so a bare substring test also matches
  *     libraries deployed beside the binary (libturbojpeg.so.0)
  *
- * It does not. The needle is `/plxnative`, with the slash, and the directory component is
+ * It does not. The needle is `/nativejelly`, with the slash, and the directory component is
  * `/com.sostk.nativejelly` — slash, then `c`. Measured rather than reasoned: a bare
- * `strstr(line, "/plxnative")` answers no on `…/com.sostk.nativejelly/libturbojpeg.so.0` and yes on
- * `…/com.sostk.nativejelly/plxnative`, which is the right answer for the wrong reason. What the
+ * `strstr(line, "/nativejelly")` answers no on `…/com.sostk.nativejelly/libturbojpeg.so.0` and yes on
+ * `…/com.sostk.nativejelly/nativejelly`, which is the right answer for the wrong reason. What the
  * separator test actually buys is the two cases below, and the test file asserts those and not the
  * one that was written down.
  *
@@ -39,8 +39,8 @@
  * record is worth having and an overrun is not, and in signal context there is nothing to report a
  * failure to.
  */
-#ifndef PLX_CRASHFMT_H
-#define PLX_CRASHFMT_H
+#ifndef NJ_CRASHFMT_H
+#define NJ_CRASHFMT_H
 
 #include <stddef.h>
 
@@ -96,28 +96,28 @@ static inline const char *plx_parse_hex(const char *s, unsigned long *out) {
 /* What one /proc/self/maps line is worth saying about. A BITMASK, because a line can be both: the
  * faulting PC is very often inside our own executable's text mapping, and that line is then the
  * `at:` evidence AND the `bin:` load base. */
-#define PLX_MAP_AT  1   /* contains the PC or the LR — which module faulted */
-#define PLX_MAP_BIN 2   /* is our own executable's mapping — the load base */
+#define NJ_MAP_AT  1   /* contains the PC or the LR — which module faulted */
+#define NJ_MAP_BIN 2   /* is our own executable's mapping — the load base */
 
 /* Does `line` name our executable?
  *
- * A TOKEN test: `/plxnative` has to be followed by end-of-line, a space or the end of the buffer.
+ * A TOKEN test: `/nativejelly` has to be followed by end-of-line, a space or the end of the buffer.
  * Two things turn on that separator, and neither is the one main.c used to claim (see the header
  * comment above — the libturbojpeg story is false and was measured false):
  *
- *   * **a sibling whose name merely STARTS with ours.** `plxnative-sim` is the host simulator and
- *     `plxnative.new` is the name `make deploy` scp's to before renaming over the running binary,
- *     and a bare `strstr(line, "/plxnative")` matches both. Neither is mapped into a television's
+ *   * **a sibling whose name merely STARTS with ours.** `nativejelly-sim` is the host simulator and
+ *     `nativejelly.new` is the name `make deploy` scp's to before renaming over the running binary,
+ *     and a bare `strstr(line, "/nativejelly")` matches both. Neither is mapped into a television's
  *     address space today, which is precisely why this is worth a test rather than a hope: the
  *     cost of the guard is one comparison and the cost of losing it is silent.
  *   * **`(deleted)`**, which the kernel appends once the file has been replaced under a running
  *     process — which `make deploy`'s tmp+mv dance does on every single iteration. So the
  *     space-terminated spelling is the NORMAL one while developing, not an edge case, and a test
- *     for `"/plxnative\n"` alone would fail to find our own binary exactly when it is being
+ *     for `"/nativejelly\n"` alone would fail to find our own binary exactly when it is being
  *     worked on. The old code got this right with two `strstr` needles; this keeps it.
  */
 static inline int plx_names_our_binary(const char *line, size_t n) {
-    static const char TOK[] = "/plxnative";
+    static const char TOK[] = "/nativejelly";
     const size_t t = sizeof TOK - 1;
     if (n < t) return 0;
     for (size_t i = 0; i + t <= n; i++) {
@@ -141,8 +141,8 @@ static inline int plx_map_line_kind(const char *line, size_t n, unsigned long pc
     /* Half-open, and `lr` is checked as well as `pc`: on ARM the link register is the return
      * address of the frame that faulted, so on a jump through a bad function pointer the PC is
      * garbage and the LR is the only thing that names a real module. */
-    if ((pc >= lo && pc < hi) || (lr >= lo && lr < hi)) kind |= PLX_MAP_AT;
-    if (plx_names_our_binary(line, n)) kind |= PLX_MAP_BIN;
+    if ((pc >= lo && pc < hi) || (lr >= lo && lr < hi)) kind |= NJ_MAP_AT;
+    if (plx_names_our_binary(line, n)) kind |= NJ_MAP_BIN;
     return kind;
 }
 
@@ -170,4 +170,4 @@ static inline size_t plx_fmt_signal(char *out, size_t cap, int sig, const char *
     return b.n;
 }
 
-#endif /* PLX_CRASHFMT_H */
+#endif /* NJ_CRASHFMT_H */

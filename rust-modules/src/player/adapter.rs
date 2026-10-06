@@ -15,7 +15,7 @@
 //! — see `docs/async-model-decision.md`).
 //!
 //! The reasoning is unchanged and the enforcement is stronger. **The token is now CONSUMED at
-//! construction** ([`PlayerAdapter::new`] takes it by value, and `plex_run` is the only place that
+//! construction** ([`PlayerAdapter::new`] takes it by value, and `nj_run` is the only place that
 //! can mint one), so holding a `&mut PlayerAdapter` IS the proof the old argument stood in for —
 //! and it is a proof the borrow checker keeps rather than one a caller could satisfy twice. Two
 //! live `&mut` to the engine no longer requires a convention: it does not compile.
@@ -25,7 +25,7 @@
 //! sequence of calls with no locking behind it) — and that surface is not this module's.
 
 use super::engine::Engine;
-use plx_base::task::MainThread;
+use nj_base::task::MainThread;
 
 /// The `ENGINE` slot and its confinement, as one owned value (`App.adapters.player`).
 pub(crate) struct PlayerAdapter {
@@ -34,7 +34,7 @@ pub(crate) struct PlayerAdapter {
     mt: MainThread,
     /// The live native session, or `None` between playbacks.
     engine: Option<Engine>,
-    repair: Option<(u64, std::sync::mpsc::Receiver<Result<(), plx_platform::tv::sandbox::Failure>>)>,
+    repair: Option<(u64, std::sync::mpsc::Receiver<Result<(), nj_platform::tv::sandbox::Failure>>)>,
     /// A timed-out native `Load` whose media thread had not returned when its Engine was torn
     /// down. Owned here, not by a static, for the same reason the Engine is: releasing it calls
     /// the Starfish seam, which only the main thread may do. See `engine::AbandonedLoad`.
@@ -42,7 +42,7 @@ pub(crate) struct PlayerAdapter {
 }
 
 impl PlayerAdapter {
-    /// Take the token. `app::boot` calls this once, with the token `plex_run` minted.
+    /// Take the token. `app::boot` calls this once, with the token `nj_run` minted.
     pub(crate) fn new(mt: MainThread) -> Self {
         Self {
             mt,
@@ -56,12 +56,12 @@ impl PlayerAdapter {
     pub(crate) fn repair_sandbox(&mut self, owner: &mut super::machine::RepairAttempt, supported: bool) {
         let Some(token) = owner.begin(supported) else { return; };
         let (tx, rx) = std::sync::mpsc::channel();
-        if plx_base::task::spawn_small("jail repair", move || {
-            let _ = tx.send(plx_platform::tv::sandbox::repair());
+        if nj_base::task::spawn_small("jail repair", move || {
+            let _ = tx.send(nj_platform::tv::sandbox::repair());
         }) {
             self.repair = Some((token, rx));
         } else {
-            owner.complete(token, Err(plx_platform::tv::sandbox::Failure::StartFailed));
+            owner.complete(token, Err(nj_platform::tv::sandbox::Failure::StartFailed));
         }
     }
 
@@ -71,7 +71,7 @@ impl PlayerAdapter {
         let result = match rx.try_recv() {
             Ok(result) => result,
             Err(std::sync::mpsc::TryRecvError::Empty) => return false,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(plx_platform::tv::sandbox::Failure::StartFailed),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(nj_platform::tv::sandbox::Failure::StartFailed),
         };
         let changed = owner.complete(*token, result);
         self.repair = None;
@@ -150,7 +150,7 @@ impl PlayerAdapter {
 #[cfg(test)]
 mod repair_receipt_tests {
     use super::*;
-    use plx_platform::tv::sandbox::{Failure, State};
+    use nj_platform::tv::sandbox::{Failure, State};
     #[test]
     fn a_receipt_lands_without_a_player_screen_and_cannot_rearm_the_attempt() {
         let mut owner = super::super::machine::RepairAttempt::new();

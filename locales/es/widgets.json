@@ -121,7 +121,7 @@
   "widgets.tracks.kbps": "{rate} kbps",
   "widgets.panel.jail": "el entorno aislado de esta instalación bloquea /dev/rtkmem; Native Jelly puede ofrecer una reparación con confirmación mediante el acceso root de Homebrew Channel",
   "widgets.panel.refused": "el servidor rechazó el elemento en /decision: no puede reproducirlo directamente ni convertirlo",
-  "widgets.panel.audio_only_no_pass": "el servidor solo envió audio: no encontró un formato de vídeo compatible para convertirlo (el servidor no tiene Plex Pass)",
+  "widgets.panel.audio_only_no_pass": "el servidor solo envió audio: no encontró un formato de vídeo compatible para convertirlo",
   "widgets.panel.audio_only": "el servidor solo envió audio: no encontró un formato de vídeo compatible para convertirlo",
   "widgets.panel.no_video": "el flujo no contiene pista de vídeo",
   "widgets.panel.open": "no se pudo abrir o leer el flujo multimedia",

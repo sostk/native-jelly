@@ -14,13 +14,13 @@ const KEY: &str = "tv.config.supportDolbyHDRContents";
 
 static STARTED: OnceLock<()> = OnceLock::new();
 
-plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-dvcaps0` — force the boot's platform answer to unsupported.
+nj_base::devtrig::latched_flag!(
+    /// `/tmp/nativejelly-dvcaps0` — force the boot's platform answer to unsupported.
     pub fn forced_unsupported = "dvcaps0";
 );
 
-plx_base::devtrig::latched_flag!(
-    /// `/tmp/plxnative-dvcaps1` — force the boot's platform answer to supported.
+nj_base::devtrig::latched_flag!(
+    /// `/tmp/nativejelly-dvcaps1` — force the boot's platform answer to supported.
     pub fn forced_supported = "dvcaps1";
 );
 
@@ -43,18 +43,18 @@ fn publish(probe: DvProbe, started: Instant, code: Option<i64>, detail: Option<&
             .filter(|s| !s.is_empty())
             .map(|s| format!(" detail={s}"))
             .unwrap_or_default();
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "webos-caps: key={KEY} answer=unknown stage={}{}{} elapsed_ms={elapsed}",
             probe.reason, code, detail,
         ));
     } else {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "webos-caps: key={KEY} answer={} source={} elapsed_ms={elapsed}",
             probe.capability.label(),
             probe.provenance(),
         ));
     }
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// Start the one boot probe. The registration and its private GLib context are both created and
@@ -63,7 +63,7 @@ pub fn start_probe() {
     if STARTED.set(()).is_err() {
         return;
     }
-    if plx_base::task::spawn("webos Dolby Vision capability", run_probe).is_none() {
+    if nj_base::task::spawn("webos Dolby Vision capability", run_probe).is_none() {
         publish(
             DvProbe {
                 capability: DvCapability::Unknown,
@@ -83,7 +83,7 @@ fn run_probe() {
         override_capability(forced_unsupported(), forced_supported())
     {
         if conflict {
-            plx_base::eventlog::log("webos-caps: dvcaps0 and dvcaps1 both armed; dvcaps0 wins");
+            nj_base::eventlog::log("webos-caps: dvcaps0 and dvcaps1 both armed; dvcaps0 wins");
         }
         publish(
             DvProbe {

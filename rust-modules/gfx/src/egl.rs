@@ -52,7 +52,7 @@
 //! the draw path DOES call — `gfx::field_kick` fences the underlay-field reduction so its
 //! read-back is taken only once the GPU has finished it — and which resolves its entry points the
 //! same way, for the same `DT_NEEDED` reason.
-use plx_base::dynlib::Handle;
+use nj_base::dynlib::Handle;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 
@@ -128,7 +128,7 @@ fn resolve(name: &str, lib: &mut Option<Handle>) -> Option<*mut c_void> {
     let mut mapped = |n: &str| {
         if lib.is_none() {
             *lib = Handle::open_loaded(EGL_SONAMES).map(|(h, soname)| {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "egl: RTLD_DEFAULT had no EGL; using the mapped {soname}"
                 ));
                 h
@@ -215,7 +215,7 @@ pub fn probe() {
     let Some(Current { dpy, ctx }) = current_with(&mut |name| resolve(name, &mut lib)) else {
         // Not a fault on a desktop simulator (no EGL at all on macOS; GLX on Linux/X11) and a
         // genuine surprise on a television, so say which one this is rather than guessing.
-        plx_base::eventlog::log(
+        nj_base::eventlog::log(
             "egl: no current EGL context on this thread — SDL is not on an EGL backend here, \
              nothing more to ask",
         );
@@ -226,7 +226,7 @@ pub fn probe() {
         let f: FnGetCurrentSurface = unsafe { std::mem::transmute(f) };
         unsafe { f(EGL_DRAW) }
     });
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "egl: display={dpy:p} context={ctx:p} draw_surface={surface:p}"
     ));
 
@@ -237,11 +237,11 @@ pub fn probe() {
             ("version", EGL_VERSION),
             ("client_apis", EGL_CLIENT_APIS),
         ] {
-            plx_base::eventlog::log(&format!("egl {label}: {}", cstr(unsafe { f(dpy, token) })));
+            nj_base::eventlog::log(&format!("egl {label}: {}", cstr(unsafe { f(dpy, token) })));
         }
         // The line this whole module exists to produce. Unsplit: a grep for one extension name
         // has to be able to find it, and the event log has no line-length limit.
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "egl extensions: {}",
             cstr(unsafe { f(dpy, EGL_EXTENSIONS) })
         ));
@@ -263,7 +263,7 @@ pub fn probe() {
             let p = unsafe { f(c.as_ptr()) };
             out.push_str(&format!(" {name}={}", i32::from(!p.is_null())));
         }
-        plx_base::eventlog::log(&out);
+        nj_base::eventlog::log(&out);
     }
 
     if let (Some(f), false) = (resolve("eglQuerySurface", &mut lib), surface.is_null()) {
@@ -293,7 +293,7 @@ pub fn probe() {
         // having queried the age is an error, and the age is what says how many frames of damage
         // a correct implementation must union.
         let (aok, age, aerr) = ask(EGL_BUFFER_AGE);
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "egl surface: {w}x{h} (ok={wok}/{hok}) swap_behavior=0x{behavior:04x} \
              {behavior_name} (ok={bok} err=0x{berr:04x}) buffer_age={age} \
              (ok={aok} err=0x{aerr:04x})"
@@ -302,10 +302,10 @@ pub fn probe() {
         // EGL_SWAP_BEHAVIOR_PRESERVED_BIT the `eglSurfaceAttrib` route is closed by the config,
         // not by policy, and no amount of asking will open it.
         probe_config(dpy, ctx, &mut lib);
-        // Only with `/tmp/plxnative-eglprobe`, because it MUTATES the live surface: ask for
+        // Only with `/tmp/nativejelly-eglprobe`, because it MUTATES the live surface: ask for
         // EGL_BUFFER_PRESERVED, read back what we got, and put it back the way SDL had it.
         // Empirical, because a config bit and a driver's answer have disagreed before.
-        if plx_base::devtrig::flag("eglprobe") {
+        if nj_base::devtrig::flag("eglprobe") {
             try_preserve(dpy, surface, &mut lib);
             try_damage(dpy, surface, &mut lib);
         }
@@ -342,13 +342,13 @@ fn probe_config(dpy: *mut c_void, ctx: *mut c_void, lib: &mut Option<Handle>) {
     let mut config: *mut c_void = std::ptr::null_mut();
     let mut n: c_int = 0;
     if unsafe { choose(dpy, attribs.as_ptr(), &mut config, 1, &mut n) } == 0 || n < 1 {
-        plx_base::eventlog::log(&format!("egl config: id={id} could not be re-selected"));
+        nj_base::eventlog::log(&format!("egl config: id={id} could not be re-selected"));
         return;
     }
     let mut surface_type: c_int = 0;
     let ok = unsafe { get_attr(dpy, config, EGL_SURFACE_TYPE, &mut surface_type) };
     let preserved = surface_type & EGL_SWAP_BEHAVIOR_PRESERVED_BIT != 0;
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "egl config: id={id} surface_type=0x{surface_type:04x} (ok={ok})          SWAP_BEHAVIOR_PRESERVED_BIT={}",
         i32::from(preserved)
     ));
@@ -377,7 +377,7 @@ fn try_preserve(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>
     let err = get_error.map_or(0, |e| unsafe { e() });
     let mut got: c_int = -1;
     unsafe { query(dpy, surface, EGL_SWAP_BEHAVIOR, &mut got) };
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "egl preserve: eglSurfaceAttrib(BUFFER_PRESERVED) ok={ok} err=0x{err:04x}          readback=0x{got:04x} ({})",
         if got == EGL_BUFFER_PRESERVED { "PRESERVED" } else { "DESTROYED" }
     ));
@@ -443,7 +443,7 @@ fn try_damage(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) 
         clear();
         let ok = unsafe { f(dpy, surface, rects.as_ptr(), 1) };
         let e = err();
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "egl damage: eglSetDamageRegionKHR(0,0,64,64) ok={ok} err=0x{e:04x} {}",
             egl_error_name(e)
         ));
@@ -455,7 +455,7 @@ fn try_damage(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) 
         clear();
         let ok = unsafe { f(dpy, surface, rects.as_ptr(), 1) };
         let e = err();
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "egl damage: eglSwapBuffersWithDamageKHR(0,0,64,64) ok={ok} err=0x{e:04x} {}",
             egl_error_name(e)
         ));
@@ -463,7 +463,7 @@ fn try_damage(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) 
 }
 
 // ---------------------------------------------------------------------------------------------
-// EXPERIMENT (`/tmp/plxnative-egldamage[=WxH]`): is the unadvertised damage region REAL?
+// EXPERIMENT (`/tmp/nativejelly-egldamage[=WxH]`): is the unadvertised damage region REAL?
 // ---------------------------------------------------------------------------------------------
 //
 // `eglSetDamageRegionKHR` resolves and returns `EGL_TRUE`/`EGL_SUCCESS` on this driver, but
@@ -491,11 +491,11 @@ static mut DMG_WARMUP: u32 = 0;
 /// must be full damage" rule of any shippable version, arrived at from the wrong end.
 const DMG_WARMUP_FRAMES: u32 = 180;
 
-/// Resolve the damage entry points once, if `/tmp/plxnative-egldamage` is armed. `WxH` in the
+/// Resolve the damage entry points once, if `/tmp/nativejelly-egldamage` is armed. `WxH` in the
 /// trigger sets the rect (default 480x270, a sixteenth of the panel), anchored bottom-left
 /// because both damage specs use GL's origin, not the authored top-left one.
 fn damage_init(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>) {
-    let Some(spec) = plx_base::devtrig::read("egldamage") else {
+    let Some(spec) = nj_base::devtrig::read("egldamage") else {
         return;
     };
     let (w, h) = spec
@@ -511,12 +511,12 @@ fn damage_init(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>)
     let gpa: FnGetProcAddress = unsafe { std::mem::transmute(gpa) };
     let set = unsafe { gpa(c"eglSetDamageRegionKHR".as_ptr()) };
     if set.is_null() {
-        plx_base::eventlog::log("egldamage: eglSetDamageRegionKHR did not resolve — experiment not armed");
+        nj_base::eventlog::log("egldamage: eglSetDamageRegionKHR did not resolve — experiment not armed");
         return;
     }
     let (fw, fh) = (
-        plx_base::surface::LOGICAL_W as c_int,
-        plx_base::surface::LOGICAL_H as c_int,
+        nj_base::surface::LOGICAL_W as c_int,
+        nj_base::surface::LOGICAL_H as c_int,
     );
     unsafe {
         DMG_QUERY = Some(std::mem::transmute(query));
@@ -527,7 +527,7 @@ fn damage_init(dpy: *mut c_void, surface: *mut c_void, lib: &mut Option<Handle>)
         LATE_DPY = dpy;
         LATE_SURFACE = surface;
     }
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "egldamage: ARMED — {DMG_WARMUP_FRAMES} frames of full damage, then {w}x{h} at (0,0)"
     ));
 }
@@ -548,7 +548,7 @@ pub fn frame_damage() {
         let rect = if DMG_WARMUP < DMG_WARMUP_FRAMES {
             DMG_WARMUP += 1;
             if DMG_WARMUP == DMG_WARMUP_FRAMES {
-                plx_base::eventlog::log("egldamage: warm-up over — narrowing to the sub-rect now");
+                nj_base::eventlog::log("egldamage: warm-up over — narrowing to the sub-rect now");
             }
             std::ptr::addr_of!(DMG_FULL)
         } else {
@@ -592,7 +592,7 @@ pub fn late_probe() {
         let mut age: c_int = -1;
         let ok = query(LATE_DPY, LATE_SURFACE, EGL_BUFFER_AGE, &mut age);
         let e = err();
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "egl surface (after 120 presents): buffer_age={age} ok={ok} err=0x{e:04x}"
         ));
     }
@@ -601,10 +601,10 @@ pub fn late_probe() {
 fn log_gl_extensions() {
     let p = unsafe { glGetString(GL_EXTENSIONS) };
     if p.is_null() {
-        plx_base::eventlog::log("gl extensions: <null>");
+        nj_base::eventlog::log("gl extensions: <null>");
         return;
     }
-    plx_base::eventlog::log(&format!("gl extensions: {}", cstr(p)));
+    nj_base::eventlog::log(&format!("gl extensions: {}", cstr(p)));
 }
 
 /// **"Has the GPU finished this yet?" — asked without waiting for the answer** (`EGL_KHR_fence_sync`).
@@ -669,7 +669,7 @@ pub mod fence {
             .split_ascii_whitespace()
             .any(|e| e == "EGL_KHR_fence_sync")
         {
-            plx_base::eventlog::log("egl fence: EGL_KHR_fence_sync not advertised — field reads count frames");
+            nj_base::eventlog::log("egl fence: EGL_KHR_fence_sync not advertised — field reads count frames");
             return None;
         }
         let api = Api {
@@ -678,7 +678,7 @@ pub mod fence {
             wait: lookup("eglClientWaitSyncKHR")? as usize,
             destroy: lookup("eglDestroySyncKHR")? as usize,
         };
-        plx_base::eventlog::log("egl fence: EGL_KHR_fence_sync in use for the field read-back");
+        nj_base::eventlog::log("egl fence: EGL_KHR_fence_sync in use for the field read-back");
         Some(api)
     }
 
@@ -770,7 +770,7 @@ mod tests {
     /// the invalid pointer `CStr::from_ptr` walked into.
     #[test]
     fn no_current_context_disables_the_fence_without_a_query() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         QUERIES.store(0, Ordering::SeqCst);
         let mut lookup = table(no_context, garbage_display);
         assert!(fence::api_with(&mut lookup).is_none());
@@ -837,7 +837,7 @@ mod tests {
     /// The television's case still binds: a current context on a real display.
     #[test]
     fn a_current_context_binds_the_fence() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         QUERIES.store(0, Ordering::SeqCst);
         let mut lookup = table(some_context, real_display);
         assert!(fence::api_with(&mut lookup).is_some());

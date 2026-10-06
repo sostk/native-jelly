@@ -2,8 +2,8 @@
 //! `ui::widgets::Glass`: the walk itself moved to `gfx::backdrop` (module-layers step L5), and a
 //! test of the `gfx` layer may not name `ui`, so these live with the layer that owns all of their
 //! parts. The tests that need nothing above `gfx` stayed in `gfx/backdrop.rs`.
-use plx_gfx::gfx::backdrop::*;
-use plx_gfx::gfx::Rect;
+use nj_gfx::gfx::backdrop::*;
+use nj_gfx::gfx::Rect;
 use std::{cell::RefCell, rc::Rc};
 
 fn rect(x: f32) -> Rect {
@@ -17,27 +17,27 @@ fn declare_glass(p: crate::ui::Painter, r: Rect) {
         0.0,
         2.0,
         [1.0; 4],
-        plx_gfx::gfx::GlassRim::Standing,
-        plx_gfx::gfx::GlassFace::NONE,
+        nj_gfx::gfx::GlassRim::Standing,
+        nj_gfx::gfx::GlassFace::NONE,
         crate::ui::theme::Material::UltraThin
     ));
 }
 
 #[test]
 fn still_commands_track_crop_texture_revision_and_scrim_under_cached_glass() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     let tex = 9081;
-    plx_gfx::gfx::tex_ledger::specified(tex, 720, 480);
+    nj_gfx::gfx::tex_ledger::specified(tex, 720, 480);
     // Each changed input repeats once: its first frame invalidates; its settled twin reuses.
     for step in 0..14 {
         let state = step / 2;
-        if step == 4 { plx_gfx::gfx::tex_ledger::specified(tex, 720, 480); }
+        if step == 4 { nj_gfx::gfx::tex_ledger::specified(tex, 720, 480); }
         sources.borrow_mut().begin(vec![]);
         {
             let _walk = discover(sources.clone());
             let p = crate::ui::Painter::root();
-            let uv = if state >= 1 { [0.0, 0.1, 1.0, 0.8] } else { plx_gfx::gfx::UV_FULL };
+            let uv = if state >= 1 { [0.0, 0.1, 1.0, 0.8] } else { nj_gfx::gfx::UV_FULL };
             let rad = if state >= 3 { 18.0 } else { 14.0 };
             let focus = if state >= 4 { 0.5 } else { 0.0 };
             let band = if state >= 5 { 90.0 } else { 80.0 };
@@ -55,12 +55,12 @@ fn still_commands_track_crop_texture_revision_and_scrim_under_cached_glass() {
         assert_eq!(!sources.borrow().entries[&Z(1)].valid, step % 2 == 0, "step {step}");
         commit(&sources);
     }
-    plx_gfx::gfx::tex_ledger::deleted(tex);
+    nj_gfx::gfx::tex_ledger::deleted(tex);
 }
 
 #[test]
 fn standalone_still_scrims_invalidate_only_when_their_picture_changes() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for step in 0..8 {
         sources.borrow_mut().begin(vec![]);
@@ -80,7 +80,7 @@ fn standalone_still_scrims_invalidate_only_when_their_picture_changes() {
 
 #[test]
 fn the_real_painter_ignores_foreground_and_outside_motion_but_captures_settle() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for (i, x) in [0.0, 1.0, 2.0, 2.0].into_iter().enumerate() {
         sources.borrow_mut().begin(vec![]);
@@ -106,7 +106,7 @@ fn the_real_painter_ignores_foreground_and_outside_motion_but_captures_settle() 
 
 #[test]
 fn one_capture_per_band_covers_this_frames_union_even_on_activation() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -123,7 +123,7 @@ fn one_capture_per_band_covers_this_frames_union_even_on_activation() {
 
 #[test]
 fn overlapping_bands_retain_separate_underlays_and_capture_the_lower_composite() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -156,7 +156,7 @@ fn overlapping_bands_retain_separate_underlays_and_capture_the_lower_composite()
 
 #[test]
 fn a_frozen_replacement_removes_covered_lower_glass_from_upper_capture_dependencies() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
 
     // Seed the lower retained glass and its overlapping upper neighbour.
@@ -199,7 +199,7 @@ fn a_frozen_replacement_removes_covered_lower_glass_from_upper_capture_dependenc
 
 #[test]
 fn adding_lower_glass_outside_the_sampled_region_does_not_refresh_shared_chrome() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for frame in 0..2 {
         sources.borrow_mut().begin(vec![]);
@@ -223,7 +223,7 @@ fn adding_lower_glass_outside_the_sampled_region_does_not_refresh_shared_chrome(
 
 #[test]
 fn a_moving_lower_glass_outside_the_sampled_region_does_not_refresh_it() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for frame in 0..2 {
         sources.borrow_mut().begin(vec![]);
@@ -243,7 +243,7 @@ fn a_moving_lower_glass_outside_the_sampled_region_does_not_refresh_it() {
 
 #[test]
 fn recording_painters_do_not_declare_live_glass_or_underlay_damage() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -256,8 +256,8 @@ fn recording_painters_do_not_declare_live_glass_or_underlay_damage() {
             0.0,
             2.0,
             [1.0; 4],
-            plx_gfx::gfx::GlassRim::Standing,
-            plx_gfx::gfx::GlassFace::NONE,
+            nj_gfx::gfx::GlassRim::Standing,
+            nj_gfx::gfx::GlassFace::NONE,
             crate::ui::theme::Material::UltraThin
         ));
     }
@@ -273,7 +273,7 @@ fn content_at_or_above_the_surfaces_band_is_never_recorded() {
     // every discovered frame — but no glass entry ever lives at or above `Z::surface(0)`, so
     // recording what it declares was pure cost for data nothing reads. This is the modal-100 /
     // push-100 stress-bench regression's second cause (see docs/backdrop-blur-profiling.md).
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -304,7 +304,7 @@ fn a_glass_command_above_the_surfaces_band_trips_the_debug_assert() {
     // `Painter::declare`'s fast pre-check must never silently eat a glass command: if one is
     // ever declared inside a surface (none is today — grep-verified), the debug build has to
     // say so immediately rather than let that glass quietly never resolve.
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -330,7 +330,7 @@ fn content_below_a_frozen_host_boundary_is_never_recorded() {
     // work the surfaces-band fix already excludes above `Z::surface(0)`, just bounded by a
     // per-frame layer instead of a fixed ceiling. This is the modal-100 stress-bench
     // regression's open hypothesis (docs/backdrop-blur-profiling.md's last dated addendum).
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![Layer {
         z: Z(5),
@@ -370,7 +370,7 @@ fn content_below_a_frozen_host_boundary_is_never_recorded() {
 
 #[test]
 fn glass_growing_into_unchanged_captured_pixels_reuses_its_source() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for frame in 0..2 {
         sources.borrow_mut().begin(vec![]);
@@ -398,29 +398,29 @@ fn glass_growing_into_unchanged_captured_pixels_reuses_its_source() {
 
 #[test]
 fn a_video_plane_does_not_declare_a_framebuffer_glass_source() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     let _walk = discover(sources.clone());
-    let old = plx_gfx::gfx::set_video_plane_frame(true);
+    let old = nj_gfx::gfx::set_video_plane_frame(true);
     let handled = crate::ui::widgets::Glass::DYNAMIC_BACKDROP.backdrop(
         crate::ui::Painter::root(),
         rect(0.0),
         0.0,
         2.0,
         [1.0; 4],
-        plx_gfx::gfx::GlassRim::Standing,
-        plx_gfx::gfx::GlassFace::NONE,
+        nj_gfx::gfx::GlassRim::Standing,
+        nj_gfx::gfx::GlassFace::NONE,
         crate::ui::theme::Material::UltraThin,
     );
-    plx_gfx::gfx::set_video_plane_frame(old);
+    nj_gfx::gfx::set_video_plane_frame(old);
     assert!(!handled);
     assert!(sources.borrow().entries.is_empty());
 }
 
 #[test]
 fn shared_chrome_splits_when_its_glasses_overlap() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -444,7 +444,7 @@ fn shared_chrome_splits_when_its_glasses_overlap() {
 
 #[test]
 fn a_frozen_replacement_hides_lower_damage_but_its_new_image_invalidates() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for (frame, revision) in [7, 7, 8].into_iter().enumerate() {
         sources.borrow_mut().begin(vec![Layer {
@@ -469,7 +469,7 @@ fn a_frozen_replacement_hides_lower_damage_but_its_new_image_invalidates() {
 
 #[test]
 fn held_image_alpha_reuses_the_filter_but_content_revision_invalidates_it() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for (frame, (revision, alpha)) in [(7, 0.2), (7, 0.8), (8, 0.8)].into_iter().enumerate() {
         sources.borrow_mut().begin(vec![Layer {
@@ -498,7 +498,7 @@ fn held_image_alpha_reuses_the_filter_but_content_revision_invalidates_it() {
 
 #[test]
 fn clipped_out_glass_neither_captures_nor_draws() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     sources.borrow_mut().begin(vec![]);
     {
@@ -517,7 +517,7 @@ fn clipped_out_glass_neither_captures_nor_draws() {
 /// `Painter::clip` does, and hand it back on drop.
 #[test]
 fn a_clip_scope_clips_the_discovery_walk_and_restores_it() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let sources = Rc::new(RefCell::new(Sources::default()));
     for scoped in [true, false] {
         sources.borrow_mut().begin(vec![]);

@@ -39,10 +39,10 @@ fn home_keeps_recently_added_rows_for_two_same_type_libraries() {
          "Metadata":[{"ratingKey":"202","librarySectionID":"2","librarySectionTitle":"TV HDR",
                       "type":"show","title":"HDR Show","thumb":"/hdr.jpg","art":"/hdr-art.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::catalog::Envelope>(body)
         .expect("the two-library PMS response parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
     let (items, hubs, _) = merge(&[src(0, "", HubState::Ready, Some(build))]);
 
     assert_eq!(hubs.len(), 2, "both same-type library shelves reach Home");
@@ -81,10 +81,10 @@ fn one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles()
          "Metadata":[{"ratingKey":"101","librarySectionID":"2","librarySectionTitle":"TV",
                       "type":"show","title":"TV Show","thumb":"/tv.jpg","art":"/tv-art.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::catalog::Envelope>(body)
         .expect("the one-movie-one-tv PMS response parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 2);
     assert_eq!(
@@ -102,17 +102,17 @@ fn one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles()
 /// recognize keeps drawing PMS's own text verbatim (checked below).
 #[test]
 fn a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui() {
-    let _thread_locale = plx_platform::i18n::language_on_this_thread_for_test(plx_platform::i18n::Preference::Be);
+    let _thread_locale = nj_platform::i18n::language_on_this_thread_for_test(nj_platform::i18n::Preference::Be);
     let body = r#"{"MediaContainer":{"Hub":[
         {"type":"movie","hubIdentifier":"movie.recentlyadded.1",
          "title":"Recently Added in Movies","key":"/library/sections/1/all?sort=addedAt:desc",
          "Metadata":[{"ratingKey":"1","librarySectionID":"1","librarySectionTitle":"Movies",
                       "type":"movie","title":"A Film","thumb":"/t.jpg","art":"/a.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::catalog::Envelope>(body)
         .expect("a PMS body with a per-library Recently Added hub parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 1);
     assert_eq!(
@@ -127,17 +127,17 @@ fn a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui() {
 /// the per-library `{library}`-interpolated form, under a `be` UI.
 #[test]
 fn a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui() {
-    let _thread_locale = plx_platform::i18n::language_on_this_thread_for_test(plx_platform::i18n::Preference::Be);
+    let _thread_locale = nj_platform::i18n::language_on_this_thread_for_test(nj_platform::i18n::Preference::Be);
     let body = r#"{"MediaContainer":{"Hub":[
         {"type":"movie","hubIdentifier":"home.movies.recent",
          "title":"Recently Added Movies","key":"/hubs/home/recentlyAdded?type=1",
          "Metadata":[{"ratingKey":"1","librarySectionID":"1","librarySectionTitle":"Movies",
                       "type":"movie","title":"A Film","thumb":"/m.jpg","art":"/m-art.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::catalog::Envelope>(body)
         .expect("a PMS body with a lone whole-server Recently Added hub parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 1);
     assert_eq!(
@@ -151,17 +151,17 @@ fn a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui() {
 /// drawing PMS's own `title` verbatim, in any language, exactly as it did before this change.
 #[test]
 fn an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim() {
-    let _thread_locale = plx_platform::i18n::language_on_this_thread_for_test(plx_platform::i18n::Preference::Be);
+    let _thread_locale = nj_platform::i18n::language_on_this_thread_for_test(nj_platform::i18n::Preference::Be);
     let body = r#"{"MediaContainer":{"Hub":[
         {"type":"movie","hubIdentifier":"custom.collection.987",
          "title":"Прайдзiсветы i Незнаёмцы","key":"/library/collections/987/children",
          "Metadata":[{"ratingKey":"5","librarySectionID":"1","librarySectionTitle":"Movies",
                       "type":"movie","title":"A Film","thumb":"/t.jpg","art":"/a.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::catalog::Envelope>(body)
         .expect("a PMS body with an unrecognized (custom-collection-shaped) hub parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 1);
     assert_eq!(
@@ -185,10 +185,10 @@ fn a_mixed_section_hub_keeps_its_identity_when_the_leading_library_changes() {
         }}]}}}}"#)
     };
     let projection = |wire: String| {
-        let mc = serde_json::from_str::<crate::plex::Envelope>(&wire)
+        let mc = serde_json::from_str::<crate::catalog::Envelope>(&wire)
             .expect("the mixed-library PMS response parses")
             .media_container;
-        let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+        let build = project(&mc, &crate::catalog::MediaContainer::default(), sid(0));
         let (items, hubs, _) = merge(&[src(0, "", HubState::Ready, Some(build))]);
         let identity = match stable_hub_identity(&hubs[0], &items) {
             Some(HubIdentity::Identifier { sid, id, key }) => {
@@ -233,11 +233,11 @@ fn every_row_a_source_projects_is_stamped_with_the_server_it_was_asked_of() {
         )
     };
     let parse = |s: String| {
-        serde_json::from_str::<crate::plex::Envelope>(&s)
+        serde_json::from_str::<crate::catalog::Envelope>(&s)
             .expect("a PMS body parses")
             .media_container
     };
-    let empty = crate::plex::MediaContainer::default();
+    let empty = crate::catalog::MediaContainer::default();
     let ours = sid(3);
 
     let b = project(&parse(body("1", "Ours")), &empty, ours);
@@ -260,7 +260,7 @@ fn every_row_a_source_projects_is_stamped_with_the_server_it_was_asked_of() {
     let b2 = project(&parse(body("1", "Theirs")), &empty, theirs);
     let (m1, m2) = (&b.shelves[0].items[0], &b2.shelves[0].items[0]);
     assert!(
-        !crate::plex::same_item((m1.sid, &m1.rk), (m2.sid, &m2.rk)),
+        !crate::catalog::same_item((m1.sid, &m1.rk), (m2.sid, &m2.rk)),
         "one ratingKey from two servers must never alias"
     );
 
@@ -285,7 +285,7 @@ fn every_row_a_source_projects_is_stamped_with_the_server_it_was_asked_of() {
 /// nothing and backs off alone.
 #[test]
 fn one_failing_source_still_commits_the_other() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -340,7 +340,7 @@ fn one_failing_source_still_commits_the_other() {
 /// catalog nor the deck loses a row.
 #[test]
 fn a_failing_source_leaves_a_populated_home_completely_intact() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -397,17 +397,17 @@ fn a_failing_source_leaves_a_populated_home_completely_intact() {
     reset(&mut o.state, &o.adapter);
 }
 
-/// A PARTIAL landing repaints. A settled Home stops presenting entirely (`plx_machine::idle`), so a
+/// A PARTIAL landing repaints. A settled Home stops presenting entirely (`nj_machine::idle`), so a
 /// source arriving seconds after the owned server did — which is the normal shape of this
 /// feature, not an edge case — would otherwise draw its shelves invisibly until the next
 /// keypress. The failure half matters just as much: a retry that fails changes the status
 /// caption under an empty Home.
 #[test]
 fn a_source_landing_repaints_a_settled_home() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
-    plx_machine::idle::set_enabled(true);
+    nj_machine::idle::set_enabled(true);
     seed(&mut o.state, vec![
         src(0, "", HubState::Ready, Some(build_test(1))),
         src(1, "friend", HubState::Loading, None),
@@ -417,15 +417,15 @@ fn a_source_landing_repaints_a_settled_home() {
         ("a share arriving", Some(build_test(2))),
         ("a share failing", None),
     ] {
-        plx_machine::idle::should_present(0); // takes-and-clears whatever was already pending
+        nj_machine::idle::should_present(0); // takes-and-clears whatever was already pending
         assert!(
-            !plx_machine::idle::should_present(0),
+            !nj_machine::idle::should_present(0),
             "the panel is settled with nothing happening"
         );
         land(&o.state, &o.adapter, 1, build);
         pump(&mut o.state, &o.adapter, 0.0);
         assert!(
-            plx_machine::idle::should_present(0),
+            nj_machine::idle::should_present(0),
             "{what} must invalidate the frame"
         );
     }
@@ -436,7 +436,7 @@ fn a_source_landing_repaints_a_settled_home() {
 /// answered; a mix of failed and still-loading is still loading.
 #[test]
 fn only_every_source_failing_reads_as_a_failed_home() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -477,7 +477,7 @@ fn only_every_source_failing_reads_as_a_failed_home() {
 /// owner's screenshots show a friend's films sitting BETWEEN their own, in one row.
 #[test]
 fn continue_watching_merges_across_sources_by_last_viewed() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -514,7 +514,7 @@ fn continue_watching_merges_across_sources_by_last_viewed() {
 /// source's shelves may never be interleaved with another's.
 #[test]
 fn every_other_shelf_carries_its_source_and_the_groups_stay_contiguous() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -572,7 +572,7 @@ fn every_other_shelf_carries_its_source_and_the_groups_stay_contiguous() {
 /// not reflow the shelves under the focus ring.
 #[test]
 fn a_source_that_never_answered_draws_nothing_at_all() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -602,7 +602,7 @@ fn a_source_that_never_answered_draws_nothing_at_all() {
 /// fact about the grant rather than about a fetch that happened to fail.
 #[test]
 fn a_source_that_leaves_the_roster_stops_contributing() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     seed(&mut o.state, vec![
@@ -636,12 +636,12 @@ fn a_source_that_leaves_the_roster_stops_contributing() {
 
 #[test]
 fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     reset(&mut o.state, &o.adapter);
-    let a = crate::plex::register_for_test("pms-a", "127.0.0.1", 1, "a", "cid");
-    let b = crate::plex::register_for_test("pms-b", "127.0.0.1", 2, "b", "cid");
+    let a = crate::catalog::register_for_test("pms-a", "127.0.0.1", 1, "a", "cid");
+    let b = crate::catalog::register_for_test("pms-b", "127.0.0.1", 2, "b", "cid");
     sync_roster(&mut o.state);
     let before = roster_key();
     assert_eq!(
@@ -649,10 +649,10 @@ fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table()
         [a, b]
     );
 
-    crate::plex::revoke_for_profile_switch();
-    let c = crate::plex::register_for_test("pms-c", "127.0.0.1", 3, "c", "cid");
+    crate::catalog::revoke_for_profile_switch();
+    let c = crate::catalog::register_for_test("pms-c", "127.0.0.1", 3, "c", "cid");
     assert_eq!(
-        crate::plex::server_count(),
+        crate::catalog::server_count(),
         2,
         "the replacement deliberately preserves count"
     );
@@ -668,7 +668,7 @@ fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table()
     );
 
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **The pin's grain is a LIBRARY, and `/hubs` is a whole-SERVER request.** So the server-level
@@ -722,11 +722,11 @@ fn an_unpinned_library_keeps_its_items_off_home_even_when_its_server_feeds_it() 
 
 #[test]
 fn equal_generation_browse_owners_rebuild_the_pms_home_projection() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     reset(&mut o.state, &o.adapter);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::catalog::register_for_test(
         "equal-generation-home", "127.0.0.1", 9, "synthetic", "fixture");
     let alpha = two_library_directory(sid, true);
     let beta = two_library_directory(sid, false);
@@ -742,7 +742,7 @@ fn equal_generation_browse_owners_rebuild_the_pms_home_projection() {
     assert_eq!(rks(&o.state, 0), ["beta"],
         "the PMS cache must not alias an independent equal-generation owner");
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **The pin store is the seam, and "no pinned library" only means something for a server whose
@@ -845,7 +845,7 @@ fn the_budget_is_shared_so_neither_source_starves_the_other() {
     );
     assert_eq!(allot(10, &[]), Vec::<usize>::new());
 
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     let many = |slot: u16, tag: &str| {
@@ -891,16 +891,16 @@ fn the_budget_is_shared_so_neither_source_starves_the_other() {
 /// `describe` at all, so `sync_roster` early-returned before reaching any of it.
 #[test]
 fn a_corrected_credit_restamps_the_shelves_home_already_built() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     reset(&mut o.state, &o.adapter);
-    let s = crate::plex::register_for_test("pms-credit", "127.0.0.1", 1, "t", "cid");
+    let s = crate::catalog::register_for_test("pms-credit", "127.0.0.1", 1, "t", "cid");
     assert_eq!(s, sid(0), "a fresh registry hands out slot 0");
 
     // what a build without the rule published: the household's own server, wearing the account
     // holder's handle, with shelves already merged from it
-    crate::plex::describe_server(s, "Mac mini", "admin", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(s, "Mac mini", "admin", crate::catalog::GrantEvidence::outside());
     seed(&mut o.state, vec![src(
         0,
         "admin",
@@ -910,7 +910,7 @@ fn a_corrected_credit_restamps_the_shelves_home_already_built() {
     assert_eq!(hub_source(&o.state, 0), "admin");
 
     // the roster refresh re-grades it — and there is deliberately NO landing after this
-    crate::plex::describe_server(s, "Mac mini", "", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(s, "Mac mini", "", crate::catalog::GrantEvidence::outside());
     sync_roster(&mut o.state);
 
     assert_eq!(
@@ -926,7 +926,7 @@ fn a_corrected_credit_restamps_the_shelves_home_already_built() {
     );
 
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// `n` shelves of `per` cards each, all in library `sec` of `slot`'s server.
@@ -977,7 +977,7 @@ fn a_long_shelf_claims_only_what_it_can_publish() {
 /// The same split over catalog ROWS, which is the cap the shelves' items come out of.
 #[test]
 fn the_row_budget_is_shared_too() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     // enough shelves, each already at the per-shelf ceiling, that the ROW cap is what binds
@@ -1027,7 +1027,7 @@ fn the_row_budget_is_shared_too() {
 /// column the raw index names. Unreachable with one server, which is why the cap lives here now.
 #[test]
 fn the_merged_deck_is_capped_at_what_the_grid_can_address() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     let deck = |slot: u16, tag: &str| {

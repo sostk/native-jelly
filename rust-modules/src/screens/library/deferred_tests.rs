@@ -2,7 +2,7 @@
 use super::*;
 use crate::stores::browse::QueryEdit;
 use crate::ui::fixture::{FixtureArg, FixtureMeasure};
-use plx_machine::machine::{Host, InputOwner, Stamped, Tick};
+use nj_machine::machine::{Host, InputOwner, Stamped, Tick};
 
 struct TestHost;
 
@@ -37,17 +37,17 @@ struct Fixture {
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     hubs: crate::stores::browse::HubsSnapshot,
-    sids: [crate::plex::ServerId; 2],
-    _session: crate::plex::session::TempSession,
+    sids: [crate::catalog::ServerId; 2],
+    _session: crate::catalog::session::TempSession,
 }
 impl Fixture {
     fn new() -> Self {
-        let session = crate::plex::session::TempSession::new("library-deferred-ports");
+        let session = crate::catalog::session::TempSession::new("library-deferred-ports");
         session.watching("u-library-deferred-ports");
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
         let own =
-            crate::plex::register_for_test("deferred-own", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::plex::register_for_test(
+            crate::catalog::register_for_test("deferred-own", "127.0.0.1", 9, "synthetic", "fixture");
+        let shared = crate::catalog::register_for_test(
             "deferred-shared",
             "127.0.0.1",
             10,
@@ -113,7 +113,7 @@ impl Fixture {
         event: ScreenEvent<TestHost>,
     ) -> Vec<Stamped<TestHost>> {
         let mut out = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         page.step(
             &event,
             &self.cx(),
@@ -124,7 +124,7 @@ impl Fixture {
     fn flush(&mut self, page: &mut LibraryScreen) -> Vec<bool> {
         let out = self.step(
             page,
-            ScreenEvent::WillLeave(plx_machine::machine::Leave::Deeper),
+            ScreenEvent::WillLeave(nj_machine::machine::Leave::Deeper),
         );
         let directory = self.directory.view();
         let results = apply(&mut self.stores, directory, out);
@@ -138,7 +138,7 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 }
 fn apply(
@@ -175,9 +175,9 @@ fn apply(
         .collect()
 }
 fn back() -> ScreenEvent<TestHost> {
-    ScreenEvent::Input(plx_machine::machine::InputEvent {
+    ScreenEvent::Input(nj_machine::machine::InputEvent {
         at: Tick::default(),
-        source: plx_machine::machine::Source::Script,
+        source: nj_machine::machine::Source::Script,
         kind: InputKind::Key {
             key: Key::Back,
             sym: 0,
@@ -190,7 +190,7 @@ fn back() -> ScreenEvent<TestHost> {
 
 #[test]
 fn newest_section_replaces_old_grid_work_and_commits_only_the_last_section() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     let original = page.toolbar_chip(FILTER, &fixture.cx()).value;
@@ -231,7 +231,7 @@ fn newest_section_replaces_old_grid_work_and_commits_only_the_last_section() {
 
 #[test]
 fn reselecting_the_incoming_section_preserves_its_own_grid_transaction() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     let incoming = fixture.address(2);
@@ -259,7 +259,7 @@ fn reselecting_the_incoming_section_preserves_its_own_grid_transaction() {
 
 #[test]
 fn a_target_that_moves_after_the_press_is_refused_at_the_store_drain() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     let old = fixture.address(0);
@@ -289,7 +289,7 @@ fn a_target_that_moves_after_the_press_is_refused_at_the_store_drain() {
 
 #[test]
 fn queued_section_refuses_a_renumbered_table_after_a_positive_control() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     fixture.step(
@@ -315,7 +315,7 @@ fn queued_section_refuses_a_renumbered_table_after_a_positive_control() {
 
 #[test]
 fn foreign_grid_targets_neither_relabel_chips_nor_mutate_the_current_query() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     for index in [1, 2] {
         let mut page = fixture.screen();
@@ -338,7 +338,7 @@ fn foreign_grid_targets_neither_relabel_chips_nor_mutate_the_current_query() {
 
 #[test]
 fn queued_grid_epoch_is_refused_even_when_the_section_identity_still_matches() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     fixture.step(
@@ -375,7 +375,7 @@ fn queued_grid_epoch_is_refused_even_when_the_section_identity_still_matches() {
 
 #[test]
 fn back_before_commit_cancels_both_halves_and_their_outgoing_fades() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     fixture.step(

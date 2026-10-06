@@ -7,27 +7,27 @@ Scenarios (each a named row; `--only ID,ID` selects, `--quick` is `noop,leaf,siz
   noop      host test build with nothing changed (`cargo test --lib --no-run`); reports whether the
             app crate was rebuilt, read from cargo's own `--message-format=json` `fresh` flag.
   leaf      the same build after appending a comment to a leaf file of the BASE layer crate
-            (rust-modules/base/src/cbuf.rs, in `plx_base`): the crate every other layer depends on,
+            (rust-modules/base/src/cbuf.rs, in `nj_base`): the crate every other layer depends on,
             so the app crate rebuilds behind it. This was the one-crate leaf edit before the split.
   machine   ...after appending one to a leaf file of the MACHINE layer crate
-            (rust-modules/machine/src/landgate.rs, in `plx_machine`): `plx_base` stays fresh, the
+            (rust-modules/machine/src/landgate.rs, in `nj_machine`): `nj_base` stays fresh, the
             machine crate and the app crate behind it recompile.
   platform  ...after appending one to a leaf file of the PLATFORM layer crate
-            (rust-modules/platform/src/devcaps.rs, in `plx_platform`): `plx_base` and `plx_machine`
+            (rust-modules/platform/src/devcaps.rs, in `nj_platform`): `nj_base` and `nj_machine`
             stay fresh, the platform crate and the app crate behind it recompile.
   gfx       ...after appending one to a leaf file of the GFX layer crate
-            (rust-modules/gfx/src/overdraw.rs, in `plx_gfx`): `plx_base` and `plx_machine` stay
+            (rust-modules/gfx/src/overdraw.rs, in `nj_gfx`): `nj_base` and `nj_machine` stay
             fresh, the gfx crate and the app crate behind it recompile.
   net       ...after appending one to a leaf file of the NET layer crate
-            (rust-modules/net/src/stream_redirect.rs, in `plx_net`): `plx_base` stays fresh, the net
+            (rust-modules/net/src/stream_redirect.rs, in `nj_net`): `nj_base` stays fresh, the net
             crate and the app crate behind it recompile.
   app       ...after appending one to a leaf file of the app crate (rust-modules/src/coldstart.rs):
-            `plx_base` stays fresh and only the app crate recompiles.
+            `nj_base` stays fresh and only the app crate recompiles.
   hub       ...after appending one to a hub file (rust-modules/src/ui/mod.rs).
   leaf-inc  `leaf` with CARGO_INCREMENTAL=1 in rust-modules/target-fast (the `make test-fast` tree).
   hub-inc   `hub`, incremental. The two -inc rows are skipped with a note when target-fast is
             absent, unless `--cold` (which builds it, untimed, first).
-  tests     the default-feature unit suite (`cargo test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net`) on
+  tests     the default-feature unit suite (`cargo test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net`) on
             a warm tree; the `test result:` counts of every crate are summed.
   arm       the ARM staticlib line (`cargo rustc ... --crate-type staticlib`) after touching lib.rs,
             then the archive's size and sha256. Skipped when the ARM archive was never built here;
@@ -83,17 +83,17 @@ NET_LEAF_FILE = "rust-modules/net/src/stream_redirect.rs"
 APP_LEAF_FILE = "rust-modules/src/coldstart.rs"
 HUB_FILE = "rust-modules/src/ui/mod.rs"
 TOUCH_FILE = "rust-modules/src/lib.rs"
-APP_PACKAGE = "plxnative-modules"
-BASE_PACKAGE = "plx_base"
-MACHINE_PACKAGE = "plx_machine"
-PLATFORM_PACKAGE = "plx_platform"
-GFX_PACKAGE = "plx_gfx"
-NET_PACKAGE = "plx_net"
+APP_PACKAGE = "nativejelly-modules"
+BASE_PACKAGE = "nj_base"
+MACHINE_PACKAGE = "nj_machine"
+PLATFORM_PACKAGE = "nj_platform"
+GFX_PACKAGE = "nj_gfx"
+NET_PACKAGE = "nj_net"
 
 # The cargo subcommand skeletons the Makefile's recipes use. Everything else (toolchain, dirs,
 # feature flags, RUSTFLAGS) comes from `make -s print-bench-config`. ci/test_build_bench.py compares
 # these to the recipes in the Makefile.
-HOST_TEST_ARGS = ("test", "--lib", "-p", "plxnative-modules", "-p", "plx_base", "-p", "plx_machine", "-p", "plx_platform", "-p", "plx_gfx", "-p", "plx_net")
+HOST_TEST_ARGS = ("test", "--lib", "-p", "nativejelly-modules", "-p", "nj_base", "-p", "nj_machine", "-p", "nj_platform", "-p", "nj_gfx", "-p", "nj_net")
 HOST_TEST_BUILD_ARGS = HOST_TEST_ARGS + ("--no-run", "--message-format=json")
 ARM_ARGS_HEAD = ("rustc", "--release", "--target")  # then the target triple
 ARM_ARGS_LIB = ("--lib", "--crate-type", "staticlib", "--target-dir")  # then the target dir
@@ -103,14 +103,14 @@ ALL_SCENARIOS = ("noop", "leaf", "machine", "platform", "gfx", "net", "app", "hu
 QUICK_SCENARIOS = ("noop", "leaf", "sizes")
 TITLES = {
     "noop": "No-op host test build",
-    "leaf": "Edit leaf (plx_base cbuf.rs), non-incremental",
-    "machine": "Edit leaf (plx_machine landgate.rs), non-incremental",
-    "platform": "Edit leaf (plx_platform devcaps.rs), non-incremental",
-    "gfx": "Edit leaf (plx_gfx overdraw.rs), non-incremental",
-    "net": "Edit leaf (plx_net stream_redirect.rs), non-incremental",
+    "leaf": "Edit leaf (nj_base cbuf.rs), non-incremental",
+    "machine": "Edit leaf (nj_machine landgate.rs), non-incremental",
+    "platform": "Edit leaf (nj_platform devcaps.rs), non-incremental",
+    "gfx": "Edit leaf (nj_gfx overdraw.rs), non-incremental",
+    "net": "Edit leaf (nj_net stream_redirect.rs), non-incremental",
     "app": "Edit leaf (app coldstart.rs), non-incremental",
     "hub": "Edit hub (ui/mod.rs), non-incremental",
-    "leaf-inc": "Edit leaf (plx_base cbuf.rs), incremental",
+    "leaf-inc": "Edit leaf (nj_base cbuf.rs), incremental",
     "hub-inc": "Edit hub (ui/mod.rs), incremental",
     "tests": "Unit suite run (default features)",
     "arm": "ARM staticlib rebuild (touch lib.rs)",
@@ -205,8 +205,8 @@ class Cargo:
         self.base_env = dict(os.environ)
         self.base_env["PATH"] = f"{home}/.cargo/bin:{os.environ.get('PATH', '')}"
         self.base_env.pop("CARGO_TARGET_DIR", None)
-        self.runtime_dir = tempfile.mkdtemp(prefix="plxnative-bench.")
-        self.base_env["PLXNATIVE_RUNTIME_DIR"] = self.runtime_dir
+        self.runtime_dir = tempfile.mkdtemp(prefix="nativejelly-bench.")
+        self.base_env["NJ_RUNTIME_DIR"] = self.runtime_dir
         self.toolchain = f"+{cfg['RUST_NIGHTLY']}"
 
     def env(self, incremental: bool) -> dict[str, str]:
@@ -458,8 +458,8 @@ def row_info(sid: str, res: dict) -> str:
         gwhich = "yes" if gflags == {True} else "no" if gflags == {False} else "mixed"
         nflags = {s.get("net_rebuilt", False) for s in samples}
         nwhich = "yes" if nflags == {True} else "no" if nflags == {False} else "mixed"
-        text = (f"app crate rebuilt: {which}, plx_base rebuilt: {bwhich}, plx_machine rebuilt: {mwhich}, "
-                f"plx_platform rebuilt: {pwhich}, plx_gfx rebuilt: {gwhich}, plx_net rebuilt: {nwhich} "
+        text = (f"app crate rebuilt: {which}, nj_base rebuilt: {bwhich}, nj_machine rebuilt: {mwhich}, "
+                f"nj_platform rebuilt: {pwhich}, nj_gfx rebuilt: {gwhich}, nj_net rebuilt: {nwhich} "
                 f"({last['rebuilt']}/{last['units']} units)")
         if sid == "noop" and True in flags:
             text += " **UNEXPECTED: a no-op build recompiled the app crate**"
@@ -582,7 +582,7 @@ def main(argv=None) -> int:
         return 2
 
     cores = os.cpu_count() or 1
-    via_make = bool(os.environ.get("PLX_BENCH_VIA_MAKE"))
+    via_make = bool(os.environ.get("NJ_BENCH_VIA_MAKE"))
     if not via_make:
         log("note: not run through `make build-bench`, so cargo sees a bare environment (a different "
             "fingerprint from make-driven builds; the first build will be a full one)")

@@ -6,7 +6,7 @@ use super::test_support::*;
 
 #[test]
 fn initial_query_scope_comes_from_the_retained_directory() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut owner = Owner::default();
     let sid = ServerId::from_raw(3);
     let directory = crate::stores::browse::DirectorySnapshot::fixture(9, 0, vec![
@@ -32,7 +32,7 @@ fn initial_query_scope_comes_from_the_retained_directory() {
 
 #[test]
 fn equal_generation_browse_owners_replace_the_favourite_snapshot() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut owner = Owner::default();
     let sid = ServerId::from_raw(3);
     let directory = |key, title: &str| crate::stores::browse::DirectorySnapshot::fixture(
@@ -270,12 +270,12 @@ fn a_landing_from_the_previous_query_is_discarded_but_still_releases_the_fetch()
     );
     assert_eq!(titles(&owner.state.shelves()[0]), ["A Close Shave"]);
     assert_eq!(owner.state.state(), State::Ready);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// A screen that can never be answered must not spin forever. With no server registered nothing
 /// can land, so a `State` recomputed only on a landing would sit on `Searching` for good — and
-/// this is reachable: `/tmp/plxnative-search=<q>` forces the route whether or not a server was
+/// this is reachable: `/tmp/nativejelly-search=<q>` forces the route whether or not a server was
 /// ever installed.
 #[test]
 fn an_empty_roster_settles_instead_of_spinning_forever() {

@@ -37,7 +37,7 @@
 //! per-paragraph cull for free.
 //!
 //! **3. Nothing here animates from a clock.** The scroll is a [`Spring`], so `gfx::spring` reports
-//! it to [`plx_machine::idle`] and the present gate sees the paging motion without this module opting
+//! it to [`nj_machine::idle`] and the present gate sees the paging motion without this module opting
 //! in. That is deliberate rather than incidental — `Xfade` and `Spinner` both shipped FROZEN behind
 //! that gate because they integrate milliseconds, and a hand-rolled scroll offset here would have
 //! been the third. The discrete transitions ([`open`]/[`close`]/[`move_focus`]) still call
@@ -114,7 +114,7 @@ const RISE: f32 = crate::ui::popover::Popover::RISE;
 /// The person page's biography, in full. Presented on that page's own `ModalStack`
 /// (`registry::ContentPanel::Bio`), dismissed by BACK; UP/DOWN page the prose.
 pub(crate) struct PersonBioScreen {
-    entry: plx_machine::machine::EntryId,
+    entry: nj_machine::machine::EntryId,
     /// The current page, 1-based. The scroll spring chases [`scroll_for_page`] of it, rather than
     /// the page being derived from the scroll: paging is the input, and a spring still travelling
     /// must not be read back as a different page half way there.
@@ -123,7 +123,7 @@ pub(crate) struct PersonBioScreen {
 }
 
 impl PersonBioScreen {
-    pub(crate) fn new(entry: plx_machine::machine::EntryId) -> Self {
+    pub(crate) fn new(entry: nj_machine::machine::EntryId) -> Self {
         Self {
             entry,
             page: 1,
@@ -138,13 +138,13 @@ impl PersonBioScreen {
     /// [`Self::tick`] already re-clamps every frame — it has to, since the store can land a longer
     /// (or empty) biography while the panel is open — so a second clamp here would be a duplicate.
     /// It would also be an expensive one: knowing `pages` means measuring the wrapped prose, which
-    /// reaches `TextView` → `plx_gfx::text` → `TTF_SizeUTF8`.
+    /// reaches `TextView` → `nj_gfx::text` → `TTF_SizeUTF8`.
     ///
     /// **Doing that from a key handler does not fail as a skipped test. It fails as a LINK ERROR.**
     /// This screen's `step` is called by the host suite, `cargo test --lib` builds without
     /// `--features hostsim`, and nothing then supplies SDL_ttf or GL — so one `.min(pages)` on this
     /// line once stopped the whole suite from BUILDING, with an undefined `_TTF_SizeUTF8` naming
-    /// `plx_gfx::text` and nothing about this panel. It cost a bisect to find. Anything reachable
+    /// `nj_gfx::text` and nothing about this panel. It cost a bisect to find. Anything reachable
     /// from a key handler here has to stay clear of text measurement.
     ///
     /// So the index may run one past the end for a single frame and is pulled back before anything
@@ -183,7 +183,7 @@ impl PersonBioScreen {
         &mut self,
         person: &Person,
         appear: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         field: Option<&crate::ui::underlay::UnderlayField>,
     ) {
         let slide = RISE * (1.0 - appear);
@@ -215,15 +215,15 @@ impl PersonBioScreen {
     }
 }
 
-impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike> plx_machine::machine::Machine<H> for PersonBioScreen {
+impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike> nj_machine::machine::Machine<H> for PersonBioScreen {
     type Ev = crate::ui::screen::ScreenEvent<H>;
     fn step(
         &mut self,
         ev: &Self::Ev,
-        cx: &plx_machine::machine::Cx<'_, H>,
-        fx: &mut plx_machine::machine::Effects<'_, H>,
-    ) -> plx_machine::machine::Handled {
-        use plx_machine::machine::{Edge, Fx, Handled, InputKind, Key, NavOp};
+        cx: &nj_machine::machine::Cx<'_, H>,
+        fx: &mut nj_machine::machine::Effects<'_, H>,
+    ) -> nj_machine::machine::Handled {
+        use nj_machine::machine::{Edge, Fx, Handled, InputKind, Key, NavOp};
         use crate::ui::screen::ScreenEvent;
         match ev {
             ScreenEvent::Tick(t) => {
@@ -242,7 +242,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike
                 }
                 InputKind::Key { sym, edge: Edge::Down | Edge::Repeat, .. } => {
                     if self.step_page(sym as c_uint) {
-                        fx.invalidate(plx_machine::present::Provenance::Input);
+                        fx.invalidate(nj_machine::present::Provenance::Input);
                     }
                     Handled::Yes
                 }
@@ -270,45 +270,45 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike
 /// it always was: `Self::page`, moved by `step_page` from the screen's own `step`, sprung to by
 /// `tick` — the engine has no opinion about it, under either source.
 impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike> crate::ui::screen::Focusable<H> for PersonBioScreen {
-    fn groups(&self, _cx: &plx_machine::machine::Cx<'_, H>, _out: &mut Vec<crate::ui::screen::GroupSpec>) {}
-    fn group_of(&self, _key: &u32, _cx: &plx_machine::machine::Cx<'_, H>) -> Option<plx_machine::machine::GroupId> {
+    fn groups(&self, _cx: &nj_machine::machine::Cx<'_, H>, _out: &mut Vec<crate::ui::screen::GroupSpec>) {}
+    fn group_of(&self, _key: &u32, _cx: &nj_machine::machine::Cx<'_, H>) -> Option<nj_machine::machine::GroupId> {
         None
     }
     fn neighbour(
         &self,
-        _key: plx_machine::machine::FocusKey<u32>,
+        _key: nj_machine::machine::FocusKey<u32>,
         _dir: crate::ui::screen::Dir,
-        _cx: &plx_machine::machine::Cx<'_, H>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
     ) -> crate::ui::screen::Step<u32> {
         crate::ui::screen::Step::Edge
     }
     fn place(
         &self,
         _key: &u32,
-        _cx: &plx_machine::machine::Cx<'_, H>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
         _at: crate::ui::screen::At,
     ) -> Option<crate::ui::screen::Placed> {
         None
     }
     fn reconcile(
         &self,
-        want: plx_machine::machine::FocusKey<u32>,
-        _cx: &plx_machine::machine::Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
+        want: nj_machine::machine::FocusKey<u32>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
+    ) -> nj_machine::machine::FocusKey<u32> {
         want
     }
     fn seat(
         &self,
-        _g: plx_machine::machine::GroupId,
+        _g: nj_machine::machine::GroupId,
         _from: crate::ui::screen::Placed,
-        _cx: &plx_machine::machine::Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
-        plx_machine::machine::FocusKey { entry: self.entry, elem: 0 }
+        _cx: &nj_machine::machine::Cx<'_, H>,
+    ) -> nj_machine::machine::FocusKey<u32> {
+        nj_machine::machine::FocusKey { entry: self.entry, elem: 0 }
     }
 }
 
-impl plx_machine::machine::LogicalState for PersonBioScreen {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for PersonBioScreen {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         c.u64(self.page as u64).f32(self.scroll.pos).f32(self.scroll.vel);
     }
     fn probe(&self, out: &mut String) {
@@ -320,13 +320,13 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike
     fn name(&self) -> &'static str {
         "bio"
     }
-    fn state(&self) -> &dyn plx_machine::machine::LogicalState {
+    fn state(&self) -> &dyn nj_machine::machine::LogicalState {
         self
     }
-    fn crumb(&self, _cx: &plx_machine::machine::Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
+    fn crumb(&self, _cx: &nj_machine::machine::Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
         None
     }
-    fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &plx_machine::machine::Cx<'_, H>) {}
+    fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &nj_machine::machine::Cx<'_, H>) {}
     /// The page dim, at the PROSE role. Heavier than a menu's on purpose — see the module doc's
     /// point 1: this page draws the person's own name at `size::DISPLAY` directly behind this
     /// sheet's top corner, and the page around a panel of fine print should recede further than
@@ -341,7 +341,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike
         // **A surface is never part of a blur source.** The direct blur-source path (the chrome's
         // glass — the only glass there is) re-renders the host page into a small target; a
         // panel drawn into it would be blurred into the bar under its own frost.
-        if plx_gfx::gfx::blur_source_pass() {
+        if nj_gfx::gfx::blur_source_pass() {
             return;
         }
         let Some(person) = H::person(f.cx).current() else { return };
@@ -453,12 +453,12 @@ fn head_h() -> f32 {
     // site — going through `TtfMeasure` (spec §4.3's device/simulator impl) directly is exactly
     // the capability a draw-time caller would have handed in, and `cap_h` is a pure `f(sz)` font
     // metric no string or replay state can move.
-    use plx_machine::machine::Measure;
+    use nj_machine::machine::Measure;
     theme::alert::EYEBROW_LEAD
         + theme::alert::GAP_EYEBROW_TITLE
         + theme::alert::TITLE_LEAD
         + theme::alert::GAP_TITLE_SUB
-        + plx_gfx::text::TtfMeasure.cap_h(theme::size::CAPTION)
+        + nj_gfx::text::TtfMeasure.cap_h(theme::size::CAPTION)
 }
 
 /// The footer band's height — the keycap is the tallest thing in it, so the band is the cap.
@@ -533,8 +533,8 @@ fn scroll_for_page(person: &Person, page: usize) -> f32 {
 pub(crate) fn meta_runs(roles: &str, born: &str, died: &str, birthplace: &str) -> Vec<String> {
     let mut runs = Vec::new();
     if !roles.trim().is_empty() { runs.push(roles.trim().to_owned()); }
-    if !born.trim().is_empty() { runs.push(plx_platform::i18n::msg::browse_person_born(born.trim())); }
-    if !died.trim().is_empty() { runs.push(plx_platform::i18n::msg::browse_person_died(died.trim())); }
+    if !born.trim().is_empty() { runs.push(nj_platform::i18n::msg::browse_person_born(born.trim())); }
+    if !died.trim().is_empty() { runs.push(nj_platform::i18n::msg::browse_person_died(died.trim())); }
     if !birthplace.trim().is_empty() { runs.push(birthplace.trim().to_owned()); }
     runs
 }
@@ -554,10 +554,10 @@ pub(crate) fn meta_runs(roles: &str, born: &str, died: &str, birthplace: &str) -
 pub(crate) fn library_line(films: usize, shows: usize) -> Option<String> {
     match (films, shows) {
         (0, 0) => None,
-        (films, 0) => Some(plx_platform::i18n::msg::browse_person_library_one(&plx_platform::i18n::msg::browse_person_films(films as i64))),
-        (0, shows) => Some(plx_platform::i18n::msg::browse_person_library_one(&plx_platform::i18n::msg::browse_person_shows(shows as i64))),
-        (films, shows) => Some(plx_platform::i18n::msg::browse_person_library_both(
-            &plx_platform::i18n::msg::browse_person_films(films as i64), &plx_platform::i18n::msg::browse_person_shows(shows as i64))),
+        (films, 0) => Some(nj_platform::i18n::msg::browse_person_library_one(&nj_platform::i18n::msg::browse_person_films(films as i64))),
+        (0, shows) => Some(nj_platform::i18n::msg::browse_person_library_one(&nj_platform::i18n::msg::browse_person_shows(shows as i64))),
+        (films, shows) => Some(nj_platform::i18n::msg::browse_person_library_both(
+            &nj_platform::i18n::msg::browse_person_films(films as i64), &nj_platform::i18n::msg::browse_person_shows(shows as i64))),
     }
 }
 
@@ -565,16 +565,16 @@ pub(crate) fn library_line(films: usize, shows: usize) -> Option<String> {
 
 /// Eyebrow, name, identity line — stacked from the content box's top edge on the alert family's
 /// head ladder ([`theme::alert`]), the same flow [`head_h`] measures.
-fn draw_head(p: Painter, person: &Person, c: Rect, measure: &dyn plx_machine::machine::Measure) {
+fn draw_head(p: Painter, person: &Person, c: Rect, measure: &dyn nj_machine::machine::Measure) {
     let mut y = c.y;
-    Label::new(plx_platform::i18n::msg::browse_person_eyebrow_c().as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+    Label::new(nj_platform::i18n::msg::browse_person_eyebrow_c().as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
         .bold().h(theme::alert::TEXT_ALIGN).v(VAlign::CapTop).draw(p, Rect::new(c.x, y, c.w, 0.0));
     y += theme::alert::EYEBROW_LEAD + theme::alert::GAP_EYEBROW_TITLE;
 
     // The name is ELIDED to the content box, not wrapped: this is an identity, and a two-line name
     // would push the reading window down by a whole rung of the flow. `person::refresh_runs` budgets
     // the same name to the header's own column for the same reason.
-    if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&person.name, c.w, false, |t| {
+    if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&person.name, c.w, false, |t| {
         measure.width_str(t, theme::size::TITLE, true)
     })) {
         Label::new(cs.as_ptr(), theme::size::TITLE, theme::TEXT_PRIMARY)
@@ -593,7 +593,7 @@ fn draw_head(p: Painter, person: &Person, c: Rect, measure: &dyn plx_machine::ma
     );
     if !runs.is_empty() {
         let parts: Vec<&str> = runs.iter().map(|s| s.as_str()).collect();
-        let (cap_top, _) = plx_gfx::text::text_cap_band(theme::size::CAPTION, 0);
+        let (cap_top, _) = nj_gfx::text::text_cap_band(theme::size::CAPTION, 0);
         widgets::dotted_run(
             p,
             &parts,
@@ -646,17 +646,17 @@ fn draw_bio(p: Painter, person: &Person, view: Rect, scroll: f32, max_scroll: f3
 
 /// The footer: what the library holds on the left, how to leave on the right, both on one centre
 /// line so the keycap and the prose share a band.
-fn draw_foot(p: Painter, person: &Person, c: Rect, measure: &dyn plx_machine::machine::Measure) {
+fn draw_foot(p: Painter, person: &Person, c: Rect, measure: &dyn nj_machine::machine::Measure) {
     let cy = c.y + c.h - foot_h() * 0.5;
     let sz = theme::size::CAPTION;
     if let Some(line) = library_line(person.total(0), person.total(1)) {
-        if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&line, c.w * 0.5, false, |t| {
+        if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&line, c.w * 0.5, false, |t| {
             measure.width_str(t, sz, false)
         })) {
             p.text(
                 cs.as_ptr(),
                 c.x,
-                plx_gfx::text::text_vcenter_y(sz, 0, cy),
+                nj_gfx::text::text_vcenter_y(sz, 0, cy),
                 sz,
                 theme::TEXT_TERTIARY,
                 0,
@@ -666,7 +666,7 @@ fn draw_foot(p: Painter, person: &Person, c: Rect, measure: &dyn plx_machine::ma
     }
     // …and the hint, right-anchored: the widget measures itself, so the whole run ends on the
     // content box's right edge — the same edge the rail and the hairlines end on.
-    let hint = widgets::KeyHint::translated(plx_platform::i18n::msg::widgets_hint_return("\u{fffc}"), HINT_KEY);
+    let hint = widgets::KeyHint::translated(nj_platform::i18n::msg::widgets_hint_return("\u{fffc}"), HINT_KEY);
     hint.draw(p, c.x + c.w - hint.width(measure), cy, measure);
 }
 
@@ -864,12 +864,12 @@ mod tests {
     // is the sibling dependency the layer gate exists to refuse.
 
     use crate::screens::registry::{AppFx, AppMsg};
-    use plx_machine::machine::{
+    use nj_machine::machine::{
         Canon, Chrome, Cx, Edge, Effects, EntryId, FocusRead, Fx, Handled, Host, InputEvent,
         InputKind, InputOwner, Key, LogicalState, Machine, NavOp, PressRead, ScreenId,
         Source, Stamped, Tick,
     };
-    use plx_machine::present::Present;
+    use nj_machine::present::Present;
     use crate::ui::screen::{ScreenArg, ScreenEvent};
 
     #[derive(Clone, PartialEq, Eq)]
@@ -934,7 +934,7 @@ mod tests {
         let measure = crate::ui::fixture::FixtureMeasure;
         let cx = cx(&measure);
         let (mut out, mut present) = (Vec::new(), Present::new());
-        let mut fx = Effects::new(&mut out, plx_machine::machine::MachineId::Nav, &mut present);
+        let mut fx = Effects::new(&mut out, nj_machine::machine::MachineId::Nav, &mut present);
         let mut panel = PersonBioScreen::new(ENTRY);
         let handled = panel.step(
             &ScreenEvent::Input(InputEvent {
@@ -1031,7 +1031,7 @@ mod tests {
     #[test]
     fn engine_paths_are_inert_on_a_panel_with_no_focusable_element() {
         use crate::ui::focus::{FocusEngine, Outcome};
-        use plx_machine::machine::GroupId;
+        use nj_machine::machine::GroupId;
         use crate::ui::screen::FocusTarget;
 
         let measure = crate::ui::fixture::FixtureMeasure;

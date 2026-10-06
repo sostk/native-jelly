@@ -14,7 +14,7 @@
  * `com.sostk.nativejelly` is a PREFIX of `com.sostk.nativejelly.debug`.
  *
  * **Written by watching it fail.** `plx_names_our_binary` was reverted to the bare substring test
- * before this file was trusted, and exactly one assertion below went red — `plxnative-sim`. That
+ * before this file was trusted, and exactly one assertion below went red — `nativejelly-sim`. That
  * result is itself the finding: it disproved the justification `src/main.c` had carried since the
  * tracer was written (that a substring test would also match `libturbojpeg.so.0` beside the
  * binary), because the needle carries a slash and the directory component is `/com.sostk.nativejelly`.
@@ -109,9 +109,9 @@ int main(void) {
      * `pc` sits inside the executable's text mapping, which is the ordinary case. */
     static const char BIN[] =
         "00010000-0097f000 r-xp 00000000 b3:35 12345 "
-        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/plxnative\n";
-    /* Deployed beside the binary, inside a directory whose own name ends in `.plxnative`. NOT a
-     * trap, in the end: the needle is `/plxnative` and this path's slash is followed by `c`, so
+        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/nativejelly\n";
+    /* Deployed beside the binary, inside a directory whose own name ends in `.nativejelly`. NOT a
+     * trap, in the end: the needle is `/nativejelly` and this path's slash is followed by `c`, so
      * even a bare substring test rejects it. Kept because it is the shape main.c's comment named
      * for years, and a case that pins "this is not our binary" is worth having whichever argument
      * makes it true. */
@@ -122,46 +122,46 @@ int main(void) {
     static const char LGLIB[] =
         "b5000000-b5240000 r-xp 00000000 b3:02 999 /usr/lib/libplayerAPIs.so\n";
 
-    eq_int("our binary, containing the pc", kind(BIN, 0x00020000UL, 0), PLX_MAP_AT | PLX_MAP_BIN);
-    eq_int("our binary, not containing it", kind(BIN, 0xb5100000UL, 0), PLX_MAP_BIN);
+    eq_int("our binary, containing the pc", kind(BIN, 0x00020000UL, 0), NJ_MAP_AT | NJ_MAP_BIN);
+    eq_int("our binary, not containing it", kind(BIN, 0xb5100000UL, 0), NJ_MAP_BIN);
     eq_int("a library beside the binary is NOT the binary", kind(JPEG, 0x00020000UL, 0), 0);
     /* THE case the separator actually buys, and the only assertion that went red when the token
-     * test was reverted to a substring one. `plxnative-sim` is the host simulator and
-     * `plxnative.new` is what `make deploy` scp's before renaming it over the running binary;
+     * test was reverted to a substring one. `nativejelly-sim` is the host simulator and
+     * `nativejelly.new` is what `make deploy` scp's before renaming it over the running binary;
      * neither is mapped on a television today, which is what makes this a test rather than a
      * hope — nothing else would notice if the guard were dropped. */
-    eq_int("plxnative.new is a different name",
+    eq_int("nativejelly.new is a different name",
            kind("00010000-00020000 r-xp 0 0:0 1 /media/developer/apps/usr/palm/applications/"
-                "com.sostk.nativejelly/plxnative.new\n", 0, 0), 0);
-    eq_int("a library beside it, containing the pc", kind(JPEG, 0xb6a10000UL, 0), PLX_MAP_AT);
-    eq_int("a TV library containing the pc", kind(LGLIB, 0xb5100000UL, 0), PLX_MAP_AT);
+                "com.sostk.nativejelly/nativejelly.new\n", 0, 0), 0);
+    eq_int("a library beside it, containing the pc", kind(JPEG, 0xb6a10000UL, 0), NJ_MAP_AT);
+    eq_int("a TV library containing the pc", kind(LGLIB, 0xb5100000UL, 0), NJ_MAP_AT);
 
     /* The `(deleted)` form, and the other half of what the separator buys. `make deploy` writes
-     * `plxnative.new` and renames it over the running binary (the ETXTBSY dance), so the kernel
+     * `nativejelly.new` and renames it over the running binary (the ETXTBSY dance), so the kernel
      * appends this on every development iteration — the space-terminated spelling is the NORMAL
-     * one while iterating, and a test for `"/plxnative\n"` alone would fail to find our own binary
+     * one while iterating, and a test for `"/nativejelly\n"` alone would fail to find our own binary
      * exactly when it is being worked on. */
     static const char DELETED[] =
         "00010000-0097f000 r-xp 00000000 b3:35 12345 "
-        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/plxnative (deleted)\n";
-    eq_int("the (deleted) form is still our binary", kind(DELETED, 0, 0), PLX_MAP_BIN);
+        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/nativejelly (deleted)\n";
+    eq_int("the (deleted) form is still our binary", kind(DELETED, 0, 0), NJ_MAP_BIN);
 
     /* And the flavoured install, whose directory name has `.debug` after the token — the prefix
      * trap from the other side. Still our binary: both installs' executables are named
-     * `plxnative`, and it is `crash-report.sh` that decides WHICH install a `bin:` line belongs
+     * `nativejelly`, and it is `crash-report.sh` that decides WHICH install a `bin:` line belongs
      * to, by matching the app id in the path. This test pins that division of labour. */
     static const char DEBUG_BIN[] =
         "00010000-0097f000 r-xp 00000000 b3:35 12347 "
-        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly.debug/plxnative\n";
-    eq_int("the debug install's binary is also a bin: line", kind(DEBUG_BIN, 0, 0), PLX_MAP_BIN);
+        "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly.debug/nativejelly\n";
+    eq_int("the debug install's binary is also a bin: line", kind(DEBUG_BIN, 0, 0), NJ_MAP_BIN);
 
     /* The LR is checked as well as the PC: on a jump through a bad function pointer the PC is
      * garbage and the link register is the only thing naming a real module. */
-    eq_int("matched by the lr alone", kind(LGLIB, 0xffffffffUL, 0xb5100000UL), PLX_MAP_AT);
+    eq_int("matched by the lr alone", kind(LGLIB, 0xffffffffUL, 0xb5100000UL), NJ_MAP_AT);
 
     /* Half-open, at both ends. `hi` is the first address NOT in the mapping; a closed test would
      * attribute a fault to the library below the one that owns it. */
-    eq_int("lo is inside", kind(LGLIB, 0xb5000000UL, 0), PLX_MAP_AT);
+    eq_int("lo is inside", kind(LGLIB, 0xb5000000UL, 0), NJ_MAP_AT);
     eq_int("hi is outside", kind(LGLIB, 0xb5240000UL, 0), 0);
 
     /* A line with no range says nothing — rather than parsing to a zero-length range at zero that
@@ -171,7 +171,7 @@ int main(void) {
     eq_int("a truncated range", kind("00010000-\n", 0, 0), 0);
     eq_int("an empty line", kind("\n", 0, 0), 0);
 
-    eq_int("plxnative-sim is a different name", kind("00010000-00020000 r-xp 0 0:0 1 /x/plxnative-sim\n", 0, 0), 0);
+    eq_int("nativejelly-sim is a different name", kind("00010000-00020000 r-xp 0 0:0 1 /x/nativejelly-sim\n", 0, 0), 0);
 
     if (failures) {
         fprintf(stderr, "crashfmt: %d assertion(s) failed\n", failures);

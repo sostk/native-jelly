@@ -176,7 +176,7 @@ driving the real binary against a throwaway root of fake secrets and grepping it
 which is the only way to check this and is now a step in the test. `redact()` is the fix; the
 heredoc body and any `--body-file` contents were never echoed and still are not.
 
-THE ESCAPE HATCH is a prefix on the command itself — `PLX_PUBLISH_BYPASS=1 gh pr create …`. It is
+THE ESCAPE HATCH is a prefix on the command itself — `NJ_PUBLISH_BYPASS=1 gh pr create …`. It is
 for a human publishing something the scanner mis-read (a doc that must quote a real-looking address
 is the realistic case). An agent reaching for it is deciding, on the maintainer's behalf and
 usually on a third party's behalf, to publish an address that cannot be un-published. Use a
@@ -192,7 +192,7 @@ import re
 import subprocess
 import sys
 
-BYPASS = re.compile(r"\bPLX_PUBLISH_BYPASS=1\b")
+BYPASS = re.compile(r"\bNJ_PUBLISH_BYPASS=1\b")
 
 # The gitignored files that hold private values. All eight are named in `.gitignore`, and seven of
 # them carry their own reason in its comments — `src/config.local.h` and `local.env` under "local
@@ -212,7 +212,7 @@ PRIVATE_FILES = (
     "pkg/auth.json",
     # The Lab Diagnostics session (`docs/lab-diagnostics.md`): a bearer secret, a certificate pin
     # and an endpoint that is the developer's own static address. Written by
-    # `tools/plxnative-lab start`, staged into a `make LAB=1` package, and gitignored — the exact
+    # `tools/nativejelly-lab start`, staged into a `make LAB=1` package, and gitignored — the exact
     # shape of thing this hook exists to keep out of a PR body.
     "pkg/lab.json",
     # The telemetry endpoints and credentials (`docs/telemetry.md` when it exists). The DSN's public
@@ -230,7 +230,7 @@ PRIVATE_FILES = (
 # recording taken against a real server carries the household's every keypress and every server
 # answer. Matched by path COMPONENT wherever the directory sits (the runtime root on the set, a
 # fetched copy under /tmp, a checkout).
-PRIVATE_DIRS = ("plxnative-recordings",)
+PRIVATE_DIRS = ("nativejelly-recordings",)
 
 # The recording envelope's grammar (`ui/rec.rs`): a payload that carries it is a recording
 # leaving the machine, whatever it is called. The ONE exception the hook computes itself: a file
@@ -966,7 +966,7 @@ def named_private_paths(seg, root, cwd):
                 seen.add(rel)
                 hits.append((rel, how))
             if under_private_dir(t) and ("<recording>", how) not in hits:
-                hits.append(("<recording> (a plxnative-recordings/ directory: a recording never leaves "
+                hits.append(("<recording> (a nativejelly-recordings/ directory: a recording never leaves "
                              "this machine)", how))
             elif os.path.isfile(rp) and under_fixture_dir(rp, root):
                 try:

@@ -67,8 +67,8 @@ impl Dsn {
     /// one.
     pub(crate) fn auth_header(&self) -> String {
         format!(
-            "X-Sentry-Auth: Sentry sentry_version=7, sentry_client=plxnative/{}, sentry_key={}",
-            env!("PLX_VERSION"),
+            "X-Sentry-Auth: Sentry sentry_version=7, sentry_client=nativejelly/{}, sentry_key={}",
+            env!("NJ_VERSION"),
             self.public_key
         )
     }
@@ -143,7 +143,7 @@ pub(crate) fn is_eu_region(d: &Dsn) -> bool {
 /// | `image_addr` | result |
 /// |---|---|
 /// | `0x0` | `missing_symbol`, no error reported |
-/// | `0x10000` | `symbolicated` -> `plx_crash_install`, `crashtrace.c:290` |
+/// | `0x10000` | `symbolicated` -> `nj_crash_install`, `crashtrace.c:290` |
 ///
 /// The reason is that Symbolicator computes `rva = instruction_addr - image_addr` and an ELF's
 /// symbol addresses are relative to its own load base, which for this non-PIE executable is the
@@ -207,7 +207,7 @@ fn read_head(path: &str) -> Option<Vec<u8>> {
 }
 
 /// **The GNU build id of the running binary, as lowercase hex** — the only thing that can pair a
-/// crash report with the `plxnative.debug` a release cut and uploaded.
+/// crash report with the `nativejelly.debug` a release cut and uploaded.
 ///
 /// `-Wl,--build-id=sha1` is unconditional on every link (`docs/agent-reference.md`: it costs 20 bytes and `strip`
 /// preserves it), and a debuginfo build and a plain one produce DIFFERENT ids from identical
@@ -248,7 +248,7 @@ pub(crate) fn image_size() -> u64 {
 /// every later fallback record with the binary that actually crashed even if another binary is
 /// deployed before the log is read.
 #[no_mangle]
-pub extern "C" fn plx_crash_write_image_marker(fd: std::os::raw::c_int) {
+pub extern "C" fn nj_crash_write_image_marker(fd: std::os::raw::c_int) {
     if fd < 0 {
         return;
     }
@@ -522,7 +522,7 @@ pub(crate) fn attach_user(body: &mut serde_json::Value, errors_id: Option<&str>)
 /// this crate builds by hand.
 ///
 /// A crash gets these two contexts because `sdk::start` (`telemetry/native.rs`) calls
-/// `plx_sentry_set_webos_context` once at Sentry-backend startup, which puts them on the SDK's own
+/// `nj_sentry_set_webos_context` once at Sentry-backend startup, which puts them on the SDK's own
 /// scope; the native backend copies that scope into every envelope the out-of-process daemon
 /// writes. A handled event — playback failure and any other one this crate serialises straight to
 /// JSON — never touches that SDK scope at all, so without this function it carries none of it.
@@ -535,8 +535,8 @@ pub(crate) fn attach_user(body: &mut serde_json::Value, errors_id: Option<&str>)
 /// `playback` context sits beside these, not under them) rather than replacing it — and creates one
 /// if the body had none yet.
 pub(crate) fn attach_hardware_context(body: &mut serde_json::Value) {
-    let webos = plx_platform::tv::device::info();
-    let hw = plx_platform::tv::device::device();
+    let webos = nj_platform::tv::device::info();
+    let hw = nj_platform::tv::device::device();
     let contexts = body
         .as_object_mut()
         .expect("event body is always a JSON object")
@@ -554,8 +554,8 @@ pub(crate) fn attach_hardware_context(body: &mut serde_json::Value) {
         "model": hw.model,
         "soc": hw.board,
         "revision": hw.hw_revision,
-        "rtkmem": plx_platform::tv::sandbox::context(),
-        "install": plx_base::paths::install_kind(),
+        "rtkmem": nj_platform::tv::sandbox::context(),
+        "install": nj_base::paths::install_kind(),
     });
 }
 
@@ -784,7 +784,7 @@ mod tests {
     /// with `0x0` the same address, the same DIF and the same project return `missing_symbol` with
     /// no error attached, which reads exactly like never having uploaded symbols at all. Verified
     /// end to end against the live EU project on 2026-08-29 — `0x10000` resolved
-    /// `0x88ef8` to `plx_crash_install` at `crashtrace.c:290`, matching `addr2line` locally.
+    /// `0x88ef8` to `nj_crash_install` at `crashtrace.c:290`, matching `addr2line` locally.
     #[test]
     fn the_image_base_is_the_load_vaddr_not_zero() {
         assert_eq!(IMAGE_ADDR, "0x10000");

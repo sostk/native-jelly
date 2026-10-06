@@ -17,7 +17,7 @@ This sits between the TV and the PMS and makes the server misbehave on demand.
 
 The PMS runs on this same Mac, so the proxy only needs a second port; point the app at it by
 editing `PMS_PORT` in the gitignored `src/config.local.h`, then `make deploy` (the host/port are
-compiled into `main.c`'s `plex_run` call — there is no runtime override).
+compiled into `main.c`'s `nj_run` call — there is no runtime override).
 
 ## Modes
 

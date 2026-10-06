@@ -28,14 +28,14 @@
  * CROSS (default): each value becomes the SIZE of a zero-initialised array, read back with
  * `nm -S`. Nothing executes, which is the only option for an ARM object on this desk.
  *
- * `-DPLX_FFABI_MAIN` (the HOST table, for the simulator): the same list becomes a printed table,
+ * `-DNJ_FFABI_MAIN` (the HOST table, for the simulator): the same list becomes a printed table,
  * because a host object CAN be run and because macOS `nm` reports every Mach-O size as zero — the
  * array trick is not merely unnecessary there, it silently yields nothing.
  *
  * **One list, two readers.** A second file would drift, and a drifted ABI table does not fail: it
  * succeeds with garbage, which is the whole reason this apparatus exists.
  */
-#ifdef PLX_FFABI_MAIN
+#ifdef NJ_FFABI_MAIN
 #include <stdio.h>
 static const struct { const char *name; long value; } plx_table[] = {
 #define DUMP(name, expr) { #name, (long)(expr) },
@@ -144,7 +144,7 @@ DUMP(mt_video,  AVMEDIA_TYPE_VIDEO)
 DUMP(mt_audio,  AVMEDIA_TYPE_AUDIO)
 DUMP(mt_sub,    AVMEDIA_TYPE_SUBTITLE)
 
-#ifdef PLX_FFABI_MAIN
+#ifdef NJ_FFABI_MAIN
 };
 int main(void) {
     for (unsigned i = 0; i < sizeof plx_table / sizeof plx_table[0]; i++)

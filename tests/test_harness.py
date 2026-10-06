@@ -263,10 +263,10 @@ class FocusFpAccounting(unittest.TestCase):
                    'result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME')
         for mode in ('--replay', '--targets', '--resolve'):
             expected = 'resolve' if mode == '--resolve' else 'targets'
-            script = ('#!/bin/sh\nroot="$PLXNATIVE_RUNTIME_DIR"\n'
-                      'test "$(sed -n 1p "$root/plxnative-recplay")" = v1 || exit 3\n'
-                      f'test "$(sed -n 2p "$root/plxnative-recplay")" = {expected} || exit 3\n'
-                      f'printf "hubs: landed\\n{summary}\\n" > "$root/plxnative-events.log"\n')
+            script = ('#!/bin/sh\nroot="$NJ_RUNTIME_DIR"\n'
+                      'test "$(sed -n 1p "$root/nativejelly-recplay")" = v1 || exit 3\n'
+                      f'test "$(sed -n 2p "$root/nativejelly-recplay")" = {expected} || exit 3\n'
+                      f'printf "hubs: landed\\n{summary}\\n" > "$root/nativejelly-events.log"\n')
             result = self._run_isolated_focusfp(script, '--only', '1', mode=mode)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for pair in (('--rec', '--replay'), ('--targets', '--resolve'), ('--resolve', '--replay'),
@@ -277,8 +277,8 @@ class FocusFpAccounting(unittest.TestCase):
         for field in ('input_diffs', 'focus_diffs', 'hit_diffs'):
             for bad in (summary.replace(field + '=0', field + '=1'),
                         summary.replace(' ' + field + '=0', '')):
-                script = ('#!/bin/sh\nroot="$PLXNATIVE_RUNTIME_DIR"\n'
-                          f'printf "hubs: landed\\n{bad}\\n" > "$root/plxnative-events.log"\n')
+                script = ('#!/bin/sh\nroot="$NJ_RUNTIME_DIR"\n'
+                          f'printf "hubs: landed\\n{bad}\\n" > "$root/nativejelly-events.log"\n')
                 result = self._run_isolated_focusfp(script, '--only', '1', mode='--resolve')
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
@@ -320,15 +320,15 @@ class FocusFpAccounting(unittest.TestCase):
     def test_replay_counts_pass_skip_and_failure_separately(self):
         """A missing replay fixture is a skip, not a successful flow."""
         script = """#!/bin/sh
-root="$PLXNATIVE_RUNTIME_DIR"
-if [ -e "$root/plxnative-settings" ]; then
+root="$NJ_RUNTIME_DIR"
+if [ -e "$root/nativejelly-settings" ]; then
     marker='overlay=settings'
-elif [ -e "$root/plxnative-filmography" ]; then
+elif [ -e "$root/nativejelly-filmography" ]; then
     marker='route=person'
 else
     marker='hubs: landed'
 fi
-printf '%s\\nreplay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME\\n' "$marker" > "$root/plxnative-events.log"
+printf '%s\\nreplay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME\\n' "$marker" > "$root/nativejelly-events.log"
 exit 0
 """
         result = self._run_isolated_focusfp(script)
@@ -338,8 +338,8 @@ exit 0
 
     def test_only_counts_a_failed_simulator_and_the_tv_root_as_selected_outcomes(self):
         script = """#!/bin/sh
-root="$PLXNATIVE_RUNTIME_DIR"
-printf 'hubs: landed\\n' > "$root/plxnative-events.log"
+root="$NJ_RUNTIME_DIR"
+printf 'hubs: landed\\n' > "$root/nativejelly-events.log"
 exit 0
 """
         result = self._run_isolated_focusfp(script, "--only", "1,10")
@@ -367,8 +367,8 @@ class ReplayFixtures(unittest.TestCase):
             fixtures = os.path.join(root, "tests", "fixtures", "replay")
             os.makedirs(fixtures)
             os.makedirs(os.path.join(root, "tools"))
-            tool = os.path.join(root, "tools", "plxnative-rec")
-            shutil.copy(os.path.join(REPO_ROOT, "tools", "plxnative-rec"), tool)
+            tool = os.path.join(root, "tools", "nativejelly-rec")
+            shutil.copy(os.path.join(REPO_ROOT, "tools", "nativejelly-rec"), tool)
             shutil.copy(os.path.join(self.FIXTURES, "ALPHABET.json"), fixtures)
             hook = os.path.join(REPO_ROOT, ".claude", "hooks", "outbound-guard.py")
 
@@ -383,17 +383,17 @@ class ReplayFixtures(unittest.TestCase):
             negatives = ["UnlistedHouseholdName", "UNLISTEDHOUSEHOLDNAME",
                          "UnlistedHouseholdName(Instance(4))",
                          "Landing(UnlistedHouseholdName(4))",
-                         "plxnative-unlistedhouseholdname", "route=unlistedhouseholdname",
+                         "nativejelly-unlistedhouseholdname", "route=unlistedhouseholdname",
                          "pat:unlistedhouseholdname", "txt:deadbeefcafebabe",
                          "12345678-1234-4234-8234-123456789abc",
                          "ABCDEFPrivateToken", "s01234567\n",
-                         "plxnative-rec=unlistedhouseholdname",
+                         "nativejelly-rec=unlistedhouseholdname",
                          "route=home overlay=unlistedhouseholdname",
                          "Landing(Instance(4))"]
             positives = ["Mount", "Session", "Landing(Instance(InstanceId(4)))",
                          "Landing(Store(StoreOrd(3)))", "Landing(Session)",
                          "Resource(Texture)", "Timer(TimerId(7))", "s01234567",
-                         "route=home overlay=account", "plxnative-rec",
+                         "route=home overlay=account", "nativejelly-rec",
                          "pat:solid:120:50", "txt:s01234567+s89abcdef"]
             for index, value in enumerate(negatives + positives):
                 accepted = index >= len(negatives)
@@ -456,8 +456,8 @@ class ReplayFixtures(unittest.TestCase):
             fixtures = os.path.join(root, "tests", "fixtures", "replay")
             os.makedirs(fixtures)
             os.makedirs(os.path.join(root, "tools"))
-            tool = os.path.join(root, "tools", "plxnative-rec")
-            shutil.copy(os.path.join(REPO_ROOT, "tools", "plxnative-rec"), tool)
+            tool = os.path.join(root, "tools", "nativejelly-rec")
+            shutil.copy(os.path.join(REPO_ROOT, "tools", "nativejelly-rec"), tool)
             alphabet_path = os.path.join(fixtures, "ALPHABET.json")
             shutil.copy(os.path.join(self.FIXTURES, "ALPHABET.json"), alphabet_path)
 
@@ -586,7 +586,7 @@ class ReplayFixtures(unittest.TestCase):
 
         `schema` alone is not the only way a fixture goes stale: two anchors can share `schema`
         while their `state_fp` (the recorded state SHAPE — route/overlay/focus/tree/session/
-        consent/initial) has moved apart, which is exactly what `tools/plxnative-rec rerecord`
+        consent/initial) has moved apart, which is exactly what `tools/nativejelly-rec rerecord`
         reports as a load-time REFUSED and what the README documents happened to fixture 12. So
         this also checks every non-quarantined fixture's `state_fp` agrees with the majority
         value among committed anchors, and reports (without reddening `make check`) any
@@ -612,7 +612,7 @@ class ReplayFixtures(unittest.TestCase):
             checked += 1
             self.assertEqual(manifest.get("schema"), schema,
                               "%s/manifest.json: schema %r does not match ui/rec.rs SCHEMA=%d "
-                              "(tools/plxnative-rec rerecord it)"
+                              "(tools/nativejelly-rec rerecord it)"
                               % (name, manifest.get("schema"), schema))
             fps[name] = manifest.get("state_fp")
         self.assertGreater(checked, 0)
@@ -624,7 +624,7 @@ class ReplayFixtures(unittest.TestCase):
             for name, fp in live_fps.items():
                 self.assertEqual(fp, current_fp,
                                   "%s/manifest.json: state_fp %r does not match the other "
-                                  "committed anchors' %r (tools/plxnative-rec rerecord it, or "
+                                  "committed anchors' %r (tools/nativejelly-rec rerecord it, or "
                                   "quarantine it in QUARANTINED_FIXTURES with a reason)"
                                   % (name, fp, current_fp))
             for name, reason in self.QUARANTINED_FIXTURES.items():
@@ -637,7 +637,7 @@ class ReplayFixtures(unittest.TestCase):
                     print("QUARANTINED: %s/manifest.json — %s" % (name, reason))
 
     def _tool(self, *args):
-        tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "plxnative-rec")
+        tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "nativejelly-rec")
         return subprocess.run([sys.executable, os.path.abspath(tool), *args],
                               capture_output=True, text=True)
 
@@ -715,10 +715,10 @@ class ReplayFixtures(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fixtures = os.path.join(tmp, "fixtures")
             os.makedirs(fixtures)
-            env_tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "plxnative-rec")
+            env_tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "nativejelly-rec")
             src = open(os.path.abspath(env_tool), encoding="utf-8").read()
             # point the tool at a throwaway fixture directory
-            tool = os.path.join(tmp, "plxnative-rec")
+            tool = os.path.join(tmp, "nativejelly-rec")
             with open(tool, "w", encoding="utf-8") as f:
                 f.write(src.replace('FIXTURES = os.path.join(ROOT, "tests", "fixtures", "replay")',
                                     'FIXTURES = %r' % fixtures))
@@ -835,7 +835,7 @@ class ReplayFixtures(unittest.TestCase):
         for v in ("Film Club Night", "The Godfather", "10.203.0.10", "nas-home",
                   "UnlistedHouseholdName", "UnlistedUppercaseWord", "ABCDEFPrivateToken"):
             self.assertFalse(v in lits or any(p.fullmatch(v) for p in pats), "rejected case")
-        for v in ("s0a1b2c3d", "tick", "inst:3", "0.7.0-dev", "Landing(Instance(InstanceId(4)))", "plxnative-rec"):
+        for v in ("s0a1b2c3d", "tick", "inst:3", "0.7.0-dev", "Landing(Instance(InstanceId(4)))", "nativejelly-rec"):
             self.assertTrue(v in lits or any(p.fullmatch(v) for p in pats), "protocol case")
 
     def test_home_payload_alphabet_accepts_only_the_mock_protocol_and_synthetic_words(self):
@@ -856,12 +856,12 @@ class ReplayFixtures(unittest.TestCase):
     def test_controlled_init_alphabet_is_a_finite_source_vocabulary(self):
         lits, pats = self._alphabet()
         accepts = lambda value: value in lits or any(p.fullmatch(value) for p in pats)
-        for value in ("controlled=home version=1", "plxnative-app-init", "127.0.0.1",
+        for value in ("controlled=home version=1", "nativejelly-app-init", "127.0.0.1",
                       "http://127.0.0.1:32517", "Idle", "Boot", "ActivateDevBootstrap",
                       "AlreadyInstalled", "Request", "owned", "Sdl", "RemoteFifo", "Script", "Replay",
                       "Up", "Down", "Left", "Right", "Repeat", "discovery", "reset", "refetch"):
             self.assertTrue(accepts(value), "source protocol constant")
-        for value in ("UnlistedHouseholdName", "UnlistedUppercaseWord", "plxnative-app-init=secret",
+        for value in ("UnlistedHouseholdName", "UnlistedUppercaseWord", "nativejelly-app-init=secret",
                       "http://192.0.2.1:32517", "https://127.0.0.1:32517", "http://127.0.0.1:325170",
                       "http://127.0.0.1:32517?X-Plex-Token=secret", "http://127.0.0.1:32517@private",
                       "01234567-89ab-4cde-8fab-0123456789ab"):
@@ -870,7 +870,7 @@ class ReplayFixtures(unittest.TestCase):
 
 class TeardownProcessTable(unittest.TestCase):
     def test_non_utf8_argv_cannot_hide_or_crash_a_run_stream_pid(self):
-        marker = "/tmp/com.sostk.nativejelly.debug/plxnative-events.log"
+        marker = "/tmp/com.sostk.nativejelly.debug/nativejelly-events.log"
         raw = b"431 ssh " + marker.encode("ascii") + b" \xdflegacy\n"
         fake = mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout=raw))
         with mock.patch.object(run, "RUN_STREAM_MARK", marker):
@@ -989,8 +989,8 @@ class FpsIdentity(unittest.TestCase):
         self.assertNotIn("needs_shared_server", sources)
         self.assertGreaterEqual(sources["loop_floor"], 50)
         self.assertGreaterEqual(sources["fps_floor"], 50)
-        self.assertTrue(sources["triggers"]["plxnative-firstrun"])
-        self.assertTrue(sources["triggers"]["plxnative-onboardosc"])
+        self.assertTrue(sources["triggers"]["nativejelly-firstrun"])
+        self.assertTrue(sources["triggers"]["nativejelly-onboardosc"])
 
         for name, stage in (("consent-crash", "crash"), ("consent-product", "product")):
             with self.subTest(scene=name):
@@ -999,8 +999,8 @@ class FpsIdentity(unittest.TestCase):
                 self.assertEqual(scene["overlay"], "consent")
                 self.assertGreaterEqual(scene["loop_floor"], 50)
                 self.assertGreaterEqual(scene["fps_floor"], 50)
-                self.assertEqual(scene["triggers"]["plxnative-consent"], stage)
-                self.assertTrue(scene["triggers"]["plxnative-consentosc"])
+                self.assertEqual(scene["triggers"]["nativejelly-consent"], stage)
+                self.assertTrue(scene["triggers"]["nativejelly-consentosc"])
 
     def test_settings_scenes_carry_the_50_fps_contract_and_idle_inverse(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
@@ -1015,13 +1015,13 @@ class FpsIdentity(unittest.TestCase):
                 self.assertEqual(scene["overlay"], overlay)
                 self.assertGreaterEqual(scene["loop_floor"], 50)
                 self.assertGreaterEqual(scene["fps_floor"], 50)
-                self.assertTrue(scene["triggers"]["plxnative-settingsosc"])
+                self.assertTrue(scene["triggers"]["nativejelly-settingsosc"])
 
         idle = scenes["settings-idle"]
         self.assertEqual(idle["overlay"], "settings")
         self.assertGreaterEqual(idle["loop_floor"], 50)
         self.assertLessEqual(idle["fps_ceiling"], 5)
-        self.assertNotIn("plxnative-settingsosc", idle["triggers"])
+        self.assertNotIn("nativejelly-settingsosc", idle["triggers"])
 
     def test_fps_filter_can_isolate_the_new_screen_without_changing_tiers(self):
         scenes = [
@@ -1178,7 +1178,7 @@ class ColdOpenGate(unittest.TestCase):
 
     def test_the_gate_does_not_arm_the_frame_drop_detector(self):
         """`coldopen` is unarmed by construction; a scene declaring only this gate must not make
-        the harness arm `plxnative-framedrop`, which would perturb the pacing it did not ask for."""
+        the harness arm `nativejelly-framedrop`, which would perturb the pacing it did not ask for."""
         self.assertIsNone(run.frame_ceiling_threshold({"coldopen_ceiling_ms": 160}))
 
     def test_cold_open_gate_is_measured_not_provisional(self):
@@ -1322,7 +1322,7 @@ class BenchManifest(unittest.TestCase):
         self.assertGreater(modal["run_secs"], 100 * 2 * 1.5 + modal.get("warmup_s", 5))
         for name in ("push-100", "modal-100"):
             self.assertEqual(scenes[name]["tier"], "ui")
-            self.assertIn("plxnative-framedrop", scenes[name]["triggers"],
+            self.assertIn("nativejelly-framedrop", scenes[name]["triggers"],
                          f"{name}: bench worst_ms reads 0.0 unarmed — see bench_frame_tick's doc")
 
 
@@ -1455,7 +1455,7 @@ class DeepBenchManifest(unittest.TestCase):
         self.assertEqual(deep["tier"], "ui")
         # depth=100 -> 200 steps * 2 half-periods each; run_secs must clear that plus warmup.
         self.assertGreater(deep["run_secs"], 200 * 2 * 1.4 + deep.get("warmup_s", 5))
-        self.assertIn("plxnative-framedrop", deep["triggers"],
+        self.assertIn("nativejelly-framedrop", deep["triggers"],
                      "deep-100: bench worst_ms reads 0.0 unarmed — see bench_frame_tick's doc")
         self.assertIn("bench_depth_rss_kb", deep)
         self.assertIn("bench_root_rss_kb", deep, "the unwound end state is graded absolutely")
@@ -1516,19 +1516,19 @@ class LoadManifest(unittest.TestCase):
 
     def test_collection_scenes_resolve_through_the_overlay(self):
         """manifest.json is installation-independent, so the collection scenes may not carry a
-        mock_pms ratingKey: on a real server `plxnative-collection=50001` opens a collection that
+        mock_pms ratingKey: on a real server `nativejelly-collection=50001` opens a collection that
         does not exist and the page's fps_ceiling passes vacuously on its failure read-out."""
         tracked = {s["name"]: s for s in _manifest()["fps_scenes"]}
         for name in ("collection-page", "library-collections"):
             with self.subTest(scene=name):
                 self.assertEqual(tracked[name]["item"], "collection")
-        self.assertEqual(tracked["collection-page"]["triggers"]["plxnative-collection"], "$rk")
+        self.assertEqual(tracked["collection-page"]["triggers"]["nativejelly-collection"], "$rk")
 
         items = self._all_keys()
         items["collection"] = 424242
         scenes = {s["name"]: s for s in self._load(_overlay(items))["fps_scenes"]}
         page = scenes["collection-page"]
-        self.assertIn(("plxnative-collection", "424242"), run.fps_trigger_files(page))
+        self.assertIn(("nativejelly-collection", "424242"), run.fps_trigger_files(page))
         # library-collections declares the key as a requirement only: nothing reads its `$rk`.
         self.assertNotIn("424242", [v for _, v in run.fps_trigger_files(scenes["library-collections"])])
 
@@ -1542,8 +1542,8 @@ class LoadManifest(unittest.TestCase):
     def test_no_fps_trigger_holds_a_literal_ratingkey(self):
         """A scene that opens one item names it by `item` + `$rk`, never by a number that is true
         on one server only. These are the triggers whose value carries a ratingKey."""
-        takes_rk = ("plxnative-detail", "plxnative-collection", "plxnative-play", "plxnative-navosc",
-                    "plxnative-pushbench", "plxnative-modalbench", "plxnative-deepbench")
+        takes_rk = ("nativejelly-detail", "nativejelly-collection", "nativejelly-play", "nativejelly-navosc",
+                    "nativejelly-pushbench", "nativejelly-modalbench", "nativejelly-deepbench")
         for scene in _manifest()["fps_scenes"]:
             for trigger, value in scene.get("triggers", {}).items():
                 if trigger in takes_rk and value is not True:
@@ -1664,7 +1664,7 @@ class PipelineTier(unittest.TestCase):
         """
         for c in self._pipeline_cases():
             files = run.triggers_for_case(c, url_base="http://192.0.2.10:8020")
-            self.assertEqual(files[0][0], "plxnative-playurl")
+            self.assertEqual(files[0][0], "nativejelly-playurl")
             payload = files[0][1]
             self.assertNotIn("'", payload, f"{c['name']}: would break the single-quoted printf")
             spec = json.loads(payload)
@@ -1676,19 +1676,19 @@ class PipelineTier(unittest.TestCase):
         """The PMS matrix must not inherit an Auto preference from an earlier TV run."""
         files = run.triggers_for_case({"rk": "1234", "operations": [{"op": "play"}]})
         self.assertEqual(files, [
-            ("plxnative-play", "1234"),
-            ("plxnative-quality", "original"),
-            ("plxnative-stats", None),
+            ("nativejelly-play", "1234"),
+            ("nativejelly-quality", "original"),
+            ("nativejelly-stats", None),
             # issue #266 PR4 review: EVERY case forces the persisted audio-enhancement preference
             # too, default "off" -- see test_audio_enhancement_boot_trigger_defaults_off_and_is_overridable.
-            ("plxnative-audioenh", "off"),
+            ("nativejelly-audioenh", "off"),
         ])
 
     def test_an_integration_case_can_explicitly_grade_auto(self):
         files = run.triggers_for_case({
             "rk": "1234", "quality": "auto", "operations": [{"op": "play"}],
         })
-        self.assertEqual(dict(files)["plxnative-quality"], "auto")
+        self.assertEqual(dict(files)["nativejelly-quality"], "auto")
 
     def test_a_declaration_that_was_never_read_fails_rather_than_passing(self):
         """THE false-PASS this tier is most exposed to: the engine's fallthrough arm produces
@@ -1721,7 +1721,7 @@ class PipelineTier(unittest.TestCase):
         self.assertFalse(run.a_server_wire((0, 0), 1, 0)[0])
 
     def test_the_stream_path_assertion_catches_playing_the_wrong_thing(self):
-        """A stale plxnative-play from a by-hand session plays a LIBRARY ITEM through a pipeline
+        """A stale nativejelly-play from a by-hand session plays a LIBRARY ITEM through a pipeline
         case. Everything else would still pass; the opened path is what tells them apart."""
         good = ["stream: host=192.0.2.10 port=8020 path=/pipe_h264_ac3_1080p.mkv"]
         self.assertTrue(run.a_stream_path(good, "pipe_h264_ac3_1080p.mkv")[0])
@@ -1738,7 +1738,7 @@ class PipelineTier(unittest.TestCase):
         self.assertTrue(run.a_stream_path(hls, "pipe_h264_aac_mp4.mp4", hls_entry=True)[0])
         stale = ["stream: 10.0.0.2:53923 path=/library/parts/9/1/file.mkv?X-Plex-Token=x"]
         self.assertFalse(run.a_stream_path(stale, "pipe_h264_aac_mp4.mp4", hls_entry=True)[0],
-                         "a stale plxnative-play library item is what this assertion is FOR")
+                         "a stale nativejelly-play library item is what this assertion is FOR")
 
     def test_the_audio_lane_assertion_reads_the_fed_index(self):
         ln = ["ff: v=#0 codec=h264 codec_id=27 1920x1080 trc=1 pri=1 spc=1 a=#2 dur_ns=60000000000"]
@@ -1816,18 +1816,18 @@ class ResolutionSpike(unittest.TestCase):
         self.assertEqual(c["expect"]["server_opens_exact"], 1)
         self.assertEqual(c["expect"]["server_range_opens_exact"], 0)
         files = dict(run.triggers_for_case(c, url_base="http://192.0.2.10:8020"))
-        self.assertEqual(files["plxnative-gstlog"], c["gst_trace"]["debug"])
-        self.assertEqual(files["plxnative-gstlog"], "lxvideosink:6")
+        self.assertEqual(files["nativejelly-gstlog"], c["gst_trace"]["debug"])
+        self.assertEqual(files["nativejelly-gstlog"], "lxvideosink:6")
 
     def test_apply_triggers_removes_a_stale_trace_before_arming(self):
         saved = run.RUNDIR
         run.RUNDIR = "/tmp/com.sostk.nativejelly.debug"
         try:
             with mock.patch.object(run, "ssh") as ssh:
-                run.apply_triggers("192.0.2.20", [("plxnative-gstlog", "GST_EVENT:6")])
+                run.apply_triggers("192.0.2.20", [("nativejelly-gstlog", "GST_EVENT:6")])
             command = ssh.call_args.args[1]
-            self.assertIn("rm -f /tmp/com.sostk.nativejelly.debug/plxnative-gst.log", command)
-            self.assertIn("plxnative-gstlog", command)
+            self.assertIn("rm -f /tmp/com.sostk.nativejelly.debug/nativejelly-gst.log", command)
+            self.assertIn("nativejelly-gstlog", command)
         finally:
             run.RUNDIR = saved
 
@@ -2090,15 +2090,15 @@ class CompletionCase(unittest.TestCase):
 
     def test_the_replay_trigger_carries_the_number_the_case_grades(self):
         """One statement, not two: `expect.replays` is what the harness writes into
-        `plxnative-replay` AND what `a_replayed` counts, so they cannot drift."""
+        `nativejelly-replay` AND what `a_replayed` counts, so they cannot drift."""
         c = next(c for c in _manifest()["pipeline_cases"] if c["expect"].get("replays"))
         files = dict(run.triggers_for_case(c, url_base="http://192.0.2.10:8020"))
-        self.assertEqual(files.get("plxnative-replay"), str(c["expect"]["replays"]))
+        self.assertEqual(files.get("nativejelly-replay"), str(c["expect"]["replays"]))
         # ...and every other case must NOT arm it, or a one-shot boot silently becomes a loop.
         for other in _manifest()["pipeline_cases"]:
             if other["expect"].get("replays"):
                 continue
-            self.assertNotIn("plxnative-replay",
+            self.assertNotIn("nativejelly-replay",
                              dict(run.triggers_for_case(other, url_base="http://192.0.2.10:8020")),
                              other["name"])
 
@@ -2223,8 +2223,8 @@ class AutoNetworkProfile(unittest.TestCase):
 
     def test_trigger_carries_auto_policy_source_rate_and_same_origin_hls_root(self):
         files = dict(run.triggers_for_case(self._case(), url_base="http://192.0.2.10:8020"))
-        self.assertEqual(files["plxnative-quality"], "auto")
-        spec = json.loads(files["plxnative-playurl"])
+        self.assertEqual(files["nativejelly-quality"], "auto")
+        spec = json.loads(files["nativejelly-playurl"])
         self.assertEqual(spec["auto_source_kbps"], 8000)
         self.assertEqual(spec["auto_hls_base"], "http://192.0.2.10:8020/__abr")
         self.assertEqual(spec["url"], "http://192.0.2.10:8020/pipe_h264_aac_mp4.mp4")
@@ -3191,7 +3191,7 @@ class AbrTraceMetrics(unittest.TestCase):
                          "a transcode reload with no switch line is not an audio switch")
 
     def test_audio_enhancement_op_writes_a_named_target_not_a_row(self):
-        """issue #266 PR4 review: `audio_enhancement` reuses `plxnative-menupick` at tab 0, but
+        """issue #266 PR4 review: `audio_enhancement` reuses `nativejelly-menupick` at tab 0, but
         writes a NAMED target (`TrackRow`/`TrackMenuState::row_for_audio_target` resolve it
         against the panel's own row map) rather than a row number derived from the item's track
         count -- the bug this review caught was exactly a hand-derived row going stale against the
@@ -3202,19 +3202,19 @@ class AbrTraceMetrics(unittest.TestCase):
             "operations": [{"op": "play"}, {"op": "audio_enhancement", "which": "normalize_loudness"}],
         }
         files = run.triggers_for_case(case)
-        self.assertIn(("plxnative-menupick", "0,loudness"), files)
+        self.assertIn(("nativejelly-menupick", "0,loudness"), files)
         case["operations"][1] = {"op": "audio_enhancement", "which": "boost_dialog"}
         files = run.triggers_for_case(case)
-        self.assertIn(("plxnative-menupick", "0,boost"), files)
+        self.assertIn(("nativejelly-menupick", "0,boost"), files)
 
     def test_subtitle_op_names_a_track_not_a_row(self):
         """`subtitle_text_srt` once hard-coded row 3, which became the Color row (`menupick: row 3
         already active -- no commit`). A `track` op derives the row in the app from the panel's own
         row map; `row` still passes through verbatim."""
         case = {"rk": "1", "operations": [{"op": "play"}, {"op": "subtitle", "tab": 1, "track": 0}]}
-        self.assertIn(("plxnative-menupick", "1,track:0"), run.triggers_for_case(case))
+        self.assertIn(("nativejelly-menupick", "1,track:0"), run.triggers_for_case(case))
         case["operations"][1] = {"op": "subtitle", "tab": 1, "row": 3}
-        self.assertIn(("plxnative-menupick", "1,3"), run.triggers_for_case(case))
+        self.assertIn(("nativejelly-menupick", "1,3"), run.triggers_for_case(case))
         with open(os.path.join(os.path.dirname(__file__), "manifest.json")) as fh:
             manifest = json.load(fh)
         rows = [op for c in manifest["cases"] for op in c.get("operations", [])
@@ -3226,11 +3226,11 @@ class AbrTraceMetrics(unittest.TestCase):
         `off`), so a case's starting preference never depends on what an earlier case's pick left
         behind; a case opts into a non-off start with `audio_enhancements_boot`."""
         files = run.triggers_for_case({"rk": "1", "operations": [{"op": "play"}]})
-        self.assertIn(("plxnative-audioenh", "off"), files)
+        self.assertIn(("nativejelly-audioenh", "off"), files)
         files = run.triggers_for_case({
             "rk": "1", "audio_enhancements_boot": "loudness", "operations": [{"op": "play"}],
         })
-        self.assertIn(("plxnative-audioenh", "loudness"), files)
+        self.assertIn(("nativejelly-audioenh", "loudness"), files)
 
     def test_audio_enhancement_op_grades_applied_remux_and_ac3(self):
         """A live Normalize Loudness pick that took effect: the server ran the DSP params
@@ -3739,10 +3739,10 @@ class TheQualitySwitchAssertion(unittest.TestCase):
         nothing justified — the app asks for none either."""
         one = dict(run.triggers_for_case(
             {"rk": "1", "operations": [{"op": "quality_switch", "to": "auto"}]}))
-        self.assertEqual(one["plxnative-qualityswitch"], "auto")
+        self.assertEqual(one["nativejelly-qualityswitch"], "auto")
         many = dict(run.triggers_for_case({"rk": "1", "operations": [
             {"op": "quality_switch", "to": ["720p_4_mbps", "auto"], "gap_ms": 40000}]}))
-        self.assertEqual(many["plxnative-qualityswitch"], "gap=40000,720p_4_mbps,auto")
+        self.assertEqual(many["nativejelly-qualityswitch"], "gap=40000,720p_4_mbps,auto")
 
     def test_the_wire_vocabulary_matches_the_app(self):
         """Both sides of a contract that never meets at runtime: the manifest names a rung and the
@@ -3960,15 +3960,15 @@ class AbrTriggers(unittest.TestCase):
         return dict(run.triggers_for_case(case, url_base="http://h:8020"))
 
     def test_a_pin_becomes_a_trigger_and_is_absent_by_default(self):
-        self.assertNotIn("plxnative-abrpin", self._names(dict(self.BASE)))
-        self.assertEqual(self._names({**self.BASE, "abr_pin": 14000})["plxnative-abrpin"], "14000")
+        self.assertNotIn("nativejelly-abrpin", self._names(dict(self.BASE)))
+        self.assertEqual(self._names({**self.BASE, "abr_pin": 14000})["nativejelly-abrpin"], "14000")
 
     def test_the_policy_selector_becomes_a_trigger_and_is_absent_by_default(self):
-        """It must ride the manifest: `apply_triggers` wipes every plxnative-* before each case,
+        """It must ride the manifest: `apply_triggers` wipes every nativejelly-* before each case,
         so a hand-armed A/B selector cannot survive into the case it is meant to switch."""
-        self.assertNotIn("plxnative-abrpolicy", self._names(dict(self.BASE)))
+        self.assertNotIn("nativejelly-abrpolicy", self._names(dict(self.BASE)))
         self.assertEqual(
-            self._names({**self.BASE, "abr_policy": "legacy"})["plxnative-abrpolicy"], "legacy")
+            self._names({**self.BASE, "abr_policy": "legacy"})["nativejelly-abrpolicy"], "legacy")
 
     def test_pause_resume_is_one_authored_trigger_not_two_wall_clock_writes(self):
         case = {
@@ -3976,7 +3976,7 @@ class AbrTriggers(unittest.TestCase):
             "operations": [{"op": "pause_resume", "delay_ms": 25_000, "hold_ms": 6_000}],
         }
         self.assertEqual(
-            self._names(case)["plxnative-autopause"],
+            self._names(case)["nativejelly-autopause"],
             "delay=25000,hold=6000",
         )
 
@@ -4839,7 +4839,7 @@ class AbrSeekSupport(unittest.TestCase):
     def _seek_trigger(self, op):
         case = {"rk": "1", "operations": [{"op": "play"}, op], "expect": {}}
         files = dict((n, v) for n, v in run.triggers_for_case(case))
-        return files["plxnative-autoseek"]
+        return files["nativejelly-autoseek"]
 
     def test_a_plain_seek_still_writes_the_bare_target(self):
         """`delay_ms` is opt-in: every existing case must keep the byte-identical trigger."""
@@ -5650,7 +5650,7 @@ impl PersonOwnerGateFixture {
         in a file dev.rs does not own must fail `tmppath`."""
         r = self._plant(
             "_check_deps_selftest_tmppath_open.rs",
-            'pub fn open_it() {\n    let p = "/tmp/plxnative-selftest";\n'
+            'pub fn open_it() {\n    let p = "/tmp/nativejelly-selftest";\n'
             "    let _ = std::fs::File::open(p);\n}\n",
         )
         out = r.stdout + r.stderr
@@ -5659,14 +5659,14 @@ impl PersonOwnerGateFixture {
         self.assertIn("_check_deps_selftest_tmppath_open.rs", out)
 
     def test_tmppath_gate_exempts_a_log_message_mention(self):
-        """D4's own exemption: a `/tmp/plxnative-` literal that is only message text passed to
+        """D4's own exemption: a `/tmp/nativejelly-` literal that is only message text passed to
         `log`/`crate::eventlog::log`/`log!` must not fail the gate. GREEN: planting one, including a nested
         `format!` the way most real call sites spell it, must leave `tmppath` (and the whole
         script) green."""
         r = self._plant(
             "_check_deps_selftest_tmppath_log.rs",
             'pub fn mention_it(n: u32) {\n    crate::eventlog::log(&format!(\n'
-            '        "selftest: see /tmp/plxnative-selftest ({n})"\n    ));\n}\n',
+            '        "selftest: see /tmp/nativejelly-selftest ({n})"\n    ));\n}\n',
         )
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
@@ -5677,7 +5677,7 @@ impl PersonOwnerGateFixture {
         `player/`, `port.rs` and `tv/` that reaches `tv::sink::installed()` must fail `sink`."""
         r = self._plant(
             "_check_deps_selftest_sink_out.rs",
-            "pub fn pause_it() {\n    let _ = plx_platform::tv::sink::installed();\n}\n",
+            "pub fn pause_it() {\n    let _ = nj_platform::tv::sink::installed();\n}\n",
         )
         out = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0, out)
@@ -5688,7 +5688,7 @@ impl PersonOwnerGateFixture {
         """GREEN: the same call from a file under `player/` leaves `sink` (and the script) green."""
         r = self._plant(
             "player/_check_deps_selftest_sink_in.rs",
-            "pub fn pause_it() {\n    let _ = plx_platform::tv::sink::installed();\n}\n",
+            "pub fn pause_it() {\n    let _ = nj_platform::tv::sink::installed();\n}\n",
         )
         out = r.stdout + r.stderr
         self.assertEqual(r.returncode, 0, out)
@@ -5719,7 +5719,7 @@ impl PersonOwnerGateFixture {
         r = self._plant(
             "_check_deps_selftest_textmeasure_impl.rs",
             "struct SelftestMeasure;\n\n"
-            "impl plx_machine::machine::Measure for SelftestMeasure {\n"
+            "impl nj_machine::machine::Measure for SelftestMeasure {\n"
             "    fn width(&self, s: &std::ffi::CStr, sz: i32, bold: bool) -> f32 {\n"
             "        crate::text::text_width(s.as_ptr(), sz, bold as i32)\n"
             "    }\n"
@@ -5751,7 +5751,7 @@ impl PersonOwnerGateFixture {
         the function no longer exists to call."""
         r = self._plant(
             "_check_deps_selftest_dt_fn.rs",
-            "pub fn read_it() -> f32 {\n    plx_machine::idle::dt()\n}\n",
+            "pub fn read_it() -> f32 {\n    nj_machine::idle::dt()\n}\n",
         )
         out = r.stdout + r.stderr
         self.assertNotEqual(r.returncode, 0, out)
@@ -5854,7 +5854,7 @@ class PosterGateCoverage(unittest.TestCase):
         self.assertEqual(set(scenes), {'settle', 'eviction', 'dive'})
         for scene in scenes.values():
             self.assertGreaterEqual(scene['poster_gate']['moving_fps_floor'], 55)
-            self.assertIn('plxnative-postergate', scene['triggers'])
+            self.assertIn('nativejelly-postergate', scene['triggers'])
 
     def test_poster_grade_requires_real_work_and_complete_settle(self):
         import poster_gate
@@ -6077,12 +6077,12 @@ class _ParallelSuite(unittest.TestSuite):
 
     def run(self, result, debug=False):
         jobs = min(8, os.cpu_count() or 1)
-        configured = os.environ.get("PLX_TEST_JOBS")
+        configured = os.environ.get("NJ_TEST_JOBS")
         if configured:
             try:
                 jobs = int(configured)
             except ValueError:
-                print(f"PLX_TEST_JOBS={configured!r} is not an integer; using {jobs}", file=sys.stderr)
+                print(f"NJ_TEST_JOBS={configured!r} is not an integer; using {jobs}", file=sys.stderr)
         tests = list(self)
         if jobs <= 1 or len(tests) <= 1:
             return super().run(result, debug)
@@ -6116,7 +6116,7 @@ class _ParallelSuite(unittest.TestSuite):
 def load_tests(loader, tests, pattern):
     """Whole-module runs (`python3 tests/test_harness.py`, `make check`) run `DepGates` in
     parallel; naming a test on the command line still runs it alone, in the foreground.
-    `PLX_TEST_JOBS=1` forces the one-at-a-time order."""
+    `NJ_TEST_JOBS=1` forces the one-at-a-time order."""
     suite = unittest.TestSuite()
     module = sys.modules[__name__]
     # The same walk `loadTestsFromModule` does (every TestCase class the module can see, in name

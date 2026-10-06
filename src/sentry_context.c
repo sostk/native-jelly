@@ -11,7 +11,7 @@
  * below, and only as `user.id`.
  */
 void
-plx_sentry_set_webos_context(const char *name, const char *release,
+nj_sentry_set_webos_context(const char *name, const char *release,
     const char *codename, const char *api, const char *model,
     const char *soc, const char *hardware_revision, const char *rtkmem,
     const char *install)
@@ -76,7 +76,7 @@ plx_sentry_set_webos_context(const char *name, const char *release,
  * report for a fault this process never gets to handle.
  */
 void
-plx_sentry_set_user_id(const char *id)
+nj_sentry_set_user_id(const char *id)
 {
     if (!id || !id[0]) {
         sentry_remove_user();
@@ -90,7 +90,7 @@ plx_sentry_set_user_id(const char *id)
 /* Sparse, typed window diagnostics. The caller accepts only closed stage labels and optional
  * booleans / SDL version bytes. Negative integers mean absent. No sentry_value_t crosses FFI. */
 void
-plx_sentry_window_breadcrumb(const char *stage, int playing,
+nj_sentry_window_breadcrumb(const char *stage, int playing,
     int major, int minor, int patch, int display, int surface)
 {
     sentry_value_t crumb = sentry_value_new_breadcrumb("state", stage);

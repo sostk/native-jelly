@@ -1,4 +1,4 @@
-# plxnative — native webOS build (cross-compiled from macOS with the webOS NDK)
+# nativejelly — native webOS build (cross-compiled from macOS with the webOS NDK)
 #
 # Toolchain: the webosbrew "native-toolchain" buildroot SDK (GCC 12, glibc 2.12,
 # armv7-a soft-float). Install it once with `make setup-env` (or see the
@@ -18,7 +18,7 @@
 # video-plane comment at the top of src/starfish.c. `tools/fwcompat.py` grades the
 # result against 14 real firmware inventories without leaving the desk.
 #
-# make          — build pkg/plxnative
+# make          — build pkg/nativejelly
 # make setup-env— download+extract+relocate the NDK into $(WEBOS_SDK)
 # make deploy   — scp binary + appinfo to the TV (rooted, root@TV)
 # make run      — launch on TV, keep alive $(RUN_SECS)s, fetch event log
@@ -99,7 +99,7 @@ tv-lock-require:
 # runtime files; `nightly` (`com.sostk.nativejelly.nightly`) is a third install beside both — same
 # per-flavour shape (own tile, own sign-in, own runtime root) but ALWAYS a RELEASE=1 build (see
 # `release-guard` below), with its own bumped package version and a dated reported version
-# (`rust-modules/build.rs::emit_version`'s `PLX_CHANNEL=nightly` arm). webOS keys everything — the
+# (`rust-modules/build.rs::emit_version`'s `NJ_CHANNEL=nightly` arm). webOS keys everything — the
 # install directory, SAM's launch/closeByAppId, the LS2 role file — on that id, so distinct ids are
 # distinct apps that cannot touch each other.
 #
@@ -140,7 +140,7 @@ APPDIR       = /media/developer/apps/usr/palm/applications/$(APPID)
 # there, never invents the directory.
 SERVICEDIR   = /media/developer/apps/usr/palm/services/$(APPID).storage
 
-# Where this install's runtime files live — the event log, the crash log, the `plxnative-*` dev
+# Where this install's runtime files live — the event log, the crash log, the `nativejelly-*` dev
 # triggers and the remote FIFO. The app resolves this itself (`paths::resolve_runtime_dir`); this
 # is the same rule spelled for the shell, and `make print-rundir` is how every tool asks for it
 # instead of restating it a fourth time.
@@ -148,10 +148,10 @@ SERVICEDIR   = /media/developer/apps/usr/palm/services/$(APPID).storage
 # The stable install keeps `/tmp` byte for byte, so every existing recipe, doc line and harness
 # glob stays true for the app users get. A flavoured install gets `/tmp/<app id>` — a DOT in the
 # name, never a hyphen, because `dev::any_trigger_present` scans the root for entries beginning
-# `plxnative-` and a sibling directory matching that prefix would silently suppress the OTHER
+# `nativejelly-` and a sibling directory matching that prefix would silently suppress the OTHER
 # install's who's-watching picker.
 RUNDIR       = $(if $(filter stable,$(FLAVOR)),/tmp,/tmp/$(APPID))
-EVENTLOG     = $(RUNDIR)/plxnative-events.log
+EVENTLOG     = $(RUNDIR)/nativejelly-events.log
 
 # Machine-readable answers, so no tool has to restate any of the above. `make -s print-appdir
 # FLAVOR=debug` and every tool in tools/ and tests/ asks this way — which also means the flavour a
@@ -205,7 +205,7 @@ print-deploy-files:   ; @echo '$(DEPLOY_FILES)'
 print-sentry-handler: ; @echo '$(SENTRY_HANDLER)'
 print-ffmpeg-staged:  ; @echo '$(FFMPEG_STAGED)'
 print-sentry-project: ; @echo '$(SENTRY_PROJECT)'
-print-cargo-env: ; @env $(TELEMETRY_ENV) env | grep '^PLX_' | sort || true
+print-cargo-env: ; @env $(TELEMETRY_ENV) env | grep '^NJ_' | sort || true
 # What `tools/build-bench.py` needs to run the recipes' cargo invocations without restating their
 # flags: toolchain, target dirs, feature flags, RUSTFLAGS. Never the telemetry credentials -- the
 # `build-bench` recipe hands those over in the environment, exactly like `test-fast` does.
@@ -276,7 +276,7 @@ CFLAGS       = --sysroot=$(SYSROOT) -O2 -fno-omit-frame-pointer -funwind-tables 
 # WORKING DIRECTORY (`DW_AT_comp_dir`) and every `-I`/sysroot path into DWARF, which
 # --remap-path-prefix cannot touch — that flag is rustc's, and GCC never sees it. Found on the
 # first release build that ever combined SYMBOLS=1 with ci/check-elf.sh's build-host-identity
-# scan (both existed before; this exact pairing had not): pkg/plxnative, built with SYMBOLS=1 on
+# scan (both existed before; this exact pairing had not): pkg/nativejelly, built with SYMBOLS=1 on
 # CI, carried five `/home/runner/work/plx-native/plx-native/.webos-ndk/…/sysroot/usr/include…`
 # strings and the bare checkout root, both from GCC's DWARF, not rustc's. Same broad-then-
 # specific order as RUST_REMAP and the same reasoning: WEBOS_SDK defaults under $(HOME) but is
@@ -304,18 +304,18 @@ CFLAGS       = --sysroot=$(SYSROOT) -O2 -fno-omit-frame-pointer -funwind-tables 
 # fix, if the degradation turns out to matter, is a real directory or symlink at each remapped
 # target path, created in the CI job between the build and the upload step — not a change here.
 CFLAGS_REMAP = -fdebug-prefix-map=$(HOME)=/build -fdebug-prefix-map=$(WEBOS_SDK)=/webos-sdk \
-               -fdebug-prefix-map=$(CURDIR)=/plxnative
+               -fdebug-prefix-map=$(CURDIR)=/nativejelly
 
 ifeq ($(DEBUG),1)
-# -DPLX_DEBUG lets the C shim keep core dumps enabled for a post-mortem (src/crashtrace.c's
+# -DNJ_DEBUG lets the C shim keep core dumps enabled for a post-mortem (src/crashtrace.c's
 # setrlimit(RLIMIT_CORE, 0) — a shipping build must not write 200 MB into the TV's app
 # partition). This is the only thing DEBUG=1 changes about behaviour rather than debuginfo.
-CFLAGS      += -g $(CFLAGS_REMAP) -DPLX_DEBUG
+CFLAGS      += -g $(CFLAGS_REMAP) -DNJ_DEBUG
 RUST_DEBUGINFO = -C debuginfo=2
 endif
 
 # SYMBOLS=1 — the same DWARF, WITHOUT DEBUG=1's behaviour change, for producing a separated
-# `pkg/plxnative.debug` that a symbol server can match to a stripped shipped binary by build id.
+# `pkg/nativejelly.debug` that a symbol server can match to a stripped shipped binary by build id.
 # `make symbols` below is the whole recipe.
 #
 # **NOT the default, and the numbers are why** (measured 2026-08-29 on the dev Mac, cold):
@@ -324,7 +324,7 @@ endif
 #   its target dir                      356 MB   vs a normal one's share of a tree already at 26 GB
 #   the Rust staticlib                  148 MB   vs 19.6 MB
 #   the linked binary                    86.7 MB vs 10.0 MB
-#   -> pkg/plxnative.debug               79.8 MB
+#   -> pkg/nativejelly.debug               79.8 MB
 #   -> stripped, i.e. what ships          6.93 MB vs 6.99 MB from a non-debuginfo build
 #
 # (Those are the 2026-08-29 absolutes; the binary has grown since. On 2026-10-01 a RELEASE=1
@@ -425,7 +425,7 @@ LIBS_REAL = -lSDL2 -lSDL2_ttf -lGLESv2 -lluna-service2 -lglib-2.0 \
 # See rust-modules/Cargo.toml's [features].
 #
 # Each feature set gets its OWN target dir, and that is load-bearing rather than tidy. Cargo names
-# the staticlib by crate, so both builds would otherwise write the SAME libplxnative_modules.a —
+# the staticlib by crate, so both builds would otherwise write the SAME libnativejelly_modules.a —
 # and cargo fingerprints the build without hashing its output, so after a RELEASE=1 build it
 # reports the dev build "Finished in 0.04s" and leaves the release .a sitting there. `make` then
 # links it with no comment: a release binary shipped as if it were the tested dev one. Measured,
@@ -460,8 +460,8 @@ LIBS_REAL = -lSDL2 -lSDL2_ttf -lGLESv2 -lluna-service2 -lglib-2.0 \
 # (`export VAR ?= v` on one line is silently a no-op under the make 3.81 macOS ships — measured
 # here, `$(origin CARGO_INCREMENTAL)` came back `undefined` — so the assignment and the export are
 # two statements.)
-PLX_LINKED_WORKTREE := $(shell test -f .git && echo yes)
-ifeq ($(PLX_LINKED_WORKTREE),yes)
+NJ_LINKED_WORKTREE := $(shell test -f .git && echo yes)
+ifeq ($(NJ_LINKED_WORKTREE),yes)
 CARGO_INCREMENTAL ?= 0
 export CARGO_INCREMENTAL
 endif
@@ -471,21 +471,21 @@ endif
 # path) and are 40% of a lane's target bytes. `tools/cargo-seed.py` fills an ABSENT target dir with
 # an APFS clone of those artifacts (the app crate is stripped from it: cargo judges a path package
 # by mtime alone, so a cloned app artifact could be linked silently) and refreshes the seed under
-# ~/.cache/plxnative/cargo-seed/ after a build finishes. A clone costs no disk until a file is
+# ~/.cache/nativejelly/cargo-seed/ after a build finishes. A clone costs no disk until a file is
 # rewritten, and nothing else about the build changes: each checkout still builds into its own
 # target dirs, which is what keeps `make` outputs per-checkout. Linked worktrees only (the main
 # checkout is not a lane and keeps what it has); `true` swallows the call elsewhere, and
-# PLX_CARGO_SEED=off turns it off here. It is never fatal: the script exits 0 and a build never
+# NJ_CARGO_SEED=off turns it off here. It is never fatal: the script exits 0 and a build never
 # waits on it. See the script's docstring for the safety argument. Not hooked into
-# `pkg/plxnative-storage`, on purpose: that rule sets the linker to an absolute path in the lane,
+# `pkg/nativejelly-storage`, on purpose: that rule sets the linker to an absolute path in the lane,
 # cargo hashes it into every unit, so a seeded helper tree recompiled in full (measured).
-CARGO_SEED = $(if $(filter yes,$(PLX_LINKED_WORKTREE)),python3 tools/cargo-seed.py,true)
+CARGO_SEED = $(if $(filter yes,$(NJ_LINKED_WORKTREE)),python3 tools/cargo-seed.py,true)
 
 RUST_FEATFLAGS = $(if $(RELEASE),--no-default-features,)$(if $(LAB), --features lab-diagnostics,)
 RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOLS),-sym,)
 # OVERRIDING RUST_FEATFLAGS BY HAND? PASS RUST_TDIR TOO. This dir is keyed on RELEASE, not on the
 # flag set, so `make RUST_FEATFLAGS=...` alone lands in the SAME target/ as an ordinary build:
-# cargo's staticlib looks up to date, the stamp below deletes pkg/plxnative, and make relinks the
+# cargo's staticlib looks up to date, the stamp below deletes pkg/nativejelly, and make relinks the
 # PREVIOUS feature set without a word. Exactly the stale-artifact trap the stamp exists to prevent,
 # one step removed — and it burned two builds while shooting the README screenshots (which want
 # devtriggers ON and devtools OFF, a combination neither RELEASE nor the default gives). Correct:
@@ -504,7 +504,7 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # It is deliberately NOT in $(RUST_CFG), and `override` is what makes that safe. RELEASE is
 # already in the stamp and gives each configuration its own --target-dir, so a flip through the
 # supported door rebuilds a DIFFERENT .a and cargo re-runs the script for it. What the stamp could
-# not have caught is somebody decoupling this from RELEASE by hand — `make PLX_RELEASE=1 deploy`
+# not have caught is somebody decoupling this from RELEASE by hand — `make NJ_RELEASE=1 deploy`
 # (a command-line variable outranks an ordinary assignment) or `make -e` with it exported — which
 # would write a binary reporting 0.6.0 into the DEV target dir, leave RUST_CFG unmoved, and let
 # every later plain `make` link that stale library without a word. `override` makes the value a
@@ -520,13 +520,13 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # no-op is `override export VAR := value` — override AND export STACKED on one line — which sets
 # the value for make's own expansions but never reaches a child process's environment. That is
 # exactly what happened here: `RELEASE=1` correctly drove `RUST_FEATFLAGS`, so the cargo
-# invocation used the right feature set, while the linked binary's `PLX_VERSION` still read
-# `0.7.0-dev` with no error from anything, because PLX_RELEASE never left make. `override` has to
-# stay on the assignment, not the export, or a command-line `PLX_RELEASE=1` could outrank this
+# invocation used the right feature set, while the linked binary's `NJ_VERSION` still read
+# `0.7.0-dev` with no error from anything, because NJ_RELEASE never left make. `override` has to
+# stay on the assignment, not the export, or a command-line `NJ_RELEASE=1` could outrank this
 # derivation again.
 #
 # EXPORTED ONLY WHEN NON-EMPTY, and `unexport`ed otherwise. Cargo fingerprints an environment
-# variable as an Option: `PLX_RELEASE=` (set, blank) is a different input from PLX_RELEASE unset.
+# variable as an Option: `NJ_RELEASE=` (set, blank) is a different input from NJ_RELEASE unset.
 # `build.rs` watches this variable with `rerun-if-env-changed`, so exporting it blank for every
 # dev build made every bare `cargo` (a CI step, rust-analyzer, an agent's `cargo test --lib foo`)
 # rerun the build script and recompile the whole app crate after a `make`, and the next `make`
@@ -534,24 +534,24 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # same fingerprint a bare `cargo` has, and `build.rs` already reads blank and unset as the same
 # thing, so the binary is unchanged. `make -s print-cargo-env` shows what a cargo recipe receives
 # and `ci/test_build_not_always_dirty.py` pins the parity.
-override PLX_RELEASE := $(if $(RELEASE),1,)
-ifneq ($(PLX_RELEASE),)
-export PLX_RELEASE
+override NJ_RELEASE := $(if $(RELEASE),1,)
+ifneq ($(NJ_RELEASE),)
+export NJ_RELEASE
 else
-unexport PLX_RELEASE
+unexport NJ_RELEASE
 endif
-# `PLX_CHANNEL=nightly` selects `build.rs::emit_version`'s nightly arm — a dated pre-release
+# `NJ_CHANNEL=nightly` selects `build.rs::emit_version`'s nightly arm — a dated pre-release
 # string (`X.Y.Z-nightly-YYYYMMDD`) instead of the plain `-dev` suffix every other non-release
 # build reports. Derived from FLAVOR by the same `override … := $(if …)` / export-only-when-set
-# shape as PLX_RELEASE immediately above, for the same reason: a stray command-line
-# `PLX_CHANNEL=nightly FLAVOR=debug` must not reach cargo, and a blank value must not either (it is
-# a different cargo fingerprint from unset; see PLX_RELEASE). `build.rs` reads blank and unset as
-# the same "not nightly", exactly as it does PLX_RELEASE.
-override PLX_CHANNEL := $(if $(filter nightly,$(FLAVOR)),nightly,)
-ifneq ($(PLX_CHANNEL),)
-export PLX_CHANNEL
+# shape as NJ_RELEASE immediately above, for the same reason: a stray command-line
+# `NJ_CHANNEL=nightly FLAVOR=debug` must not reach cargo, and a blank value must not either (it is
+# a different cargo fingerprint from unset; see NJ_RELEASE). `build.rs` reads blank and unset as
+# the same "not nightly", exactly as it does NJ_RELEASE.
+override NJ_CHANNEL := $(if $(filter nightly,$(FLAVOR)),nightly,)
+ifneq ($(NJ_CHANNEL),)
+export NJ_CHANNEL
 else
-unexport PLX_CHANNEL
+unexport NJ_CHANNEL
 endif
 # The date a nightly build reports, `YYYYMMDD`. Only meaningful for FLAVOR=nightly, and exported
 # ONLY then — exporting it unconditionally would make cargo's `rerun-if-env-changed` force a
@@ -560,12 +560,12 @@ endif
 # already-set environment variable — CI's coming nightly caller supplies the date it actually cut;
 # a bare local `make FLAVOR=nightly RELEASE=1 ipk` gets today's UTC date for free.
 ifeq ($(FLAVOR),nightly)
-PLX_NIGHTLY_DATE ?= $(shell date -u +%Y%m%d)
-export PLX_NIGHTLY_DATE
+NJ_NIGHTLY_DATE ?= $(shell date -u +%Y%m%d)
+export NJ_NIGHTLY_DATE
 endif
-# ...and the LINK needs its own witness, because pkg/plxnative is a path BOTH configurations
+# ...and the LINK needs its own witness, because pkg/nativejelly is a path BOTH configurations
 # write. Per-dir targets keep cargo honest, but after a RELEASE=1 build the dev .a is older
-# than the release binary sitting at pkg/plxnative, so make would call the link up to date and
+# than the release binary sitting at pkg/nativejelly, so make would call the link up to date and
 # leave the release binary in place under a plain `make`. The stamp's CONTENT is the flag set,
 # so switching configuration is a real prerequisite change.
 RUST_STAMP     = pkg/.build-config
@@ -611,13 +611,13 @@ RUST_STAMP     = pkg/.build-config
 TELEMETRY_JSON = pkg/telemetry.local.json
 telemetry_val = $(shell python3 -c "import json,sys;print(json.load(open('$(TELEMETRY_JSON)')).get('$(1)',''))" 2>/dev/null || true)
 # The dev pair: read from the working copy, written there by `make telemetry-local`.
-PLX_SENTRY_DSN_DEV  ?= $(call telemetry_val,sentry_dsn_dev)
-PLX_POSTHOG_KEY_DEV ?= $(call telemetry_val,posthog_key_dev)
+NJ_SENTRY_DSN_DEV  ?= $(call telemetry_val,sentry_dsn_dev)
+NJ_POSTHOG_KEY_DEV ?= $(call telemetry_val,posthog_key_dev)
 # The production pair: deliberately NOT read from the file. Only the environment can supply these,
 # which in practice means the release workflow. Reading them from the working copy is precisely the
 # bug this whole arrangement exists to make impossible.
-PLX_SENTRY_DSN  ?=
-PLX_POSTHOG_KEY ?=
+NJ_SENTRY_DSN  ?=
+NJ_POSTHOG_KEY ?=
 
 # The telemetry values as `NAME='value'` words for the front of a cargo command line, for the
 # NON-EMPTY ones only. Cargo fingerprints an environment variable as an Option, so `NAME=''` is a
@@ -628,25 +628,25 @@ PLX_POSTHOG_KEY ?=
 # and the binary is byte-for-byte what it was. A value the CALLER exported blank still reaches
 # cargo (make passes its environment through), which is the same blank a bare `cargo` in that
 # shell sees. `make -s print-cargo-env` prints what a cargo recipe receives.
-TELEMETRY_ENV = $(foreach v,PLX_SENTRY_DSN PLX_POSTHOG_KEY PLX_SENTRY_DSN_DEV PLX_POSTHOG_KEY_DEV,$(if $($(v)),$(v)='$($(v))',))
+TELEMETRY_ENV = $(foreach v,NJ_SENTRY_DSN NJ_POSTHOG_KEY NJ_SENTRY_DSN_DEV NJ_POSTHOG_KEY_DEV,$(if $($(v)),$(v)='$($(v))',))
 
 # In the stamp, and it has to be: switching a build from unconfigured to configured changes what
 # the binary CAN DO and nothing about the sources, so without this the configuration would be
 # baked in from whichever build happened to run first -- the same class of trap as
 # `make RELEASE=1 && make deploy`. The values are hashed rather than written, so the stamp file
 # (which is not gitignored) never contains a credential.
-TELEMETRY_CFG  = $(shell printf '%s|%s|%s|%s' '$(PLX_SENTRY_DSN)' '$(PLX_POSTHOG_KEY)' '$(PLX_SENTRY_DSN_DEV)' '$(PLX_POSTHOG_KEY_DEV)' | shasum | cut -c1-12)
-# `+nightly:<date>` carries PLX_NIGHTLY_DATE into the stamp itself, the same reason SYMBOLS and the
+TELEMETRY_CFG  = $(shell printf '%s|%s|%s|%s' '$(NJ_SENTRY_DSN)' '$(NJ_POSTHOG_KEY)' '$(NJ_SENTRY_DSN_DEV)' '$(NJ_POSTHOG_KEY_DEV)' | shasum | cut -c1-12)
+# `+nightly:<date>` carries NJ_NIGHTLY_DATE into the stamp itself, the same reason SYMBOLS and the
 # telemetry pair are in it and RELEASE already was: a nightly binary's REPORTED version is dated by
-# this value (`build.rs`'s PLX_CHANNEL=nightly arm), so `ci/check-package.py` needs the exact date a
+# this value (`build.rs`'s NJ_CHANNEL=nightly arm), so `ci/check-package.py` needs the exact date a
 # packaged binary was built with to grade it — and the ONLY other place that date exists is this
 # environment variable, gone the moment the shell that ran `make` exits. Embedding the real value
 # (not just "nightly: yes/no") is also what makes a DATE CHANGE relink: two nightly builds cut on
-# the same tracked version a day apart must not silently share pkg/plxnative just because nothing
+# the same tracked version a day apart must not silently share pkg/nativejelly just because nothing
 # else about the configuration moved. `$(filter nightly,$(FLAVOR))` guards it exactly the way
-# PLX_CHANNEL and PLX_NIGHTLY_DATE above are themselves guarded, so a non-nightly stamp is
+# NJ_CHANNEL and NJ_NIGHTLY_DATE above are themselves guarded, so a non-nightly stamp is
 # byte-for-byte what it always was.
-RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filter nightly,$(FLAVOR)),+nightly:$(PLX_NIGHTLY_DATE),)+tel:$(TELEMETRY_CFG)
+RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filter nightly,$(FLAVOR)),+nightly:$(NJ_NIGHTLY_DATE),)+tel:$(TELEMETRY_CFG)
 # Handled by $(shell) during PARSING, and by DELETING the output rather than by timestamps.
 # Both choices are load-bearing, and both were arrived at by measuring the failures:
 #   * A rule cannot do it. macOS ships GNU make 3.81, which decides whether a target is up to date
@@ -655,7 +655,7 @@ RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filt
 #   * A newer stamp is not enough either. make 3.81 compares mtimes at ONE-SECOND granularity, so
 #     a stamp written 0.5s after the binary compares EQUAL and the link is still skipped —
 #     measured: stamp 1785559259.894 vs binary 1785559259.408, no relink.
-# Removing pkg/plxnative cannot be defeated by either, because "the target does not exist" is not
+# Removing pkg/nativejelly cannot be defeated by either, because "the target does not exist" is not
 # a timestamp comparison. The failure this prevents is silent: you get the OTHER configuration's
 # binary, with the dev counter burned into a release build or vice versa.
 # (Consequence: a `make -n` that CHANGES the configuration really does delete the binary. The next
@@ -663,7 +663,7 @@ RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filt
 #
 # ...and it is skipped for a PURE QUERY. `make -s print-appdir` and friends exist so tools stop
 # restating this file's values, but the block above runs at PARSE time, on every invocation,
-# whatever the goal — so asking a question would delete `pkg/plxnative`, the FFmpeg header sentinel
+# whatever the goal — so asking a question would delete `pkg/nativejelly`, the FFmpeg header sentinel
 # and the staged libraries whenever the asking invocation's configuration differed from the stamp.
 # That is not hypothetical: `tools/crash-report.sh` shells out to make for the TV address, and it
 # is the tool you run immediately after a crash, i.e. right after the RELEASE=1 build you were
@@ -676,13 +676,13 @@ RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filt
 # `release-guard` is in the list beside the queries for the same reason it is not one of them: it
 # is a check-only phony that produces no artifact, and it is exactly the target somebody runs to
 # SEE the refusal message the cut-release skill quotes. Without it, asking that question on a
-# different configuration deleted `pkg/plxnative`, the FFmpeg header sentinel and the staged
+# different configuration deleted `pkg/nativejelly`, the FFmpeg header sentinel and the staged
 # libraries — measured, by a reviewer, mid-review.
 SIDE_EFFECT_FREE = $(QUERY_GOALS) release-guard lab-guard disk build-bench build-bench-quick
 PURE_QUERY := $(if $(MAKECMDGOALS),$(if $(filter-out $(SIDE_EFFECT_FREE),$(MAKECMDGOALS)),,yes),)
 ifneq ($(PURE_QUERY),yes)
 ifneq ($(RUST_CFG),$(shell cat $(RUST_STAMP) 2>/dev/null))
-  $(shell mkdir -p pkg && printf '%s' '$(RUST_CFG)' > $(RUST_STAMP) && rm -f pkg/plxnative pkg/plxnative-storage \
+  $(shell mkdir -p pkg && printf '%s' '$(RUST_CFG)' > $(RUST_STAMP) && rm -f pkg/nativejelly pkg/nativejelly-storage \
           vendor/ffmpeg-prefix/include/libavformat/avformat.h pkg/lib*-plx.so.* pkg/.ffabi-ok)
 endif
 endif
@@ -704,14 +704,14 @@ endif
 endif
 
 RUST_TARGET = arm-unknown-linux-gnueabi
-RUST_LIB    = rust-modules/$(RUST_TDIR)/$(RUST_TARGET)/release/libplxnative_modules.a
+RUST_LIB    = rust-modules/$(RUST_TDIR)/$(RUST_TARGET)/release/libnativejelly_modules.a
 
 # Every ordinary C translation unit ships; gpdebug remains an opt-in allocator guard.
 # ass.c belongs to the privately bundled renderer, never the application ELF.
 SRCS = $(filter-out src/gpdebug.c src/ass.c,$(wildcard src/*.c)) src/compat/getauxval.c
 OBJS = $(SRCS:.c=.o)
 
-all: pkg/plxnative pkg/plxnative-storage
+all: pkg/nativejelly pkg/nativejelly-storage
 
 # per-file compile; each object depends on ALL headers so a header edit rebuilds all, plus the
 # config.local.h presence/hash stamp so its appearance, change or disappearance also rebuilds
@@ -836,35 +836,35 @@ $(RUST_LIB): LICENSE $(RUST_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.l
 # The helper is an independent executable: it has its own auxv implementation and must never
 # link app getauxval.o. The project linker wrapper attests its map, trace and ELF bytes too.
 #
-# ITS OWN TARGET DIR, deliberately not $(RUST_TDIR): this `cargo rustc -p plxnative-storage` and
+# ITS OWN TARGET DIR, deliberately not $(RUST_TDIR): this `cargo rustc -p nativejelly-storage` and
 # $(RUST_LIB)'s `cargo rustc --lib` are two cargo invocations in ONE workspace (two packages, two
 # feature configurations), and `make -j` runs them concurrently — exactly the hazard
 # rust-modules/.cargo/config.toml's own comment already documents ("a hand-typed cross build with a DIFFERENT ENVIRONMENT still writes the archive
 # make links... give a hand-run one its own --target-dir"). Sharing one target dir let the two
 # invocations race on the shared build-std sysroot units (std/core/alloc are never cached by
 # CI's rust-cache and so are rebuilt fresh by BOTH processes every run), which could leave
-# `cargo rustc`'s own fingerprint believing the just-linked plxnative-storage binary was still
+# `cargo rustc`'s own fingerprint believing the just-linked nativejelly-storage binary was still
 # fresh from the OTHER invocation's pass and skip re-invoking arm-cc.py — so no `.link.map`/
 # `.link.trace`/`.link.json` sidecar existed anywhere `stage-link-evidence.py` could find one,
 # even by its content-hash fallback (`04801c22`). A dedicated target dir makes the two cargo
 # invocations share nothing, so neither can observe the other's fingerprint state.
 STORAGE_TDIR = $(RUST_TDIR)-storage
 # The helper is its own cargo package (rust-modules/storage) that does NOT depend on the app crate,
-# so the `cargo rustc -p plxnative-storage` below compiles only it, not the application library. What
+# so the `cargo rustc -p nativejelly-storage` below compiles only it, not the application library. What
 # it does read of the platform layer crate is the handful of files it shares by `#[path]`
 # (platform/src/storage_service/ and platform/src/storage/state.rs) and the install-identity
 # generator in build_support/; that is all it names here, so an edit to the UI no longer relinks it. `ci/test_storage_package_isolated.py` holds the
 # "no app library" line.
 STORAGE_INPUTS := $(shell find rust-modules/storage rust-modules/build_support rust-modules/platform/src/storage_service -type f 2>/dev/null) rust-modules/platform/src/storage/state.rs rust-modules/.cargo/config.toml
-STORAGE_BIN = rust-modules/$(STORAGE_TDIR)/$(RUST_TARGET)/release/plxnative-storage
+STORAGE_BIN = rust-modules/$(STORAGE_TDIR)/$(RUST_TARGET)/release/nativejelly-storage
 # An x86_64-Linux nightly hands its own rust-lld to the NDK gcc (`-fuse-ld=lld`). The link must
 # stay the NDK's GNU ld: check-link-evidence.py reads a GNU map, and the app is linked by it too.
 STORAGE_LINKER_FLAGS = -Z unstable-options -C linker-features=-lld
-pkg/plxnative-storage: LICENSE $(STORAGE_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock ci/install-identities.json Makefile ci/arm-cc.py ci/check-link-evidence.py
+pkg/nativejelly-storage: LICENSE $(STORAGE_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock ci/install-identities.json Makefile ci/arm-cc.py ci/check-link-evidence.py
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" $(RUST_ENV) \
 	  CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABI_LINKER='$(CC)' \
 	  cargo +$(RUST_NIGHTLY) rustc --release --target $(RUST_TARGET) \
-	    -p plxnative-storage --bin plxnative-storage --target-dir $(STORAGE_TDIR) --no-default-features -- \
+	    -p nativejelly-storage --bin nativejelly-storage --target-dir $(STORAGE_TDIR) --no-default-features -- \
 	    $(STORAGE_LINKER_FLAGS) -C link-arg=--sysroot=$(SYSROOT) -L native=$(SYSROOT)/usr/lib \
 	    -C link-arg=-Wl,-rpath-link,$(SYSROOT)/usr/lib -C link-arg=-Wl,--build-id=sha1
 	cp $(STORAGE_BIN) $@
@@ -892,7 +892,7 @@ pkg/plxnative-storage: LICENSE $(STORAGE_INPUTS) rust-modules/Cargo.toml rust-mo
 SMP_CALLBACK_HOOK = _ZN17StarfishMediaAPIs20callbackFunctionHookEixPKc
 SMP_INTERPOSER_LDFLAG = -Wl,--export-dynamic-symbol=$(SMP_CALLBACK_HOOK)
 # --gc-sections: this link is gcc's, not rustc's. rustc passes --gc-sections itself when IT links an
-# executable (which is why pkg/plxnative-storage above never needed the flag), but here the Rust
+# executable (which is why pkg/nativejelly-storage above never needed the flag), but here the Rust
 # code arrives as a finished staticlib, so without the flag every section of every archive member
 # that got pulled in stays — measured on the dev binary (unmodified main, 2026-10-01): 22.95 MB
 # allocated, of which 8.27 MB .rodata (mostly icu_datetime compiled_data for markers the app never
@@ -909,7 +909,7 @@ SMP_INTERPOSER_LDFLAG = -Wl,--export-dynamic-symbol=$(SMP_CALLBACK_HOOK)
 # explicitly. `ci/check-elf.sh` only asserts that the Starfish interposer is exported (and that
 # Load-with-context is not a loader dependency); it does not assert that nothing else is defined.
 GC_SECTIONS_LDFLAG = -Wl,--gc-sections
-pkg/plxnative: $(OBJS) $(RUST_LIB) $(FFMPEG_STAGED) $(LIBASS_STAGED) $(SENTRY_NATIVE_STAMP) Makefile ci/arm-cc.py ci/check-link-evidence.py
+pkg/nativejelly: $(OBJS) $(RUST_LIB) $(FFMPEG_STAGED) $(LIBASS_STAGED) $(SENTRY_NATIVE_STAMP) Makefile ci/arm-cc.py ci/check-link-evidence.py
 	$(CC) $(CFLAGS) -Wl,--build-id=sha1 $(GC_SECTIONS_LDFLAG) $(SMP_INTERPOSER_LDFLAG) \
 	  $(OBJS) $(RUST_LIB) $(SENTRY_NATIVE_LIB) \
 	  $(SENTRY_UNWIND_LIB) $(LIBS_REAL) -ldl -lrt -lpthread -lm -o $@
@@ -958,10 +958,10 @@ telemetry-local:
 	@command -v gh >/dev/null || { echo "telemetry-local: needs the gh CLI (brew install gh)"; exit 1; }
 	@gh auth status >/dev/null 2>&1 || { echo "telemetry-local: gh is not authenticated (gh auth login)"; exit 1; }
 	@set -e; \
-	  dsn=$$(gh variable get PLX_SENTRY_DSN_DEV 2>/dev/null || true); \
-	  key=$$(gh variable get PLX_POSTHOG_KEY_DEV 2>/dev/null || true); \
+	  dsn=$$(gh variable get NJ_SENTRY_DSN_DEV 2>/dev/null || true); \
+	  key=$$(gh variable get NJ_POSTHOG_KEY_DEV 2>/dev/null || true); \
 	  if [ -z "$$dsn$$key" ]; then \
-	    echo "telemetry-local: neither PLX_SENTRY_DSN_DEV nor PLX_POSTHOG_KEY_DEV is set on the repo"; \
+	    echo "telemetry-local: neither NJ_SENTRY_DSN_DEV nor NJ_POSTHOG_KEY_DEV is set on the repo"; \
 	    exit 1; \
 	  fi; \
 	  python3 -c 'import json,sys; json.dump({"_comment":["Written by `make telemetry-local`. GITIGNORED. DEV credentials only — the production pair lives solely in GitHub repository variables and is injected by the release workflow.","No auth token here: gh cannot read secrets, and sentry-cli runs in CI."],"sentry_dsn_dev":sys.argv[1],"posthog_key_dev":sys.argv[2],"sentry_org":"gleb-linnik","sentry_project":"plx-native-dev","posthog_host":"https://eu.i.posthog.com"}, open("$(TELEMETRY_JSON)","w"), indent=2)' "$$dsn" "$$key"; \
@@ -1015,12 +1015,12 @@ APPINFO   = $(if $(filter stable,$(FLAVOR)),pkg/appinfo.json,pkg/.flavor/$(FLAVO
 ICONDIR   = $(if $(filter nightly,$(FLAVOR)),pkg/nightly,pkg/dev)
 ICONS     = $(if $(filter stable,$(FLAVOR)),pkg/icon.png pkg/largeIcon.png,$(ICONDIR)/icon.png $(ICONDIR)/largeIcon.png)
 # `pkg/lab.json` is in this list ONLY under LAB=1, and it is the whole handoff between the two
-# halves of the Cloud Lab bridge: `tools/plxnative-lab start` writes it (endpoint, session,
+# halves of the Cloud Lab bridge: `tools/nativejelly-lab start` writes it (endpoint, session,
 # secret, certificate pin), and the app reads it out of its own install directory at boot, because
 # a Cloud Test Lab set has no ssh and the package is the only channel into it. GITIGNORED, 0600,
 # and in `.claude/hooks/outbound-guard.py`'s PRIVATE_FILES — it carries a live credential.
 LAB_FILES = $(if $(LAB),pkg/lab.json,)
-APP_FILES = pkg/plxnative $(SENTRY_HANDLER) $(APPINFO) $(ICONS) pkg/splash.png \
+APP_FILES = pkg/nativejelly $(SENTRY_HANDLER) $(APPINFO) $(ICONS) pkg/splash.png \
             pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf pkg/OFL.txt \
             THIRD-PARTY-NOTICES.md LICENSING.md \
             $(LAB_FILES) \
@@ -1038,7 +1038,7 @@ APP_FILES = pkg/plxnative $(SENTRY_HANDLER) $(APPINFO) $(ICONS) pkg/splash.png \
 # `THIRD-PARTY-NOTICES.md` were in every `.ipk` and in NO deployed app directory, silently, for as
 # long as nobody compared the two by hand. `ci/test_deploy_manifest.py` pins the relationship
 # itself (via `print-app-files`/`print-deploy-files`), not just today's four names.
-DEPLOY_FILES = $(filter-out pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LAB_FILES),$(APP_FILES))
+DEPLOY_FILES = $(filter-out pkg/nativejelly $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LAB_FILES),$(APP_FILES))
 # appfont-cjk.ttf is the fallback face (Noto Sans CJK KR, tools/cut-noto-cjk.py) and it is the
 # single largest thing in the package — 21 MB raw, ~11 MB of the .ipk. It is PAYLOAD, not an
 # optional extra: without it a Korean, Japanese or Chinese library renders as tofu end to end, and
@@ -1073,7 +1073,7 @@ pkg/.flavor/$(FLAVOR)/appinfo.json: pkg/appinfo.json ci/flavor.py ci/install-ide
 # prerequisites run left to right, and a cold `make deploy` spends ~2 minutes building FFmpeg
 # before it touches the television. Taking the lock first would hold the set through a build that
 # needs no television — and, on the short implicit lease, could even let it expire before the scp.
-deploy: pkg/plxnative pkg/plxnative-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) $(APPINFO) release-guard tv-lock-require
+deploy: pkg/nativejelly pkg/nativejelly-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) $(APPINFO) release-guard tv-lock-require
 	@echo "deploying $(if $(RELEASE),RELEASE,dev) build ($(RUST_CFG)) to $(APPID) [$(FLAVOR)]"
 	@$(SSH) 'test -d $(APPDIR)' || { \
 	  echo "$(APPDIR) does not exist on the TV — the $(FLAVOR) flavour is not installed."; \
@@ -1112,8 +1112,8 @@ deploy: pkg/plxnative pkg/plxnative-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STA
 	# reinstall. Same `.new` + `mv` dance as the crash handler and for the same reason: LS2 may
 	# already have this service's OLD binary running (`appinstalld` execs `services.json`'s
 	# `executable` under its own uid), so `scp` straight onto that inode risks `ETXTBSY`.
-	$(SCP) pkg/plxnative-storage tv:$(SERVICEDIR)/plxnative-storage.new
-	$(SSH) 'chmod 755 $(SERVICEDIR)/plxnative-storage.new && mv $(SERVICEDIR)/plxnative-storage.new $(SERVICEDIR)/plxnative-storage'
+	$(SCP) pkg/nativejelly-storage tv:$(SERVICEDIR)/nativejelly-storage.new
+	$(SSH) 'chmod 755 $(SERVICEDIR)/nativejelly-storage.new && mv $(SERVICEDIR)/nativejelly-storage.new $(SERVICEDIR)/nativejelly-storage'
 	# ...then retire any FFmpeg from a PREVIOUS version. `scp` only adds, so bumping the bundled
 	# release left the old majors sitting in the app directory forever — observed on the dev TV,
 	# which was carrying libavcodec-plx.so.60 and .so.58 from an earlier experiment alongside the
@@ -1122,7 +1122,7 @@ deploy: pkg/plxnative pkg/plxnative-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STA
 	# a moment with no FFmpeg on the device.
 	$(SSH) 'cd $(APPDIR) && for f in libav*-plx.so.* libswscale-plx.so.*; do case " $(FFMPEG_SONAMES) " in *" $$f "*) ;; *) rm -f "$$f";; esac; done'
 
-	$(SCP) pkg/plxnative tv:$(APPDIR)/plxnative.new
+	$(SCP) pkg/nativejelly tv:$(APPDIR)/nativejelly.new
 	@# The lab session file, under LAB=1 only. Shipped by deploy as well as by the .ipk so the
 	@# whole path — trigger, snapshot, pinned upload — can be rehearsed on the dev television
 	@# before an hour of Cloud Test Lab is spent on it. A non-LAB deploy REMOVES any file a
@@ -1158,7 +1158,7 @@ deploy: pkg/plxnative pkg/plxnative-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STA
 	@# root-owned 0700 binary: SAM could launch it before entering the app jail, but Sentry's
 	@# same-uid external reporter could not `execv` it to spool a crash envelope. The .ipk builder
 	@# already normalises this member to 0755; make the fast deploy path identical.
-	$(SSH) 'mv $(APPDIR)/plxnative.new $(APPDIR)/plxnative && chmod 755 $(APPDIR)/plxnative'
+	$(SSH) 'mv $(APPDIR)/nativejelly.new $(APPDIR)/nativejelly && chmod 755 $(APPDIR)/nativejelly'
 	@$(MAKE) --no-print-directory verify-deploy FLAVOR=$(FLAVOR) RELEASE=$(RELEASE) LAB=$(LAB)
 
 # --- proving the payload actually landed ---------------------------------------------------------
@@ -1173,7 +1173,7 @@ deploy: pkg/plxnative pkg/plxnative-storage $(FFMPEG_STAGED) $(SENTRY_NATIVE_STA
 # report to find weeks later. `VERIFY_FILES` is deliberately not `DEPLOY_FILES` alone: the binary,
 # the crash handler and the FFmpeg libraries take their own path to the device above and are just
 # as capable of silently drifting, so they are verified too.
-VERIFY_FILES = pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(DEPLOY_FILES) pkg/plxnative-storage \
+VERIFY_FILES = pkg/nativejelly $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(DEPLOY_FILES) pkg/nativejelly-storage \
                $(if $(LAB),pkg/lab.json,)
 verify-deploy: tv-lock-require
 	@echo "verify-deploy: comparing $(words $(VERIFY_FILES)) files against $(APPID) [$(FLAVOR)]"
@@ -1181,8 +1181,8 @@ verify-deploy: tv-lock-require
 	@# `ci/verify-deploy.py` keys purely by basename (see its module doc), so a second `cd && md5sum`
 	@# appended to the same ssh round trip merges into one stream it already knows how to read,
 	@# rather than needing a transport of its own.
-	@$(SSH) 'cd $(APPDIR) && md5sum $(notdir $(filter-out pkg/plxnative-storage,$(VERIFY_FILES))) 2>&1; \
-	         cd $(SERVICEDIR) && md5sum plxnative-storage 2>&1' | \
+	@$(SSH) 'cd $(APPDIR) && md5sum $(notdir $(filter-out pkg/nativejelly-storage,$(VERIFY_FILES))) 2>&1; \
+	         cd $(SERVICEDIR) && md5sum nativejelly-storage 2>&1' | \
 	  python3 ci/verify-deploy.py $(VERIFY_FILES)
 
 # NB (this webOS build): luna-send must stay subscribed (-i) for the launch to
@@ -1197,7 +1197,7 @@ verify-deploy: tv-lock-require
 # event log: they are OUTPUTS the app creates, and a root-owned leftover is one the jailed app
 # cannot open — which disables the profiler with a single `Permission denied` line that is easy to
 # scroll past. Clearing an output is not disarming a trigger: `make run` deliberately preserves
-# `$(RUNDIR)/plxnative-*` scene triggers, including `plxnative-profile` and `plxnative-hwcnt`, so a
+# `$(RUNDIR)/nativejelly-*` scene triggers, including `nativejelly-profile` and `nativejelly-hwcnt`, so a
 # profiling run is armed once and repeated.
 #
 # Only `rm -f` the log — never pre-create it. The app runs jailed under its own uid
@@ -1205,8 +1205,8 @@ verify-deploy: tv-lock-require
 # log stays 0 bytes and every assertion reads as a total regression. `tail -F` retries
 # until the app creates the file itself, which is exactly what -F is for.
 #
-# `fuser -k $(APPDIR)/plxnative` is INODE-scoped where `closeByAppId` is ID-scoped, and with two
-# installs that difference is the point: both binaries are named `plxnative`, so a name-based kill
+# `fuser -k $(APPDIR)/nativejelly` is INODE-scoped where `closeByAppId` is ID-scoped, and with two
+# installs that difference is the point: both binaries are named `nativejelly`, so a name-based kill
 # (`pidof`, `killall`) would take down the OTHER install too. Keep it addressed by path.
 #
 # `mkdir -p` + `chmod 1777` on the runtime root before anything writes into it: two uids write here
@@ -1216,10 +1216,10 @@ verify-deploy: tv-lock-require
 # reports as "no line found", i.e. exactly like a total regression. A no-op for the stable flavour,
 # whose root is `/tmp` itself (already 1777).
 CLOSE_SH = (luna-send -i "luna://com.webos.applicationManager/closeByAppId" "{\"id\":\"$(APPID)\"}" >/dev/null 2>&1 & P=$$!; sleep 2; kill $$P 2>/dev/null); \
-	  fuser -k $(APPDIR)/plxnative 2>/dev/null;
+	  fuser -k $(APPDIR)/nativejelly 2>/dev/null;
 BOOT_SH = $(CLOSE_SH) \
 	  mkdir -p $(RUNDIR) && chmod 1777 $(RUNDIR); \
-	  rm -f $(EVENTLOG) $(RUNDIR)/plxnative-gputime.jsonl $(RUNDIR)/plxnative-hwcnt.jsonl; \
+	  rm -f $(EVENTLOG) $(RUNDIR)/nativejelly-gputime.jsonl $(RUNDIR)/nativejelly-hwcnt.jsonl; \
 	  luna-send -i "luna://com.webos.applicationManager/launch" "{\"id\":\"$(APPID)\"}" >/dev/null 2>&1 & LP=$$!;
 
 run: tv-lock-require
@@ -1240,23 +1240,23 @@ run-stream: tv-lock-require
 	  tail -F -n +1 $(EVENTLOG)'
 
 # make softfloat-probe — the ARM half of machine/src/motion.rs's differential claim (spec §4.2): boot the
-# deployed debug build with plxnative-softfloat armed, print the `softfloat:` line (its hash beside
+# deployed debug build with nativejelly-softfloat armed, print the `softfloat:` line (its hash beside
 # the host's pinned one, MATCH or DIVERGE) and fetch the word table for a diff. Needs a prior
 # `make deploy`; the trigger is removed afterwards so the next boot is ordinary.
 softfloat-probe: tv-lock-require
 	@echo "softfloat probe on $(APPID) [$(FLAVOR)]"
-	$(SSH) 'mkdir -p $(RUNDIR) && chmod 1777 $(RUNDIR); touch $(RUNDIR)/plxnative-softfloat; \
+	$(SSH) 'mkdir -p $(RUNDIR) && chmod 1777 $(RUNDIR); touch $(RUNDIR)/nativejelly-softfloat; \
 	  $(BOOT_SH) \
-	  sleep 12; kill $$LP 2>/dev/null; sleep 1; rm -f $(RUNDIR)/plxnative-softfloat; \
+	  sleep 12; kill $$LP 2>/dev/null; sleep 1; rm -f $(RUNDIR)/nativejelly-softfloat; \
 	  $(CLOSE_SH) grep softfloat $(EVENTLOG) || echo "softfloat: NO LINE (was the build deployed with devtriggers?)"'
 	@mkdir -p tests/fixtures/softfloat
-	-$(SCP) tv:$(RUNDIR)/plxnative-softfloat.tbl tests/fixtures/softfloat/arm.tbl 2>/dev/null && echo "table: tests/fixtures/softfloat/arm.tbl"
+	-$(SCP) tv:$(RUNDIR)/nativejelly-softfloat.tbl tests/fixtures/softfloat/arm.tbl 2>/dev/null && echo "table: tests/fixtures/softfloat/arm.tbl"
 
 kill: tv-lock-require
 	$(SSH) '$(CLOSE_SH) echo closed $(APPID)'
 
 clean:
-	rm -f src/*.o pkg/plxnative pkg/plxnative-storage
+	rm -f src/*.o pkg/nativejelly pkg/nativejelly-storage
 
 test: deploy run
 
@@ -1265,9 +1265,9 @@ test: deploy run
 # is a cold 412k-line rustc build (~1 GB RSS), swap hit 9-15 GB, and one run took 60
 # minutes (`cargo test --lib` build 26m33 vs. a normal ~1-2 min, hostsim build 17m37) —
 # where a lone run is ~10 min. Queuing through `tools/check-lock.py`'s machine-wide
-# flock (`~/.cache/plxnative/check.lock` by default, shared by every worktree) is
+# flock (`~/.cache/nativejelly/check.lock` by default, shared by every worktree) is
 # strictly faster for everyone: the kernel releases the lock the moment a holder dies,
-# so there is nothing to clean up by hand. `PLX_CHECK_LOCK=off` bypasses it. See
+# so there is nothing to clean up by hand. `NJ_CHECK_LOCK=off` bypasses it. See
 # `check-unlocked` below for the actual suite; CI runs `make check` uncontended, so the
 # wrapper acquires immediately there.
 check:
@@ -1287,9 +1287,9 @@ check:
 # that actually calls into FFmpeg or GL fails to link by design. --lib keeps it to the crate's own
 # `#[cfg(test)] mod tests` blocks (there are no integration tests in tests/ — that directory is the
 # on-device Python harness, a different thing entirely).
-# NB the suite APPENDS to `/tmp/plxnative-events.log` on the dev Mac, and deliberately cannot be
+# NB the suite APPENDS to `/tmp/nativejelly-events.log` on the dev Mac, and deliberately cannot be
 # pointed elsewhere. Since 2026-08-15 enough of the tree logs its failures (stream, posters, img,
-# account, remote) that host tests exercising those paths write real lines. `PLXNATIVE_RUNTIME_DIR`
+# account, remote) that host tests exercising those paths write real lines. `NJ_RUNTIME_DIR`
 # does NOT help: `paths::ENV_STEERABLE` is `cfg!(feature = "hostsim")`, off here, and widening it to
 # `cfg(test)` would silently retire `paths.rs`'s own test that a television build ignores that
 # variable — the suite is the only place that guarantee is ever checked. Host-side cosmetics are not
@@ -1361,7 +1361,7 @@ check-cargo-lint: lint
 	@# gate has nothing to reuse a cache for. No `pkg/lab.json` is involved — that file is `make
 	@# LAB=1`'s requirement (a live session secret), not the compiler's.
 	@set -e; cd rust-modules && CARGO_INCREMENTAL=0 PATH="$$HOME/.cargo/bin:$$PATH" \
-	  cargo +$(RUST_NIGHTLY) check --lib --tests -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net --features lab-diagnostics
+	  cargo +$(RUST_NIGHTLY) check --lib --tests -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net --features lab-diagnostics
 
 # The default-feature unit suite and everything that drives cargo through ci/ self-tests.
 check-cargo-unit-default:
@@ -1385,12 +1385,12 @@ check-cargo-unit-default:
 	@# the two compile-time refusals are derived from them, so a host suite run WITHOUT them grades a
 	@# configuration nobody builds. With them, `the_environment_matches_the_credential_pair_that_was_
 	@# supplied` checks this checkout's actual configuration rather than the empty one.
-	@set -e; d=$$(mktemp -d /tmp/plxnative-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
-	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" PLXNATIVE_RUNTIME_DIR="$$d" \
+	@set -e; d=$$(mktemp -d /tmp/nativejelly-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
+	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" NJ_RUNTIME_DIR="$$d" \
 	  $(TELEMETRY_ENV) \
-	  cargo +$(RUST_NIGHTLY) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net
+	  cargo +$(RUST_NIGHTLY) test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net
 	RUST_NIGHTLY=$(RUST_NIGHTLY) python3 ci/test_storage_service_package.py
-	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_NIGHTLY) test -p plxnative-storage --bin plxnative-storage
+	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_NIGHTLY) test -p nativejelly-storage --bin nativejelly-storage
 	@# The helper is its own package, so building it compiles no copy of the app library; this reads
 	@# cargo's resolved unit graph (`--unit-graph`, nothing is compiled) for both invocations the repo
 	@# uses for it and fails if either contains a unit of the app package.
@@ -1418,10 +1418,10 @@ check-cargo-unit-hostsim:
 	@# was invisible to all 1398 default-feature tests because the seam it needs was not there.
 	@# Cargo keys fingerprints by feature set, so the two configurations coexist in one target/ and
 	@# this costs a few seconds warm rather than a rebuild.
-	@set -e; d=$$(mktemp -d /tmp/plxnative-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
-	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" PLXNATIVE_RUNTIME_DIR="$$d" \
+	@set -e; d=$$(mktemp -d /tmp/nativejelly-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
+	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" NJ_RUNTIME_DIR="$$d" \
 	  $(TELEMETRY_ENV) \
-	  cargo +$(RUST_NIGHTLY) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net --features hostsim
+	  cargo +$(RUST_NIGHTLY) test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net --features hostsim
 
 # OPT-IN incremental inner loop: the default-feature unit suite (the same `cargo test --lib` as
 # `check-cargo-unit-default`, same throwaway runtime root and telemetry env) with
@@ -1440,11 +1440,11 @@ TEST_FAST_TDIR = target-fast
 test-fast:
 	@$(if $(RELEASE),echo "make test-fast: refused under RELEASE=1 -- it runs the default-feature host unit suite incrementally; RELEASE=1 is the shipping feature set (use make check for gates)." >&2; exit 1,:)
 	@echo "test-fast: incremental host unit tests in rust-modules/$(TEST_FAST_TDIR) -- this dir grows to ~2.7 GB; reclaim it with: tools/build-gc.sh --incremental (cache) or rm -rf rust-modules/$(TEST_FAST_TDIR)"
-	@set -e; d=$$(mktemp -d /tmp/plxnative-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
+	@set -e; d=$$(mktemp -d /tmp/nativejelly-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
 	cd rust-modules && CARGO_INCREMENTAL=1 CARGO_TARGET_DIR=$(TEST_FAST_TDIR) \
-	  PATH="$$HOME/.cargo/bin:$$PATH" PLXNATIVE_RUNTIME_DIR="$$d" \
+	  PATH="$$HOME/.cargo/bin:$$PATH" NJ_RUNTIME_DIR="$$d" \
 	  $(TELEMETRY_ENV) \
-	  cargo +$(RUST_NIGHTLY) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net $(if $(T),'$(T)')
+	  cargo +$(RUST_NIGHTLY) test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net $(if $(T),'$(T)')
 
 # `make build-bench [ARGS='--runs 5 --json out.json']` -- the repeatable local build benchmark
 # (tools/build-bench.py; docs/agent-reference.md says what it measures and when a PR must paste its
@@ -1459,7 +1459,7 @@ test-fast:
 .PHONY: build-bench build-bench-quick
 build-bench build-bench-quick:
 	@$(if $(RELEASE),echo "make $@: refused under RELEASE=1 -- it benchmarks the default-feature host build; RELEASE=1 is the shipping feature set." >&2; exit 1,:)
-	@python3 tools/check-lock.py -- env PLX_BENCH_VIA_MAKE=1 $(TELEMETRY_ENV) \
+	@python3 tools/check-lock.py -- env NJ_BENCH_VIA_MAKE=1 $(TELEMETRY_ENV) \
 	  python3 tools/build-bench.py $(if $(filter build-bench-quick,$@),--quick) $(ARGS)
 
 check-python: check-localization
@@ -1529,7 +1529,7 @@ check-python: check-localization
 	@# at load ~5, and 630 s of that is the `DepGates` class running the whole of
 	@# `ci/check-deps.sh` (11 s a run) once or more per test to prove each structure gate still
 	@# catches a planted violation. Those self-tests now edit a private copy of the gate's inputs
-	@# and run on a thread pool (`PLX_TEST_JOBS`, default min(8, cpus)): the module takes 175 s
+	@# and run on a thread pool (`NJ_TEST_JOBS`, default min(8, cpus)): the module takes 175 s
 	@# instead of 661 s. (It was 980 s of 1217 s before `check-deps.sh` stopped forking a process
 	@# per candidate line.) Measure before budgeting, and if this number needs to come down
 	@# further, `check-deps.sh` itself is the place. run.py
@@ -1548,7 +1548,7 @@ check-python: check-localization
 	@# Host-only halves of the opt-in live diagnostics: /proc/interrupt parsing, rate normalization,
 	@# stack aggregation and folded output. Neither command resolves a TV or takes its lock.
 	tools/profile-graphics --selftest
-	tools/plxnative-sample selftest
+	tools/nativejelly-sample selftest
 	@# The direct-screen TV command's own host-only contract: `--server N` must suppress the
 	@# singular token boot (which cannot register N>0) and must construct the exact identity marker
 	@# that `up` requires after launch. No SSH or television access occurs in this self-test.
@@ -1576,7 +1576,7 @@ check-python: check-localization
 	@# the public internet. ~5 s, most of it the two deliberate rate-limit waits, and it needs no
 	@# router: the UPnP half reports what is on this LAN rather than asserting anything.
 	@# It runs here because the receiver has no other gate — nothing in cargo can see a python file.
-	python3 tools/plxnative-lab selftest
+	python3 tools/nativejelly-lab selftest
 	python3 tools/test_abr_transfer_bound.py
 	python3 tools/test_abr_calibrate_plant.py
 	python3 tools/test_abr_window_grade.py
@@ -1610,9 +1610,9 @@ check-python: check-localization
 	python3 ci/test_restore_runtime.py
 	python3 ci/test-compat.py
 	@# The `check` lock wrapper's own suite: two invocations serialize, a SIGKILLed holder
-	@# unblocks the waiter promptly, --timeout exits 75, and PLX_CHECK_LOCK=off really
+	@# unblocks the waiter promptly, --timeout exits 75, and NJ_CHECK_LOCK=off really
 	@# bypasses it. Runs against a throwaway lock path — never the real
-	@# ~/.cache/plxnative/check.lock — so it cannot contend with the `check` that is
+	@# ~/.cache/nativejelly/check.lock — so it cannot contend with the `check` that is
 	@# running it.
 	python3 ci/test_check_lock.py
 	python3 tools/test_check_parallel.py
@@ -1677,37 +1677,37 @@ STAGE       := ipkroot/data/usr/palm/applications/$(APPID)
 #   - ci/mkipk.py normalises uid/gid/uname/gname/mtime/mode/order and the gzip header. `tar czf`
 #     was embedding `gleblinnik/staff` in every shipped archive.
 #   - `ar` gets D (deterministic): binutils' default embeds the builder's uid and a real mtime.
-# `make SYMBOLS=1 symbols` — separate the debug info into `pkg/plxnative.debug`.
+# `make SYMBOLS=1 symbols` — separate the debug info into `pkg/nativejelly.debug`.
 #
 # What this is FOR: a crash reported from a stranger's television carries an address, and the
 # binary they are running is stripped. Matching the two needs a debug file identified by the same
 # BUILD ID, which `-Wl,--build-id=sha1` on the link puts in an allocated note that survives
 # `strip`. Verified end to end 2026-08-29 — full, `.debug` and stripped all carry
-# `cc4a5c7b3923da5e872ee3c8f5054a3b23f07568`, and `addr2line -e pkg/plxnative.debug` resolves an
+# `cc4a5c7b3923da5e872ee3c8f5054a3b23f07568`, and `addr2line -e pkg/nativejelly.debug` resolves an
 # address the stripped binary answers `?? ??:0` for.
 #
 # **It refuses without SYMBOLS=1 rather than producing an empty shell.** `objcopy --only-keep-debug`
 # on a binary with no `.debug_*` sections succeeds and writes a file; that file matches nothing and
 # fails only much later, at the symbol server, on somebody else's crash. Fail here instead.
-symbols: pkg/plxnative
+symbols: pkg/nativejelly
 ifneq ($(SYMBOLS),1)
 	@echo "make symbols needs SYMBOLS=1 — without it this binary carries no DWARF and" >&2
 	@echo "objcopy would write an empty .debug that silently matches nothing." >&2
 	@echo "  correct: make RELEASE=1 SYMBOLS=1 ipk symbols" >&2
 	@false
 else
-	$(TOOLPREFIX)objcopy --only-keep-debug pkg/plxnative pkg/plxnative.debug
+	$(TOOLPREFIX)objcopy --only-keep-debug pkg/nativejelly pkg/nativejelly.debug
 	@# The build ids MUST agree, and asserting it here is the point: everything downstream —
 	@# the DIF upload, the symbol server's lookup, `addr2line` against the right file — keys on
 	@# this one value, and a mismatch is invisible until a real crash fails to symbolize.
-	@bin=$$($(TOOLPREFIX)readelf -n pkg/plxnative | sed -n 's/.*Build ID: //p'); \
-	 dbg=$$($(TOOLPREFIX)readelf -n pkg/plxnative.debug 2>/dev/null | sed -n 's/.*Build ID: //p'); \
-	 if [ -z "$$bin" ]; then echo "pkg/plxnative has NO build id — is -Wl,--build-id still on the link?" >&2; exit 1; fi; \
+	@bin=$$($(TOOLPREFIX)readelf -n pkg/nativejelly | sed -n 's/.*Build ID: //p'); \
+	 dbg=$$($(TOOLPREFIX)readelf -n pkg/nativejelly.debug 2>/dev/null | sed -n 's/.*Build ID: //p'); \
+	 if [ -z "$$bin" ]; then echo "pkg/nativejelly has NO build id — is -Wl,--build-id still on the link?" >&2; exit 1; fi; \
 	 if [ "$$bin" != "$$dbg" ]; then echo "build id mismatch: binary $$bin, debug $$dbg" >&2; exit 1; fi; \
-	 echo "symbols: pkg/plxnative.debug  build-id $$bin  ($$(du -h pkg/plxnative.debug | cut -f1))"
+	 echo "symbols: pkg/nativejelly.debug  build-id $$bin  ($$(du -h pkg/nativejelly.debug | cut -f1))"
 endif
 
-# Validate and upload the exact debug file that matches `pkg/plxnative`. This is a separate target
+# Validate and upload the exact debug file that matches `pkg/nativejelly`. This is a separate target
 # so a development build used for an on-device crash test gets the same fail-closed pairing as CI.
 # `SENTRY_AUTH_TOKEN` is read only from the process environment and is never echoed or written.
 SENTRY_ORG     ?= gleb-linnik
@@ -1720,33 +1720,33 @@ sentry-symbols: symbols
 	@test -n "$${SENTRY_AUTH_TOKEN:-}" || { \
 	  echo "sentry-symbols: SENTRY_AUTH_TOKEN is required" >&2; exit 1; }
 	@SENTRY_ORG='$(SENTRY_ORG)' SENTRY_PROJECT='$(SENTRY_PROJECT)' \
-	  $(SENTRY_CLI) debug-files check pkg/plxnative.debug
+	  $(SENTRY_CLI) debug-files check pkg/nativejelly.debug
 	@SENTRY_ORG='$(SENTRY_ORG)' SENTRY_PROJECT='$(SENTRY_PROJECT)' \
-	  $(SENTRY_CLI) debug-files upload --include-sources pkg/plxnative.debug pkg/plxnative
+	  $(SENTRY_CLI) debug-files upload --include-sources pkg/nativejelly.debug pkg/nativejelly
 
-ipk: pkg/plxnative pkg/plxnative-storage $(APPINFO) release-guard
-	python3 ci/check-link-evidence.py pkg/plxnative pkg/plxnative-storage $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LIBASS_STAGED)
+ipk: pkg/nativejelly pkg/nativejelly-storage $(APPINFO) release-guard
+	python3 ci/check-link-evidence.py pkg/nativejelly pkg/nativejelly-storage $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LIBASS_STAGED)
 	@echo "packaging $(if $(RELEASE),RELEASE,dev) build ($(RUST_CFG)) as $(APPID) [$(FLAVOR)]"
 	rm -rf ipkroot/data/usr && mkdir -p $(STAGE)/licenses
 	cp $(APP_FILES) $(STAGE)/
 	cp $(LICENSE_FILES) $(STAGE)/licenses/
-	@# Strip the STAGED copy only, never pkg/plxnative. ~2.4 MB of .symtab+.strtab (30% of the
+	@# Strip the STAGED copy only, never pkg/nativejelly. ~2.4 MB of .symtab+.strtab (30% of the
 	@# download, on a device whose app partition is 615 MB total and shared with every other app).
-	@# It must not be pkg/plxnative because tools/crash-report.sh symbolizes a crash PC against
+	@# It must not be pkg/nativejelly because tools/crash-report.sh symbolizes a crash PC against
 	@# that local binary AND md5-compares it to the on-TV copy to prove they are the same build —
 	@# stripping in place would break the identity check and lose function names from every
 	@# release crash report. Deploy ships the unstripped one by design; only the ipk is stripped.
-	$(TOOLPREFIX)strip --strip-unneeded $(STAGE)/plxnative
+	$(TOOLPREFIX)strip --strip-unneeded $(STAGE)/nativejelly
 	rm -rf pkg/link-evidence/$(FLAVOR)
-	@for source in pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LIBASS_STAGED); do \
+	@for source in pkg/nativejelly $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LIBASS_STAGED); do \
 	  python3 ci/stage-link-evidence.py "$$source" "$(STAGE)/$$(basename "$$source")" --stripped \
 	    --evidence-base "pkg/link-evidence/$(FLAVOR)/$$(basename "$$source")" || exit $$?; \
 	done
 	@# Only THIS flavour's artifact — packaging one must never delete the other's.
 	rm -f pkg/$(APPID)_*_arm.ipk
 	FLAVOR=$(FLAVOR) python3 ci/mkipk.py
-	python3 ci/stage-link-evidence.py pkg/plxnative-storage ipkroot/data/usr/palm/services/$(APPID).storage/plxnative-storage \
-	  --evidence-base pkg/link-evidence/$(FLAVOR)/plxnative-storage
+	python3 ci/stage-link-evidence.py pkg/nativejelly-storage ipkroot/data/usr/palm/services/$(APPID).storage/nativejelly-storage \
+	  --evidence-base pkg/link-evidence/$(FLAVOR)/nativejelly-storage
 	@# Emitted from INSIDE pkg/ so the line carries the bare filename. With the `pkg/` prefix
 	@# in it, `shasum -a 256 -c ipk.sha256` fails for everyone who downloads the two release
 	@# assets side by side — which is every user, and is what shipped through v0.2.1.
@@ -1764,7 +1764,7 @@ ipk: pkg/plxnative pkg/plxnative-storage $(APPINFO) release-guard
 # THE STABLE INSTALL IS ALWAYS A RELEASE BUILD, and that is a gate rather than a habit.
 #
 # `com.sostk.nativejelly` is the id users get. A dev-featured binary under it carries the whole
-# `/tmp` trigger surface, the world-writable `plxnative-remote` FIFO and the `:8910` capture
+# `/tmp` trigger surface, the world-writable `nativejelly-remote` FIFO and the `:8910` capture
 # listener — the exact surface the `cut-release` skill's §2 exists to keep out of a shipped
 # artifact, seen from the other side. Before the flavour split this could only happen by
 # publishing by hand, which is how v0.2.1's defects got out; now it is one forgotten `RELEASE=1`
@@ -1789,7 +1789,7 @@ lab-guard:
 	  exit 1; fi
 	@if [ -n "$(LAB)" ] && [ ! -f pkg/lab.json ]; then \
 	  echo "LAB=1 but pkg/lab.json is missing — the build would ship with no session."; \
-	  echo "  start a receiver first:  tools/plxnative-lab start"; \
+	  echo "  start a receiver first:  tools/nativejelly-lab start"; \
 	  echo "  (it writes pkg/lab.json for you; docs/lab-diagnostics.md)"; \
 	  exit 1; fi
 
@@ -1882,16 +1882,16 @@ mali-irq-sample: tools/mali-irq-sample.c
 	@mkdir -p pkg
 	$(CC) $(CFLAGS) -o pkg/mali-irq-sample tools/mali-irq-sample.c
 
-# tools/plxnative-stackwalk.c — opt-in live-process sampler for the rooted development set.  The
+# tools/nativejelly-stackwalk.c — opt-in live-process sampler for the rooted development set.  The
 # ptrace implementation is the same libunwind remote archive used by sentry-crash, but this helper
-# is never an APP_FILE and therefore never enters an ipk or a deploy.  tools/plxnative-sample owns
+# is never an APP_FILE and therefore never enters an ipk or a deploy.  tools/nativejelly-sample owns
 # its temporary copy under /tmp and removes it after every session.
-plxnative-stackwalk: $(SENTRY_NATIVE_STAMP) tools/plxnative-stackwalk.c
+nativejelly-stackwalk: $(SENTRY_NATIVE_STAMP) tools/nativejelly-stackwalk.c
 	@mkdir -p pkg
 	$(CC) $(CFLAGS) \
 	  -Ivendor/sentry-native-src/vendor/libunwind/include \
 	  -Ivendor/sentry-native-build/vendor/libunwind/include \
-	  -o pkg/plxnative-stackwalk tools/plxnative-stackwalk.c \
+	  -o pkg/nativejelly-stackwalk tools/nativejelly-stackwalk.c \
 	  $(SENTRY_REMOTE_UNWIND_LIB) -ldl -lpthread
 
 # ---------------------------------------------------------------------------------------------
@@ -1910,7 +1910,7 @@ plxnative-stackwalk: $(SENTRY_NATIVE_STAMP) tools/plxnative-stackwalk.c
 cfg_macro = $(shell sed -n 's/^\#define[ \t]*$(1)[ \t]*"\([^"]*\)".*/\1/p' src/config.local.h 2>/dev/null)
 SIM_PMS  ?= $(call cfg_macro,PMS_HOST)
 SIM_PORT ?= $(shell sed -n 's/^\#define[ \t]*PMS_PORT[ \t]*\([0-9]*\).*/\1/p' src/config.local.h 2>/dev/null)
-SIM_DIR  ?= /tmp/plxnative-sim
+SIM_DIR  ?= /tmp/nativejelly-sim
 # Its OWN target dir, per this file's rule for feature-set splits: `make check` builds default
 # features on nightly, `make sim-macos` builds `hostsim` on the default toolchain. Sharing one dir makes
 # each invocation rebuild the crate the other way round.
@@ -1919,9 +1919,9 @@ SIM_DIR  ?= /tmp/plxnative-sim
 # (/Volumes/…, SMB, some external SSDs) cannot be a cargo target dir at all — those filesystems do
 # not implement flock, and cargo fails with "could not create session directory lock file
 # (os error 45)" before compiling anything. Point this at a local path and the checkout can stay
-# where it is:  export SIM_TDIR=$HOME/plxnative-sim-target
+# where it is:  export SIM_TDIR=$HOME/nativejelly-sim-target
 SIM_TDIR  ?= rust-modules/target-sim
-SIM_MACOS_BIN = $(SIM_TDIR)$(if $(LAB),-lab,)/debug/plxnative-sim
+SIM_MACOS_BIN = $(SIM_TDIR)$(if $(LAB),-lab,)/debug/nativejelly-sim
 SIM_MACOS_BIN_ENV = $(SIM_MACOS_BIN)
 SIM_LINUX_TDIR_ENV = $(SIM_TDIR)
 export SIM_MACOS_BIN_ENV SIM_LINUX_TDIR_ENV
@@ -1936,13 +1936,13 @@ SIM_SHOT  ?= $(SIM_DIR)/shot.png
 # `desktop_window_size`), which on a 1x screen is half the authored canvas and therefore half the
 # resolution of every screenshot. Set both to look at the UI the size it is drawn:
 #   make sim-shot SIM_W=1920 SIM_H=1080
-# For a capture LARGER than the display can hold, set PLXNATIVE_RENDER_SCALE=<1..4> in the
+# For a capture LARGER than the display can hold, set NJ_RENDER_SCALE=<1..4> in the
 # environment instead: the frame is then rendered offscreen at that multiple of 1920x1080 (glyphs,
 # icons and artwork rasterised to match) and shots come out at that size (`surface::render_scale`).
 SIM_W ?=
 SIM_H ?=
-SIM_WIN = $(if $(and $(SIM_W),$(SIM_H)),PLXNATIVE_WIN=$(SIM_W)x$(SIM_H),)
-SIM_ENV = PLXNATIVE_RUNTIME_DIR=$(SIM_DIR) PLXNATIVE_APP_DIR=$(CURDIR)/pkg $(SIM_WIN)
+SIM_WIN = $(if $(and $(SIM_W),$(SIM_H)),NJ_WIN=$(SIM_W)x$(SIM_H),)
+SIM_ENV = NJ_RUNTIME_DIR=$(SIM_DIR) NJ_APP_DIR=$(CURDIR)/pkg $(SIM_WIN)
 SIM_PRE = mkdir -p $(SIM_DIR); test -n "$(SIM_PMS)" || \
           { echo "no PMS host — set SIM_PMS=<ip> or add PMS_HOST to src/config.local.h"; exit 1; }
 
@@ -1969,7 +1969,7 @@ libass-host: $(LIBASS_HOST_STAGED)
 # fonts that ship, including cancellation and source-lifecycle regressions beside the pixels.
 .PHONY: check-ass
 check-ass: $(LIBASS_HOST_STAGED)
-	cd rust-modules && CARGO_INCREMENTAL=0 PLXNATIVE_APP_DIR="$(CURDIR)/pkg" PATH="$$HOME/.cargo/bin:$$PATH" \
+	cd rust-modules && CARGO_INCREMENTAL=0 NJ_APP_DIR="$(CURDIR)/pkg" PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib player::ass::tests -- --include-ignored
 
 $(FFMPEG_HOST_INC)/libavformat/avformat.h: ci/build-ffmpeg.sh
@@ -1985,7 +1985,7 @@ $(FFMPEG_HOST_STAGED): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci
 # `#[ignore]`d in the plain suite; the first is the zlib-compressed PGS track that no configure
 # flag change may silently drop again (`ff_image_subtitle_tests.rs`). macOS only, like the staging.
 check-ffmpeg: $(FFMPEG_HOST_STAGED)
-	cd rust-modules && CARGO_INCREMENTAL=0 PLX_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
+	cd rust-modules && CARGO_INCREMENTAL=0 NJ_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib ff::image_subtitle_tests -- --ignored
 
 # The same ABI gate the cross build runs, at the other pointer width. ci/ffabi-assert.c `#if`s on
@@ -1998,9 +1998,9 @@ pkg/.ffabi-host-ok: ci/ffabi-assert.c $(FFMPEG_HOST_INC)/libavformat/avformat.h 
 
 # LAB=1 adds the Lab Diagnostics feature here too, and that is not a curiosity: it is the only way
 # to exercise the WHOLE upload path — trigger, snapshot, scrub, gzip, pinned TLS POST, receiver —
-# without a television and without opening a port on the router (`tools/plxnative-lab start
+# without a television and without opening a port on the router (`tools/nativejelly-lab start
 # --hostname 127.0.0.1 --no-upnp`). The simulator reads `lab.json` out of its app dir, which is
-# `pkg/`, which is where `plxnative-lab start` writes it. It has its own target dir for the same
+# `pkg/`, which is where `nativejelly-lab start` writes it. It has its own target dir for the same
 # reason every other feature set does.
 #
 # The host FFmpeg is a prerequisite of BOTH configurations: a lab simulator that cannot demux
@@ -2011,7 +2011,7 @@ sim: sim-macos
 
 sim-macos: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
 	$(TELEMETRY_ENV) \
-	  cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SIM_TDIR)$(if $(LAB),-lab,) --features hostsim$(if $(LAB), --features lab-diagnostics,) --bin plxnative-sim
+	  cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SIM_TDIR)$(if $(LAB),-lab,) --features hostsim$(if $(LAB), --features lab-diagnostics,) --bin nativejelly-sim
 
 # Full product replay is a renderer-backed host gate. Keep the fast unit suite usable without
 # a window system; Simulator CI runs this same driver against the simulator it just built.
@@ -2037,7 +2037,7 @@ check-replay: sim-macos
 # not part of the product) and `devtriggers` comes back because scenes are reached through them.
 # Its own target dir, for this file's feature-set rule. `CARGO_INCREMENTAL=0`: a one-shot build.
 SHOT_TDIR ?= $(SIM_TDIR)-shots
-SHOT_BIN   = $(SHOT_TDIR)/debug/plxnative-sim
+SHOT_BIN   = $(SHOT_TDIR)/debug/nativejelly-sim
 SHOT_SCENES ?=
 SHOT_OUT    ?=
 SHOT_CHECK  ?=
@@ -2045,7 +2045,7 @@ SHOT_HERO   ?=
 SHOT_HERO_VARIANTS ?=
 screenshots-sim: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
 	CARGO_INCREMENTAL=0 cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SHOT_TDIR) \
-	  --no-default-features --features hostsim,devtriggers --bin plxnative-sim
+	  --no-default-features --features hostsim,devtriggers --bin nativejelly-sim
 
 demo-library:
 	python3 tools/demo_library.py derive
@@ -2068,16 +2068,16 @@ $(FFMPEG_LINUX_HOST_STAGED) &: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stag
 sim-linux: $(LIBASS_HOST_STAGED) $(FFMPEG_LINUX_HOST_STAGED) pkg/.ffabi-host-ok
 	$(TELEMETRY_ENV) \
 	  cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir "$$SIM_LINUX_TDIR_ENV" \
-	  --features hostsim --bin plxnative-sim
+	  --features hostsim --bin nativejelly-sim
 
 # `make sim-linux-run SIM_PMS=<host> [SIM_PORT=<port>]` — the Linux simulator WITH PLAYBACK. Arms the
 # clock sink (`player/ffi_host.rs`) and the two system-ffmpeg children that decode under it: the
 # picture (`player/sim_video.rs`) and the sound (`player/sim_audio.rs`). Needs `ffmpeg` on PATH
-# (or PLXNATIVE_SIM_FFMPEG). Nothing measured here is a television measurement.
+# (or NJ_SIM_FFMPEG). Nothing measured here is a television measurement.
 sim-linux-run: sim-linux
 	@$(SIM_PRE)
-	@touch $(SIM_DIR)/plxnative-clocksink $(SIM_DIR)/plxnative-simvideo $(SIM_DIR)/plxnative-simaudio
-	$(SIM_ENV) "$$SIM_LINUX_TDIR_ENV/release/plxnative-sim" $(SIM_PMS) $(SIM_PORT)
+	@touch $(SIM_DIR)/nativejelly-clocksink $(SIM_DIR)/nativejelly-simvideo $(SIM_DIR)/nativejelly-simaudio
+	$(SIM_ENV) "$$SIM_LINUX_TDIR_ENV/release/nativejelly-sim" $(SIM_PMS) $(SIM_PORT)
 
 # Compatibility spelling used by the Windows launcher and existing documentation.
 sim-wsl: sim-linux
@@ -2091,7 +2091,7 @@ sim-macos-run: sim-macos
 sim-shot: sim-macos-shot
 sim-macos-shot: sim-macos
 	@$(SIM_PRE)
-	$(SIM_ENV) PLXNATIVE_SHOT=$(SIM_SHOT) PLXNATIVE_SHOT_FRAME=$(SIM_FRAME) PLXNATIVE_SHOT_EXIT=1 \
+	$(SIM_ENV) NJ_SHOT=$(SIM_SHOT) NJ_SHOT_FRAME=$(SIM_FRAME) NJ_SHOT_EXIT=1 \
 	  $(SIM_MACOS_BIN) $(SIM_PMS) $(SIM_PORT)
 	@echo "wrote $(SIM_SHOT)"
 
@@ -2103,8 +2103,8 @@ sim-macos-shot: sim-macos
 sim-token: sim-macos-token
 sim-macos-token:
 	@mkdir -p $(SIM_DIR)
-	@printf '%s' '$(call cfg_macro,PMS_TOKEN)' > $(SIM_DIR)/plxnative-token
-	@test -s $(SIM_DIR)/plxnative-token || { echo "no PMS_TOKEN in src/config.local.h"; rm -f $(SIM_DIR)/plxnative-token; exit 1; }
+	@printf '%s' '$(call cfg_macro,PMS_TOKEN)' > $(SIM_DIR)/nativejelly-token
+	@test -s $(SIM_DIR)/nativejelly-token || { echo "no PMS_TOKEN in src/config.local.h"; rm -f $(SIM_DIR)/nativejelly-token; exit 1; }
 	@echo "token staged in $(SIM_DIR)"
 
 # `make sim-play` — a REAL playback session on this Mac, with no television and no Plex.
@@ -2130,13 +2130,13 @@ sim-macos-play: sim-macos
 	@test -n "$(SIM_SAMPLE)" || { echo "SIM_SAMPLE=<file.h264> is required — an Annex-B elementary stream WITH access-unit delimiters, e.g."; \
 	  echo "  ffmpeg -i clip.ts -c:v copy -an -bsf:v h264_metadata=aud=insert -f h264 /tmp/sample.h264"; exit 1; }
 	@mkdir -p $(SIM_DIR)
-	@rm -f $(SIM_DIR)/plxnative-playurl $(SIM_DIR)/plxnative-events.log
+	@rm -f $(SIM_DIR)/nativejelly-playurl $(SIM_DIR)/nativejelly-events.log
 	@cp $(SIM_SAMPLE) $(SIM_DIR)/sample.h264
-	@touch $(SIM_DIR)/plxnative-clocksink $(SIM_DIR)/plxnative-autoplay $(SIM_DIR)/plxnative-stats
-	$(SIM_ENV) PLXNATIVE_SHOT=$(SIM_SHOT) PLXNATIVE_SHOT_FRAME=$$(( $(SIM_SECS) * 60 )) \
-	  PLXNATIVE_SHOT_EXIT=1 $(SIM_MACOS_BIN) 127.0.0.1 32400 || true
-	@echo "--- $(SIM_DIR)/plxnative-events.log ---"
-	@grep -E 'clocksink|bf_split|SMP |vplane|route=player' $(SIM_DIR)/plxnative-events.log | head -20
+	@touch $(SIM_DIR)/nativejelly-clocksink $(SIM_DIR)/nativejelly-autoplay $(SIM_DIR)/nativejelly-stats
+	$(SIM_ENV) NJ_SHOT=$(SIM_SHOT) NJ_SHOT_FRAME=$$(( $(SIM_SECS) * 60 )) \
+	  NJ_SHOT_EXIT=1 $(SIM_MACOS_BIN) 127.0.0.1 32400 || true
+	@echo "--- $(SIM_DIR)/nativejelly-events.log ---"
+	@grep -E 'clocksink|bf_split|SMP |vplane|route=player' $(SIM_DIR)/nativejelly-events.log | head -20
 
 sim-clean: sim-macos-clean
 sim-macos-clean:
@@ -2162,7 +2162,7 @@ macapp-zip:
 
 # ---------------------------------------------------------------------------------------------
 # `make fixtures` — SYNTHESIZE THE TEST MEDIA. Host-side, and there is NO TELEVISION anywhere in
-# it: it is ffmpeg + lavfi on this Mac, writing into $(FIXTURES_OUT) (default ~/plxnative-fixtures,
+# it: it is ffmpeg + lavfi on this Mac, writing into $(FIXTURES_OUT) (default ~/nativejelly-fixtures,
 # OUTSIDE the repo — tests/fixtures/make_fixtures.py refuses an --out inside it, because media must
 # never be committed).
 #
@@ -2179,7 +2179,7 @@ macapp-zip:
 # and takes ~20 minutes, which is not something a build should do because somebody typed `make`.
 # `fixtures-quick` builds the same shapes at ~20 s each in about a minute — structurally correct,
 # and NOT suite-valid, since every seek/resume/marker depth the suite asserts is deeper than that.
-FIXTURES_OUT ?= $(HOME)/plxnative-fixtures
+FIXTURES_OUT ?= $(HOME)/nativejelly-fixtures
 
 # $(FIXTURES_OUT) is QUOTED: it defaults under $(HOME), and a home directory with a space in it
 # would otherwise split into two arguments and fail as an unknown option.
@@ -2195,7 +2195,7 @@ fixtures-quick:
 # watched threshold that drops a seeded resume point, the marker windows, the Up Next tail).
 # `./tests/run.py` (the DEFAULT tier since 2026-08-22) needs none of that — it serves these files
 # off this machine over HTTP
-# and plays them through plxnative-playurl with no Plex anywhere — so the pack is short clips in a
+# and plays them through nativejelly-playurl with no Plex anywhere — so the pack is short clips in a
 # FLAT directory, ~0.7 GB and a few minutes instead of ~3 GB and twenty. Same root, its own
 # subdirectory, which is also where the harness looks by default.
 #
@@ -2215,9 +2215,9 @@ fixtures-pipeline:
 # because both lines are `-` prefixed the miss was swallowed — so a profiling run that produced
 # exactly the data asked for reported "no profiler output on the TV".
 fetch-profile:
-	-$(SCP) tv:$(RUNDIR)/plxnative-gputime.jsonl pkg/plxnative-gputime.jsonl
-	-$(SCP) tv:$(RUNDIR)/plxnative-hwcnt.jsonl pkg/plxnative-hwcnt.jsonl
-	@ls -l pkg/plxnative-*.jsonl 2>/dev/null || echo "no profiler output in $(RUNDIR) on the TV ($(APPID))"
+	-$(SCP) tv:$(RUNDIR)/nativejelly-gputime.jsonl pkg/nativejelly-gputime.jsonl
+	-$(SCP) tv:$(RUNDIR)/nativejelly-hwcnt.jsonl pkg/nativejelly-hwcnt.jsonl
+	@ls -l pkg/nativejelly-*.jsonl 2>/dev/null || echo "no profiler output in $(RUNDIR) on the TV ($(APPID))"
 
-.PHONY: libass libass-host screenshots screenshots-sim demo-library disk symbols sentry-symbols sentry-native all setup-env telemetry-local deploy verify-deploy run run-stream kill check check-unlocked check-ffmpeg lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample plxnative-stackwalk sim sim-macos sim-linux sim-wsl sim-run sim-macos-run sim-shot sim-macos-shot sim-token sim-macos-token sim-play sim-macos-play sim-clean sim-macos-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
+.PHONY: libass libass-host screenshots screenshots-sim demo-library disk symbols sentry-symbols sentry-native all setup-env telemetry-local deploy verify-deploy run run-stream kill check check-unlocked check-ffmpeg lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample nativejelly-stackwalk sim sim-macos sim-linux sim-wsl sim-run sim-macos-run sim-shot sim-macos-shot sim-token sim-macos-token sim-play sim-macos-play sim-clean sim-macos-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
         release-guard lab-guard install uninstall $(QUERY_GOALS)

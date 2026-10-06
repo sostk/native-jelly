@@ -33,7 +33,7 @@
 //!   dispatcher does not yet run a phase this early in the frame). `opaque_route` and
 //!   `clear_opaque_region` stopped being no-ops in phase 9 — the rig's hooks are real, but they
 //!   delegate to `app/run.rs::rig_opaque_route`/`rig_clear_opaque_region` rather than naming
-//!   `plx_platform::tv::window::` here, which is what keeps the OS-facing call text in one file (D4;
+//!   `nj_platform::tv::window::` here, which is what keeps the OS-facing call text in one file (D4;
 //!   `ci/check-deps.sh`'s `frame` gate).
 
 use std::ffi::CStr;
@@ -49,12 +49,12 @@ use crate::screens::registry::every_surface_arg;
 #[cfg(test)]
 use crate::ui::dispatch::NoTap;
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, Handled, Host,
     InputEvent, InputKind, InputOwner, InstanceId, Key, LogicalState, Machine, MachineId, Measure, NavOp,
     Source, Tick, TimerId,
 };
-use plx_machine::present::Present;
+use nj_machine::present::Present;
 use crate::ui::screen::{
     At, DrawFrame, FocusSource, Focusable, ReturnState, Screen, ScreenEvent,
 };
@@ -87,7 +87,7 @@ fn refresh_chrome(
     chrome: &mut super::chrome::ChromeSnapshot,
     measure: &dyn Measure,
     directory: crate::stores::browse::DirectoryView<'_>,
-    captured: Option<(&crate::plex::session::CurrentProfile, &crate::plex::session::Session)>,
+    captured: Option<(&crate::catalog::session::CurrentProfile, &crate::catalog::session::Session)>,
 ) {
     match captured {
         Some(captured) => chrome.refresh_with_profile(measure, directory, Some(captured)),
@@ -98,7 +98,7 @@ fn refresh_chrome(
 #[derive(Clone, Copy)]
 pub(crate) struct AppViews<'a> {
     pub(crate) auth: crate::auth::SessionRead<'a>,
-    pub(crate) hubs: crate::pms::HubsView<'a>,
+    pub(crate) hubs: crate::catalog_fetch::HubsView<'a>,
     pub(crate) listing: crate::stores::browse::ListingView<'a>,
     pub(crate) directory: crate::stores::browse::DirectoryView<'a>,
     pub(crate) section_hubs: crate::stores::browse::HubsView<'a>,
@@ -139,7 +139,7 @@ pub(crate) struct BridgeInit;
 
 /// Retained read inputs captured before construction. This is not a store decision owner.
 struct StorePublications {
-    hubs: crate::pms::HubsSnapshot,
+    hubs: crate::catalog_fetch::HubsSnapshot,
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     section_hubs: crate::stores::browse::HubsSnapshot,
@@ -172,7 +172,7 @@ impl Host for AppHost {
 }
 
 impl HomeLike for AppHost {
-    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::pms::HubsView<'a> { cx.views.hubs }
+    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::catalog_fetch::HubsView<'a> { cx.views.hubs }
 }
 
 impl crate::screens::registry::CollectionLike for AppHost {
@@ -263,7 +263,7 @@ impl ConsentMachine {
             (usage, next.usage, "usage analytics"),
         ] {
             if asked && !got {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "consent: no /dev/urandom — refusing {channel} rather than inventing an identifier"
                 ));
             }
@@ -298,11 +298,11 @@ impl ConsentMachine {
 pub(crate) struct Bridge {
     session_cache_generation: u64,
     home_io: Option<super::bootstrap::HomeIo>,
-    recorded_clients: std::collections::BTreeMap<u32, &'static crate::plex::Client>,
+    recorded_clients: std::collections::BTreeMap<u32, &'static crate::catalog::Client>,
     initial_subhash: u64,
     session: crate::auth::SessionMachine,
     session_adapter: super::adapters::session::SessionAdapter,
-    session_ready: Option<(u64, crate::auth::owner::ProfileScope, crate::plex::session::ServerRef, String, crate::auth::owner::ReadyInstall)>,
+    session_ready: Option<(u64, crate::auth::owner::ProfileScope, crate::catalog::session::ServerRef, String, crate::auth::owner::ReadyInstall)>,
     /// A Jellyfin sign-in the login screen just adopted (`app::jf_login::adopt`), waiting for the
     /// same landing a Session handoff takes. It never passes through the Session owner, which
     /// speaks plex.tv only.
@@ -329,7 +329,7 @@ pub(crate) struct Bridge {
     /// on its own assertion. `Split::measure` is `&dyn Measure` already, so erasing it here costs
     /// the app nothing and buys [`Bridge::for_test`].
     measure: crate::ui::rec::Measurements,
-    hubs: crate::pms::HubsSnapshot,
+    hubs: crate::catalog_fetch::HubsSnapshot,
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     section_hubs: crate::stores::browse::HubsSnapshot,
@@ -403,8 +403,8 @@ impl Bridge {
         }
     }
     pub(crate) fn controlled_home(now_us: fn() -> u64, initial: &super::bootstrap::Initial,
-        mt: &plx_base::task::MainThread, replay: bool) -> Self {
-        static TTF: plx_gfx::text::TtfMeasure = plx_gfx::text::TtfMeasure;
+        mt: &nj_base::task::MainThread, replay: bool) -> Self {
+        static TTF: nj_gfx::text::TtfMeasure = nj_gfx::text::TtfMeasure;
         let preferences = initial.session.persisted.clone();
         let (state, adapter) = initial.home.restore(mt).expect("validated Home initial state");
         let mut stores = crate::stores::Stores::default();
@@ -433,12 +433,12 @@ impl Bridge {
         bridge
     }
     pub(crate) fn new(now_us: fn() -> u64, init: crate::auth::SessionInit,
-        consent: crate::telemetry::consent::Consent, mt: &plx_base::task::MainThread) -> Self {
+        consent: crate::telemetry::consent::Consent, mt: &nj_base::task::MainThread) -> Self {
         // A `static`, not `&TtfMeasure` inline: a unit-struct literal DOES const-promote to
         // `'static` today, but that is a rule about the expression rather than a promise about
         // this field, and a `static` states the lifetime outright. Same reasoning as the one
         // `screens::settings`'s test module writes out beside its own measure.
-        static TTF: plx_gfx::text::TtfMeasure = plx_gfx::text::TtfMeasure;
+        static TTF: nj_gfx::text::TtfMeasure = nj_gfx::text::TtfMeasure;
         Self::with_measure(&TTF, now_us, init, super::adapters::session::SessionAdapter::live(mt),
             consent, super::adapters::consent::ConsentAdapter::live())
     }
@@ -450,7 +450,7 @@ impl Bridge {
     pub(crate) fn for_test(now_us: fn() -> u64) -> Self {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         Self::with_measure(&FIXTURE, now_us,
-            crate::auth::SessionInit::captured(crate::plex::session::Session::default()),
+            crate::auth::SessionInit::captured(crate::catalog::session::Session::default()),
             super::adapters::session::SessionAdapter::fixture(), Default::default(),
             super::adapters::consent::ConsentAdapter::fixture())
     }
@@ -478,7 +478,7 @@ impl Bridge {
         let adapter = super::adapters::session::SessionAdapter::fixture_with(init.persisted.clone());
         Self::with_publications(&FIXTURE, || 0, init, adapter, Default::default(),
             super::adapters::consent::ConsentAdapter::fixture(), StorePublications {
-            hubs: crate::pms::HubsSnapshot::empty_for_test(),
+            hubs: crate::catalog_fetch::HubsSnapshot::empty_for_test(),
             listing: crate::stores::browse::ListingSnapshot::empty_for_test(),
             directory: Default::default(), section_hubs: crate::stores::browse::HubsSnapshot::empty_for_test(),
             search: Default::default(),
@@ -489,10 +489,10 @@ impl Bridge {
     fn for_consent_test(consent: crate::telemetry::consent::Consent) -> Self {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         Self::with_publications(&FIXTURE, || 0,
-            crate::auth::SessionInit::captured(crate::plex::session::Session::default()),
+            crate::auth::SessionInit::captured(crate::catalog::session::Session::default()),
             super::adapters::session::SessionAdapter::fixture(), consent,
             super::adapters::consent::ConsentAdapter::fixture(), StorePublications {
-                hubs: crate::pms::HubsSnapshot::empty_for_test(),
+                hubs: crate::catalog_fetch::HubsSnapshot::empty_for_test(),
                 listing: crate::stores::browse::ListingSnapshot::empty(),
                 directory: Default::default(), section_hubs: crate::stores::browse::HubsSnapshot::empty(),
                 search: Default::default(),
@@ -503,10 +503,10 @@ impl Bridge {
     pub(crate) fn for_consent_resource_test(consent: crate::telemetry::consent::Consent) -> Self {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         Self::with_publications(&FIXTURE, || 0,
-            crate::auth::SessionInit::captured(crate::plex::session::Session::default()),
+            crate::auth::SessionInit::captured(crate::catalog::session::Session::default()),
             super::adapters::session::SessionAdapter::fixture(), consent,
             super::adapters::consent::ConsentAdapter::live(), StorePublications {
-                hubs: crate::pms::HubsSnapshot::empty_for_test(),
+                hubs: crate::catalog_fetch::HubsSnapshot::empty_for_test(),
                 listing: crate::stores::browse::ListingSnapshot::empty(),
                 directory: Default::default(), section_hubs: crate::stores::browse::HubsSnapshot::empty(),
                 search: Default::default(),
@@ -529,7 +529,7 @@ impl Bridge {
         consent_adapter: super::adapters::consent::ConsentAdapter,
         reads: StorePublications, stores: crate::stores::Stores) -> Self {
         Self {
-            session_cache_generation: crate::plex::session::visible_generation(),
+            session_cache_generation: crate::catalog::session::visible_generation(),
             home_io: None,
             recorded_clients: std::collections::BTreeMap::new(),
             initial_subhash: 0,
@@ -574,10 +574,10 @@ impl Bridge {
 
     /// Observe storage landings on the frame thread, alongside store/adapter publications.
     pub(crate) fn land_session_cache(&mut self) {
-        let generation = crate::plex::session::visible_generation();
+        let generation = crate::catalog::session::visible_generation();
         if self.session_cache_generation != generation {
             self.session_cache_generation = generation;
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
         }
     }
 
@@ -593,7 +593,7 @@ impl Bridge {
     pub fn consent_subhash(&self) -> u64 { self.consent.subhash() }
     pub(crate) fn initial_subhash(&self) -> u64 { self.initial_subhash }
     #[cfg(test)]
-    pub(crate) fn profile_resource_view(&self) -> Option<std::sync::Arc<crate::plex::session::CurrentProfile>> {
+    pub(crate) fn profile_resource_view(&self) -> Option<std::sync::Arc<crate::catalog::session::CurrentProfile>> {
         self.session_adapter.profile_resource_view()
     }
     pub(crate) fn snapshot_session_init(&self) -> crate::auth::SessionInit { self.session.snapshot_init() }
@@ -637,7 +637,7 @@ impl Bridge {
         -> Option<(crate::search::Item, crate::ui::popover::Opener)> {
         let page = d.nav.entry(entry)?.inst.as_ref()?.screen.as_any()?.downcast_ref::<crate::screens::search::SearchScreen>()?;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry) };
+            focus: nj_machine::machine::FocusRead { current: focus, ..Default::default() }, owner: InputOwner::Entry(entry) };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         let item = page.selected_item(focus, &cx)?.clone();
         let rect = page.place(&focus?.elem, &cx, At::Drawn)?.rest_rect;
@@ -653,10 +653,10 @@ impl Bridge {
     }
 
     pub(crate) fn library_selection(&self, d: &Dispatcher<AppHost>, entry: EntryId, focus: Option<FocusKey<u32>>)
-        -> Option<(crate::pms::PmsMovie, crate::ui::popover::Opener)> {
+        -> Option<(crate::catalog_fetch::PmsMovie, crate::ui::popover::Opener)> {
         let page = d.nav.entry(entry)?.inst.as_ref()?.screen.as_any()?.downcast_ref::<crate::screens::library::LibraryScreen>()?;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry) };
+            focus: nj_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry) };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         let item = page.focused_item(focus, &cx)?.clone();
         let rect = page.place(&focus?.elem, &cx, At::Drawn)?.rest_rect;
@@ -738,7 +738,7 @@ impl Bridge {
         let rect = focus.filter(|key| key.entry == entry).and_then(|key| {
             let screen = &d.nav.entry(entry)?.inst.as_ref()?.screen;
             let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-                focus: plx_machine::machine::FocusRead { current: Some(key) , ..Default::default() }, owner: InputOwner::Entry(entry) };
+                focus: nj_machine::machine::FocusRead { current: Some(key) , ..Default::default() }, owner: InputOwner::Entry(entry) };
             let cx = parts.cx::<AppHost>(self.views(), &self.measure);
             screen.as_any()?.downcast_ref::<crate::screens::home::HomeScreen>()?
                 .focused_rect::<AppHost>(Some(key), &cx, At::Drawn)
@@ -748,7 +748,7 @@ impl Bridge {
 
     /// Restore a detail page that is about to mount to a `Spot` no `ReturnState` holds — see
     /// [`crate::screens::registry::DetailSeed`].
-    pub(crate) fn seed_detail(&mut self, sid: crate::plex::ServerId, rk: &str, spot: crate::metadata::Spot) {
+    pub(crate) fn seed_detail(&mut self, sid: crate::catalog::ServerId, rk: &str, spot: crate::metadata::Spot) {
         self.mounter.seed = Some(crate::screens::registry::DetailSeed { sid, rk: rk.to_string(), spot });
     }
 
@@ -774,7 +774,7 @@ impl Bridge {
         let home = entry.inst.as_ref()?.screen.as_any()?.downcast_ref::<crate::screens::home::HomeScreen>()?;
         let focus = Self::home_focus(d);
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
+            focus: nj_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         Some(f(home, &cx, focus))
     }
@@ -904,7 +904,7 @@ impl Bridge {
             .and_then(|s| s.downcast_ref::<crate::screens::home::HomeScreen>()) else { return false };
         if <crate::screens::home::HomeScreen as Screen<AppHost>>::strip_reachable(home) { return false; }
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: Self::home_focus(d) , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
+            focus: nj_machine::machine::FocusRead { current: Self::home_focus(d) , ..Default::default() }, owner: InputOwner::Entry(entry.id) };
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         if home.grid_position::<AppHost>(parts.focus.current, &cx).is_none() { return false; }
         self.home_command(HomeCmd::ItemMenu)
@@ -920,10 +920,10 @@ impl Bridge {
         let e = d.nav.entry(entry)?;
         let screen = e.inst.as_ref()?.screen.as_any()?;
         let mut parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
-            press: plx_machine::machine::PressRead { scale: 1.0, is_long: false },
-            focus: plx_machine::machine::FocusRead { current: None , ..Default::default() },
-            owner: plx_machine::machine::InputOwner::Entry(entry) };
-        parts.owner = plx_machine::machine::InputOwner::Entry(entry);
+            press: nj_machine::machine::PressRead { scale: 1.0, is_long: false },
+            focus: nj_machine::machine::FocusRead { current: None , ..Default::default() },
+            owner: nj_machine::machine::InputOwner::Entry(entry) };
+        parts.owner = nj_machine::machine::InputOwner::Entry(entry);
         parts.focus.current = ret.focus;
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         if let Some(page) = screen.downcast_ref::<crate::screens::detail::DetailScreen>() {
@@ -972,10 +972,10 @@ impl Bridge {
         // above that quad, like Popover::scrim_lifting's legacy callback scope.
         let _live = crate::ui::popover::host::live();
         let mut parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
-            press: plx_machine::machine::PressRead { scale: 1.0, is_long: false },
-            focus: plx_machine::machine::FocusRead { current: None , ..Default::default() },
-            owner: plx_machine::machine::InputOwner::Entry(entry) };
-        parts.owner = plx_machine::machine::InputOwner::Entry(entry);
+            press: nj_machine::machine::PressRead { scale: 1.0, is_long: false },
+            focus: nj_machine::machine::FocusRead { current: None , ..Default::default() },
+            owner: nj_machine::machine::InputOwner::Entry(entry) };
+        parts.owner = nj_machine::machine::InputOwner::Entry(entry);
         parts.focus.current = focus;
         let cx = parts.cx::<AppHost>(self.views(), &self.measure);
         let mut frame = DrawFrame::with_navigation(&cx, crate::ui::Painter::root(), self.navigation_presentation());
@@ -1129,7 +1129,7 @@ impl Bridge {
 
     /// A fresh Hubs publication captured from this owner's store, for a caller that must not read
     /// the frame's retained `self.hubs` publication (e.g. a same-turn action after a command).
-    pub(crate) fn hubs_snapshot(&self) -> crate::pms::HubsSnapshot {
+    pub(crate) fn hubs_snapshot(&self) -> crate::catalog_fetch::HubsSnapshot {
         self.stores.hubs.snapshot()
     }
 
@@ -1147,7 +1147,7 @@ impl Bridge {
         self.stores.gen(id)
     }
 
-    pub(crate) fn landgate(&self) -> &plx_machine::landgate::Gate { &self.stores.landgate }
+    pub(crate) fn landgate(&self) -> &nj_machine::landgate::Gate { &self.stores.landgate }
 
     /// The `MetadataStore`'s own async detail landing — `app/run.rs`'s route-unconditional pump.
     pub(crate) fn metadata_pump_detail(&mut self) -> bool {
@@ -1175,7 +1175,7 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn seed_registered_browse_for_test(
         &mut self,
-        sids: [crate::plex::ServerId; 2],
+        sids: [crate::catalog::ServerId; 2],
     ) {
         self.stores.browse.borrow_mut().seed_registered_table_for_test(sids);
         self.refresh_browse_directory();
@@ -1186,16 +1186,16 @@ impl Bridge {
     /// `mod tests`) reaches its owned `(state, adapter)` pair through here rather than the deleted
     /// process-wide catalog.
     #[cfg(test)]
-    pub(crate) fn seed_hubs_for_test(&mut self, items: usize, hub_state: crate::pms::HubState) {
+    pub(crate) fn seed_hubs_for_test(&mut self, items: usize, hub_state: crate::catalog_fetch::HubState) {
         self.stores.hubs.seed_for_test(items, hub_state);
     }
 
     #[cfg(test)]
     pub(crate) fn seed_hubs_for_directory_test(
         &mut self,
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         items: usize,
-        hub_state: crate::pms::HubState,
+        hub_state: crate::catalog_fetch::HubState,
     ) {
         let directory = self.directory.view();
         self.stores.hubs.seed_for_directory_test(sid, items, hub_state, directory);
@@ -1222,7 +1222,7 @@ impl Bridge {
     }
 
     pub(crate) fn bind_primary(&mut self, recorded: u32) -> Result<(), &'static str> {
-        let resource = crate::plex::client_opt().ok_or("missing controlled primary")?;
+        let resource = crate::catalog::client_opt().ok_or("missing controlled primary")?;
         if resource.instance_gen() != recorded || resource.id().raw() != 0 {
             return Err("initial primary binding mismatch");
         }
@@ -1231,7 +1231,7 @@ impl Bridge {
         }
         Ok(())
     }
-    pub(crate) fn recorded_client(&self, id: u32) -> Option<&'static crate::plex::Client> {
+    pub(crate) fn recorded_client(&self, id: u32) -> Option<&'static crate::catalog::Client> {
         self.recorded_clients.get(&id).copied()
     }
     /// Does [`Rig::draw_chrome`] paint the shared top bar for this argument? Pulled out of that
@@ -1252,7 +1252,7 @@ impl Bridge {
     /// route over" — has nothing left to resolve and went with the routes in D1.
     fn draws_chrome_for(arg: &AppArg) -> bool {
         use crate::ui::screen::ScreenArg;
-        arg.chrome() == plx_machine::machine::Chrome::TabBar
+        arg.chrome() == nj_machine::machine::Chrome::TabBar
     }
 }
 
@@ -1359,7 +1359,7 @@ impl Rig<AppHost> for Bridge {
             // #132: the owner logs nothing, and the Profiles screen cannot see a read-out that
             // existed before it mounted — so the one step that ENTERED it is announced here.
             if let Some(line) = crate::auth::owner::roster_readout_entered(&publication, &self.session.publication()) {
-                plx_base::eventlog::log(&line);
+                nj_base::eventlog::log(&line);
             }
             return handled;
         }
@@ -1373,7 +1373,7 @@ impl Rig<AppHost> for Bridge {
             return Handled::No;
         };
         if StoreId::from_ord(ord) != Some(store) {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "stores: a {} event was addressed to store ordinal {} — dropped",
                 store.name(),
                 ord.0
@@ -1485,7 +1485,7 @@ impl Rig<AppHost> for Bridge {
         self.app_effect(from, fx, out);
     }
     fn log(&mut self, line: &str) {
-        plx_base::eventlog::log(line);
+        nj_base::eventlog::log(line);
     }
     fn system_keyboard(&mut self, up: bool) {
         #[cfg(test)]
@@ -1513,7 +1513,7 @@ impl Rig<AppHost> for Bridge {
     /// `PresentEvent::VideoPlane`, and `tv::window::opaque_route` only sends a wayland request when
     /// the answer CHANGES — so the loop's own call beside it (`app/run.rs`, from the same bit) is
     /// a `static` read and a return, not a second claim. Delegates to `run::rig_opaque_route`
-    /// (D4) rather than naming `plx_platform::tv::window::opaque_route` here directly — see that function's
+    /// (D4) rather than naming `nj_platform::tv::window::opaque_route` here directly — see that function's
     /// doc for why.
     fn opaque_route(&mut self, video_plane_bound: bool) {
         super::run::rig_opaque_route(video_plane_bound);
@@ -1569,7 +1569,7 @@ impl Bridge {
     /// commit acknowledgement never recursively steps the owner outside drain/carry budgets.
     fn session_effect(&mut self, effect: crate::auth::owner::SessionFx, out: &mut Effects<'_, AppHost>) {
         use crate::auth::owner::{SessionEvent, SessionFx, AdmissionReply};
-        use plx_machine::machine::{Addr, RequestId};
+        use nj_machine::machine::{Addr, RequestId};
         if let Some(io) = &mut self.home_io {
             if matches!(effect, SessionFx::Capture { .. } | SessionFx::Work { .. }
                 | SessionFx::Coordinator(_) | SessionFx::Erase { .. } | SessionFx::Incident { .. }) {
@@ -1709,22 +1709,22 @@ pub(crate) fn frame_with_tap(
     inputs: Vec<InputEvent<u32>>,
     tap: &mut dyn crate::ui::dispatch::Tap<AppHost>,
 ) -> (&'static str, FrameReport) {
-    let _frame_scope = plx_base::task::FrameScope::enter();
+    let _frame_scope = nj_base::task::FrameScope::enter();
     if matches!(d.top_arg(), Some(AppArg::Login | AppArg::Profiles)) && rig.session.needs_ready_commit() {
         execute_session_command(d, crate::auth::SessionCmd::TakeReady);
     }
     frame_ingest(d, rig, tick, inputs, Bridge::take_live_results, tap)
 }
 
-pub(crate) type AppResults = Vec<(plx_machine::machine::Addr, AppMsg)>;
+pub(crate) type AppResults = Vec<(nj_machine::machine::Addr, AppMsg)>;
 
 /// Home's hubs — the one adapter result the dispatcher delivers, and a LANDING SITE exactly like
-/// the legacy pumps' mailboxes, so it goes through `plx_machine::landgate`: under a replay the arrival
+/// the legacy pumps' mailboxes, so it goes through `nj_machine::landgate`: under a replay the arrival
 /// waits for the frame the recording delivered it on (§3.3 step 3). Off a replay, one relaxed
 /// atomic load and the same call.
 impl Bridge {
     /// Home's hubs — the one adapter result the dispatcher delivers, and a LANDING SITE exactly
-    /// like the legacy pumps' mailboxes, so it goes through `plx_machine::landgate`: under a replay the
+    /// like the legacy pumps' mailboxes, so it goes through `nj_machine::landgate`: under a replay the
     /// arrival waits for the frame the recording delivered it on (§3.3 step 3). Off a replay, one
     /// relaxed atomic load and the same call.
     fn take_hubs_results(&self) -> AppResults {
@@ -1732,9 +1732,9 @@ impl Bridge {
             self.stores.landgate.take_all(StoreId::Hubs.ord(), || self.stores.hubs.take_results());
         results.sort_by_key(|result| result.request_id());
         results.into_iter().map(|result| (
-            plx_machine::machine::Addr {
+            nj_machine::machine::Addr {
                 to: MachineId::Store(StoreId::Hubs.ord()),
-                req: plx_machine::machine::RequestId(result.request_id()),
+                req: nj_machine::machine::RequestId(result.request_id()),
             },
             AppMsg::HubsResult(result),
         )).collect()
@@ -1744,7 +1744,7 @@ impl Bridge {
     pub(crate) fn settle_session_io_for_test(&mut self, d: &mut Dispatcher<AppHost>) {
         for _ in 0..32 {
             if !self.session_adapter.persistence_pending() { return; }
-            plx_base::storage_worker::drain_for_test();
+            nj_base::storage_worker::drain_for_test();
             frame_with_tap(d, self, Tick::default(), Vec::new(), &mut NoTap);
         }
         panic!("session persistence did not settle");
@@ -1763,11 +1763,11 @@ impl Bridge {
             self.session.commit_is_current(req, epoch, arrival));
         if let Some(completed) = self.session_adapter.take_committed() {
             let disk_event = completed.disk_event();
-            let disk_addr = plx_machine::machine::Addr { to: MachineId::Session,
-                req: plx_machine::machine::RequestId(completed.req) };
+            let disk_addr = nj_machine::machine::Addr { to: MachineId::Session,
+                req: nj_machine::machine::RequestId(completed.req) };
             if let Some(permit) = self.session.commit_permit(completed.req, completed.epoch, completed.arrival) {
                 let reply = self.session_adapter.finish_commit(permit, completed);
-                let addr = plx_machine::machine::Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(reply.req) };
+                let addr = nj_machine::machine::Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(reply.req) };
                 results.push((addr, AppMsg::Session(crate::auth::owner::SessionEvent::Commit(reply))));
                 if let Some(completion) = self.session_adapter.take_live_completion() {
                     results.push((addr, AppMsg::Session(crate::auth::owner::SessionEvent::Persistence(completion))));
@@ -1778,22 +1778,22 @@ impl Bridge {
             if let Some(event) = disk_event { results.push((disk_addr, AppMsg::Session(event))); }
         }
         if let Some(event) = self.session_adapter.take_erased(&mut self.stores.metadata) {
-            results.push((plx_machine::machine::Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(0) },
+            results.push((nj_machine::machine::Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(0) },
                 AppMsg::Session(event)));
         }
         // What became of the report whose Report ID the sign-in screen shows: held, delivered or
         // dropped.
         if let Some((id, delivery)) = self.session_adapter.take_incident_delivery() {
-            results.push((plx_machine::machine::Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(0) },
+            results.push((nj_machine::machine::Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(0) },
                 AppMsg::Session(crate::auth::owner::SessionEvent::IncidentReported { id, delivery })));
         }
         results.extend(self.take_hubs_results());
         if self.home_io.is_some() {
             if let Some(result) = self.stores.landgate.take(StoreId::Browse.ord(),
                 || self.stores.browse.borrow_mut().take_discovery()) {
-                results.push((plx_machine::machine::Addr {
+                results.push((nj_machine::machine::Addr {
                     to: MachineId::Store(StoreId::Browse.ord()),
-                    req: plx_machine::machine::RequestId(result.request_id()),
+                    req: nj_machine::machine::RequestId(result.request_id()),
                 }, AppMsg::Store(StoreCmd::Browse(crate::stores::browse::BrowseCmd::Discovery(result)))));
             }
         }
@@ -1835,15 +1835,15 @@ fn frame_ingest(
     take: impl FnOnce(&mut Bridge) -> AppResults,
     tap: &mut dyn crate::ui::dispatch::Tap<AppHost>,
 ) -> (&'static str, FrameReport) {
-    let _frame_scope = plx_base::task::FrameScope::enter();
+    let _frame_scope = nj_base::task::FrameScope::enter();
     #[cfg(test)]
-    plx_base::testlock::assert_held("the store pump behind an app::bridge frame");
+    nj_base::testlock::assert_held("the store pump behind an app::bridge frame");
     // Library used to be the only route that pumped Browse. Onboard schedules the roster-only
     // owner work from its Tick, but Tick runs after views are captured; land the roster first so
     // a discovery result and the directory publication are observed in one frame. Controlled
     // execution instead recaptures at its addressed result delivery above, preserving recording.
     if rig.home_io.is_none() {
-        plx_base::storage_worker::pump_retained();
+        nj_base::storage_worker::pump_retained();
         rig.land_session_cache();
         let outcome = rig.stores.browse_discover_pump();
         execute_endpoint_outcomes(d, outcome.endpoints);
@@ -1888,21 +1888,21 @@ fn frame_ingest(
     }).collect();
     rig.session_adapter.validate_supplied(&session_records)
         .expect("Session ingest requires an exactly addressed, admitted transfer batch");
-    let report = plx_base::diag::spans::span("dframe", || d.frame_with(rig, tick, inputs, results, tap, false));
+    let report = nj_base::diag::spans::span("dframe", || d.frame_with(rig, tick, inputs, results, tap, false));
     d.prune(&report.unmounted);
-    plx_base::diag::spans::span("dsync", || rig.sync_host(d));
+    nj_base::diag::spans::span("dsync", || rig.sync_host(d));
     // On the simulator, a frame the video plane alone presented is not reported as damage: the
     // loop's gate presents it on its own video-plane term anyway, and the report would keep the
-    // settled-capture clock (`plx_machine::idle::last_change_ms`) from ever seeing a paused player at rest
+    // settled-capture clock (`nj_machine::idle::last_change_ms`) from ever seeing a paused player at rest
     // (`FrameReport::video_only`). The television keeps the unconditional report it always had.
     let video_only = cfg!(feature = "hostsim") && report.video_only;
     if report.presented && !video_only {
         // The dispatcher's gate wants a frame: the loop's gate presents it. While a surface is up
         // this bump is the PANEL's — `take_page_damage` subtracts the panel's claims BY COUNT, and
-        // a page's own landings reach `plx_machine::idle` from the pumps outside this frame (the poster
+        // a page's own landings reach `nj_machine::idle` from the pumps outside this frame (the poster
         // adapter, `pms::commit`), where nothing claims them.
-        let _own = surface.then(plx_machine::idle::OwnScope::open);
-        plx_machine::idle::invalidate();
+        let _own = surface.then(nj_machine::idle::OwnScope::open);
+        nj_machine::idle::invalidate();
     }
     // **Publish the transition's presentation** for the readers that draw outside a page's own
     // `DrawFrame` (`ui::popover`'s panel and scrim, the profile chip's redraw, the glass track's
@@ -2016,7 +2016,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
             .and_then(|s| s.downcast_ref::<crate::screens::home::HomeScreen>()) else { return String::new() };
         let focus = Bridge::home_focus(d);
         let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 }, press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
+            focus: nj_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
         let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
         let position = home.grid_position::<AppHost>(focus, &cx);
         let (row, col) = position.map(|(r, c)| (r as i64, c as i64)).unwrap_or((-1, -1));
@@ -2036,7 +2036,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
             .and_then(|s| s.downcast_ref::<crate::screens::library::LibraryScreen>()) else { return String::new() };
         let focus = d.input.engine.current(InputOwner::Entry(page.id));
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
-            focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
+            focus: nj_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(page.id) };
         let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
         let menu = d.top_surface_name() == Some("library_menu");
         let pill = if menu { -1 } else { match rig.chrome.focus(focus) {
@@ -2073,8 +2073,8 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
     let Some(instance) = d.nav.entry(owner).and_then(|e| e.inst.as_ref()) else { return String::new() };
     let focus = d.focus();
     let parts = CxParts { tick: Tick { ms: 0, dt_us: 0 },
-        press: plx_machine::machine::PressRead { scale: 1.0, is_long: false },
-        focus: plx_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(owner) };
+        press: nj_machine::machine::PressRead { scale: 1.0, is_long: false },
+        focus: nj_machine::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(owner) };
     let cx = parts.cx::<AppHost>(rig.views(), &rig.measure);
     let mut groups = Vec::new();
     instance.screen.groups(&cx, &mut groups);
@@ -2140,7 +2140,7 @@ fn page_probe(d: &Dispatcher<AppHost>, rig: &Bridge) -> String {
                 crate::focusprobe::push_rk(&mut out, &item.rk);
             } else { out.push_str(" sid=- rk=-"); }
         }
-        AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef { rk, sec, tag, .. })) => {
+        AppArg::Content(ContentArg::Collection(crate::catalog::collections::CollectionRef { rk, sec, tag, .. })) => {
             let item = instance.screen.as_any()
                 .and_then(|screen| screen.downcast_ref::<crate::screens::collection::CollectionScreen>())
                 .and_then(|screen| screen.focused_item(focus, &cx));
@@ -2281,7 +2281,7 @@ pub(crate) fn dismiss_player_overlays(d: &mut Dispatcher<AppHost>) {
 }
 
 /// A live panel's own state, for the dev triggers that drive one by hand
-/// (`plxnative-menupick`) and for the focus probe's `sel=`.
+/// (`nativejelly-menupick`) and for the focus probe's `sel=`.
 pub(crate) fn player_overlay_mut(
     d: &mut Dispatcher<AppHost>,
 ) -> Option<&mut crate::screens::player::overlay::PlayerOverlayScreen> {
@@ -2310,7 +2310,7 @@ pub(crate) fn player_overlay_mut(
 pub(crate) fn open_content_panel(
     d: &mut Dispatcher<AppHost>,
     host: InstanceId,
-    subject: Option<(crate::plex::ServerId, &str)>,
+    subject: Option<(crate::catalog::ServerId, &str)>,
     panel: crate::screens::registry::ContentPanel,
 ) {
     // WHICH surface a panel is — its style and its argument — is the registry's
@@ -2340,7 +2340,7 @@ fn anchor_bits(rect: Option<crate::ui::Rect>) -> [u32; 4] {
 /// all five are the same arm: the row rides in the argument instead of being looked up in the hub
 /// catalog, which only Home's cards are ever in.
 pub(crate) fn card_menu_arg(
-    item: &crate::pms::PmsMovie,
+    item: &crate::catalog_fetch::PmsMovie,
     from_deck: bool,
     from_home: bool,
     host: EntryId,
@@ -2363,7 +2363,7 @@ pub(crate) fn card_menu_arg(
 /// rather than a catalog row: no row to carry, and `loaded_episode` set for the filmstrip so the
 /// dispatch routes Play from Start and the scrobble through that page's own episode path.
 fn strip_menu_arg(
-    sid: crate::plex::ServerId,
+    sid: crate::catalog::ServerId,
     rk: &str,
     kind: ItemMenuKind,
     host: EntryId,
@@ -2538,7 +2538,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         // A sign-out followed by a fresh sign-in can replace the session without restarting the
         // process. Re-read only at this one credentials handoff so the old account's in-memory
         // preference cannot leak into the new session.
-        let saved = crate::plex::session::peek();
+        let saved = crate::catalog::session::peek();
         crate::route::restore_quality(
             crate::dev::playback_quality_override().unwrap_or_else(|| saved.playback_quality()),
         );
@@ -2567,12 +2567,12 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         super::input::maybe_ask_consent(pages);
         bridge.refresh_browse_directory();
         if crate::stores::browse::onboard::asks(bridge.browse_directory()) {
-            plx_base::eventlog::log("login: server installed — asking which sources feed Home");
+            nj_base::eventlog::log("login: server installed — asking which sources feed Home");
             // no `enter()`: rooting the stack at the page is what mounts the owned screen
             // (`boot.rs`), and a ROOT is right because the sweep above has just emptied the tree.
             nav_root_if_unsettled(pages, AppArg::Onboard);
         } else {
-            plx_base::eventlog::log("login: server installed — entering Home");
+            nj_base::eventlog::log("login: server installed — entering Home");
             nav_root_if_unsettled(pages, AppArg::Home);
         }
     } else if bridge.auth_read().0.persistence_warning.is_some() {
@@ -2753,7 +2753,7 @@ fn nav_peer(d: &mut Dispatcher<AppHost>, arg: AppArg, ret: Option<ReturnState<u3
 /// SEED (`DetailSeed`) exactly as it rode on the trail node's `Spot` before.
 pub(crate) fn open_detail(
     d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
-    sid: crate::plex::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    sid: crate::catalog::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
     use crate::ui::screen::ScreenArg;
@@ -2867,7 +2867,7 @@ pub(crate) fn open_first_run_consent(d: &mut Dispatcher<AppHost>) {
     open_first_run_consent_at(d, 0);
 }
 
-/// …at `stage`, which only `/tmp/plxnative-consent=product` ever names.
+/// …at `stage`, which only `/tmp/nativejelly-consent=product` ever names.
 pub(crate) fn open_first_run_consent_at(d: &mut Dispatcher<AppHost>, stage: u8) {
     if surface_up(d, is_first_run_consent) {
         return;
@@ -3067,7 +3067,7 @@ pub(crate) fn owns_input(d: &Dispatcher<AppHost>) -> bool {
 }
 
 /// The topmost surface's heartbeat word, for the dev triggers that have to wait for a particular
-/// page of the family to be up (`plxnative-legaldoc`, `plxnative-alert`).
+/// page of the family to be up (`nativejelly-legaldoc`, `nativejelly-alert`).
 pub(crate) fn surface_word(d: &Dispatcher<AppHost>) -> Option<&'static str> {
     d.top_surface_name()
 }
@@ -3425,9 +3425,9 @@ mod preference_effect_tests {
 
     #[test]
     fn controlled_preferences_are_rejected_before_capture_or_persistence() {
-        let _serial = plx_base::testlock::serial();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
-        let temp = crate::plex::session::TempSession::new("controlled-preference-effects");
+        let _serial = nj_base::testlock::serial();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
+        let temp = crate::catalog::session::TempSession::new("controlled-preference-effects");
         let before = std::fs::read(temp.path()).unwrap();
         let quality = crate::route::quality();
         let mode = crate::route::direct_play_mode();

@@ -53,7 +53,7 @@ def safe_name(name):
     p = PurePosixPath(name)
     if not name or p.is_absolute() or '..' in p.parts or '\\' in name or str(p) != name:
         fail('unsafe archive path: ' + name)
-    if any(part in PRIVATE_NAMES or part in {'.git', 'plxnative-recordings'} for part in p.parts):
+    if any(part in PRIVATE_NAMES or part in {'.git', 'nativejelly-recordings'} for part in p.parts):
         fail('private path forbidden: ' + name)
     return p
 
@@ -154,7 +154,7 @@ def scan(data, name, private_values=(), depth=0, budget=None):
         if value and value in data:
             fail('private value found in: ' + name)  # Never print the matched value.
     patterns = [PRIVATE_KEY_PATTERN,
-                rb'PLXNATIVE_' + rb'PRIVATE_SENTINEL_[A-Za-z0-9]+',
+                rb'NJ_' + rb'PRIVATE_SENTINEL_[A-Za-z0-9]+',
                 rb'\bgh[pousr]_[A-Za-z0-9]{30,}',
                 rb'\bAKIA[A-Z0-9]{16}\b',
                 SENTRY_DSN_PATTERN,

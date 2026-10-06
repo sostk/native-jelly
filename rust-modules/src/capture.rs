@@ -8,7 +8,7 @@
 //! GL work lives in `gfx::cap_cycle`; this module owns the trigger, the threads, the
 //! single-slot mailbox, and the wire protocol.
 //!
-//! Enabled by the `plxnative-capture` trigger (content: optional port, else [`default_port`] —
+//! Enabled by the `nativejelly-capture` trigger (content: optional port, else [`default_port`] —
 //! 8910 for the app users install, one higher for a developer build beside it), read
 //! once at boot like every dev trigger — and excluded from `automated_boot`'s DIAG
 //! list (dev.rs) so attaching a live view to an interactive session doesn't suppress
@@ -53,7 +53,7 @@ use std::sync::{Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 
 /// The listener's port for the app users install. A flavoured install steps off it — see
 /// [`default_port`].
@@ -80,7 +80,7 @@ const STABLE_PORT: u16 = 8910;
 /// compares the two. A FOURTH flavour needs its own decision in both places, the same way nightly
 /// just did, and the selftest is what will say so.
 pub(crate) fn default_port() -> u16 {
-    match plx_base::paths::flavour() {
+    match nj_base::paths::flavour() {
         None => STABLE_PORT,
         Some("debug") => STABLE_PORT + 1,
         Some("nightly") => STABLE_PORT + 2,
@@ -144,15 +144,15 @@ static CYC_N: AtomicU32 = AtomicU32::new(0);
 /// create a file in a world-writable `/tmp`. The gate is `devtrig::read` below being compile-time
 /// `None` without the `devtriggers` feature, which makes the two `spawn`s unreachable.
 pub(crate) fn init() {
-    let Some(content) = plx_base::devtrig::read("capture") else {
+    let Some(content) = nj_base::devtrig::read("capture") else {
         return;
     };
     let port: u16 = content.parse().unwrap_or_else(|_| default_port());
     let mut hs = HANDLES.lock().unwrap();
     // Both halves are required — a listener with no encoder serves an empty stream — but whatever
     // did spawn still goes into HANDLES (Option is IntoIterator) so `shutdown` joins it either way.
-    let listener = plx_base::task::spawn("cap-listen", move || caplisten(port));
-    let encoder = plx_base::task::spawn("cap-encode", capenc);
+    let listener = nj_base::task::spawn("cap-listen", move || caplisten(port));
+    let encoder = nj_base::task::spawn("cap-encode", capenc);
     let both = listener.is_some() && encoder.is_some();
     hs.extend(listener);
     hs.extend(encoder);
@@ -186,7 +186,7 @@ pub(crate) fn shutdown() {
     for h in HANDLES.lock().unwrap().drain(..) {
         // one aggregate name: the Vec mixes cap-listen and cap-encode, and which one stalled is a
         // question for the next person who sees a number here at all
-        plx_base::task::join("capture", h);
+        nj_base::task::join("capture", h);
     }
 }
 
@@ -219,8 +219,8 @@ pub(crate) fn tick(now: u32) {
     // A GL downscale and readback: GL work, labelled so for the hang watchdog.
     let cycle = {
         #[cfg(feature = "threadcheck")]
-        let _readback = plx_base::task::watchdog::readback_scope();
-        plx_gfx::gfx::cap_cycle(want_960, &mut buf)
+        let _readback = nj_base::task::watchdog::readback_scope();
+        nj_gfx::gfx::cap_cycle(want_960, &mut buf)
     };
     match cycle {
         Some((w, h, flip)) => {
@@ -469,7 +469,7 @@ struct TurboJpeg {
 fn tj_load() -> Option<TurboJpeg> {
     unsafe {
         let path = std::ffi::CString::new(
-            plx_base::paths::in_app_dir("libturbojpeg.so.0")
+            nj_base::paths::in_app_dir("libturbojpeg.so.0")
                 .into_os_string()
                 .into_string()
                 .ok()?,
@@ -594,7 +594,7 @@ fn capenc() {
                                             // The newest frame's pixels, kept by SWAP with the pool rather than copied, so the idle
                                             // keepalive below can re-encode the picture we ALREADY have instead of asking the UI to
                                             // render an identical one. Re-rendering a still screen to feed a dev stream would hand back
-                                            // exactly the cost `plx_machine::idle` exists to remove.
+                                            // exactly the cost `nj_machine::idle` exists to remove.
     let mut last_rgba: Vec<u8> = Vec::new();
     let mut last_flip = false;
 
@@ -755,8 +755,8 @@ fn capenc() {
                         CYC_N.swap(0, Ordering::Relaxed),
                     );
                     let (rd_us, rd_n) = (
-                        plx_gfx::gfx::CAP_READ_US.swap(0, Ordering::Relaxed),
-                        plx_gfx::gfx::CAP_READ_N.swap(0, Ordering::Relaxed),
+                        nj_gfx::gfx::CAP_READ_US.swap(0, Ordering::Relaxed),
+                        nj_gfx::gfx::CAP_READ_N.swap(0, Ordering::Relaxed),
                     );
                     log(&format!(
                         "capture: {} frm/{:.1}s ({:.1}fps) enc {:.1}ms avg (max {:.1}) send {:.1}ms \

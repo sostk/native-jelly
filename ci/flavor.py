@@ -8,7 +8,7 @@ launcher tile, its own sign-in and its own `/tmp` root, and `nightly` (`com.sost
 is a third install beside both — always a `RELEASE=1` build (no dev triggers, ever), with its own
 tile ("PlxNative Nightly"), its own sign-in and its own `/tmp` root, that additionally carries a
 PACKAGE version ahead of the tracked one (see `appinfo_for`'s nightly arm) and a dated REPORTED
-version (`rust-modules/build.rs::emit_version`'s `PLX_CHANNEL=nightly` arm). The Makefile's FLAVOR
+version (`rust-modules/build.rs::emit_version`'s `NJ_CHANNEL=nightly` arm). The Makefile's FLAVOR
 block is the account of why; this file is the part that has to be identical in three places at
 once.
 

@@ -5,7 +5,7 @@ use super::wire::{Descriptor, DESCRIPTOR_NAME, PROTOCOL, SOCKET_NAME};
 use std::path::Path;
 
 pub fn app_identity(executable: &Path) -> Result<&str, ErrorCode> {
-    if executable.file_name().and_then(|n| n.to_str()) != Some("plxnative-storage") {
+    if executable.file_name().and_then(|n| n.to_str()) != Some("nativejelly-storage") {
         return Err(ErrorCode::Invalid);
     }
     let dir = executable.parent().ok_or(ErrorCode::Invalid)?;
@@ -261,17 +261,17 @@ mod tests {
 
     #[test]
     fn nightly_app_identity() {
-        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.sostk.nativejelly.nightly.storage/plxnative-storage")), Ok("com.sostk.nativejelly.nightly"));
+        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.sostk.nativejelly.nightly.storage/nativejelly-storage")), Ok("com.sostk.nativejelly.nightly"));
     }
 
     #[test]
     fn rejects_foreign_or_malformed_install_paths() {
         for path in [
-            "/usr/palm/services/com.sostk.nativejelly.typo.storage/plxnative-storage",
-            "/usr/palm/services/com.sostk.nativejelly.nightly/plxnative-storage",
-            "/usr/palm/applications/com.sostk.nativejelly.nightly.storage/plxnative-storage",
+            "/usr/palm/services/com.sostk.nativejelly.typo.storage/nativejelly-storage",
+            "/usr/palm/services/com.sostk.nativejelly.nightly/nativejelly-storage",
+            "/usr/palm/applications/com.sostk.nativejelly.nightly.storage/nativejelly-storage",
             "/usr/palm/services/com.sostk.nativejelly.nightly.storage/other",
-            "plxnative-storage",
+            "nativejelly-storage",
         ] {
             assert_eq!(app_identity(Path::new(path)), Err(ErrorCode::Invalid));
         }
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn packaged_app_identity() {
-        let Ok(paths) = std::env::var("PLX_TEST_PACKAGED_HELPERS") else {
+        let Ok(paths) = std::env::var("NJ_TEST_PACKAGED_HELPERS") else {
             return;
         };
         for path in paths.lines() {

@@ -194,7 +194,7 @@ static PRESENTS: AtomicU32 = AtomicU32::new(0);
 /// clock (`shot::tick`) reads it; nothing on the television does.
 #[cfg(feature = "hostsim")]
 static LAST_CHANGE: AtomicU32 = AtomicU32::new(0);
-/// Kill switch (`/tmp/plxnative-noidle`), so a device A/B is one file apart and a bad frame on the
+/// Kill switch (`/tmp/nativejelly-noidle`), so a device A/B is one file apart and a bad frame on the
 /// panel is one `rm` from being ruled out as this feature's fault.
 static ENABLED: AtomicBool = AtomicBool::new(true);
 /// **Is the hardware video plane bound to our sink?** The gate's only non-damage INPUT (spec §4.4,
@@ -249,7 +249,7 @@ pub fn page_frozen() -> bool {
     PAGE_FROZEN.load(Relaxed)
 }
 
-/// Turn the gate off for this boot. Read once at startup from `/tmp/plxnative-noidle`.
+/// Turn the gate off for this boot. Read once at startup from `/tmp/nativejelly-noidle`.
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Relaxed);
 }
@@ -258,13 +258,13 @@ pub fn enabled() -> bool {
     ENABLED.load(Relaxed)
 }
 
-/// **The typed input to the LIVE gate** (spec §4.4). `plx_machine::present::Present` is the machine this
+/// **The typed input to the LIVE gate** (spec §4.4). `nj_machine::present::Present` is the machine this
 /// module becomes; until it is swapped in, the two share one vocabulary so they cannot drift, and
 /// a caller says WHAT happened rather than poking a bool.
 ///
 /// The mapping onto this module's older doors, in full:
 /// * `VideoPlane(b)` — the one input with state of its own; see [`VIDEO_PLANE`].
-/// * `Damage(_)` / `Fault(_)` — [`invalidate`]. The provenance is dropped: `plx_machine::idle` has no
+/// * `Damage(_)` / `Fault(_)` — [`invalidate`]. The provenance is dropped: `nj_machine::idle` has no
 ///   ledger to record it on (`Present::why` is the machine's, and the recorder reads that one).
 /// * `Motion` — [`invalidate`] as well, deliberately NOT the `MOVING` thread-local. `MOVING` is
 ///   the *rest test*'s answer, judged from a spring's own post-step state by [`note_spring`], and
@@ -418,7 +418,7 @@ pub fn take_local_damage() -> u32 {
 }
 
 /// Drain leftover gate state so another module's spring test can assert a quiet frame.
-/// Callers still take [`plx_base::testlock::serial`] first — this is not the lock.
+/// Callers still take [`nj_base::testlock::serial`] first — this is not the lock.
 #[cfg(any(test, feature = "test-support"))]
 pub fn reset_for_test() {
     set_enabled(true);
@@ -727,8 +727,8 @@ mod tests {
     /// The gate's statics are reached from `gfx::spring`, which every other module's spring tests
     /// also drive — so this contends across modules, not just within this file. `testlock`, not a
     /// module-local mutex (see `lib.rs::testlock`).
-    fn fresh() -> plx_base::testlock::Serial {
-        let g = plx_base::testlock::serial();
+    fn fresh() -> nj_base::testlock::Serial {
+        let g = nj_base::testlock::serial();
         reset_for_test();
         g
     }
@@ -1096,7 +1096,7 @@ mod tests {
         assert!(should_present(10_032), "0.6px in a long frame is");
     }
 
-    /// The kill switch must not silently consume the dirty flag — `/tmp/plxnative-noidle` is the
+    /// The kill switch must not silently consume the dirty flag — `/tmp/nativejelly-noidle` is the
     /// A/B instrument, so arming it has to change the frame RATE and nothing else.
     #[test]
     fn the_kill_switch_leaves_the_dirty_flag_alone() {

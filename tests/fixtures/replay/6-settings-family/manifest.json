@@ -161,11 +161,11 @@
    },
    "settings": "root",
    "triggers": [
-    "plxnative-app-init",
-    "plxnative-rec",
-    "plxnative-focus",
-    "plxnative-noidle",
-    "plxnative-settings"
+    "nativejelly-app-init",
+    "nativejelly-rec",
+    "nativejelly-focus",
+    "nativejelly-noidle",
+    "nativejelly-settings"
    ],
    "version": 1
   },
@@ -175,10 +175,10 @@
  "schema": 3,
  "state_fp": 10119451143357529556,
  "triggers": [
-  "plxnative-app-init",
-  "plxnative-rec",
-  "plxnative-focus",
-  "plxnative-noidle",
-  "plxnative-settings"
+  "nativejelly-app-init",
+  "nativejelly-rec",
+  "nativejelly-focus",
+  "nativejelly-noidle",
+  "nativejelly-settings"
  ]
 }

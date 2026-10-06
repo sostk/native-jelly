@@ -3,8 +3,8 @@
 
 use crate::auth::owner::{SessionArrival, SessionEnvelope, SessionWorkKey};
 use crate::auth::AuthProgress;
-use plx_machine::landing::{AdmissionError, Landing, Lane, PublishError};
-use plx_machine::machine::{Addr, MachineId, RequestId};
+use nj_machine::landing::{AdmissionError, Landing, Lane, PublishError};
+use nj_machine::machine::{Addr, MachineId, RequestId};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -20,7 +20,7 @@ pub(crate) enum SessionIngressError { BatchTooLarge, AddressMismatch, Unadmitted
 /// The revision of the last ordinary asynchronous persistence admission, used to give the live
 /// adapter's typed reply a real revision without inventing one. Zero before any bootstrap.
 fn ordinary_revision() -> u64 {
-    crate::plex::session::async_persistence::ordinary_revision()
+    crate::catalog::session::async_persistence::ordinary_revision()
 }
 
 enum NativeEndpoint {
@@ -40,7 +40,7 @@ impl NativeEndpoint {
 }
 
 enum Resources {
-    Live { publisher: crate::plex::session::ProfilePublisher },
+    Live { publisher: crate::catalog::session::ProfilePublisher },
     #[cfg(test)]
     Fixture(FixtureResources),
 }
@@ -50,10 +50,10 @@ enum Resources {
 /// slots execute the shared registry implementation (using its non-network test constructor).
 #[cfg(test)]
 pub(crate) struct FixtureResources {
-    pub disk: crate::plex::session::Session,
+    pub disk: crate::catalog::session::Session,
     pub endpoints: BTreeMap<u16, EndpointCapture>,
     /// Explicit native registry fixtures only; absence never falls back to a global client.
-    pub native_endpoints: BTreeMap<u16, &'static crate::plex::Client>,
+    pub native_endpoints: BTreeMap<u16, &'static crate::catalog::Client>,
     pub registry_writes: Vec<crate::auth::owner::RegistryPlan>,
     pub profile: Option<crate::auth::owner::ProfilePublication>,
     pub recently_unreachable: bool,
@@ -66,7 +66,7 @@ pub(crate) struct FixtureResources {
     /// `Failed`/`Uncertain` verdict) — drained by `commit` the same way a real disk failure would
     /// be, so an app-level test can drive `PersistenceWarning` routing without a real filesystem
     /// fault. `None` keeps the default `Durable(PersistedPlaintext)` outcome.
-    pub next_completion_outcome: Option<crate::plex::session::async_persistence::CompletionOutcome>,
+    pub next_completion_outcome: Option<crate::catalog::session::async_persistence::CompletionOutcome>,
     /// Every onboarding report the owner asked for, in order. The fixture answers a standing
     /// report as queued and a one-off with [`FIXTURE_RECEIPT`].
     pub incident_reports: Vec<(crate::auth::owner::IncidentLane, crate::auth::owner::IncidentReport)>,
@@ -181,7 +181,7 @@ struct TransferMetadata {
     admission: AdmissionId,
 }
 
-type DiskCommit = Result<Option<crate::plex::session::async_persistence::LiveWrite>, ()>;
+type DiskCommit = Result<Option<crate::catalog::session::async_persistence::LiveWrite>, ()>;
 
 /// Disk fencing and mutation execute together under session::IO on the persistence worker.
 #[cfg(test)]
@@ -191,13 +191,13 @@ fn write_credentials(plan: &CommitPlan, cancelled: &AtomicBool) -> DiskCommit {
     #[cfg(test)]
     if let Some(started) = CREDENTIAL_IO_STARTED.lock().unwrap().take() { let _ = started.send(()); }
     let Some(patch) = &plan.credentials else { return Ok(None); };
-    if plan.authority == crate::plex::session::SaveAuthority::FreshReauthentication {
-        crate::plex::session::replace_after_reauthentication_guarded_with_outcome(
+    if plan.authority == crate::catalog::session::SaveAuthority::FreshReauthentication {
+        crate::catalog::session::replace_after_reauthentication_guarded_with_outcome(
             |disk| plan.expected_disk.matches(disk), |disk| patch.merge_into(disk),
             || !cancelled.load(Ordering::Acquire))
     } else {
         let mut stale = false;
-        let write = crate::plex::session::update_guarded_with_outcome(|disk| {
+        let write = crate::catalog::session::update_guarded_with_outcome(|disk| {
             stale = !plan.expected_disk.matches(disk);
             (!stale).then(|| patch.merge_into(disk))
         }, || !cancelled.load(Ordering::Acquire));
@@ -228,7 +228,7 @@ struct PendingCommit {
     arrival: u64,
     plan: CommitPlan,
     cancelled: Arc<AtomicBool>,
-    ticket: Option<plx_base::storage_worker::TypedTicket<DiskCommit>>,
+    ticket: Option<nj_base::storage_worker::TypedTicket<DiskCommit>>,
     retry_at: u32,
 }
 
@@ -254,20 +254,20 @@ struct PendingErase {
     epoch: u64,
     all_local: bool,
     diagnostics: bool,
-    ticket: Option<plx_base::storage_worker::TypedTicket<EraseWorkerOutcome>>,
+    ticket: Option<nj_base::storage_worker::TypedTicket<EraseWorkerOutcome>>,
     retry_at: u32,
     /// Consecutive clears that reported a surviving credential; drives [`erase_retry_delay`].
     incomplete: u32,
     /// The install language the first attempt read before clearing. A retry carries it, because
     /// once the credential file is gone a re-read can no longer see what to retain.
-    language: Option<plx_platform::i18n::Preference>,
+    language: Option<nj_platform::i18n::Preference>,
 }
 
 struct EraseWorkerOutcome {
     complete: bool,
     failures: Vec<String>,
     /// The next-launch language after this erase: retained by sign-out, System after delete-all.
-    language: plx_platform::i18n::Preference,
+    language: nj_platform::i18n::Preference,
 }
 
 pub(crate) struct SessionAdapter {
@@ -285,8 +285,8 @@ pub(crate) struct SessionAdapter {
     /// it belongs to. The worker has finished by the time the deferred
     /// typed admission is returned; the bridge drains it as a typed completion rather than
     /// letting the owner infer durability from `accepted`.
-    live_completion: Option<crate::plex::session::async_persistence::PersistenceCompletion>,
-    captures: std::collections::VecDeque<(u32, u64, plx_base::storage_worker::TypedTicket<String>)>,
+    live_completion: Option<crate::catalog::session::async_persistence::PersistenceCompletion>,
+    captures: std::collections::VecDeque<(u32, u64, nj_base::storage_worker::TypedTicket<String>)>,
     erasures: std::collections::VecDeque<PendingErase>,
     commits: std::collections::VecDeque<PendingCommit>,
     /// The report the owner now shows as queued — `(offer id, receipt)`, from either lane — until
@@ -318,7 +318,7 @@ impl SessionAdapter {
         self.recording_leftovers += usize::from(failed);
         if self.controlled_home && !self.replay_resources {
             self.controlled_home = false;
-            self.spawn = |name, job| plx_base::task::spawn_small(name, job);
+            self.spawn = |name, job| nj_base::task::spawn_small(name, job);
             match &mut self.resources {
                 Resources::Live { publisher } => publisher.resume_live(),
                 #[cfg(test)] Resources::Fixture(_) => {}
@@ -327,43 +327,43 @@ impl SessionAdapter {
     }
     /// Controlled Home executes only its captured DevInstall resource operation. It cannot
     /// launch account workers, mint identity, write credentials, or invoke platform coordination.
-    pub(crate) fn controlled_home(mt: &plx_base::task::MainThread, replay: bool) -> Self {
+    pub(crate) fn controlled_home(mt: &nj_base::task::MainThread, replay: bool) -> Self {
         let mut adapter = Self::empty(|_, _| false, Resources::Live {
-            publisher: crate::plex::session::ProfilePublisher::scoped(mt),
+            publisher: crate::catalog::session::ProfilePublisher::scoped(mt),
         });
         adapter.controlled_home = true;
         adapter.replay_resources = replay;
         adapter
     }
     #[cfg(test)]
-    pub(crate) fn live_resources_for_test(mt: &plx_base::task::MainThread,
+    pub(crate) fn live_resources_for_test(mt: &nj_base::task::MainThread,
         recently_unreachable: bool) -> Self {
-        plx_base::testlock::assert_held("live Session resource test");
+        nj_base::testlock::assert_held("live Session resource test");
         let mut adapter = Self::empty(|_, _| false, Resources::Live {
-            publisher: crate::plex::session::ProfilePublisher::new(mt),
+            publisher: crate::catalog::session::ProfilePublisher::new(mt),
         });
         adapter.resource_test_io = Some(ResourceTestIo { recently_unreachable, recording_root: None,
             coordinator_events: Vec::new(), erase_sweeps: Vec::new() });
         adapter
     }
 
-    pub(crate) fn live(_mt: &plx_base::task::MainThread) -> Self {
-        Self::empty(|name, job| plx_base::task::spawn_small(name, job), Resources::Live {
-            publisher: crate::plex::session::ProfilePublisher::new(_mt),
+    pub(crate) fn live(_mt: &nj_base::task::MainThread) -> Self {
+        Self::empty(|name, job| nj_base::task::spawn_small(name, job), Resources::Live {
+            publisher: crate::catalog::session::ProfilePublisher::new(_mt),
         })
     }
     #[cfg(test)]
-    pub(crate) fn live_recording_resources_for_test(mt: &plx_base::task::MainThread, root: std::path::PathBuf) -> Self {
+    pub(crate) fn live_recording_resources_for_test(mt: &nj_base::task::MainThread, root: std::path::PathBuf) -> Self {
         assert!(root.is_absolute() && root.is_dir());
         let mut adapter = Self::live_resources_for_test(mt, false);
         adapter.resource_test_io.as_mut().unwrap().recording_root = Some(root);
         adapter
     }
     #[cfg(test)]
-    pub(crate) fn fixture() -> Self { Self::fixture_with(crate::plex::session::Session::default()) }
+    pub(crate) fn fixture() -> Self { Self::fixture_with(crate::catalog::session::Session::default()) }
 
     #[cfg(test)]
-    pub(crate) fn fixture_with(disk: crate::plex::session::Session) -> Self {
+    pub(crate) fn fixture_with(disk: crate::catalog::session::Session) -> Self {
         Self::empty(|_, _| false, Resources::Fixture(FixtureResources {
             disk, endpoints: BTreeMap::new(), native_endpoints: BTreeMap::new(), registry_writes: Vec::new(), profile: None,
             recently_unreachable: false, minted_client_id: "synthetic-client".into(),
@@ -398,9 +398,9 @@ impl SessionAdapter {
         -> Option<SessionReadReply> {
         if !self.controlled_home && matches!(self.resources, Resources::Live { .. })
             && matches!(request, SessionReadRequest::LoginClientId)
-            && crate::plex::session::peek().client_id.is_empty() {
+            && crate::catalog::session::peek().client_id.is_empty() {
             self.captures.push_back((req, epoch,
-                plx_base::storage_worker::submit_retained(crate::plex::session::load_login_client_id)));
+                nj_base::storage_worker::submit_retained(crate::catalog::session::load_login_client_id)));
             None
         } else { Some(self.capture(req, epoch, request)) }
     }
@@ -429,12 +429,12 @@ impl SessionAdapter {
         }
         let value = match &mut self.resources {
             Resources::Live { .. } => match request {
-                SessionReadRequest::LoginClientId => SessionReadValue::LoginClientId(crate::plex::session::peek().client_id.clone()),
+                SessionReadRequest::LoginClientId => SessionReadValue::LoginClientId(crate::catalog::session::peek().client_id.clone()),
                 SessionReadRequest::ProfilePolicy => SessionReadValue::ProfilePolicy {
-                    recently_unreachable: crate::plex::account::plex_tv_recently_unreachable(),
+                    recently_unreachable: crate::catalog::account::plex_tv_recently_unreachable(),
                 },
                 SessionReadRequest::Endpoint { sid } => {
-                    let endpoint = crate::plex::client_for(crate::plex::ServerId::from_raw(sid))
+                    let endpoint = crate::catalog::client_for(crate::catalog::ServerId::from_raw(sid))
                         .filter(|client| !client.machine_id().is_empty()).map(|client| {
                             let native = crate::auth::ClientLifecycle::capture(client);
                             let captured = EndpointCapture { lifecycle: native.logical(sid), machine_id: client.machine_id().into() };
@@ -533,10 +533,10 @@ impl SessionAdapter {
         if pending.ticket.is_some() || now.wrapping_sub(pending.retry_at) >= u32::MAX / 2 { return; }
         let plan = pending.plan.clone();
         let cancelled = Arc::clone(&pending.cancelled);
-        pending.ticket = plx_base::storage_worker::submit(move || {
+        pending.ticket = nj_base::storage_worker::submit(move || {
             let result = if cancelled.load(Ordering::Acquire) { Err(()) } else { write_credentials(&plan, &cancelled) };
-            plx_machine::idle::wake();
-            plx_machine::present::wake_from_worker();
+            nj_machine::idle::wake();
+            nj_machine::present::wake_from_worker();
             result
         }).ok();
         pending.retry_at = now.wrapping_add(STORAGE_RETRY_MS);
@@ -592,16 +592,16 @@ impl SessionAdapter {
             // (`ConnectionFacts::default()` is a no-op when `primary.tier` is unknown), deriving
             // the IP family from the stored ADDRESS rather than `origin.host()` — a `plex.direct`
             // origin's host is a certificate NAME, which `IpVersion::of_host` cannot parse.
-            let connection = crate::plex::ConnectionFacts::new(
+            let connection = crate::catalog::ConnectionFacts::new(
                 primary.tier,
-                crate::plex::IpVersion::of_host(&primary.address),
+                crate::catalog::IpVersion::of_host(&primary.address),
             );
-            let id = crate::plex::register_pinned_with_client_id("", &origin,
+            let id = crate::catalog::register_pinned_with_client_id("", &origin,
                 &primary.token, primary.resolve_pin().as_ref(), client_id, connection);
             if self.replay_resources {
-                if let Some(client) = crate::plex::client_for(id) { client.disable_data_io(); }
+                if let Some(client) = crate::catalog::client_for(id) { client.disable_data_io(); }
             }
-            crate::plex::set_current(id);
+            crate::catalog::set_current(id);
             return permit.reply(CommitAdmission::RegistryOnly);
         }
         if !self.commit_current(permit.request(), plan) {
@@ -618,12 +618,12 @@ impl SessionAdapter {
                         Err(()) => return permit.reply(CommitAdmission::StaleAuthority),
                     };
                     if plan.writes_durable && write.is_none()
-                        && plan.authority == crate::plex::session::SaveAuthority::FreshReauthentication {
+                        && plan.authority == crate::catalog::session::SaveAuthority::FreshReauthentication {
                         // The edit produced nothing to write (no account token to persist) —
                         // never admit a write that never happened.
                         return permit.reply(CommitAdmission::Rejected {
                             revision: None,
-                            rejection: crate::plex::session::async_persistence::RejectionKind::Uninitialized,
+                            rejection: crate::catalog::session::async_persistence::RejectionKind::Uninitialized,
                         });
                     }
                     if plan.writes_durable {
@@ -639,7 +639,7 @@ impl SessionAdapter {
                         // `ProtectionFailed` commit reports `ProtectionUncertain` or
                         // `Failed(Failure::Protection(..))` by its own preservation evidence.
                         pending_completion = write.map(|write| {
-                            crate::plex::session::async_persistence::PersistenceCompletion {
+                            crate::catalog::session::async_persistence::PersistenceCompletion {
                                 req: permit.request(), epoch: permit.epoch(),
                                 arrival: permit.arrival(), revision,
                                 purpose: plan.purpose,
@@ -670,7 +670,7 @@ impl SessionAdapter {
                     // since Fresh's whole point is surviving exactly that case. A Routine write
                     // over an unreadable disk stays a no-op, matching the live
                     // `update_with_outcome`'s own `client_id.is_empty()` early return.
-                    let fresh = plan.authority == crate::plex::session::SaveAuthority::FreshReauthentication;
+                    let fresh = plan.authority == crate::catalog::session::SaveAuthority::FreshReauthentication;
                     let readable = !resources.disk.client_id.is_empty();
                     if readable && !plan.expected_disk.matches(&resources.disk) {
                         return permit.reply(CommitAdmission::StaleAuthority);
@@ -697,13 +697,13 @@ impl SessionAdapter {
                             // handoff (AUTH-03/04) would otherwise stay held forever in a fixture
                             // test, since nothing else produces one for this path.
                             let outcome = resources.next_completion_outcome.take().unwrap_or(
-                                crate::plex::session::async_persistence::CompletionOutcome::Durable(
-                                    crate::plex::session::async_persistence::Operation::Write {
-                                        outcome: crate::plex::session::async_persistence::PersistOutcome::PersistedPlaintext,
+                                crate::catalog::session::async_persistence::CompletionOutcome::Durable(
+                                    crate::catalog::session::async_persistence::Operation::Write {
+                                        outcome: crate::catalog::session::async_persistence::PersistOutcome::PersistedPlaintext,
                                         verified: true, protection: None,
                                     }));
                             self.live_completion = Some(
-                                crate::plex::session::async_persistence::PersistenceCompletion {
+                                crate::catalog::session::async_persistence::PersistenceCompletion {
                                     req: permit.request(), epoch: permit.epoch(),
                                     arrival: permit.arrival(), revision, purpose, outcome,
                                 });
@@ -720,7 +720,7 @@ impl SessionAdapter {
     /// Draining exactly once is what keeps a verdict from being delivered twice.
     pub(crate) fn take_live_completion(
         &mut self,
-    ) -> Option<crate::plex::session::async_persistence::PersistenceCompletion> {
+    ) -> Option<crate::catalog::session::async_persistence::PersistenceCompletion> {
         self.live_completion.take()
     }
 
@@ -737,12 +737,12 @@ impl SessionAdapter {
         meta: &mut crate::stores::metadata::MetadataStore) -> Option<usize> {
         if matches!(self.resources, Resources::Live { .. }) {
             for commit in &self.commits { commit.cancelled.store(true, Ordering::Release); }
-            crate::plex::revoke_all();
-            crate::plex::session::revoke_cached_session();
+            crate::catalog::revoke_all();
+            crate::catalog::session::revoke_cached_session();
             let diagnostics = all_local;
             #[cfg(test)]
             let diagnostics = diagnostics && self.resource_test_io.is_none();
-            if diagnostics { plx_platform::storage::diagnostics::disable(); }
+            if diagnostics { nj_platform::storage::diagnostics::disable(); }
             self.erasures.push_back(PendingErase {
                 epoch, all_local, diagnostics, ticket: None, retry_at: crate::app::clock::now(), incomplete: 0,
                 language: None,
@@ -758,19 +758,19 @@ impl SessionAdapter {
         // SDL's millisecond counter wraps; the retry is due within the forward half-range.
         if pending.ticket.is_some() || now.wrapping_sub(pending.retry_at) >= u32::MAX / 2 { return; }
         let (diagnostics, all_local, language) = (pending.diagnostics, pending.all_local, pending.language);
-        pending.ticket = plx_base::storage_worker::submit(move || {
-            let erasure = crate::plex::session::clear_for_erase(all_local, language);
+        pending.ticket = nj_base::storage_worker::submit(move || {
+            let erasure = crate::catalog::session::clear_for_erase(all_local, language);
             let cleared = matches!(erasure.outcome,
-                crate::plex::session::ClearOutcome::Durable { legacy_swept: true });
+                crate::catalog::session::ClearOutcome::Durable { legacy_swept: true });
             // A sign-out that could not retain the language retries, carrying it; delete-all
             // reports a language it could not reset among its leftovers instead.
             let complete = cleared && (all_local || erasure.preference_failures.is_empty());
             if !complete {
-                plx_base::eventlog::log("session: queued clear incomplete; retaining revocation and retrying");
+                nj_base::eventlog::log("session: queued clear incomplete; retaining revocation and retrying");
             }
-            crate::plex::session::revoke_cached_session();
+            crate::catalog::session::revoke_cached_session();
             let mut failures: Vec<String> = if diagnostics {
-                plx_platform::storage::diagnostics::finish_disable(plx_base::paths::runtime_dir())
+                nj_platform::storage::diagnostics::finish_disable(nj_base::paths::runtime_dir())
                     .err()
                     .into_iter()
                     .collect()
@@ -778,8 +778,8 @@ impl SessionAdapter {
                 Vec::new()
             };
             if all_local { failures.extend(erasure.preference_failures); }
-            plx_machine::idle::wake();
-            plx_machine::present::wake_from_worker();
+            nj_machine::idle::wake();
+            nj_machine::present::wake_from_worker();
             EraseWorkerOutcome { complete, failures, language: erasure.retained_language }
         }).ok();
         pending.retry_at = now.wrapping_add(STORAGE_RETRY_MS);
@@ -805,7 +805,7 @@ impl SessionAdapter {
                 return None;
             }
             Ok(outcome) => {
-                plx_platform::i18n::set_saved_preference(outcome.language);
+                nj_platform::i18n::set_saved_preference(outcome.language);
                 outcome.failures
             }
         };
@@ -827,11 +827,11 @@ impl SessionAdapter {
                         super::super::input::remove_or_prove_absent).len())
                     } else { 0 }; // Other host cache/runtime sweeps remain disabled in resource tests.
                 }
-                plx_platform::imgcache::clear();
+                nj_platform::imgcache::clear();
                 if all_local {
                     let leftovers = super::super::input::delete_all_local_data(meta, worker_failures);
                     if super::super::input::delete_outcome(leftovers.len()).report_leftovers {
-                        plx_base::eventlog::log(&format!("privacy: local data erased; {} file(s) could not be removed: {}",
+                        nj_base::eventlog::log(&format!("privacy: local data erased; {} file(s) could not be removed: {}",
                             leftovers.len(), leftovers.join("; ")));
                     }
                     leftovers.len()
@@ -937,7 +937,7 @@ impl SessionAdapter {
     pub(crate) fn claim_root_press(&mut self) -> bool {
         if self.controlled_home { return false; }
         match &mut self.resources {
-            Resources::Live { .. } => plx_platform::tv::home::take_root_press(),
+            Resources::Live { .. } => nj_platform::tv::home::take_root_press(),
             #[cfg(test)]
             Resources::Fixture(resources) => std::mem::replace(&mut resources.root_press_available, false),
         }
@@ -948,8 +948,8 @@ impl SessionAdapter {
         match &mut self.resources {
             Resources::Live { .. } => {
                 match super::super::input::after_cancel(resumed) {
-                    super::super::input::AfterCancel::BackedOut => plx_platform::tv::home::release_root_press(),
-                    super::super::input::AfterCancel::Home => plx_platform::tv::home::go_home(),
+                    super::super::input::AfterCancel::BackedOut => nj_platform::tv::home::release_root_press(),
+                    super::super::input::AfterCancel::Home => nj_platform::tv::home::go_home(),
                 }
             }
             #[cfg(test)]
@@ -960,7 +960,7 @@ impl SessionAdapter {
         }
     }
 
-    pub(crate) fn profile_resource_view(&self) -> Option<std::sync::Arc<crate::plex::session::CurrentProfile>> {
+    pub(crate) fn profile_resource_view(&self) -> Option<std::sync::Arc<crate::catalog::session::CurrentProfile>> {
         match &self.resources {
             Resources::Live { publisher } => Some(publisher.snapshot()),
             #[cfg(test)]
@@ -993,9 +993,9 @@ impl SessionAdapter {
         // belongs to the LIVE resources: a fixture adapter (a test rig, which runs without the
         // serial lock) never reaches into it.
         if key.op == SessionOp::Login && matches!(self.resources, Resources::Live { .. }) {
-            crate::plex::grant::identity_changed();
+            crate::catalog::grant::identity_changed();
         }
-        let ask = crate::plex::grant::PlaintextAsk::capture(input.account_token());
+        let ask = crate::catalog::grant::PlaintextAsk::capture(input.account_token());
         #[cfg(test)]
         let launched = if let Some(run) = self.fixture_work.remove(&req.0) {
             self.launch_correlated(req, key, admission, stream, |job| { job(); true },
@@ -1171,14 +1171,14 @@ mod tests {
     /// is not a durability authority). The adapter must hand the bridge the verdict the write
     /// actually produced so the owner can receive it as a typed completion, and the drain must
     /// hand it over exactly once.
-    fn queued_plan(disk: &crate::plex::session::Session) -> CommitPlan {
+    fn queued_plan(disk: &crate::catalog::session::Session) -> CommitPlan {
         let mut next = disk.clone();
         next.account_token = "new-credential".into();
         CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: crate::auth::owner::Identity::of(disk),
             credentials: Some(crate::auth::owner::CredentialPatch::of(&next)),
             lifecycle: None, registry: Vec::new(), writes_durable: true,
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            authority: crate::plex::session::SaveAuthority::Routine }
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            authority: crate::catalog::session::SaveAuthority::Routine }
     }
 
     fn enqueue_test_commit(adapter: &mut SessionAdapter, plan: CommitPlan) {
@@ -1187,34 +1187,34 @@ mod tests {
     }
 
     fn check_retry_uses_frame_time(erase: bool, start: u32) {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("logical-storage-retry");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("logical-storage-retry");
         struct ResetClock;
         impl Drop for ResetClock {
             fn drop(&mut self) { crate::app::clock::set_replay(0); }
         }
         let _clock = ResetClock;
         crate::app::clock::set_replay(start);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         if erase {
             adapter.erasures.push_back(PendingErase { epoch: 1, all_local: false, diagnostics: false, ticket: None,
                 retry_at: crate::app::clock::now(), incomplete: 0, language: None });
         } else {
-            enqueue_test_commit(&mut adapter, queued_plan(&crate::plex::session::Session::default()));
+            enqueue_test_commit(&mut adapter, queued_plan(&crate::catalog::session::Session::default()));
         }
         let (release, held) = std::sync::mpsc::channel();
         let (started, entered) = std::sync::mpsc::channel();
-        let _block = plx_base::storage_worker::submit(move || {
+        let _block = nj_base::storage_worker::submit(move || {
             started.send(()).unwrap();
             let _ = held.recv();
         }).unwrap();
         entered.recv().unwrap();
-        for _ in 0..plx_base::storage_worker::CAPACITY {
-            let _ = plx_base::storage_worker::submit(|| ()).unwrap();
+        for _ in 0..nj_base::storage_worker::CAPACITY {
+            let _ = nj_base::storage_worker::submit(|| ()).unwrap();
         }
         let submit = |adapter: &mut SessionAdapter| {
-            let _frame = plx_base::task::FrameScope::enter();
+            let _frame = nj_base::task::FrameScope::enter();
             if erase { adapter.submit_erase(); } else { adapter.submit_commit(); }
         };
         let admitted = |adapter: &SessionAdapter| {
@@ -1224,7 +1224,7 @@ mod tests {
         submit(&mut adapter);
         let initially_admitted = admitted(&adapter);
         release.send(()).unwrap();
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(!initially_admitted, "the full queue must arm backoff");
         crate::app::clock::set_replay(start.wrapping_add(999));
         submit(&mut adapter);
@@ -1246,45 +1246,45 @@ mod tests {
 
     #[test]
     fn cancellation_while_waiting_for_session_io_prevents_the_credential_write() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("cancel-before-io");
-        let disk = crate::plex::session::Session { client_id: "install".into(), account_token: "old".into(), ..Default::default() };
-        crate::plex::session::save(&disk);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("cancel-before-io");
+        let disk = crate::catalog::session::Session { client_id: "install".into(), account_token: "old".into(), ..Default::default() };
+        crate::catalog::session::save(&disk);
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         enqueue_test_commit(&mut adapter, queued_plan(&disk));
         let (started, entered) = std::sync::mpsc::channel();
         *CREDENTIAL_IO_STARTED.lock().unwrap() = Some(started);
-        crate::plex::session::with_io_for_test(|| {
+        crate::catalog::session::with_io_for_test(|| {
             adapter.submit_commit();
             entered.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
             adapter.cancel(RequestId(1));
         });
-        plx_base::storage_worker::drain_for_test();
-        assert_eq!(crate::plex::session::load().account_token, "old");
+        nj_base::storage_worker::drain_for_test();
+        assert_eq!(crate::catalog::session::load().account_token, "old");
     }
 
     #[test]
     fn a_refused_erase_keeps_later_credentials_out_of_the_worker_queue() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("erase-before-commit");
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("erase-before-commit");
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         adapter.erasures.push_back(PendingErase { epoch: 1, all_local: false, diagnostics: false, ticket: None,
             retry_at: crate::app::clock::now().wrapping_add(STORAGE_RETRY_MS), incomplete: 0, language: None });
-        enqueue_test_commit(&mut adapter, queued_plan(&crate::plex::session::Session::default()));
+        enqueue_test_commit(&mut adapter, queued_plan(&crate::catalog::session::Session::default()));
         adapter.submit_commit();
         assert!(adapter.commits.front().unwrap().ticket.is_none(), "erase retains its FIFO position");
     }
 
     /// The webOS 4.10.2 mount: the session candidate does not exist and every unlink in its
     /// directory answers EROFS. Returns the fault guard and the adapter.
-    fn erase_behind_a_read_only_mount(session: &crate::plex::session::TempSession,
-        mt: &plx_base::task::MainThread) -> (plx_platform::storage::UnlinkFaultForTest, SessionAdapter) {
-        crate::plex::session::save(&crate::plex::session::Session {
+    fn erase_behind_a_read_only_mount(session: &crate::catalog::session::TempSession,
+        mt: &nj_base::task::MainThread) -> (nj_platform::storage::UnlinkFaultForTest, SessionAdapter) {
+        crate::catalog::session::save(&crate::catalog::session::Session {
             client_id: "install".into(), account_token: "old".into(), ..Default::default() });
         std::fs::remove_file(session.path()).unwrap();
-        let erofs = plx_platform::storage::UnlinkFaultForTest::install(session.path().parent().unwrap(), libc::EROFS);
+        let erofs = nj_platform::storage::UnlinkFaultForTest::install(session.path().parent().unwrap(), libc::EROFS);
         (erofs, SessionAdapter::live_resources_for_test(mt, false))
     }
 
@@ -1292,37 +1292,37 @@ mod tests {
     /// behind a pending erase — so a sign-in after that sign-out was never persisted at all.
     #[test]
     fn a_signin_after_signout_behind_a_read_only_mount_is_written() {
-        let _serial = plx_base::testlock::serial();
-        let session = crate::plex::session::TempSession::new("signin-after-erofs-signout");
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let session = crate::catalog::session::TempSession::new("signin-after-erofs-signout");
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let (_erofs, mut adapter) = erase_behind_a_read_only_mount(&session, &mt);
         let mut meta = crate::stores::metadata::MetadataStore::default();
         assert!(adapter.begin_erase(1, false, &mut meta).is_none());
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(adapter.take_erased(&mut meta), Some(crate::auth::owner::SessionEvent::Erased { epoch: 1, .. })),
             "an absent candidate behind EROFS must not hold the sign-out open");
         // A QR sign-in persists under the fresh-reauthentication authority.
-        let plan = CommitPlan { authority: crate::plex::session::SaveAuthority::FreshReauthentication,
-            ..queued_plan(&crate::plex::session::load()) };
+        let plan = CommitPlan { authority: crate::catalog::session::SaveAuthority::FreshReauthentication,
+            ..queued_plan(&crate::catalog::session::load()) };
         enqueue_test_commit(&mut adapter, plan);
         assert!(adapter.take_committed().is_none(), "admitted, not yet run");
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         let completed = adapter.take_committed().expect("the new sign-in's commit runs");
         assert!(matches!(completed.disk, Ok(Some(_))), "the new credential is written");
-        assert_eq!(crate::plex::session::load().account_token, "new-credential");
+        assert_eq!(crate::catalog::session::load().account_token, "new-credential");
     }
 
     /// "Delete all local data" rides the same erase queue; its sweep and the route to sign-in only
     /// run from `finish_erase`, which the stuck clear never reached on the television.
     #[test]
     fn delete_all_local_data_behind_a_read_only_mount_reaches_its_sweep() {
-        let _serial = plx_base::testlock::serial();
-        let session = crate::plex::session::TempSession::new("erase-local-erofs");
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let session = crate::catalog::session::TempSession::new("erase-local-erofs");
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let (_erofs, mut adapter) = erase_behind_a_read_only_mount(&session, &mt);
         let mut meta = crate::stores::metadata::MetadataStore::default();
         assert!(adapter.begin_erase(7, true, &mut meta).is_none());
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(adapter.take_erased(&mut meta), Some(crate::auth::owner::SessionEvent::Erased { epoch: 7, .. })),
             "the all-local erase completes");
         assert_eq!(adapter.resource_test_io.as_ref().unwrap().erase_sweeps, [true],
@@ -1335,43 +1335,43 @@ mod tests {
     /// next-launch preference the Language screen shows.
     #[test]
     fn signout_keeps_the_install_language_and_only_delete_all_resets_it() {
-        use plx_platform::i18n::Preference;
-        let _serial = plx_base::testlock::serial();
-        let session = crate::plex::session::TempSession::new("erase-language");
+        use nj_platform::i18n::Preference;
+        let _serial = nj_base::testlock::serial();
+        let session = crate::catalog::session::TempSession::new("erase-language");
         struct Restore(Preference);
         impl Drop for Restore {
-            fn drop(&mut self) { plx_platform::i18n::set_saved_preference(self.0); }
+            fn drop(&mut self) { nj_platform::i18n::set_saved_preference(self.0); }
         }
-        let _restore = Restore(plx_platform::i18n::saved_preference());
-        crate::plex::session::save(&crate::plex::session::Session {
+        let _restore = Restore(nj_platform::i18n::saved_preference());
+        crate::catalog::session::save(&crate::catalog::session::Session {
             client_id: "install".into(), account_token: "old".into(), ..Default::default() });
-        assert!(crate::plex::session::set_language(Preference::Be), "setup: a durable language");
+        assert!(crate::catalog::session::set_language(Preference::Be), "setup: a durable language");
         let relaunch = || {
-            crate::plex::session::redirect_for_test(Some(session.path()));
-            plx_platform::i18n::set_saved_preference(Preference::System);
-            crate::plex::session::load()
+            crate::catalog::session::redirect_for_test(Some(session.path()));
+            nj_platform::i18n::set_saved_preference(Preference::System);
+            crate::catalog::session::load()
         };
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         let mut meta = crate::stores::metadata::MetadataStore::default();
 
         assert!(adapter.begin_erase(1, false, &mut meta).is_none());
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(adapter.take_erased(&mut meta),
             Some(crate::auth::owner::SessionEvent::Erased { epoch: 1, .. })));
-        assert_eq!(plx_platform::i18n::saved_preference(), Preference::Be,
+        assert_eq!(nj_platform::i18n::saved_preference(), Preference::Be,
             "sign-out must not change the confirmed next-launch language");
         let signed_out = relaunch();
         assert!(signed_out.account_token.is_empty(), "sign-out still revokes the credential");
         assert_eq!(signed_out.language, Preference::Be,
             "an ordinary sign-out must keep the install-wide language across relaunch");
 
-        plx_platform::i18n::set_saved_preference(Preference::Be);
+        nj_platform::i18n::set_saved_preference(Preference::Be);
         assert!(adapter.begin_erase(2, true, &mut meta).is_none());
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(adapter.take_erased(&mut meta),
             Some(crate::auth::owner::SessionEvent::Erased { epoch: 2, .. })));
-        assert_eq!(plx_platform::i18n::saved_preference(), Preference::System,
+        assert_eq!(nj_platform::i18n::saved_preference(), Preference::System,
             "Delete all local data resets the confirmed next-launch language");
         assert_eq!(relaunch().language, Preference::System,
             "Delete all local data must not leave the language behind on disk");
@@ -1391,9 +1391,9 @@ mod tests {
     #[test]
     fn a_clear_that_leaves_a_credential_retries_with_capped_backoff_and_never_gives_up() {
         use std::os::unix::fs::PermissionsExt;
-        let _serial = plx_base::testlock::serial();
-        let session = crate::plex::session::TempSession::new("erase-capped-backoff");
-        crate::plex::session::save(&crate::plex::session::Session {
+        let _serial = nj_base::testlock::serial();
+        let session = crate::catalog::session::TempSession::new("erase-capped-backoff");
+        crate::catalog::session::save(&crate::catalog::session::Session {
             client_id: "install".into(), account_token: "old".into(), ..Default::default() });
         let file = session.path();
         let dir = file.parent().unwrap().to_path_buf();
@@ -1410,13 +1410,13 @@ mod tests {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o400)).unwrap();
         crate::app::clock::set_replay(100);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         let mut meta = crate::stores::metadata::MetadataStore::default();
         assert!(adapter.begin_erase(1, false, &mut meta).is_none());
         let mut waits = Vec::new();
         for _ in 0..7 {
-            plx_base::storage_worker::drain_for_test();
+            nj_base::storage_worker::drain_for_test();
             assert!(adapter.take_erased(&mut meta).is_none(), "the revocation is retained");
             let due = adapter.erasures.front().expect("the erase stays queued").retry_at;
             waits.push(due.wrapping_sub(crate::app::clock::now()));
@@ -1428,13 +1428,13 @@ mod tests {
             assert!(adapter.erasures.front().unwrap().ticket.is_some(), "the due retry runs");
         }
         assert_eq!(waits, [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(adapter.take_erased(&mut meta).is_none(), "the eighth attempt fails too");
         assert!(file.exists(), "the credential really survived every attempt");
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         crate::app::clock::set_replay(adapter.erasures.front().unwrap().retry_at);
         let completed = adapter.take_erased(&mut meta);
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         let completed = completed.or_else(|| adapter.take_erased(&mut meta));
         assert!(matches!(completed, Some(crate::auth::owner::SessionEvent::Erased { epoch: 1, .. })),
             "the next due retry retires the file once it can go");
@@ -1443,59 +1443,59 @@ mod tests {
 
     #[test]
     fn session_refresh_login_capture_recovers_identity_without_unrevoking() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("revoked-login-capture");
-        let id = crate::plex::session::load().client_id;
-        crate::plex::session::revoke_cached_session();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("revoked-login-capture");
+        let id = crate::catalog::session::load().client_id;
+        crate::catalog::session::revoke_cached_session();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         {
-            let _frame = plx_base::task::FrameScope::enter();
+            let _frame = nj_base::task::FrameScope::enter();
             assert!(adapter.begin_capture(1, 1, SessionReadRequest::LoginClientId).is_none());
         }
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(adapter.take_capture().unwrap().value,
             SessionReadValue::LoginClientId(captured) if captured == id));
-        assert!(crate::plex::session::peek().client_id.is_empty());
+        assert!(crate::catalog::session::peek().client_id.is_empty());
     }
 
     #[test]
     fn a_cold_login_capture_persists_its_id_off_thread_and_reuses_it() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("cold-login-stable-id");
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("cold-login-stable-id");
         std::fs::remove_file(_session.path()).unwrap();
-        crate::plex::session::invalidate_for_test();
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        crate::catalog::session::invalidate_for_test();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         {
-            let _frame = plx_base::task::FrameScope::enter();
+            let _frame = nj_base::task::FrameScope::enter();
             assert!(adapter.begin_capture(1, 1, SessionReadRequest::LoginClientId).is_none());
         }
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         let reply = adapter.take_capture().unwrap();
         let SessionReadValue::LoginClientId(id) = reply.value else { panic!("login capture"); };
         assert!(!id.is_empty());
-        assert_eq!(crate::plex::session::load().client_id, id);
-        crate::plex::session::invalidate_for_test();
+        assert_eq!(crate::catalog::session::load().client_id, id);
+        crate::catalog::session::invalidate_for_test();
         let mut restarted = SessionAdapter::live_resources_for_test(&mt, false);
         {
-            let _frame = plx_base::task::FrameScope::enter();
+            let _frame = nj_base::task::FrameScope::enter();
             assert!(restarted.begin_capture(2, 2, SessionReadRequest::LoginClientId).is_none());
         }
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert!(matches!(restarted.take_capture().unwrap().value, SessionReadValue::LoginClientId(next) if next == id));
     }
 
     #[test]
     fn login_capture_reuses_the_persisted_install_identifier() {
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("login-stable-id");
-        crate::plex::session::save(&crate::plex::session::Session {
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("login-stable-id");
+        crate::catalog::session::save(&crate::catalog::session::Session {
             client_id: "stable-install".into(), ..Default::default()
         });
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
-        let _frame = plx_base::task::FrameScope::enter();
+        let _frame = nj_base::task::FrameScope::enter();
         for req in [1, 2] {
             let reply = adapter.capture(req, 1, SessionReadRequest::LoginClientId);
             assert!(matches!(reply.value, SessionReadValue::LoginClientId(ref id) if id == "stable-install"));
@@ -1506,11 +1506,11 @@ mod tests {
     fn post_sign_out_registration_uses_login_capture_not_disk_validation_identity() {
         use crate::auth::owner::{CommitDelta, Identity, Pending, PendingCommit,
             RegistryPlan, SessionInit, SessionMachine, StreamPhase};
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("registry-capture-vs-validation");
-        crate::plex::reset_servers_for_test();
-        let disk = crate::plex::session::peek();
-        crate::plex::session::revoke_cached_session();
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("registry-capture-vs-validation");
+        crate::catalog::reset_servers_for_test();
+        let disk = crate::catalog::session::peek();
+        crate::catalog::session::revoke_cached_session();
         let mut init = SessionInit::captured((*disk).clone());
         init.epoch = 1;
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Ready },
@@ -1521,35 +1521,35 @@ mod tests {
             writes_credentials: false, receipt: None, delta: CommitDelta::default(),
             admitted_revision: None, purpose: None, fresh: false });
         let owner = SessionMachine::from_init(init);
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         let plan = CommitPlan { registry_client_id: "captured-login-id".into(),
             expected_disk: Identity::of(&disk), credentials: None, lifecycle: None,
-            registry: vec![RegistryPlan::Activate { source: crate::plex::session::SourceRef {
+            registry: vec![RegistryPlan::Activate { source: crate::catalog::session::SourceRef {
                 machine_id: "synthetic-machine".into(), origin_url: "https://server.example.test:32400".into(),
                 address: "192.0.2.1".into(), port: 32400, token: "synthetic-token".into(),
-                tier: Some(crate::plex::probe::Location::Local), ..Default::default()
+                tier: Some(crate::catalog::probe::Location::Local), ..Default::default()
             }, ipv6: false, same_identity: true }], writes_durable: false,
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Background,
-            authority: crate::plex::session::SaveAuthority::Routine };
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Background,
+            authority: crate::catalog::session::SaveAuthority::Routine };
         assert!(adapter.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan).admission.accepted());
-        assert_eq!(crate::plex::client_opt().unwrap().client_id_for_test(), "captured-login-id",
+        assert_eq!(crate::catalog::client_opt().unwrap().client_id_for_test(), "captured-login-id",
             "registration must use the login identity, not the OCC disk fence");
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     #[test]
     fn the_bridge_takes_the_live_durability_verdict_exactly_once() {
         use crate::auth::owner::{CommitDelta, CredentialPatch, Identity, Pending, PendingCommit,
             SessionInit, SessionMachine, StreamPhase};
-        let _serial = plx_base::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("live-durability-verdict");
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("live-durability-verdict");
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         assert!(adapter.take_live_completion().is_none(),
             "nothing is outstanding before a durable commit");
 
-        let disk = crate::plex::session::peek();
+        let disk = crate::catalog::session::peek();
         let mut init = SessionInit::captured((*disk).clone());
         init.epoch = 1;
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Ready },
@@ -1565,8 +1565,8 @@ mod tests {
         next.account_token = "synthetic-new-token".into();
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&next)), lifecycle: None, registry: Vec::new(),
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            writes_durable: true, authority: crate::plex::session::SaveAuthority::Routine };
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            writes_durable: true, authority: crate::catalog::session::SaveAuthority::Routine };
         let reply = adapter.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan);
         let admitted = reply.admission.admitted_revision()
             .expect("a durable write must be admitted, not merely accepted");
@@ -1576,7 +1576,7 @@ mod tests {
         assert_eq!((completion.req, completion.epoch, completion.arrival), (1, 1, 0),
             "the verdict must carry the correlation of the operation that produced it");
         assert_eq!(completion.purpose,
-            crate::plex::session::async_persistence::PersistencePurpose::Final);
+            crate::catalog::session::async_persistence::PersistencePurpose::Final);
         assert_eq!(completion.revision, admitted,
             "the verdict must name the revision that was admitted");
         assert!(adapter.take_live_completion().is_none(),
@@ -1608,17 +1608,17 @@ mod tests {
         use crate::auth::owner::{CommitDelta, CredentialPatch, Identity, Pending, PendingCommit,
             SessionInit, SessionMachine, StreamPhase};
         use std::os::unix::fs::PermissionsExt;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         // Declared FIRST so it is dropped LAST (Rust drops locals in reverse declaration order):
         // the RAII permission-restore guard below must run before `TempSession::drop` tries to
         // remove this same now-read-only directory.
-        let session = crate::plex::session::TempSession::new("live-write-failure");
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let session = crate::catalog::session::TempSession::new("live-write-failure");
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         assert!(adapter.take_live_completion().is_none(),
             "nothing is outstanding before any commit");
 
-        let disk = crate::plex::session::peek();
+        let disk = crate::catalog::session::peek();
         let mut init = SessionInit::captured((*disk).clone());
         init.epoch = 1;
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Ready },
@@ -1634,8 +1634,8 @@ mod tests {
         next.account_token = "synthetic-new-token".into();
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&next)), lifecycle: None, registry: Vec::new(),
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            writes_durable: true, authority: crate::plex::session::SaveAuthority::Routine };
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            writes_durable: true, authority: crate::catalog::session::SaveAuthority::Routine };
 
         // Make the underlying disk write genuinely fail: strip write permission on the scratch
         // session's own directory, so `write_atomic`'s temp-file create fails with EACCES and
@@ -1664,9 +1664,9 @@ mod tests {
             .expect("a verdict is still delivered even when the write failed");
         assert!(
             matches!(completion.outcome,
-                crate::plex::session::async_persistence::CompletionOutcome::Failed(
-                    crate::plex::session::async_persistence::Failure::Persistence(
-                        crate::plex::session::async_persistence::PersistOutcome::WriteFailed))),
+                crate::catalog::session::async_persistence::CompletionOutcome::Failed(
+                    crate::catalog::session::async_persistence::Failure::Persistence(
+                        crate::catalog::session::async_persistence::PersistOutcome::WriteFailed))),
             "a failed disk write must surface as Failed, not be silently upgraded to Durable: {:?}",
             completion.outcome);
     }
@@ -1721,7 +1721,7 @@ mod tests {
     fn the_bridge_reports_an_uncertain_canonical_commit_as_uncertain_not_durable() {
         use crate::auth::owner::{CommitDelta, CredentialPatch, Identity, Pending, PendingCommit,
             SessionInit, SessionMachine, StreamPhase};
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
 
         // Point the canonical persistence root at a directory of this test's own, and take it
         // back on drop — same shape as `plex::session`'s private `TempCanonicalRoot`.
@@ -1729,15 +1729,15 @@ mod tests {
         impl TempCanonicalRoot {
             fn new(tag: &str) -> TempCanonicalRoot {
                 let dir = std::env::temp_dir().join(format!(
-                    "plxnative-adapter-canonical-{}-{tag}", std::process::id()));
+                    "nativejelly-adapter-canonical-{}-{tag}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&dir);
-                plx_base::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
+                nj_base::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
                 TempCanonicalRoot { dir }
             }
         }
         impl Drop for TempCanonicalRoot {
             fn drop(&mut self) {
-                plx_base::paths::redirect_persistent_state_root_for_test(None);
+                nj_base::paths::redirect_persistent_state_root_for_test(None);
                 let _ = std::fs::remove_dir_all(&self.dir);
             }
         }
@@ -1750,15 +1750,15 @@ mod tests {
 
         // Snapshot whatever `TEST_FILE` held before this test touched it (normally `None`, but a
         // guard, not an assumption) and restore it on drop.
-        let test_file_original = crate::plex::session::redirect_snapshot_for_test();
+        let test_file_original = crate::catalog::session::redirect_snapshot_for_test();
         struct RestoreTestFile { original: Option<std::path::PathBuf> }
         impl Drop for RestoreTestFile {
             fn drop(&mut self) {
-                crate::plex::session::redirect_for_test(self.original.clone());
+                crate::catalog::session::redirect_for_test(self.original.clone());
             }
         }
         let _restore_test_file = RestoreTestFile { original: test_file_original };
-        crate::plex::session::redirect_for_test(None);
+        crate::catalog::session::redirect_for_test(None);
 
         // The legacy fall-through write (once the injected canonical failure makes the commit
         // non-durable) lands in the process-global `fallback_file()` — this test CANNOT redirect
@@ -1772,7 +1772,7 @@ mod tests {
         // more permissive, which is precisely the hazard Finding 3 was filed to remove at
         // `persistence.rs`'s own legacy-candidate sweep.
         use std::os::unix::fs::PermissionsExt;
-        let fallback_path = crate::plex::session::fallback_file_for_test();
+        let fallback_path = crate::catalog::session::fallback_file_for_test();
         let fallback_original = std::fs::read(&fallback_path).ok();
         let fallback_original_mode = std::fs::metadata(&fallback_path)
             .ok()
@@ -1811,12 +1811,12 @@ mod tests {
         struct ClearInjectedFailure;
         impl Drop for ClearInjectedFailure {
             fn drop(&mut self) {
-                plx_platform::storage::clear_injected_commit_failure_for_test();
+                nj_platform::storage::clear_injected_commit_failure_for_test();
             }
         }
         let _clear_injected_failure = ClearInjectedFailure;
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         assert!(adapter.take_live_completion().is_none(),
             "nothing is outstanding before any commit");
@@ -1824,19 +1824,19 @@ mod tests {
         // Seed the canonical authority with a real signed-in record BEFORE injecting any
         // failure, so the seed commit lands genuinely Durable and `disk` below reads back for
         // real.
-        let seed = crate::plex::session::Session {
+        let seed = crate::catalog::session::Session {
             client_id: "cid-uncertain-verdict".into(), account_token: "seed-token".into(),
             ..Default::default()
         };
-        crate::plex::session::save(&seed);
+        crate::catalog::session::save(&seed);
         assert!(
-            matches!(crate::plex::session::persistence::load(),
-                crate::plex::session::persistence::CanonicalRead::Data { .. }
-                | crate::plex::session::persistence::CanonicalRead::Opened { .. }),
+            matches!(crate::catalog::session::persistence::load(),
+                crate::catalog::session::persistence::CanonicalRead::Data { .. }
+                | crate::catalog::session::persistence::CanonicalRead::Opened { .. }),
             "setup: the seed save must reach the canonical authority"
         );
 
-        let disk = crate::plex::session::peek();
+        let disk = crate::catalog::session::peek();
         let mut init = SessionInit::captured((*disk).clone());
         init.epoch = 1;
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Ready },
@@ -1852,14 +1852,14 @@ mod tests {
         next.account_token = "synthetic-uncertain-token".into();
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&next)), lifecycle: None, registry: Vec::new(),
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            writes_durable: true, authority: crate::plex::session::SaveAuthority::Routine };
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            writes_durable: true, authority: crate::catalog::session::SaveAuthority::Routine };
 
         // Force the canonical commit under test to come back `Uncertain` at `ParentSync` — after
         // the record has actually been renamed into place (the real production seam; see
         // `storage::JsonStore::commit`), so `save_locked_with_authority` takes the `!durable`
         // branch and falls through to the legacy write, which succeeds.
-        plx_platform::storage::inject_next_commit_failure_for_test(plx_platform::storage::CommitStage::ParentSync);
+        nj_platform::storage::inject_next_commit_failure_for_test(nj_platform::storage::CommitStage::ParentSync);
 
         let reply = adapter.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan);
         // The registry/admission bookkeeping is unrelated to this finding; only the completion's
@@ -1870,8 +1870,8 @@ mod tests {
             .expect("a verdict is still delivered even though the canonical commit was uncertain");
         assert!(
             matches!(completion.outcome,
-                crate::plex::session::async_persistence::CompletionOutcome::Uncertain {
-                    stage: plx_platform::storage::CommitStage::ParentSync, ..
+                crate::catalog::session::async_persistence::CompletionOutcome::Uncertain {
+                    stage: nj_platform::storage::CommitStage::ParentSync, ..
                 }),
             "an Uncertain canonical commit must surface as Uncertain even though the legacy \
              fall-through write succeeded — it must NEVER be reported as Durable: {:?}",
@@ -1879,7 +1879,7 @@ mod tests {
         );
         assert!(
             !matches!(completion.outcome,
-                crate::plex::session::async_persistence::CompletionOutcome::Durable(..)),
+                crate::catalog::session::async_persistence::CompletionOutcome::Durable(..)),
             "the exact regression this test pins: an uncertain canonical commit reported as a \
              durable saved login"
         );
@@ -1908,22 +1908,22 @@ mod tests {
     fn a_fresh_sign_in_over_an_unopenable_envelope_is_persisted_for_the_next_launch() {
         use crate::auth::owner::{CommitAdmission, CommitDelta, CredentialPatch, Identity, Pending,
             PendingCommit, SessionInit, SessionMachine, StreamPhase};
-        use crate::plex::session::async_persistence::PersistencePurpose;
-        let _serial = plx_base::testlock::serial();
+        use crate::catalog::session::async_persistence::PersistencePurpose;
+        let _serial = nj_base::testlock::serial();
 
         struct TempCanonicalRoot { dir: std::path::PathBuf }
         impl TempCanonicalRoot {
             fn new(tag: &str) -> TempCanonicalRoot {
                 let dir = std::env::temp_dir().join(format!(
-                    "plxnative-adapter-canonical-{}-{tag}", std::process::id()));
+                    "nativejelly-adapter-canonical-{}-{tag}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&dir);
-                plx_base::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
+                nj_base::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
                 TempCanonicalRoot { dir }
             }
         }
         impl Drop for TempCanonicalRoot {
             fn drop(&mut self) {
-                plx_base::paths::redirect_persistent_state_root_for_test(None);
+                nj_base::paths::redirect_persistent_state_root_for_test(None);
                 let _ = std::fs::remove_dir_all(&self.dir);
             }
         }
@@ -1931,16 +1931,16 @@ mod tests {
         // hazard the uncertain-verdict test above documents.
         let _root = TempCanonicalRoot::new("unopenable-envelope");
 
-        let test_file_original = crate::plex::session::redirect_snapshot_for_test();
+        let test_file_original = crate::catalog::session::redirect_snapshot_for_test();
         struct RestoreTestFile { original: Option<std::path::PathBuf> }
         impl Drop for RestoreTestFile {
-            fn drop(&mut self) { crate::plex::session::redirect_for_test(self.original.clone()); }
+            fn drop(&mut self) { crate::catalog::session::redirect_for_test(self.original.clone()); }
         }
         let _restore_test_file = RestoreTestFile { original: test_file_original };
-        crate::plex::session::redirect_for_test(None);
+        crate::catalog::session::redirect_for_test(None);
 
         use std::os::unix::fs::PermissionsExt;
-        let fallback_path = crate::plex::session::fallback_file_for_test();
+        let fallback_path = crate::catalog::session::fallback_file_for_test();
         let fallback_original = std::fs::read(&fallback_path).ok();
         let fallback_original_mode = std::fs::metadata(&fallback_path).ok()
             .map(|m| m.permissions().mode());
@@ -1965,19 +1965,19 @@ mod tests {
         // Plant the v1 SecureEnvelope this host's key service cannot open — the exact shape
         // `plex/session.rs`'s `SecureEnvelope`/`tv::secure::Sealed` serialize as (constructed here
         // as raw JSON since both types are private to `plex::session`/`keymanager`).
-        let envelope = br#"{"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"plxnative.session.v1","iv":"AAAAAAAAAAAAAAAAAAAAAA==","data":"c2VjcmV0"}}"#;
+        let envelope = br#"{"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"nativejelly.session.v1","iv":"AAAAAAAAAAAAAAAAAAAAAA==","data":"c2VjcmV0"}}"#;
         std::fs::write(&fallback_path, envelope).expect("plant the unopenable legacy envelope");
 
         // Launch 1: the legacy read is Locked (unopenable) and the canonical authority is Missing
         // (a fresh `TempCanonicalRoot`), so there is nothing a launch could have used.
-        assert!(crate::plex::session::peek().account_token.is_empty(),
+        assert!(crate::catalog::session::peek().account_token.is_empty(),
             "setup: launch 1 has nothing usable — the legacy envelope cannot be opened");
 
-        let mt = unsafe { plx_base::task::MainThread::assume() };
+        let mt = unsafe { nj_base::task::MainThread::assume() };
         let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
         assert!(adapter.take_live_completion().is_none());
 
-        let disk = crate::plex::session::peek();
+        let disk = crate::catalog::session::peek();
         let mut init = SessionInit::captured((*disk).clone());
         init.epoch = 1;
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Login },
@@ -1995,29 +1995,29 @@ mod tests {
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&next)), lifecycle: None, registry: Vec::new(),
             purpose: PersistencePurpose::Final, writes_durable: true,
-            authority: crate::plex::session::SaveAuthority::FreshReauthentication };
+            authority: crate::catalog::session::SaveAuthority::FreshReauthentication };
 
-        crate::plex::session::reset_last_write_authority_for_test();
+        crate::catalog::session::reset_last_write_authority_for_test();
         let reply = adapter.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan);
         assert!(matches!(reply.admission, CommitAdmission::Admitted { .. }),
             "MUTATION M2 TARGET: a fresh write over a Locked/empty-client_id disk must still be \
              admitted, not refused as StaleAuthority");
-        assert_eq!(crate::plex::session::last_write_authority_for_test(),
-            Some(crate::plex::session::SaveAuthority::FreshReauthentication));
+        assert_eq!(crate::catalog::session::last_write_authority_for_test(),
+            Some(crate::catalog::session::SaveAuthority::FreshReauthentication));
 
         let completion = adapter.take_live_completion()
             .expect("a fresh admitted write must deliver a completion");
         assert!(matches!(completion.outcome,
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(..)),
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(..)),
             "the fresh write must actually reach the canonical authority: {:?}", completion.outcome);
 
         // Launch 2: the canonical authority now has a real record, and it is read back — this is
         // the AUTH-03 claim itself, distinct from whether a warning was shown.
-        assert_eq!(crate::plex::session::load().account_token, "acct",
+        assert_eq!(crate::catalog::session::load().account_token, "acct",
             "MUTATION M2 TARGET: the sign-in must survive the next launch");
-        assert!(matches!(crate::plex::session::persistence::load(),
-            crate::plex::session::persistence::CanonicalRead::Data { .. }
-            | crate::plex::session::persistence::CanonicalRead::Opened { .. }),
+        assert!(matches!(crate::catalog::session::persistence::load(),
+            crate::catalog::session::persistence::CanonicalRead::Data { .. }
+            | crate::catalog::session::persistence::CanonicalRead::Opened { .. }),
             "the write must have reached the canonical authority, not only the legacy floor");
     }
 
@@ -2040,14 +2040,14 @@ mod tests {
     fn the_live_adapter_refuses_a_write_over_a_readable_disk_whose_identity_moved() {
         use crate::auth::owner::{CommitAdmission, CommitDelta, CredentialPatch, Identity, Pending,
             PendingCommit, SessionInit, SessionMachine, StreamPhase};
-        let _serial = plx_base::testlock::serial();
-        for authority in [crate::plex::session::SaveAuthority::Routine,
-                          crate::plex::session::SaveAuthority::FreshReauthentication] {
-            let _session = crate::plex::session::TempSession::new("stale-write-readable-disk");
-            let mt = unsafe { plx_base::task::MainThread::assume() };
+        let _serial = nj_base::testlock::serial();
+        for authority in [crate::catalog::session::SaveAuthority::Routine,
+                          crate::catalog::session::SaveAuthority::FreshReauthentication] {
+            let _session = crate::catalog::session::TempSession::new("stale-write-readable-disk");
+            let mt = unsafe { nj_base::task::MainThread::assume() };
             let mut adapter = SessionAdapter::live_resources_for_test(&mt, false);
 
-            let disk = crate::plex::session::peek();
+            let disk = crate::catalog::session::peek();
             let expected = Identity::of(&disk);
             let mut init = SessionInit::captured((*disk).clone());
             init.epoch = 1;
@@ -2061,7 +2061,7 @@ mod tests {
             let owner = SessionMachine::from_init(init);
 
             // A concurrent external actor replaces the readable record out from under this plan.
-            assert!(crate::plex::session::update(|d| Some(crate::plex::session::Session {
+            assert!(crate::catalog::session::update(|d| Some(crate::catalog::session::Session {
                 account_token: "synthetic-external-change".into(), ..d.clone() })),
                 "setup: the seeded session must be updatable");
 
@@ -2069,13 +2069,13 @@ mod tests {
             next.account_token = "synthetic-new-token".into();
             let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: expected,
                 credentials: Some(CredentialPatch::of(&next)), lifecycle: None, registry: Vec::new(),
-                purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
+                purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
                 writes_durable: true, authority };
             let reply = adapter.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan);
             assert!(matches!(reply.admission, CommitAdmission::StaleAuthority),
                 "a write over a READABLE disk whose identity moved must be refused for {authority:?}, got {:?}",
                 reply.admission);
-            assert_eq!(crate::plex::session::peek().account_token, "synthetic-external-change",
+            assert_eq!(crate::catalog::session::peek().account_token, "synthetic-external-change",
                 "a refused write must not have touched disk, for {authority:?}");
         }
     }
@@ -2084,7 +2084,7 @@ mod tests {
     fn fixture_commit_uses_latest_preferences_and_never_writes_another_adapter() {
         use crate::auth::owner::{CommitDelta, CredentialPatch, Identity, Pending, PendingCommit,
             SessionInit, SessionMachine, StreamPhase};
-        let disk = crate::plex::session::Session { client_id: "synthetic-client".into(), ..Default::default() };
+        let disk = crate::catalog::session::Session { client_id: "synthetic-client".into(), ..Default::default() };
         let mut init = SessionInit::captured(disk.clone());
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Ready },
             expected: Identity::of(&disk), lifecycle: None, last_arrival: Some(0),
@@ -2095,16 +2095,16 @@ mod tests {
         let owner = SessionMachine::from_init(init);
         let mut a = SessionAdapter::fixture_with(disk.clone());
         let mut b = SessionAdapter::fixture_with(disk.clone());
-        a.fixture_resources().disk.playback_quality = Some(crate::plex::session::PlaybackQuality::Original);
+        a.fixture_resources().disk.playback_quality = Some(crate::catalog::session::PlaybackQuality::Original);
         let mut next = disk.clone();
         next.account_token = "synthetic-new-token".into();
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&next)), registry: Vec::new(), lifecycle: None,
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            writes_durable: true, authority: crate::plex::session::SaveAuthority::Routine };
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            writes_durable: true, authority: crate::catalog::session::SaveAuthority::Routine };
         assert!(a.commit(owner.commit_permit(1, 1, 0).unwrap(), &plan).admission.accepted());
         assert_eq!(a.fixture_resources().disk.account_token, "synthetic-new-token");
-        assert_eq!(a.fixture_resources().disk.playback_quality, Some(crate::plex::session::PlaybackQuality::Original));
+        assert_eq!(a.fixture_resources().disk.playback_quality, Some(crate::catalog::session::PlaybackQuality::Original));
         assert!(b.fixture_resources().disk.account_token.is_empty());
         assert!(a.fixture_resources().profile.is_none());
         assert!(a.fixture_resources().registry_writes.is_empty());
@@ -2116,7 +2116,7 @@ mod tests {
     fn endpoint_commit_rejects_another_machine_before_patching_disk() {
         use crate::auth::owner::{CommitDelta, CredentialPatch, Identity, Pending, PendingCommit,
             RegistryPlan, SessionInit, SessionMachine, StreamPhase};
-        let disk = crate::plex::session::Session { client_id: "synthetic-client".into(), ..Default::default() };
+        let disk = crate::catalog::session::Session { client_id: "synthetic-client".into(), ..Default::default() };
         let lifecycle = ServerLifecycle { sid: 0, instance_gen: 11, token_gen: 12 };
         let mut init = SessionInit::captured(disk.clone());
         init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Endpoint(0) },
@@ -2135,10 +2135,10 @@ mod tests {
         changed.account_token = "synthetic-new-token".into();
         let plan = CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: Identity::of(&disk),
             credentials: Some(CredentialPatch::of(&changed)), lifecycle: Some(lifecycle),
-            purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
-            writes_durable: true, authority: crate::plex::session::SaveAuthority::Routine,
+            purpose: crate::catalog::session::async_persistence::PersistencePurpose::Final,
+            writes_durable: true, authority: crate::catalog::session::SaveAuthority::Routine,
             registry: vec![RegistryPlan::Endpoint { expected: lifecycle,
-                source: crate::plex::session::SourceRef { machine_id: "machine-b".into(),
+                source: crate::catalog::session::SourceRef { machine_id: "machine-b".into(),
                     origin_url: "http://192.0.2.2:32400".into(), ..Default::default() } }],
         };
         assert!(!adapter.commit(owner.commit_permit(1, 1, 1).unwrap(), &plan).admission.accepted(),
@@ -2339,11 +2339,11 @@ mod tests {
         let begin = source.split("pub(crate) fn begin_erase(").nth(1).unwrap()
             .split("fn submit_erase(").next().unwrap();
         let submitted = begin.find("self.submit_erase()").unwrap();
-        assert!(begin.find("crate::plex::revoke_all()").unwrap() < submitted);
-        assert!(begin.find("crate::plex::session::revoke_cached_session()").unwrap() < submitted);
+        assert!(begin.find("crate::catalog::revoke_all()").unwrap() < submitted);
+        assert!(begin.find("crate::catalog::session::revoke_cached_session()").unwrap() < submitted);
         let worker = source.split("fn submit_erase(").nth(1).unwrap()
             .split("pub(crate) fn take_erased(").next().unwrap();
-        assert!(worker.contains("crate::plex::session::clear_for_erase(all_local, language)"));
+        assert!(worker.contains("crate::catalog::session::clear_for_erase(all_local, language)"));
     }
 
     /// The adapter half of a watched report: while it is queued or on the network nothing is
@@ -2407,8 +2407,8 @@ mod tests {
 /// An *Allowed* whose write fails costs only its memory across a restart — the person is asked
 /// again, the closed direction; a refusal is written again until it lands (`plex::grant::record`).
 pub(crate) fn record_plaintext_answer(account: &str, machine_id: &str,
-    choice: crate::plex::session::PlaintextChoice) {
-    if crate::plex::grant::record(account, machine_id, choice).is_err() {
-        plx_base::eventlog::log("session: plaintext answer not saved (storage worker unavailable)");
+    choice: crate::catalog::session::PlaintextChoice) {
+    if crate::catalog::grant::record(account, machine_id, choice).is_err() {
+        nj_base::eventlog::log("session: plaintext answer not saved (storage worker unavailable)");
     }
 }

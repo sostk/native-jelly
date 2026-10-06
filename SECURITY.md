@@ -23,15 +23,15 @@ The app, its packaging, and the host-side tools in `tools/` and `ci/`. Concretel
 looking at:
 
 - **The `/tmp` trigger surface.** `/tmp` is mode 1777 in webOS's production jail, so any co-resident
-  process can create files there. Roughly forty `plxnative-*` files change behaviour, and three are
-  outright takeovers — `plxnative-token` beats the signed-in session, `plxnative-servers` injects a
-  server and its token, `plxnative-url` replaces the stream. **All of it is compiled out of a
+  process can create files there. Roughly forty `nativejelly-*` files change behaviour, and three are
+  outright takeovers — `nativejelly-token` beats the signed-in session, `nativejelly-servers` injects a
+  server and its token, `nativejelly-url` replaces the stream. **All of it is compiled out of a
   release build** by dropping the `devtriggers` cargo feature, and `ci/check-elf.sh` measures that
   on the shipped bytes rather than asserting it. A release binary that still carries any of it is a
   valid report, and a serious one.
-- **The event log.** `plxnative-events.log` is created 0600 and every line goes through
+- **The event log.** `nativejelly-events.log` is created 0600 and every line goes through
   `eventlog::scrub::scrub_local` before the write. A line that reaches it carrying a credential, a
-  Jellyfin or Plex token, a server's host name, a user name, a household name or anything about what
+  Jellyfin access token, a server's host name, a user name, a household name or anything about what
   is being watched is a valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant
   to hold.
 - **The Jellyfin sign-in file.** `jellyfin.json` holds the server address, the user, and the access
@@ -39,21 +39,16 @@ looking at:
   the session file, and is **not** encrypted with the Key Manager. A way to read it from another
   process, or to make the app write it somewhere world-readable, is in scope. So is any path where
   the password outlives the sign-in request.
-- **TLS.** Certificate verification is on for every HTTPS request, with one bounded exception: when
-  a Plex server's certificate fails only its validity-date check (the television has no
-  battery-backed clock) and a public key was remembered for that exact host and port from an
-  earlier fully verified connection, the request is repeated with the chain-and-date check
-  replaced by a pin on that key; the name check stays on. plex.tv, telemetry and any host with no
-  remembered key never take this path (`net.rs`, `net::keypin`). Stable builds refuse
-  any PMS control or media URL that would carry a Plex token over plaintext HTTP, with one
-  consented exception: a server that answers only unencrypted at a numeric private address on the
-  television's own network, where the person answered "Connect without encryption?" for that
-  server (`plex::grant`). The grant names that server and that exact origin, is never persisted,
-  and is revoked on sign-in, sign-out and return to the foreground, at a profile switch whose
-  roster does not install that server at that origin, whenever a fresh probe no longer reaches it,
-  and at once when the person says no (a refusal is written again until it reaches the disk). A
-  token sent over plaintext to any origin outside a live grant, or to a server other than the one
-  it names, is in scope.
+- **TLS.** Certificate verification is on for every HTTPS request. When a server's certificate
+  fails only its validity-date check (the television has no battery-backed clock) and a public key
+  was remembered for that exact host and port from an earlier fully verified connection, the
+  request is repeated with the chain-and-date check replaced by a pin on that key; the name check
+  stays on. Telemetry and any host with no remembered key never take this path (`net.rs`,
+  `net::keypin`). The product path talks only to the Jellyfin server whose address you enter.
+  Over `http://`, your password, access token and everything Native Jelly exchanges with that
+  server travel without encryption — enter `https://` for a server you reach over the internet.
+  A token sent over plaintext to an origin the user did not enter, or to a server other than the
+  one the token names, is in scope.
   Only an explicit developer-trigger build can otherwise allow the lab path, and it logs the
   exception without the URL.
   Anything that disables, downgrades or bypasses these rules is in scope — including a key-mode
@@ -75,8 +70,8 @@ looking at:
 - Post-compromise access by an attacker who already has root on the television. Root is not an app
   prerequisite; a report whose only precondition is an already-rooted OS describes a platform
   compromise rather than an app sandbox escape.
-- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, Jellyfin server, or Plex Media
-  Server. Report those to their maintainers.
+- The webosbrew Homebrew Channel, webOS itself, LG's own libraries, or the Jellyfin server.
+  Report those to their maintainers.
 - Missing hardening that costs nothing to an attacker who is already executing code in the app's
   jail, unless you can show a concrete consequence.
 
@@ -85,7 +80,7 @@ looking at:
 No account of its own, no server, no payment path, and no user-generated content. It signs in to
 **your** Jellyfin server and talks only to it.
 
-**It can have telemetry.** A binary built with `PLX_SENTRY_DSN` / `PLX_POSTHOG_KEY` set carries a
+**It can have telemetry.** A binary built with `NJ_SENTRY_DSN` / `NJ_POSTHOG_KEY` set carries a
 Sentry DSN and a PostHog project key — both **write-only ingest credentials**, publishable by
 design, which permit sending to a project and grant no read of anything in it. A build without them
 sends no reports at all. First run asks about crash reports

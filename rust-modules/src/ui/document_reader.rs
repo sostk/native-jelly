@@ -10,7 +10,7 @@
 //! runs only on a miss, and drawing already only touches the lines the clip rect can see.
 
 use crate::ui::consts::K_SCROLL;
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use crate::ui::text_view::TextView;
 use crate::ui::widgets;
 use crate::ui::{theme, Painter, Rect, Spring};
@@ -139,7 +139,7 @@ impl DocumentReader {
 
     pub(crate) fn move_by(&mut self, delta: i32) {
         self.target = (self.target + delta as f32 * self.body_leading() * 6.0).clamp(0.0, self.max_scroll);
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
 
     pub(crate) fn update(&mut self, dt: f32) {
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn event_measurement_preserves_blank_lines_indentation_and_long_tokens() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let _no_live = crate::ui::text_view::ForbidLive::enter();
         let measure = crate::ui::fixture::FixtureMeasure;
         let mut reader = DocumentReader::new().with_size(theme::size::BODY);
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn document_scroll_moves_on_a_spring_and_reaches_rest() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut reader = DocumentReader::new();
         reader.max_scroll = 1000.0;
         reader.move_by(1);
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn reset_clears_position_velocity_and_document_bounds() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let mut reader = DocumentReader::new();
         reader.max_scroll = 600.0;
         reader.move_by(1);

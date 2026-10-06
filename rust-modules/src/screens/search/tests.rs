@@ -13,8 +13,8 @@ use crate::ui::fixture::FixtureMeasure;
 use crate::ui::focus::{FocusEngine, Outcome};
 use crate::ui::hit::{HitMap, PointerKind};
 use crate::ui::screen::By;
-use plx_machine::machine::{FocusRead, Host, InputEvent, PressRead, Source, Stamped, Tick};
-use plx_machine::present::Present;
+use nj_machine::machine::{FocusRead, Host, InputEvent, PressRead, Source, Stamped, Tick};
+use nj_machine::present::Present;
 use crate::ui::screen::{Activate, Hover, ScreenArg, Stop};
 
 #[derive(Clone)]
@@ -24,8 +24,8 @@ impl LogicalState for Arg {
     fn probe(&self, _: &mut String) {}
 }
 impl ScreenArg for Arg {
-    fn chrome(&self) -> plx_machine::machine::Chrome { plx_machine::machine::Chrome::None }
-    fn id(&self) -> plx_machine::machine::ScreenId { plx_machine::machine::ScreenId(1) }
+    fn chrome(&self) -> nj_machine::machine::Chrome { nj_machine::machine::Chrome::None }
+    fn id(&self) -> nj_machine::machine::ScreenId { nj_machine::machine::ScreenId(1) }
     fn title(&self) -> Option<&str> { None }
     fn same_instance(&self, _: &Self) -> bool { true }
 }
@@ -52,7 +52,7 @@ const DT_US: u32 = 16_667;
 fn tick(i: u32) -> Tick { Tick { ms: i * 16, dt_us: DT_US } }
 
 fn movie(rk: &str) -> Item {
-    Item::Media(crate::pms::PmsMovie { rk: rk.into(), title: format!("Synthetic {rk}"), ..Default::default() })
+    Item::Media(crate::catalog_fetch::PmsMovie { rk: rk.into(), title: format!("Synthetic {rk}"), ..Default::default() })
 }
 
 /// A shelf of `n` synthetic items, addressed so two shelves never share a result identity.
@@ -178,10 +178,10 @@ fn hit(screen: &SearchScreen, fixture: &Fixture, elems: &[u32], x: f32, y: f32) 
 /// A profile that has remembered `terms`. The write comes BEFORE the switch deliberately: the
 /// recents store caches per profile GENERATION, so a file write behind an already-seated profile
 /// is not read until something moves that generation.
-fn watching(session: &crate::plex::session::TempSession, who: &str, terms: &[&str]) {
+fn watching(session: &crate::catalog::session::TempSession, who: &str, terms: &[&str]) {
     let terms: Vec<String> = terms.iter().map(|t| (*t).to_owned()).collect();
     let who_owned = who.to_owned();
-    crate::plex::session::update(|s| {
+    crate::catalog::session::update(|s| {
         let mut next = s.clone();
         next.set_recents_for(&who_owned, terms.clone());
         Some(next)
@@ -189,8 +189,8 @@ fn watching(session: &crate::plex::session::TempSession, who: &str, terms: &[&st
     session.watching(who);
 }
 
-fn remembering(tag: &str, terms: &[&str]) -> crate::plex::session::TempSession {
-    let session = crate::plex::session::TempSession::new(tag);
+fn remembering(tag: &str, terms: &[&str]) -> crate::catalog::session::TempSession {
+    let session = crate::catalog::session::TempSession::new(tag);
     watching(&session, tag, terms);
     session
 }
@@ -203,8 +203,8 @@ fn remembering(tag: &str, terms: &[&str]) -> crate::plex::session::TempSession {
 /// for a region it draws, so ▼ has nothing to link to. The four cases are unchanged.
 #[test]
 fn down_from_the_field_reaches_only_a_region_that_is_drawn() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-handoff");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-handoff");
 
     // (1) no query, no terms: nothing is under the field at all.
     watching(&session, "owned-search-handoff-fresh", &[]);
@@ -246,7 +246,7 @@ fn down_from_the_field_reaches_only_a_region_that_is_drawn() {
 /// server, so the remembered terms must stay up rather than flicker out and back on a backspace.
 #[test]
 fn a_query_below_the_stores_own_threshold_keeps_the_remembered_terms() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let session = remembering("owned-search-threshold", &["gromit", "wallace"]);
     let mut fixture = Fixture::new();
     fixture.query("w");
@@ -271,7 +271,7 @@ fn a_query_below_the_stores_own_threshold_keeps_the_remembered_terms() {
 /// `Seat::Projected` and `card_row::column_near_x`, on the drawn rect.
 #[test]
 fn a_vertical_step_between_shelves_keeps_the_visual_column() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("column").shelves(vec![shelf(Kind::Movie, "a", 20), shelf(Kind::Show, "b", 20)]);
     let mut screen = fixture.screen();
@@ -292,7 +292,7 @@ fn a_vertical_step_between_shelves_keeps_the_visual_column() {
 /// shelf clamps, the ends hold, and the cursor is where the user last actually stood.
 #[test]
 fn a_shelf_that_shrinks_under_the_cursor_re_seats_it() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     // Movies 8, Shows 2, Collections 5 — the shape a real search returns, on one poster lattice
     // so these assertions stay about the CLAMP rather than about an episode still's own width.
@@ -328,7 +328,7 @@ fn a_shelf_that_shrinks_under_the_cursor_re_seats_it() {
 /// standing in survives, so a shelf that lands again seats where they were.
 #[test]
 fn focus_is_clamped_when_the_shelves_shrink_under_it() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("clamp").shelves(vec![shelf(Kind::Movie, "c", 12)]);
     let mut screen = fixture.screen();
@@ -366,7 +366,7 @@ fn focus_is_clamped_when_the_shelves_shrink_under_it() {
 /// all until a shelf lands.
 #[test]
 fn an_empty_result_set_is_not_a_card() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("nothing");
     let screen = fixture.screen();
@@ -391,7 +391,7 @@ fn an_empty_result_set_is_not_a_card() {
 /// then stops on Clear — never onto a row that was never drawn, and never past the control.
 #[test]
 fn the_recents_cursor_stops_on_the_clear_control() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let session = remembering("owned-search-clear", &["gromit", "wallace", "preston"]);
     let fixture = Fixture::new();
     let mut screen = fixture.screen();
@@ -436,7 +436,7 @@ fn the_recents_cursor_stops_on_the_clear_control() {
 /// not a target at all. The clip is the page's floor, not the tile's own rect.
 #[test]
 fn a_tile_scrolled_under_the_chrome_is_not_a_pointer_target() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("chrome").shelves(vec![shelf(Kind::Movie, "t", 4)]);
     let mut screen = fixture.screen();
@@ -468,7 +468,7 @@ fn a_tile_scrolled_under_the_chrome_is_not_a_pointer_target() {
 /// under the track it is pressable on the half you can see, and fully under it is not a target.
 #[test]
 fn the_fields_hit_rect_rides_the_scroll_and_stops_at_the_track() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut screen = fixture.screen();
     let floor = crate::ui::widgets::TOP_BAR_BOTTOM;
@@ -495,7 +495,7 @@ fn the_fields_hit_rect_rides_the_scroll_and_stops_at_the_track() {
 /// takes the field entirely under the tab track, where it is no longer a pointer target.
 #[test]
 fn revealing_the_second_shelf_carries_the_query_field_under_the_track() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("reveal").shelves(vec![shelf(Kind::Movie, "r0", 6), shelf(Kind::Show, "r1", 6)]);
     let mut screen = fixture.screen();
@@ -524,10 +524,10 @@ fn revealing_the_second_shelf_carries_the_query_field_under_the_track() {
 /// over-reporting animator costs the whole idle saving while every fps floor still passes.
 ///
 /// Graded on the DISPATCHER's gate (`Present`), which is what an owned page's `Effects` reach;
-/// `plx_machine::idle` is the loop's gate and the bridge ORs the two.
+/// `nj_machine::idle` is the loop's gate and the bridge ORs the two.
 #[test]
 fn the_scroll_spring_reports_while_it_runs_and_goes_quiet_at_rest() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("scroll").shelves(vec![shelf(Kind::Movie, "s", 4)]);
     let mut screen = fixture.screen();
@@ -549,7 +549,7 @@ fn the_scroll_spring_reports_while_it_runs_and_goes_quiet_at_rest() {
 /// gliding up from idle would report motion for the first frames of a screen that is not moving.
 #[test]
 fn the_fields_focus_fade_runs_when_focus_leaves_it_and_settles() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("fade").shelves(vec![shelf(Kind::Movie, "f", 4)]);
     let mut screen = fixture.screen();
@@ -575,7 +575,7 @@ fn the_fields_focus_fade_runs_when_focus_leaves_it_and_settles() {
 /// frame would cost the whole idle saving to animate one 5px bar.
 #[test]
 fn the_caret_blinks_and_reports_only_on_the_flip() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut screen = fixture.screen();
     let engine = seated(&screen, &fixture);
@@ -615,7 +615,7 @@ fn the_caret_blinks_and_reports_only_on_the_flip() {
 /// somebody else sends and a return is this instance mounting over whatever is published.
 #[test]
 fn a_mount_seats_the_field_and_parks_every_cursor_without_replacing_the_search() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let session = remembering("owned-search-mount", &["gromit"]);
     let mut fixture = Fixture::new();
 
@@ -662,7 +662,7 @@ fn a_mount_seats_the_field_and_parks_every_cursor_without_replacing_the_search()
 /// Cyrillic throughout: two bytes a letter, so a byte step would split a codepoint.
 #[test]
 fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut screen = fixture.screen();
     let field = Some(FocusKey { entry: ENTRY, elem: FIELD });
@@ -734,7 +734,7 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
 /// without the page jumping under it.
 #[test]
 fn the_shelf_flow_is_frozen_unless_the_shelves_hold_focus_with_the_keyboard_down() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.query("frozen").shelves(vec![shelf(Kind::Movie, "f0", 4), shelf(Kind::Show, "f1", 4),
         shelf(Kind::Episode, "f2", 4)]);
@@ -775,15 +775,15 @@ fn the_shelf_flow_is_frozen_unless_the_shelves_hold_focus_with_the_keyboard_down
 // ---- the borrowed-source annotation -----------------------------------------------------------
 
 /// Three sources on one shelf: the household's own, and two shares with different handles.
-fn shared_shelf(fixture: &mut Fixture) -> [crate::plex::ServerId; 3] {
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test("own-machine", "127.0.0.1", 1, "own", "annotation");
-    let a = crate::plex::register_for_test("share-a", "127.0.0.1", 2, "a", "annotation");
-    let b = crate::plex::register_for_test("share-b", "127.0.0.1", 3, "b", "annotation");
-    crate::plex::describe_server(own, "own-machine", "", crate::plex::GrantEvidence::ours());
-    crate::plex::describe_server(a, "share-a", "friend", crate::plex::GrantEvidence::outside());
-    crate::plex::describe_server(b, "share-b", "other", crate::plex::GrantEvidence::outside());
-    let item = |sid| Item::Media(crate::pms::PmsMovie { sid, rk: format!("annotated-{sid:?}"),
+fn shared_shelf(fixture: &mut Fixture) -> [crate::catalog::ServerId; 3] {
+    crate::catalog::reset_servers_for_test();
+    let own = crate::catalog::register_for_test("own-machine", "127.0.0.1", 1, "own", "annotation");
+    let a = crate::catalog::register_for_test("share-a", "127.0.0.1", 2, "a", "annotation");
+    let b = crate::catalog::register_for_test("share-b", "127.0.0.1", 3, "b", "annotation");
+    crate::catalog::describe_server(own, "own-machine", "", crate::catalog::GrantEvidence::ours());
+    crate::catalog::describe_server(a, "share-a", "friend", crate::catalog::GrantEvidence::outside());
+    crate::catalog::describe_server(b, "share-b", "other", crate::catalog::GrantEvidence::outside());
+    let item = |sid| Item::Media(crate::catalog_fetch::PmsMovie { sid, rk: format!("annotated-{sid:?}"),
         title: "Synthetic result".into(), ..Default::default() });
     fixture.query("annotated").shelves(vec![
         Shelf { kind: Kind::Movie, items: vec![item(own), item(a), item(b)] },
@@ -800,7 +800,7 @@ fn shared_shelf(fixture: &mut Fixture) -> [crate::plex::ServerId; 3] {
 /// out and leaves it absent.
 #[test]
 fn the_owner_annotation_swaps_its_words_only_while_it_is_invisible() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let _sids = shared_shelf(&mut fixture);
     let mut screen = fixture.screen();
@@ -853,7 +853,7 @@ fn the_owner_annotation_swaps_its_words_only_while_it_is_invisible() {
     for i in 480..560 { frame(&mut screen, &fixture, &engine, i); }
     assert_eq!(screen.owner_row, Some(1), "the annotation belongs to the row the cursor is in");
     assert_eq!(screen.owner, "", "…and that row's item is the household's own");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Legacy `results.rs`'s `a_settled_annotation_goes_quiet_and_a_moving_one_does_not` — the other
@@ -861,7 +861,7 @@ fn the_owner_annotation_swaps_its_words_only_while_it_is_invisible() {
 /// rising spring asks every frame while it travels, and a settled annotation asks for nothing.
 #[test]
 fn a_settled_annotation_goes_quiet_and_a_moving_one_does_not() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut fixture = Fixture::new();
     let _sids = shared_shelf(&mut fixture);
     let mut screen = fixture.screen();
@@ -885,7 +885,7 @@ fn a_settled_annotation_goes_quiet_and_a_moving_one_does_not() {
         assert!(!frame(&mut screen, &fixture, &engine, 600 + i),
             "frame {i}: a settled annotation asked for a repaint");
     }
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **A collection hit routes to the collection page, by ratingKey first and by section + tag id
@@ -895,13 +895,13 @@ fn a_settled_annotation_goes_quiet_and_a_moving_one_does_not() {
 /// wire row.
 #[test]
 fn a_collection_hit_routes_by_rating_key_or_by_section_and_tag_id() {
-    use crate::plex::collections::CollectionRef;
+    use crate::catalog::collections::CollectionRef;
     use crate::screens::registry::ContentArg;
     use crate::search::{CollectionHit, TagHit};
-    let sid = crate::plex::ServerId::from_raw(3);
+    let sid = crate::catalog::ServerId::from_raw(3);
 
     // a full `type=collection` row (`includeCollections=1`): both ids ride along
-    let row = crate::plex::Metadata {
+    let row = crate::catalog::Metadata {
         kind: "collection".into(),
         rating_key: "50007".into(),
         title: "Aardman Shorts".into(),
@@ -940,7 +940,7 @@ fn a_collection_hit_routes_by_rating_key_or_by_section_and_tag_id() {
     );
     // with no section or no tag id there is nothing to resolve, so there is no route
     let no_section = CollectionHit {
-        item: crate::pms::PmsMovie { sec: 0, ..hit.item.clone() },
+        item: crate::catalog_fetch::PmsMovie { sec: 0, ..hit.item.clone() },
         ..hit.clone()
     };
     assert!(no_section.route().is_none(), "no section");

@@ -21,7 +21,7 @@
 //! mailbox — `detail::take_open_request`, `detail::take_alt_open` and `person::take_request` are
 //! deliberately untouched, because reading one would consume a navigation.
 //!
-//! **It must not touch [`plx_machine::idle`].** It never calls `invalidate()`. Reporting to the frame
+//! **It must not touch [`nj_machine::idle`].** It never calls `invalidate()`. Reporting to the frame
 //! gate would hold every screen presenting forever, which would destroy the very idle behaviour a
 //! harness built on this is meant to be able to observe.
 //!
@@ -57,10 +57,10 @@
 //!
 //! # Arming it
 //!
-//! `touch /tmp/plxnative-focus` on the television (or in `PLXNATIVE_RUNTIME_DIR` under the
-//! simulator), then read `focus ` lines out of `/tmp/plxnative-events.log`. The trigger is listed
+//! `touch /tmp/nativejelly-focus` on the television (or in `NJ_RUNTIME_DIR` under the
+//! simulator), then read `focus ` lines out of `/tmp/nativejelly-events.log`. The trigger is listed
 //! in [`crate::dev`]'s `DIAG` set, so arming the observer does not also change which screen the app
-//! boots to — the same reasoning `plxnative-noidle` carries, and it matters more here: a harness
+//! boots to — the same reasoning `nativejelly-noidle` carries, and it matters more here: a harness
 //! that wants to characterize the who's-watching picker must not lose the picker by watching it.
 //! `RELEASE=1` drops the `devtriggers` feature, `devtrig::flag` becomes `false`, and this whole surface
 //! goes quiet.
@@ -158,7 +158,7 @@ pub(crate) enum Screen {
 
 /// The player HUD's focus cursor, plus whether the transport is on screen at all.
 ///
-/// A copy of the `HudNav` cursor `plex_run` holds as a local. The type is a non-`pub` item of
+/// A copy of the `HudNav` cursor `nj_run` holds as a local. The type is a non-`pub` item of
 /// `app`, which `lib.rs` declares as a private `mod`, so it cannot be named from here — the same
 /// boundary `Route` sits behind. `visible` is `app.rs`'s `hud_visible(…)` — the same
 /// value its own OK and LEFT/RIGHT arms branch on — because the HUD's visibility decides whether a
@@ -171,15 +171,15 @@ pub(crate) struct Hud {
     pub(crate) visible: bool,
 }
 
-plx_base::devtrig::latched_flag!(
-    /// Is the probe armed for this boot? Resolved once, from `/tmp/plxnative-focus`.
+nj_base::devtrig::latched_flag!(
+    /// Is the probe armed for this boot? Resolved once, from `/tmp/nativejelly-focus`.
     ///
-    /// Resolved once rather than per frame for two reasons: `tests/run.py` clears `/tmp/plxnative-*`
+    /// Resolved once rather than per frame for two reasons: `tests/run.py` clears `/tmp/nativejelly-*`
     /// between cases, so a later read could legitimately find the file gone mid-run; and a per-frame
     /// `exists()` is a syscall this is not worth paying. Call sites may check this before building
     /// arguments — [`sample`] checks it again, so the module is correct on its own.
     ///
-    /// This body was hand-rolled here first; [`plx_base::devtrig::latched_flag`] is that body, moved to the
+    /// This body was hand-rolled here first; [`nj_base::devtrig::latched_flag`] is that body, moved to the
     /// module that owns the trigger surface so every per-frame `flag` caller can have it.
     pub(crate) fn armed = "focus";
 );
@@ -198,7 +198,7 @@ pub(crate) fn sample(ps: &crate::route::PlaybackSession, route: &str, screen: Sc
     if last.as_deref() == Some(line.as_str()) {
         return;
     }
-    plx_base::eventlog::log(&line);
+    nj_base::eventlog::log(&line);
     *last = Some(line);
 }
 
@@ -326,7 +326,7 @@ fn push_player(ps: &crate::route::PlaybackSession, s: &mut String, overlay: &str
 ///
 /// A rating key is a server-local integer dense from 1, so it names an item only together with the
 /// server — and the slot number is a registry index (0, 1, …), not anything about the machine.
-pub(crate) fn push_item(s: &mut String, m: Option<&crate::pms::PmsMovie>) {
+pub(crate) fn push_item(s: &mut String, m: Option<&crate::catalog_fetch::PmsMovie>) {
     match m {
         Some(m) => {
             s.push_str(" sid=");
@@ -338,12 +338,12 @@ pub(crate) fn push_item(s: &mut String, m: Option<&crate::pms::PmsMovie>) {
     }
 }
 
-/// A registry slot number, or `-` for [`crate::plex::ServerId::UNSET`].
+/// A registry slot number, or `-` for [`crate::catalog::ServerId::UNSET`].
 ///
 /// Spelled as the absence it is rather than as `65535`: `UNSET` is the reserved value a page
 /// carries before anything mounted on it, and printing the raw `u16` reads as slot 65535 — a
 /// server — on a line whose other slot numbers are 0 and 1.
-fn push_sid(s: &mut String, sid: crate::plex::ServerId) {
+fn push_sid(s: &mut String, sid: crate::catalog::ServerId) {
     if sid.is_set() {
         let _ = write!(s, "{}", sid.raw());
     } else {
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn a_fingerprint_is_stable_while_nothing_moves() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (rn, sc) in every_screen() {
             let a = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
             let b = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn the_line_is_one_ordered_row_of_safe_key_value_pairs() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for (rn, sc) in every_screen() {
             let line = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
             assert!(
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     fn one_screen_always_carries_the_same_keys() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let keys = |rn, sc, ctrl| {
             fingerprint(&ps, rn, sc, hud(), ctrl, test_store().view())
                 .split(' ')
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn moving_the_hud_cursor_changes_the_line() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let at = |f, btn, tab| {
             fingerprint(&ps, 
                 "player",
@@ -602,7 +602,7 @@ mod tests {
     #[test]
     fn the_login_screens_stalled_control_appearing_is_observable() {
         let ps = crate::route::PlaybackSession::IDLE;
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let without = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: false }, hud(), ControlSlot::Discs, test_store().view());
         let with = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: true }, hud(), ControlSlot::Discs, test_store().view());
         assert_ne!(

@@ -53,7 +53,7 @@
 use std::borrow::Cow;
 
 use crate::ui::consts::{K_SCROLL, SAFE};
-use plx_machine::machine::Measure;
+use nj_machine::machine::Measure;
 use crate::ui::popover::Popover;
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::{Button, ControlStyle, CtlPop, StatusOverlay};
@@ -281,7 +281,7 @@ impl DecisionAlert {
         // The body determines the panel's size. A cached ground can contain the OLD outline;
         // dropping it here lets all hosts redraw the measured panel, even inside an own scope.
         crate::ui::popover::host::ground_invalidate();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         true
     }
     /// One answer or two, as last opened or reconciled.
@@ -300,7 +300,7 @@ impl DecisionAlert {
         // A fresh open is a fresh page under it: re-latch at the next `draw_scrim`.
         self.field.reset();
         self.pop.open();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     /// Measure retained content through the caller's capability, before paint or during replay.
     fn measured(&self, measure: &dyn Measure) -> Layout {
@@ -321,7 +321,7 @@ impl DecisionAlert {
         self.scroll_target = (self.scroll_target + delta as f32 * theme::size::BODY as f32 * 6.0)
             .clamp(0.0, max);
         let _own = crate::ui::popover::own_motion();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
         self.scroll_target.to_bits()
     }
     pub(crate) fn scroll_target_bits(&self) -> u32 { self.scroll_target.to_bits() }
@@ -345,12 +345,12 @@ impl DecisionAlert {
     /// Instant hide — see [`Popover::close`]. Interactive answers take [`dismiss`](Self::dismiss).
     pub(crate) fn close(&mut self) {
         self.pop.close();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     /// The shared exit choreography, in reverse of the entry (`Popover::dismiss`).
     pub(crate) fn dismiss(&mut self) {
         self.pop.dismiss();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     /// Open or still fading out — the DRAW gate, never the input gate.
     pub(crate) fn visible(&self) -> bool {
@@ -364,7 +364,7 @@ impl DecisionAlert {
     }
     pub(crate) fn set_choice(&mut self, choice: Choice) {
         self.choice = self.valid_choice(choice);
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     pub(crate) fn update(&mut self, dt: f32) {
         if !self.visible() {
@@ -480,11 +480,11 @@ mod tests {
 
     #[test]
     fn belarusian_delete_question_and_complete_scope_wrap_at_the_existing_text_sizes() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let measure = DisclosureMeasure;
-        let locale = plx_platform::i18n::LocaleContext::resolve(plx_platform::i18n::Preference::Be, None, None, None, None);
-        let question = plx_platform::i18n::msg::settings_consent_delete_question_in(&locale);
-        let body = plx_platform::i18n::msg::settings_consent_delete_scope_in(&locale);
+        let locale = nj_platform::i18n::LocaleContext::resolve(nj_platform::i18n::Preference::Be, None, None, None, None);
+        let question = nj_platform::i18n::msg::settings_consent_delete_question_in(&locale);
+        let body = nj_platform::i18n::msg::settings_consent_delete_scope_in(&locale);
         assert!(body.contains("сервер Jellyfin") && body.contains("Sentry") && body.contains("PostHog"));
         let question_view = DecisionAlert::question_view(question).with_measure(&measure);
         let body_view = DecisionAlert::body_view(body).with_measure(&measure);
@@ -493,7 +493,7 @@ mod tests {
         assert!(question_view.measure_h(BODY_W) > measure.line_h(theme::size::TITLE));
         assert!(body_view.measure_h(BODY_W) > 4.0 * measure.line_h(theme::size::BODY));
         let mut alert = DecisionAlert::new();
-        alert.open_with_body(plx_platform::i18n::msg::settings_consent_delete_question_c_in(&locale), body);
+        alert.open_with_body(nj_platform::i18n::msg::settings_consent_delete_question_c_in(&locale), body);
         let l = alert.measured(&measure);
         assert_eq!(alert.choice(), Choice::Cancel);
         assert_eq!(l.question.w, 564.0);
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn oversized_disclosure_scrolls_to_its_end_while_both_answers_stay_inside_the_safe_area() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let measure = DisclosureMeasure;
         let mut alert = DecisionAlert::new();
         alert.open_card(c"A future translated question", vec![
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn reconciling_a_card_preserves_motion_and_valid_focus_and_is_quiet_when_unchanged() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut alert = DecisionAlert::new();
         alert.open_card(c"Details", vec!["old".into()], Answers::Two);
         alert.set_choice(Choice::Destructive);
@@ -547,9 +547,9 @@ mod tests {
         assert_eq!(alert.choice(), Choice::Destructive);
         assert_eq!(alert.pop.appear(), appear, "content must not restart the entrance");
         assert_eq!(crate::ui::popover::host_users_for_test(), users);
-        plx_machine::idle::take_local_damage();
+        nj_machine::idle::take_local_damage();
         assert!(!alert.reconcile_card(c"Details", vec!["receipt".into()], Answers::Two));
-        assert_eq!(plx_machine::idle::take_local_damage(), 0, "a settled card must stay idle");
+        assert_eq!(nj_machine::idle::take_local_damage(), 0, "a settled card must stay idle");
         assert!(alert.reconcile_card(c"Details", vec!["receipt".into()], Answers::One));
         assert_eq!(alert.choice(), Choice::Cancel, "the removed answer hands focus to Close");
         alert.set_choice(Choice::Destructive);
@@ -560,7 +560,7 @@ mod tests {
     }
     #[test]
     fn owned_multi_paragraph_card_scrolls_with_one_visible_answer_without_live_measurement() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let _no_live = crate::ui::text_view::ForbidLive::enter();
         let measure = DisclosureMeasure;
         let mut alert = DecisionAlert::new();
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn reopening_with_a_question_alone_clears_the_previous_body() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut alert = DecisionAlert::new();
         alert.open_with_body(c"First question?", "Consequences of the first question.");
         assert!(!alert.body.is_empty());
@@ -685,7 +685,7 @@ mod tests {
         assert!((one.cancel.cx() - one.panel.cx()).abs() < 1e-3);
         assert_eq!(one.cancel.y, two.cancel.y);
         assert_eq!(one.destructive.w, 0.0);
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let mut alert = DecisionAlert::new();
         alert.open_card(c"Details", vec!["A".into(), "B".into()], Answers::One);
         assert_eq!((alert.answers(), alert.body.len()), (Answers::One, 2));

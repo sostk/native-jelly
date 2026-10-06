@@ -1,4 +1,4 @@
-# Feeds the live build-time chart at https://plxnative.com/ci/ (site/ci/index.html).
+# Feeds the live build-time chart at https://nativejelly.com/ci/ (site/ci/index.html).
 #
 # After every CI / Simulator CI run on main this appends the new successful push runs, with their
 # per-job seconds, to ci-history.json on the orphan `ci-metrics` branch (tools/ci-history.py). The

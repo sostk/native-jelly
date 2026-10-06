@@ -23,11 +23,11 @@ pub(crate) fn load_thread(
     super::log("SMP: calling Load (uid=NULL)");
     let ok = unsafe { super::sink().load(payload.0, native_epoch) };
     super::log(&format!("SMP: Load returned ok={ok}"));
-    // `/tmp/plxnative-holdload[=ms]`: on demand, hold the flip below so issue #74 D.1's budget
+    // `/tmp/nativejelly-holdload[=ms]`: on demand, hold the flip below so issue #74 D.1's budget
     // (the pump's "deferring" line, then, past `NATIVE_LOAD_BUDGET`, the failure read-out) is
     // observable on a real television without a set that hangs here for real. Read AFTER
     // `sf_load` returns and BEFORE `mark_native_load_returned`, matching where this needs to bite.
-    if let Some(ms) = plx_base::devtrig::holdload_delay_ms() {
+    if let Some(ms) = nj_base::devtrig::holdload_delay_ms() {
         super::log(&format!(
             "holdload: armed — holding the Load-returned flag for {ms}ms"
         ));
@@ -152,7 +152,7 @@ pub(crate) fn timeline_thread(
     lease: crate::route::TimelineLease,
     stop: std::sync::Arc<ReportStop>,
 ) {
-    use crate::plex::TimelineState;
+    use crate::catalog::TimelineState;
     loop {
         if stop.wait_or_stop(REPORT_INTERVAL_S) {
             return;

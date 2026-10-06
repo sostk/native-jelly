@@ -12,7 +12,7 @@ subset of it.
 
 The facade is graded against the same server by `rust-modules/src/jf/live_tests.rs`
 (`JF_URL=… JF_USER=… JF_PASS=… cargo test --lib jf::live_tests -- --ignored --test-threads=1`),
-which exercises every op below through `plex::Client` exactly as the app calls it.
+which exercises every op below through `catalog::Client` exactly as the app calls it.
 
 ## S1 — Auth
 

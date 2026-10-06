@@ -7,27 +7,27 @@ use super::test_support::{frame};
 
 #[test]
 fn leaving_after_query_commit_before_arrival_cannot_restore_the_old_query_bookmark() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-query-leave");
+    let session = crate::catalog::session::TempSession::new("library-query-leave");
     session.watching("u-library-query-leave");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let sid =
-        crate::plex::register_for_test("query-leave-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::plex::register_for_test(
+        crate::catalog::register_for_test("query-leave-own", "127.0.0.1", 9, "synthetic", "fixture");
+    let shared = crate::catalog::register_for_test(
         "query-leave-shared",
         "127.0.0.1",
         10,
         "synthetic",
         "fixture",
     );
-    crate::plex::set_current(sid);
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
@@ -121,21 +121,21 @@ fn leaving_after_query_commit_before_arrival_cannot_restore_the_old_query_bookma
 
 #[test]
 fn a_filter_menu_resets_its_covered_library_grid_memory_without_taking_menu_focus() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-covered-query-reset");
+    let session = crate::catalog::session::TempSession::new("library-covered-query-reset");
     session.watching("u-library-covered-query-reset");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("query-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test("query-own", "127.0.0.1", 9, "synthetic", "fixture");
     let shared =
-        crate::plex::register_for_test("query-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+        crate::catalog::register_for_test("query-shared", "127.0.0.1", 10, "synthetic", "fixture");
+    crate::catalog::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);

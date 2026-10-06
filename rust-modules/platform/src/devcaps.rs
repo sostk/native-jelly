@@ -324,7 +324,7 @@ pub fn probe() {
         Ok(s) => match parse(&s) {
             Some(c) => {
                 measured = true;
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "devcaps: hevc={} {}x{} vp9={} audio={} rows: h264={}x{}@{} hevc={}x{}@{} (device table)",
                     c.hevc,
                     c.hevc_max.0,
@@ -341,14 +341,14 @@ pub fn probe() {
                 c
             }
             None => {
-                plx_base::eventlog::log(&format!(
+                nj_base::eventlog::log(&format!(
                     "devcaps: {CAPS_TABLE} unparseable — assuming the 49SM9000PLA profile"
                 ));
                 Caps::assumed()
             }
         },
         Err(e) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "devcaps: {CAPS_TABLE} unreadable ({e}) — assuming the 49SM9000PLA profile"
             ));
             Caps::assumed()

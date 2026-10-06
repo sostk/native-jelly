@@ -77,7 +77,7 @@ def main():
     print('PASS: return, errno, and partial-read negative controls rejected')
     if platform.system() == 'Linux':
         binary = out / 'auxv-native'
-        run([cc, *flags, '-D_GNU_SOURCE', '-DPLX_AUXV_HOST_TEST',
+        run([cc, *flags, '-D_GNU_SOURCE', '-DNJ_AUXV_HOST_TEST',
              ROOT / 'src/compat/getauxval.c', ROOT / 'ci/test-compat-native.c', '-o', binary])
         run([binary])
         print('PASS: same-process native Linux comparison')

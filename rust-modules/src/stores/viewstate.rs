@@ -1,7 +1,7 @@
 //! The physically owned view-state write queue (`docs/stores-as-machines.md`). Each production
 //! `Bridge` owns one [`ViewStateStore`]: main-thread state, an `Arc` worker adapter, and notice.
 
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -86,7 +86,7 @@ impl ViewStateStore {
     /// Route-unconditional landing pass for this owner's adapter.
     pub(crate) fn pump_with_gate(
         &mut self,
-        gate: &plx_machine::landgate::Gate,
+        gate: &nj_machine::landgate::Gate,
         browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
         hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> super::StoreOutcome,
         person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
@@ -113,7 +113,7 @@ impl ViewStateStore {
         search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
         metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
     ) -> super::EndpointRefreshSet {
-        self.pump_with_gate(plx_machine::landgate::fixture_gate(), browse, hubs, person, collection, search,
+        self.pump_with_gate(nj_machine::landgate::fixture_gate(), browse, hubs, person, collection, search,
             metadata)
     }
 

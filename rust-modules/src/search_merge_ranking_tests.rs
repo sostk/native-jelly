@@ -183,7 +183,7 @@ fn ranking_is_stable_so_each_servers_own_order_survives_the_pass() {
 fn a_tag_in_a_favourite_and_a_non_favourite_library_ranks_favourite_and_keeps_its_whole_count()
 {
     let sid = ServerId::from_raw(0);
-    let tag = |section: i64, count: i64| crate::plex::Tag {
+    let tag = |section: i64, count: i64| crate::catalog::Tag {
         tag: "Wallace Shawn".into(),
         tag_key: "gid-1".into(),
         id: 921,
@@ -191,8 +191,8 @@ fn a_tag_in_a_favourite_and_a_non_favourite_library_ranks_favourite_and_keeps_it
         library_section_id: section,
         ..Default::default()
     };
-    let mc = crate::plex::MediaContainer {
-        hub: vec![crate::plex::Hub {
+    let mc = crate::catalog::MediaContainer {
+        hub: vec![crate::catalog::Hub {
             hub_identifier: "actor".into(),
             kind: "actor".into(),
             directory: vec![tag(9, 5), tag(1, 3)],
@@ -477,7 +477,7 @@ fn collection_rows_become_kind_four_hits_and_other_rows_stay_ordinary_cards() {
 
     let p = project(&mc, sid, NO_FAVS);
     let Item::Collection(hit) = &p[4][0] else { panic!("a collection row is a collection hit") };
-    assert_eq!(hit.item.kind, crate::pms::KIND_COLLECTION);
+    assert_eq!(hit.item.kind, crate::catalog_fetch::KIND_COLLECTION);
     assert_eq!((hit.item.sid, hit.item.rk.as_str(), hit.item.sec), (sid, "50007", 1));
     assert_eq!((hit.tag, hit.item.child_count), (7, 12));
     assert_eq!(hit.item.thumb, "/library/collections/50007/composite/1700000000");
@@ -507,7 +507,7 @@ fn a_tag_shaped_collection_hit_routes_by_section_and_tag_id() {
     let mc = MediaContainer { hub: vec![collection], ..Default::default() };
     let p = project(&mc, sid, NO_FAVS);
     let Item::Collection(hit) = &p[4][0] else { panic!("a folded collection tag is a collection hit") };
-    assert_eq!(hit.item.kind, crate::pms::KIND_COLLECTION);
+    assert_eq!(hit.item.kind, crate::catalog_fetch::KIND_COLLECTION);
     assert_eq!((hit.item.rk.as_str(), hit.item.thumb.as_str(), hit.item.child_count), ("", "", 12));
     assert_eq!(p[4][0].title(), "Aardman Shorts");
     // the three fields the route is built from (its `ContentArg` is graded in

@@ -2,7 +2,7 @@
 //! event loop, input decode, the per-frame tick, draw orchestration, app lifecycle,
 //! the buffer-feed pump orchestration, and the dev triggers. The C boot shim
 //! (main.c) sets up the log and fallback crash tracer, calls the Rust image-marker and native-spool
-//! entries when required, then calls `plex_run` (port.rs), which hands over to `run_application`.
+//! entries when required, then calls `nj_run` (port.rs), which hands over to `run_application`.
 //! The only application subsystem left in C is the starfish.c C++/ACB seam (the engine itself is
 //! Rust: crate::player).
 #![allow(non_upper_case_globals)]
@@ -86,8 +86,8 @@ use crate::ui::consts::{
     WCODE_PLAY, WCODE_POINTER_HIDDEN, WCODE_STOP,
 };
 // The window we ASK SDL for. `surface::probe` then reads back what we actually got.
-const SCR_W: c_int = plx_base::surface::LOGICAL_W as c_int;
-const SCR_H: c_int = plx_base::surface::LOGICAL_H as c_int;
+const SCR_W: c_int = nj_base::surface::LOGICAL_W as c_int;
+const SCR_H: c_int = nj_base::surface::LOGICAL_H as c_int;
 pub(crate) const COLS: c_int = 10;
 
 // `SDL_webOSCursorVisibility` is declared apart from the rest because it exists ONLY in LG's
@@ -200,7 +200,7 @@ extern "C" {
     fn glClear(mask: c_uint);
 }
 
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 // **The screen ARGUMENT is `screens::registry`'s** since restructure phase 10 (§2.1): the
 // registry owns the concrete `ScreenArg` and the one `mount` match, so `app/` reads it here
 // rather than declaring it. Imported at the tree's root because every module under `app/`
@@ -297,7 +297,7 @@ pub(crate) struct App {
     pub(crate) refresh_hubs_at: u32,
     /// The HTTPS retry for servers on a plaintext grant (`plex::grant::UpgradeRetry`), stepped
     /// every frame beside the view-state pump (`app/run.rs`).
-    pub(crate) plaintext_upgrade: crate::plex::grant::UpgradeRetry,
+    pub(crate) plaintext_upgrade: crate::catalog::grant::UpgradeRetry,
     ev: [u8; 128],
     remote: Option<crate::remote::Remote>,
     /// The SDL window (`SDL_CreateWindow`), for the swap.
@@ -312,8 +312,8 @@ pub(crate) struct App {
     /// write, so it stays here rather than on `dev::scenarios::Scenarios`.
     pub(crate) t0: u32,
     /// The frame's instruments: the eight phase stamps, FRAMEDROP, the per-second peaks
-    /// (`diag::heartbeat`), armed by `plxnative-framedrop`.
-    instr: plx_base::diag::heartbeat::Instruments,
+    /// (`diag::heartbeat`), armed by `nativejelly-framedrop`.
+    instr: nj_base::diag::heartbeat::Instruments,
     /// Every dev-trigger arm's own state — oscillator phases, retry latches, boot-time flags
     /// (formerly `DevFlags`) — gathered on ONE struct (spec: `dev/scenarios.rs`'s module doc).
     pub(crate) scenarios: crate::dev::scenarios::Scenarios,
@@ -321,13 +321,13 @@ pub(crate) struct App {
     pub(crate) input: crate::ui::input::Input,
     /// `text::take_measure_fault` has been reported once (the report is once per process).
     measure_fault_logged: bool,
-    /// The recorder / replay driver (`plxnative-rec` / `plxnative-recplay`, spec §5.3/§5.5).
+    /// The recorder / replay driver (`nativejelly-rec` / `nativejelly-recplay`, spec §5.3/§5.5).
     pub(crate) rec: recorder::Recplay,
     pub(crate) boot_initial: Option<bootstrap::Initial>,
     pub(crate) telemetry_guard: Option<crate::telemetry::native::Guard>,
-    /// The present gate as a machine (spec §4.4). `plx_machine::idle` is still the product's verdict on
+    /// The present gate as a machine (spec §4.4). `nj_machine::idle` is still the product's verdict on
     /// this loop; this one receives the render cache's notes and is what `dispatch` takes over.
-    present: plx_machine::present::Present,
+    present: nj_machine::present::Present,
     /// The frame plan's GLASS half (spec §8.3): the layer/region source registry, shared chrome
     /// material and dev load dial. The budget half lives on the `Dispatcher` (§2.2).
     pub(crate) glass: crate::ui::frame::glass::GlassPlan,
@@ -345,7 +345,7 @@ pub(crate) struct App {
     /// never agree with each other.
     pub(crate) pages: crate::ui::dispatch::Dispatcher<bridge::AppHost>,
     /// Inputs collected for the dispatcher this iteration (`bridge` module doc).
-    pub(crate) inputs: Vec<plx_machine::machine::InputEvent<u32>>,
+    pub(crate) inputs: Vec<nj_machine::machine::InputEvent<u32>>,
     /// What that dispatcher borrows: the mounter, the real `TtfMeasure`, the store deliveries,
     /// the consent machine and the queue of requests an owned screen makes of this loop.
     pub(crate) bridge: bridge::Bridge,
@@ -357,7 +357,7 @@ impl App {
         initial.session = self.bridge.snapshot_session_init();
         Some(initial)
     }
-    /// `instr`'s own narrow read — see [`plx_base::diag::heartbeat::Instruments::last_frame_ms`]. A
+    /// `instr`'s own narrow read — see [`nj_base::diag::heartbeat::Instruments::last_frame_ms`]. A
     /// method rather than `pub(crate) instr` because the field otherwise stays module-private on
     /// purpose (`app::run` is `instr`'s only other reader, and it reaches the field directly as a
     /// descendant module); `dev::scenarios`'s stress-bench oscillators (`bench_frame_tick`) are
@@ -366,14 +366,14 @@ impl App {
         self.instr.last_frame_ms()
     }
     /// `instr`'s present-to-present read — see
-    /// [`plx_base::diag::heartbeat::Instruments::present_interval_ms`].
+    /// [`nj_base::diag::heartbeat::Instruments::present_interval_ms`].
     pub(crate) fn frame_present_interval_ms(&self) -> Option<f64> {
         self.instr.present_interval_ms()
     }
     /// Controlled construction receives decoded/captured inputs before bootstrap effects.
     pub(crate) unsafe fn from_init(initial: bootstrap::Initial, mode: bootstrap::Preflight,
-        pms_host: *const c_char, pms_port: c_int, mt: plx_base::task::MainThread,
-        deferred: Option<crate::plex::session::DeferredLoad>) -> Result<Self, c_int> {
+        pms_host: *const c_char, pms_port: c_int, mt: nj_base::task::MainThread,
+        deferred: Option<crate::catalog::session::DeferredLoad>) -> Result<Self, c_int> {
         boot::construct(pms_host, pms_port, mt, mode, Some(initial), deferred)
     }
     /// **Which page is on top** (spec §15.2) — the container's answer, and since D1 the ONLY one.
@@ -406,8 +406,8 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     //
     // Two builds can sit on one television — the app users get, and a developer one beside it
     // (`paths::app_id`) — and until this line nothing in the system said which of them produced a
-    // given log. The obvious witnesses do not work: both binaries are named `plxnative`, so
-    // `pidof` cannot tell them apart on this busybox set; `pkg/plxnative` is a path EVERY
+    // given log. The obvious witnesses do not work: both binaries are named `nativejelly`, so
+    // `pidof` cannot tell them apart on this busybox set; `pkg/nativejelly` is a path EVERY
     // configuration writes, so an md5 against the local build proves only that some flavour of
     // some configuration matches. That ambiguity is the "plausible wrong data" failure this
     // project's testing section is built around: a harness that graded the other install's log
@@ -420,10 +420,10 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // device question into something every single run answers for free.
     log(&format!(
         "install: id={} flavour={} runtime={} features={} APPID_env={}",
-        plx_base::paths::app_id(),
-        plx_base::paths::flavour().unwrap_or("-"),
-        plx_base::paths::runtime_dir().display(),
-        if plx_base::devtrig::ENABLED {
+        nj_base::paths::app_id(),
+        nj_base::paths::flavour().unwrap_or("-"),
+        nj_base::paths::runtime_dir().display(),
+        if nj_base::devtrig::ENABLED {
             "dev"
         } else {
             "release"
@@ -431,7 +431,7 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
         std::env::var("APPID").unwrap_or_else(|_| "unset".into()),
     ));
     // ...and the app directory on the NEXT line, with its provenance (`from current_exe` /
-    // `PLXNATIVE_APP_DIR` / `macOS bundle`) — strictly more than repeating the path here would
+    // `NJ_APP_DIR` / `macOS bundle`) — strictly more than repeating the path here would
     // say. Logged here rather than by whoever resolves `app_dir()` first, so the two lines are
     // adjacent and the pair is what a triage reader sees at the top. (`paths` itself cannot log:
     // the event log resolves its own path through it.)
@@ -439,13 +439,13 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // The pair stays two lines, `install:` first, rather than an `appdir=` field on `install:`:
     // every document that tells a human to read the first line to learn which install wrote a log
     // means the `install:` one.
-    log(&plx_base::paths::app_dir_line());
+    log(&nj_base::paths::app_dir_line());
     // Before the crash backend is armed, identify the firmware it would need to report. Sentry's
     // scope is snapshotted into the crash event file during `telemetry::boot`; probing afterwards
     // leaves only `Linux 4.4.84`, which does not distinguish webOS releases at all. This reads one
     // flat platform file and cannot fail the boot. The crash channel receives only the reviewed
     // compatibility fields (webOS/API/model/SoC/hardware revision), never device identifiers.
-    plx_platform::tv::probe_device();
+    nj_platform::tv::probe_device();
     // libwayland reads `WAYLAND_DEBUG` when SDL connects the display: same "before anything can
     // read it" rule. It writes the environment, so it runs BEFORE `telemetry::boot`: sentry-native's
     // `sentry_init` starts its own "sentry-tele" worker threads (logs/metrics are on by default in
@@ -455,7 +455,7 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // a snapshot this publishes, and with none installed it refuses everything. So the ordering is
     // the fail-closed guarantee, not a convenience.
     let telemetry_guard = crate::telemetry::boot();
-    // …and then, if asked, DIE. `plxnative-crashtest` is the instrument for the instrument: both
+    // …and then, if asked, DIE. `nativejelly-crashtest` is the instrument for the instrument: both
     // the C fallback and (when consented/configured) the out-of-process native recorder are now
     // armed, so this trigger grades the reporter users actually run. It remains before SDL so a
     // playback/UI regression cannot make the instrument unreachable. Compiled out with
@@ -473,7 +473,7 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // direct-play gate derive from this instead of asserting the dev TV's abilities as universal
     // (issue #22's bug class; docs/plex-pass-audit.md's closing section). Same contract as
     // above: one file read, cannot fail the boot, falls back to the profile that always shipped.
-    plx_platform::devcaps::probe();
+    nj_platform::devcaps::probe();
     // …and, in a LAB build only, the diagnostics bridge: read `lab.json` out of the app directory
     // and start the ring's clock. After the two probes above so its first log line can be read
     // beside the firmware and codec lines it will be uploaded with; a no-op at compile time in
@@ -490,7 +490,7 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     crate::dev::scenarios::pre_boot();
     // Last: the worker must observe every boot-time environment/trigger mutation above, while a
     // controlled replay which deliberately skips this preflight keeps the conservative Unknown.
-    plx_platform::tv::start_capability_probe();
+    nj_platform::tv::start_capability_probe();
     telemetry_guard
 }
 
@@ -506,7 +506,7 @@ unsafe fn run_and_shutdown(app: &mut App) -> c_int {
     i32::from(failed)
 }
 
-fn finish_recording(rec: &mut recorder::Recplay, gate: &plx_machine::landgate::Gate) -> bool {
+fn finish_recording(rec: &mut recorder::Recplay, gate: &nj_machine::landgate::Gate) -> bool {
     std::mem::replace(rec, recorder::Recplay::Off).finish(gate)
 }
 
@@ -520,7 +520,7 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
         initial.content = Some(bootstrap::ContentInitial { detail:"1001".into(), detailsec:1,
             detailok:true, filmography:true, personcredits:9, nowan:true });
         for name in ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"] {
-            initial.triggers.push(format!("plxnative-{name}"));
+            initial.triggers.push(format!("nativejelly-{name}"));
         }
         initial.validate()?;
     }
@@ -550,8 +550,8 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
     crate::metadata::prewarm_dv_latches();
     // A live boot's `install:`/`appdir:` preamble above owns the first two event-log lines.
     // Diagnostics probes `app_dir()` on its worker, so starting it earlier races that preamble.
-    plx_platform::storage::diagnostics::start(env!("PLX_VERSION"));
-    let main_thread = unsafe { plx_base::task::MainThread::assume() };
+    nj_platform::storage::diagnostics::start(env!("NJ_VERSION"));
+    let main_thread = unsafe { nj_base::task::MainThread::assume() };
     let mut app = unsafe { boot(pms_host,pms_port,main_thread,preflight) }?;
     if telemetry_guard.is_some() { app.telemetry_guard = telemetry_guard; }
     Ok(app)

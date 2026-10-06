@@ -15,7 +15,7 @@
 //! * track ids are `Index + 1`, so `0` keeps meaning "off".
 use super::models::*;
 use super::{ids, ticks};
-use crate::plex::{
+use crate::catalog::{
     Chapter, Hub, HexColor, LibrarySection, Marker, Media, MediaContainer, MediaPart, Metadata,
     Rating, Stream, Tag, UltraBlurColors,
 };
@@ -130,7 +130,7 @@ pub fn jf_image_path(src: &str, w: i64, h: i64, png: bool) -> Option<String> {
     let mut q = format!("/Items/{owner}/Images/{image_type}?maxWidth={w}&maxHeight={h}&quality=90");
     if let Some(tag) = tag {
         q.push_str("&tag=");
-        q.push_str(&crate::plex::urlenc_str(tag));
+        q.push_str(&crate::catalog::urlenc_str(tag));
     }
     if png {
         q.push_str("&format=Png");

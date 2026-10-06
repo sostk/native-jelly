@@ -38,7 +38,7 @@ minutes of television for a pipeline the change cannot reach.)
 
 **2. Reading a bare `./tests/run.py` as the suite it used to be.** The default **inverted on
 2026-08-22**. A bare run is now the **synthetic tier** — generated clips served off your
-Mac through `/tmp/plxnative-playurl`, **no Plex anywhere**. Ask `./tests/run.py --list` for the
+Mac through `/tmp/nativejelly-playurl`, **no Plex anywhere**. Ask `./tests/run.py --list` for the
 count — a number written down here has now rotted twice, the second time inside the branch that
 was correcting the first. The 21 library-backed cases are
 `./tests/run.py --server`; `--fps` and `--fps-player` imply `--server` (their scenes navigate a
@@ -80,12 +80,12 @@ but a photograph could show it (`gfx.rs`, at the `glBlendFuncSeparate` call).
 
 ### Tier 1 — `make check`
 
-`cargo +$(RUST_NIGHTLY) test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net`, preceded by `make lint` (three **named** clippy lints —
+`cargo +$(RUST_NIGHTLY) test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net`, preceded by `make lint` (three **named** clippy lints —
 `ifs_same_cond`, `same_functions_in_if_condition`, `if_same_then_else` — the shadowed-branch gate),
 and followed by **three** host checks that are easy to forget are in here: `python3 ci/flavor.py
 --selftest` (the flavour transform, whose central assertion is that the STABLE transform is the
 identity), `python3 tests/test_harness.py` (pins `run.py`'s skip partition — the path a full
-`manifest.local.json` never enters), and `python3 tools/plxnative-lab selftest` (the Lab
+`manifest.local.json` never enters), and `python3 tools/nativejelly-lab selftest` (the Lab
 Diagnostics receiver: a real TLS listener on loopback, one accepted upload and six refusals — the
 whole of what that tool exposes to the public internet, and the only gate it has, since nothing in
 cargo can see a python file).
@@ -105,7 +105,7 @@ lock.) Do not write a new number here: measure it if you need one — this file 
 Count it yourself if you need the number:
 
 ```sh
-cd rust-modules && cargo +nightly test --lib -p plxnative-modules -p plx_base -p plx_machine -p plx_platform -p plx_gfx -p plx_net -- --list | grep -c ': test'
+cd rust-modules && cargo +nightly test --lib -p nativejelly-modules -p nj_base -p nj_machine -p nj_platform -p nj_gfx -p nj_net -- --list | grep -c ': test'
 ```
 
 **Run it on nightly.** `make check` uses `cargo +$(RUST_NIGHTLY)`; a bare `cargo test` uses your
@@ -129,7 +129,7 @@ ships, because `-Z build-std` is what ships.
    an owned screen keeps no focus of its own (the `FocusEngine` does), but `pms`'s catalog statics
    are shared across modules. `ui/xfade.rs` is the cautionary case, and its own module doc says why:
    pure value semantics **with one exception that costs them their parallelism** — `tick` reports
-   to `plx_machine::idle`'s process-global dirty flag, which `plx_machine::idle`'s own "a settled screen does not
+   to `nj_machine::idle`'s process-global dirty flag, which `nj_machine::idle`'s own "a settled screen does not
    repaint" assertions read. Without the lock they fail *other modules'* tests intermittently,
    which is the worst shape a flake can take. **Anything you make report to the frame gate inherits
    that obligation**, and reach for `testlock` rather than a fresh local mutex when the global is
@@ -164,10 +164,10 @@ It provably cannot answer:
 **Two host-only traps that read as your change being broken.** The recipes are `ui-sim`'s; they are
 named here only so you can tell them from a regression in your own edit.
 
-- **`make sim-shot` hangs on a settled screen.** `PLXNATIVE_SHOT_FRAME` (`SIM_FRAME`, default 200)
-  counts **presented** frames, and `plx_machine::idle` gates presents — so a screen that settles before
-  frame 200 never reaches it. Arm `plxnative-noidle` in the instance root, or drive the `shot` FIFO
-  token instead, which calls `plx_machine::idle::invalidate()` for you (`shot.rs::request`).
+- **`make sim-shot` hangs on a settled screen.** `NJ_SHOT_FRAME` (`SIM_FRAME`, default 200)
+  counts **presented** frames, and `nj_machine::idle` gates presents — so a screen that settles before
+  frame 200 never reaches it. Arm `nativejelly-noidle` in the instance root, or drive the `shot` FIFO
+  token instead, which calls `nj_machine::idle::invalidate()` for you (`shot.rs::request`).
 - **A synthetic `SDL_TEXTINPUT` SIGSEGVs inside SDL** — macOS `libSDL2` is sdl2-compat forwarding
   into SDL3, whose text event carries a `char *text` where SDL2 carries an inline `char[32]`. No
   Rust panic, no log line, the process is just gone. The FIFO's key and `ck:` tokens are safe
@@ -210,7 +210,7 @@ that command), even though `--list` returns long before `acquire_tv_lock` is rea
 right trade — a guard that parsed argv for intent would be a hole the first time a listing flag
 grew a side effect — but it means the free move is not free from inside an agent session. Take a
 short lease for it (`tools/tv-lock.sh with --why 'coverage listing' -- ./tests/run.py --list
---server`) or read `tests/manifest.json`. Not `PLX_TV_LOCK_BYPASS=1`: that hatch is for a human who
+--server`) or read `tests/manifest.json`. Not `NJ_TV_LOCK_BYPASS=1`: that hatch is for a human who
 knows the set is theirs.
 
 ## The router — keyed on WHAT CHANGED
@@ -246,7 +246,7 @@ politeness — an over-reporting animator gives back the whole ~38-points-of-a-c
 every `floor` in the suite still passes.
 
 **Anything that animates from a CLOCK rather than a spring** — a millisecond ramp, a phase, a
-countdown — must call `plx_machine::idle::invalidate()` itself. `note_spring` cannot see it, and both
+countdown — must call `nj_machine::idle::invalidate()` itself. `note_spring` cannot see it, and both
 `Xfade::tick` (every CONTENT cross-fade) and `Spinner::draw` (every loading read-out) **shipped
 FROZEN** before they were made to report. (`Xfade` drove the ROUTE dip too until restructure phase
 12 lifted that onto `ui::containers::transition::PageDip`, which reports from inside its own
@@ -254,8 +254,8 @@ FROZEN** before they were made to report. (`Xfade` drove the ROUTE dip too until
 applies to a new async landing that repaints: without an `invalidate()` it arrives invisibly until
 the next keypress.
 
-**Frame rate.** Never quote `fps=` from a run with `/tmp/plxnative-profile` or
-`/tmp/plxnative-hwcnt` armed: `frame.ui` brackets every frame with two `glFinish`es and drops a
+**Frame rate.** Never quote `fps=` from a run with `/tmp/nativejelly-profile` or
+`/tmp/nativejelly-hwcnt` armed: `frame.ui` brackets every frame with two `glFinish`es and drops a
 60 fps leg to **45**. Measured 2026-08-19, in the run that also **refuted** the "the panel
 thermally throttles" story — a control leg held 60/60/60 across six runs on a set up 2 h 15 m under
 continuous load. The 50 fps readings in the archived notes belong to the instrument. Take pacing in
@@ -285,7 +285,7 @@ coexist in one tree — so the usual case is caught for you. That tree is **`$TM
 crate's own `target/`: this checkout can live on a network mount, and cargo cannot take its
 incremental-session lock there (`os error 45`), which failed EVERY edit with a "RELEASE-CONFIG
 BREAK" that was really a filesystem answer. Set `CARGO_TARGET_DIR` to override. Confirm it is wired in `.claude/settings.json` before relying on it, run
-the command by hand before shipping regardless, and prefer `plx_base::devtrig::latched_flag!` over
+the command by hand before shipping regardless, and prefer `nj_base::devtrig::latched_flag!` over
 hand-rolling a `#[cfg]`/`#[cfg(not)]` pair.
 
 **Packaging.** Two ipk bugs shipped undetected until 2026-08-02 — a missing
@@ -307,7 +307,7 @@ built the package; a real release goes through the **`cut-release`** skill.
   library holds, so `16 passed` can mean sixteen of the shapes that installation happens to own. A
   skipped case is coverage you did not get.
 - **The `install:` boot line names which of two identically-named binaries wrote the log.** Read it
-  before grading anything: `pidof` cannot tell the installs apart and `pkg/plxnative` is a path
+  before grading anything: `pidof` cannot tell the installs apart and `pkg/nativejelly` is a path
   every flavour and configuration writes.
 - **A `sim=1` heartbeat is not a device measurement.** Say which tier produced each claim. "Looks
   right in the simulator, not yet device-verified" is a useful, honest status; "verified" without a

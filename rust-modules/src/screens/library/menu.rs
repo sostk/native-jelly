@@ -4,7 +4,7 @@ use crate::screens::registry::{AppFx, AppMsg, LibraryLike, LibraryMenuArg, Libra
 use crate::stores::browse::{BrowseCmd, LibraryWork, QueryEdit, SectionAddress};
 use crate::stores::{StoreCmd, StoreId};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
     LogicalState, Machine, MachineId, NavOp,
 };
@@ -115,12 +115,12 @@ fn stamp_state(stamp: &mut Stamp, state: crate::browse::SourceState) {
     });
 }
 
-fn stamp_tier(stamp: &mut Stamp, tier: Option<crate::plex::probe::Location>) {
+fn stamp_tier(stamp: &mut Stamp, tier: Option<crate::catalog::probe::Location>) {
     stamp.tag(match tier {
         None => 0,
-        Some(crate::plex::probe::Location::Local) => 1,
-        Some(crate::plex::probe::Location::Remote) => 2,
-        Some(crate::plex::probe::Location::Relay) => 3,
+        Some(crate::catalog::probe::Location::Local) => 1,
+        Some(crate::catalog::probe::Location::Remote) => 2,
+        Some(crate::catalog::probe::Location::Relay) => 3,
     });
 }
 
@@ -218,7 +218,7 @@ fn source_draft(
 }
 
 fn sort_draft(sorts: &[SortEntry], sort_index: usize, sort_desc: bool) -> MenuDraft {
-    let mut section = MenuSection::new(plx_platform::i18n::msg::browse_library_sort_by());
+    let mut section = MenuSection::new(nj_platform::i18n::msg::browse_library_sort_by());
     let mut stamp = Stamp::default();
     stamp.tag(7);
     stamp.u32(sort_index as u32);
@@ -279,7 +279,7 @@ fn listing_kind(
 
 /// The TYPE menu: every [`LibraryType`] the section's kind offers, the current one checked.
 fn type_draft(section_kind: SecKind, current: LibraryType) -> MenuDraft {
-    let mut section = MenuSection::new(plx_platform::i18n::msg::browse_library_filter_by());
+    let mut section = MenuSection::new(nj_platform::i18n::msg::browse_library_filter_by());
     let mut selected = None;
     for &kind in LibraryType::offered(section_kind) {
         let identity = format!("type:{}", kind.code());
@@ -299,16 +299,16 @@ fn type_draft(section_kind: SecKind, current: LibraryType) -> MenuDraft {
 }
 
 fn filter_draft(unwatched: bool, genre: Option<&GenreEntry>, genres_supported: bool) -> MenuDraft {
-    let mut section = MenuSection::new(plx_platform::i18n::msg::browse_library_filter()).item_keyed(
+    let mut section = MenuSection::new(nj_platform::i18n::msg::browse_library_filter()).item_keyed(
         "unwatched".into(),
         RowKey(0),
         RowKind::Toggle,
         Action::Edit(QueryEdit::Unwatched(!unwatched)),
-        Row::new(plx_platform::i18n::msg::browse_library_unwatched_only()).toggle(unwatched),
+        Row::new(nj_platform::i18n::msg::browse_library_unwatched_only()).toggle(unwatched),
     );
     if genres_supported {
-        let mut row = Row::new(plx_platform::i18n::msg::browse_library_genre())
-            .value(genre.map(|g| g.title.as_str()).unwrap_or(plx_platform::i18n::msg::browse_library_all()))
+        let mut row = Row::new(nj_platform::i18n::msg::browse_library_genre())
+            .value(genre.map(|g| g.title.as_str()).unwrap_or(nj_platform::i18n::msg::browse_library_all()))
             .chevron(true);
         // A chosen genre is the server's tag title; "All" is the app's.
         if genre.is_some() { row = row.server_value(); }
@@ -332,10 +332,10 @@ fn filter_draft(unwatched: bool, genre: Option<&GenreEntry>, genres_supported: b
 
 fn genre_draft(genres: &[GenreEntry], current: Option<&GenreEntry>) -> MenuDraft {
     let mut section = choice(
-        MenuSection::new(plx_platform::i18n::msg::browse_library_genre()),
+        MenuSection::new(nj_platform::i18n::msg::browse_library_genre()),
         "genre:all".into(),
         Action::Edit(QueryEdit::Genre(None)),
-        Row::new(plx_platform::i18n::msg::browse_library_all_genres()).checked(current.is_none()),
+        Row::new(nj_platform::i18n::msg::browse_library_all_genres()).checked(current.is_none()),
     );
     let mut stamp = Stamp::default();
     stamp.tag(10);
@@ -395,7 +395,7 @@ impl LibraryMenu {
     }
     /// Hugs its rows: width is the shared menu rule ([`TableView::menu_panel_width`]), hung off the
     /// anchor's left edge and pulled back so the right edge stays inside the keep-out.
-    fn frame(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    fn frame(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         let [x, y, _, h] = self.arg.anchor.map(f32::from_bits);
         let height = self.form.table.measured_height().clamp(120.0, 740.0);
         let width = self.form.table.menu_panel_width(measure);
@@ -443,11 +443,11 @@ impl LibraryMenu {
         directory: crate::stores::browse::DirectoryView<'_>,
     ) -> MenuDraft {
         let title = match self.kind {
-            LibraryMenuKind::Type => plx_platform::i18n::msg::browse_library_filter_by(),
-            LibraryMenuKind::Sort => plx_platform::i18n::msg::browse_library_sort_by(),
-            LibraryMenuKind::Filter => plx_platform::i18n::msg::browse_library_filter(),
-            LibraryMenuKind::Genre => plx_platform::i18n::msg::browse_library_genre(),
-            LibraryMenuKind::Sources => plx_platform::i18n::msg::browse_library_libraries(),
+            LibraryMenuKind::Type => nj_platform::i18n::msg::browse_library_filter_by(),
+            LibraryMenuKind::Sort => nj_platform::i18n::msg::browse_library_sort_by(),
+            LibraryMenuKind::Filter => nj_platform::i18n::msg::browse_library_filter(),
+            LibraryMenuKind::Genre => nj_platform::i18n::msg::browse_library_genre(),
+            LibraryMenuKind::Sources => nj_platform::i18n::msg::browse_library_libraries(),
         };
         let mut section = MenuSection::new(title);
         match self.kind {
@@ -479,7 +479,7 @@ impl LibraryMenu {
                     section,
                     "recheck".into(),
                     Action::Recheck,
-                    Row::new(plx_platform::i18n::msg::browse_library_check_shares()),
+                    Row::new(nj_platform::i18n::msg::browse_library_check_shares()),
                 );
             }
         }
@@ -553,7 +553,7 @@ impl<H: LibraryLike> Machine<H> for LibraryMenu {
                 // engine owner. Never mutate the table selection as a script shortcut.
                 for edge in [Edge::Down, Edge::Up] {
                     fx.push(Fx::Deliver(fx.from(), Delivery::Screen(ScreenEvent::Input(
-                        plx_machine::machine::InputEvent { at: cx.tick, source: plx_machine::machine::Source::Script,
+                        nj_machine::machine::InputEvent { at: cx.tick, source: nj_machine::machine::Source::Script,
                             kind: InputKind::Key { key, sym: 0, wcode: 0, edge, at_edge: false } },
                     ))));
                 }
@@ -692,7 +692,7 @@ impl<H: LibraryLike> Screen<H> for LibraryMenu {
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter.alpha(f.page_alpha);
         let measure = f.measure;
-        // The panel's own share, named for `/tmp/plxnative-cpuprof` beside the page's `lb.*`
+        // The panel's own share, named for `/tmp/nativejelly-cpuprof` beside the page's `lb.*`
         // phases: the frosted ground plus its rows, so a slow frame while the Sort/Filter menu is
         // up can be read as the PANEL or as the host under it rather than as one `main.ui` total.
         let field = f.underlay;
@@ -760,9 +760,9 @@ mod review_actions_tests;
 mod tests {
     use super::*;
     use crate::browse::{SecKind, SourceState};
-    use crate::plex::ServerId;
+    use crate::catalog::ServerId;
     use crate::ui::fixture::FixtureMeasure;
-    use plx_machine::machine::{FocusRead, Host, InputOwner, PressRead, Tick};
+    use nj_machine::machine::{FocusRead, Host, InputOwner, PressRead, Tick};
     use crate::ui::screen::ScreenArg;
 
     /// A draft as a table lays it out — the drawn sections, and every focusable row as
@@ -796,11 +796,11 @@ mod tests {
         fn probe(&self, _: &mut String) {}
     }
     impl ScreenArg for Arg {
-        fn chrome(&self) -> plx_machine::machine::Chrome {
-            plx_machine::machine::Chrome::None
+        fn chrome(&self) -> nj_machine::machine::Chrome {
+            nj_machine::machine::Chrome::None
         }
-        fn id(&self) -> plx_machine::machine::ScreenId {
-            plx_machine::machine::ScreenId(1)
+        fn id(&self) -> nj_machine::machine::ScreenId {
+            nj_machine::machine::ScreenId(1)
         }
         fn title(&self) -> Option<&str> {
             None
@@ -899,7 +899,7 @@ mod tests {
     #[test]
     fn canonical_menu_state_distinguishes_actions_and_row_order_with_the_same_identity_registry() {
         let mut menu = LibraryMenu::new(EntryId(7), LibraryMenuArg {
-            host: plx_machine::machine::InstanceId(8),
+            host: nj_machine::machine::InstanceId(8),
             target: SectionAddress { epoch: 11, sid: ServerId::from_raw(1), section: 7 },
             kind: LibraryMenuKind::Sort, anchor: [0; 4],
         });
@@ -1051,7 +1051,7 @@ mod tests {
     #[test]
     fn sources_keep_server_identity_and_align_recheck_after_separator() {
         // with_cx retains the same explicit directory shape a Bridge captures from its owner.
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let (groups, sections) = source_sections();
         let draft = lay(source_draft(11, 0, &groups, &sections));
         assert_eq!(draft.sections.len(), 2);
@@ -1075,7 +1075,7 @@ mod tests {
         let mut menu = LibraryMenu::new(
             EntryId(7),
             LibraryMenuArg {
-                host: plx_machine::machine::InstanceId(8),
+                host: nj_machine::machine::InstanceId(8),
                 target: SectionAddress {
                     epoch: 11,
                     sid: ServerId::from_raw(1),
@@ -1092,10 +1092,10 @@ mod tests {
                 .expect("recheck remains placed after the separator"));
         assert_eq!(placed.index, Some(3));
         let mut output = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut fx = Effects::new(
             &mut output,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(8)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(8)),
             &mut present,
         );
         with_cx(|cx| menu.activate(recheck, cx, &mut fx));
@@ -1154,7 +1154,7 @@ mod tests {
         let mut menu = LibraryMenu::new(
             EntryId(7),
             LibraryMenuArg {
-                host: plx_machine::machine::InstanceId(8),
+                host: nj_machine::machine::InstanceId(8),
                 target: SectionAddress {
                     epoch: 11,
                     sid: ServerId::from_raw(1),
@@ -1212,8 +1212,8 @@ mod tests {
     /// popover actually gets.
     #[test]
     fn every_type_row_fits_the_popover_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
-        let measure = plx_base::fontcov::advances::ShippedMeasure;
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        let measure = nj_base::fontcov::advances::ShippedMeasure;
         let mut out = Vec::new();
         for language in SHIPPED {
             let _guard = language_on_this_thread_for_test(language);
@@ -1234,14 +1234,14 @@ mod tests {
     /// client-side Plays entry (app text); Filter covers both the "All" value and a chosen genre.
     #[test]
     fn every_sort_filter_and_genre_row_fits_the_popover_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         let sorts = vec![
             SortEntry { key: "titleSort".into(), desc_key: String::new(), title: "Title".into(), default_desc: false },
             SortEntry { key: crate::browse::PLAYS_SORT_KEY.into(), desc_key: String::new(),
-                title: plx_platform::i18n::msg::browse_library_plays().into(), default_desc: true },
+                title: nj_platform::i18n::msg::browse_library_plays().into(), default_desc: true },
         ];
         let genres = vec![GenreEntry { id: "1".into(), title: "Drama".into() }];
-        let measure = plx_base::fontcov::advances::ShippedMeasure;
+        let measure = nj_base::fontcov::advances::ShippedMeasure;
         let mut out = Vec::new();
         for language in SHIPPED {
             let _guard = language_on_this_thread_for_test(language);

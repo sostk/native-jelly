@@ -11,7 +11,7 @@ submission rather than a warning:
     ipkroot/ctl/control         Version: — read by opkg and by webosbrew's repogen.
     rust-modules/Cargo.toml     what every version the app REPORTS is derived from —
                                 X-Plex-Version, the telemetry release, the diagnostics panel.
-                                `rust-modules/build.rs` publishes it as `PLX_VERSION`, exactly
+                                `rust-modules/build.rs` publishes it as `NJ_VERSION`, exactly
                                 for a RELEASE build and as the next MINOR plus `-dev` for
                                 everything else, so a working tree stops claiming to be the
                                 last release. That suffix exists only in the binary.
@@ -50,7 +50,7 @@ APPINFO = ROOT / "pkg/appinfo.json"
 CONTROL = ROOT / "ipkroot/ctl/control"
 CARGO_TOML = ROOT / "rust-modules/Cargo.toml"
 CARGO_LOCK = ROOT / "rust-modules/Cargo.lock"
-CRATE = "plxnative-modules"
+CRATE = "nativejelly-modules"
 
 SEMVER = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 

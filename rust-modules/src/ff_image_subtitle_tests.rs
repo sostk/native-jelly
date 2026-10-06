@@ -8,10 +8,10 @@
 
 use super::*;
 
-/// Where the host FFmpeg was staged: `PLX_FFMPEG_DIR` (what `make check-ffmpeg` passes), else the
+/// Where the host FFmpeg was staged: `NJ_FFMPEG_DIR` (what `make check-ffmpeg` passes), else the
 /// checkout's own `pkg/`.
 fn host_ffmpeg_dir() -> std::path::PathBuf {
-    std::env::var_os("PLX_FFMPEG_DIR")
+    std::env::var_os("NJ_FFMPEG_DIR")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pkg"))
 }
@@ -26,7 +26,7 @@ fn bind_host_ffmpeg() {
         ("avformat", avformat::load(Some(&dir))),
     ] {
         assert!(
-            matches!(verdict, plx_base::dynlib::Loaded::Ok(_)),
+            matches!(verdict, nj_base::dynlib::Loaded::Ok(_)),
             "{what}: no host FFmpeg in {} — run `make check-ffmpeg`",
             dir.display()
         );
@@ -78,7 +78,7 @@ fn bind_host_ffmpeg() {
 #[test]
 #[ignore = "needs the host build of the bundled FFmpeg — run by `make check-ffmpeg`"]
 fn mkvmerge_zlib_subtitle_tracks_decode_like_uncompressed_ones() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     bind_host_ffmpeg();
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/mkv_zlib_subs.mkv")

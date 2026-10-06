@@ -8,9 +8,9 @@ use super::test_support::{directory_policy_fixture, DirectoryPolicyCleanup};
 
 #[test]
 fn viewstate_optimistic_home_edit_keeps_the_frame_directory_policy() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test(
         "bridge-viewstate-directory", "127.0.0.1", 9, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
@@ -42,7 +42,7 @@ fn viewstate_optimistic_home_edit_keeps_the_frame_directory_policy() {
 
 #[test]
 fn separate_bridges_do_not_share_any_viewstate_owner_state_or_notice() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
 
@@ -68,7 +68,7 @@ fn separate_bridges_do_not_share_any_viewstate_owner_state_or_notice() {
 
 #[test]
 fn reset_fences_a_late_old_viewstate_worker_from_the_post_reset_request() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
     bridge.stores.viewstate.borrow_mut().seed_post_reset_flight_for_test();
     let old_adapter = bridge.stores.viewstate.borrow().adapter_for_test();
@@ -86,7 +86,7 @@ fn reset_fences_a_late_old_viewstate_worker_from_the_post_reset_request() {
         "a completion from the retired adapter must not satisfy the replacement request");
 }
 
-fn person_open(sid: crate::plex::ServerId, name: &str) -> crate::stores::person::PersonCmd {
+fn person_open(sid: crate::catalog::ServerId, name: &str) -> crate::stores::person::PersonCmd {
     crate::stores::person::PersonCmd::Open {
         sid,
         key: "person-key".into(),
@@ -96,8 +96,8 @@ fn person_open(sid: crate::plex::ServerId, name: &str) -> crate::stores::person:
     }
 }
 
-fn person_item(sid: crate::plex::ServerId, rk: &str, watched: bool) -> crate::pms::PmsMovie {
-    crate::pms::PmsMovie {
+fn person_item(sid: crate::catalog::ServerId, rk: &str, watched: bool) -> crate::catalog_fetch::PmsMovie {
+    crate::catalog_fetch::PmsMovie {
         sid,
         rk: rk.into(),
         watched,
@@ -110,7 +110,7 @@ fn deliver_person(rig: &mut Bridge, command: crate::stores::person::PersonCmd) {
     let parts = CxParts { tick: Tick::default(), press: Default::default(),
         focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
     let mut out = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Store(StoreId::Person.ord()), &mut present);
     assert_eq!(Rig::<AppHost>::deliver(rig, MachineId::Store(StoreId::Person.ord()),
         &AppMsg::Store(StoreCmd::Person(command)), &parts, &mut fx), Handled::Yes);
@@ -118,10 +118,10 @@ fn deliver_person(rig: &mut Bridge, command: crate::stores::person::PersonCmd) {
 
 #[test]
 fn separate_bridges_do_not_share_any_person_owner_state_or_notice() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
 
     first.person_run(person_open(sid, "first-owner"));
     first.stores.person.seed_ownership_fixture_for_test();
@@ -148,9 +148,9 @@ fn separate_bridges_do_not_share_any_person_owner_state_or_notice() {
 
 #[test]
 fn person_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "old-person"));
     let old_adapter = bridge.stores.person.adapter_for_test();
     let finish_old_worker = bridge.stores.person.late_completion_for_test();
@@ -170,9 +170,9 @@ fn person_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 
 #[test]
 fn person_store_notifies_only_when_a_command_actually_changed_state() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "reader"));
     bridge.stores.person.install_for_test(vec![person_item(sid, "movie", false)], Vec::new());
     let _ = bridge.stores.person.take_notice();
@@ -191,7 +191,7 @@ fn person_store_notifies_only_when_a_command_actually_changed_state() {
 
 #[test]
 fn person_reset_on_an_empty_store_still_notifies() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
     let _ = bridge.stores.person.take_notice();
 
@@ -203,10 +203,10 @@ fn person_reset_on_an_empty_store_still_notifies() {
 
 #[test]
 fn addressed_person_store_command_changes_and_notifies_only_its_bridge() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
     first.person_run(person_open(sid, "first-reader"));
     second.person_run(person_open(sid, "second-reader"));
     first.stores.person.install_for_test(vec![person_item(sid, "movie", false)], Vec::new());
@@ -228,9 +228,9 @@ fn addressed_person_store_command_changes_and_notifies_only_its_bridge() {
 
 #[test]
 fn profile_activation_clears_the_same_bridge_person_before_a_new_mount() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "outgoing-profile"));
     assert!(bridge.person_view().current().is_some());
 
@@ -242,9 +242,9 @@ fn profile_activation_clears_the_same_bridge_person_before_a_new_mount() {
 
 #[test]
 fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test(
         "bridge-person-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
@@ -269,7 +269,7 @@ fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
         "ViewState's callback must address the Person owner beside its own queue");
     assert_eq!(first.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 1);
     assert_eq!(second.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 0);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Detail owns the press decision, but the Bridge owns the retained Browse directory needed
@@ -280,13 +280,13 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
     use crate::ui::dispatch::Tap;
 
     struct ViewStateDispatch {
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         app_effects: usize,
         store_deliveries: usize,
     }
 
     impl Tap<AppHost> for ViewStateDispatch {
-        fn effect(&mut self, _: u64, stamped: &plx_machine::machine::Stamped<AppHost>) {
+        fn effect(&mut self, _: u64, stamped: &nj_machine::machine::Stamped<AppHost>) {
             match &stamped.fx {
                 Fx::App(AppFx::Store(StoreId::ViewState,
                     StoreCmd::ViewState(crate::stores::viewstate::ViewStateCmd::Request {
@@ -316,9 +316,9 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
         }
     }
 
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test(
         "bridge-detail-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let route = AppArg::Content(ContentArg::Detail { sid, rk: "movie".into() });
@@ -360,18 +360,18 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
 
 #[test]
 fn hubs_land_and_tick_keep_the_frame_directory_policy() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let own = crate::catalog::register_for_test(
         "bridge-hubs-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let hidden = crate::plex::register_for_test(
+    let hidden = crate::catalog::register_for_test(
         "bridge-hubs-hidden", "127.0.0.1", 10, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
     rig.directory = directory_policy_fixture(own, hidden);
     let directory = rig.directory.clone();
 
-    crate::pms::with_refused_fetches_for_test(|| {
+    crate::catalog_fetch::with_refused_fetches_for_test(|| {
         let _ = rig.stores.hubs.run_with_directory(
             crate::stores::hubs::HubsCmd::Reset, directory.view());
         let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
@@ -427,11 +427,11 @@ fn hubs_land_and_tick_keep_the_frame_directory_policy() {
 
 #[test]
 fn search_capture_and_pump_keep_the_frame_directory_policy() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let own = crate::catalog::register_for_test(
         "bridge-search-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let hidden = crate::plex::register_for_test(
+    let hidden = crate::catalog::register_for_test(
         "bridge-search-hidden", "127.0.0.1", 10, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
@@ -477,9 +477,9 @@ fn search_capture_and_pump_keep_the_frame_directory_policy() {
 /// when a fix changes the seam a test would otherwise call.
 #[test]
 fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let server = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let server = crate::catalog::register_for_test(
         "bridge-search-landing", "127.0.0.1", 11, "synthetic", "landing");
     let _cleanup = DirectoryPolicyCleanup;
     let mut first = Bridge::for_test(|| 0);
@@ -505,7 +505,7 @@ fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
     first.search_run(crate::stores::search::SearchCmd::SetQuery("landed-owner".into()));
     let gen = first.stores.search.query_gen();
     let idx = server.raw() as usize;
-    let item = crate::search::Item::Media(crate::pms::PmsMovie {
+    let item = crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
         sid: server, rk: "landed-row".into(), title: "Landed row".into(), ..Default::default()
     });
     crate::search::land_for_test(&first.stores.search.adapter_for_test(), idx, gen, item);
@@ -546,9 +546,9 @@ fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
 /// `reproduce-before-fixing`.
 #[test]
 fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let server = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let server = crate::catalog::register_for_test(
         "bridge-search-late-worker", "127.0.0.1", 12, "synthetic", "late-worker");
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);
@@ -565,7 +565,7 @@ fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     // would still match, if it could reach the current adapter at all).
     let gen = bridge.stores.search.query_gen();
     let idx = server.raw() as usize;
-    let item = crate::search::Item::Media(crate::pms::PmsMovie {
+    let item = crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
         sid: server, rk: "late-row".into(), title: "Late row".into(), ..Default::default()
     });
     crate::search::land_for_test(&old_adapter, idx, gen, item);
@@ -590,9 +590,9 @@ fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 ///    `land_for_test` + post-reset `pump` shape.
 #[test]
 fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
-    let _guard = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    let _guard = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let sid = crate::catalog::register_for_test(
         "bridge-metadata-late-worker", "127.0.0.1", 15, "synthetic", "late-worker");
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);
@@ -659,19 +659,19 @@ fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 /// publication. Changing the process globals after A captured must not make A draw B's chip.
 #[test]
 fn two_bridges_keep_their_own_captured_profile_and_labels_for_a_scrim_lift() {
-    let _guard = plx_base::testlock::serial();
-    struct Restore(std::sync::Arc<crate::plex::session::CurrentProfile>);
+    let _guard = nj_base::testlock::serial();
+    struct Restore(std::sync::Arc<crate::catalog::session::CurrentProfile>);
     impl Drop for Restore {
         fn drop(&mut self) {
-            crate::plex::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
+            crate::catalog::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
         }
     }
-    let _restore = Restore(crate::plex::session::current_snapshot());
+    let _restore = Restore(crate::catalog::session::current_snapshot());
     let mut a = Bridge::for_test(|| 0);
     let mut b = Bridge::for_test(|| 0);
     a.seed_chrome_for_test("Owner A", "A", &["Home", "Movies", ""]);
     b.seed_chrome_for_test("Owner B", "B", &["Home", "TV Shows", ""]);
-    crate::plex::session::publish_profile_for_test(Some(crate::plex::session::UserRef {
+    crate::catalog::session::publish_profile_for_test(Some(crate::catalog::session::UserRef {
         title: "Global B".into(),
         ..Default::default()
     }), 41);

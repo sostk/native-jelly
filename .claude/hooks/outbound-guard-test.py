@@ -148,7 +148,7 @@ CASES = [
     # The same letter, the other meaning: `-f` is a string field on gh and a boolean on `git add`
     # whose NEXT word is the path. A flat text-flag set gets one of these two wrong.
     (ALLOW, 'gh workflow run release.yml -f version=0.3.0'),
-    (ALLOW, 'PLX_PUBLISH_BYPASS=1 gh pr create --body "%s"' % FAKE_TV),   # the documented hatch
+    (ALLOW, 'NJ_PUBLISH_BYPASS=1 gh pr create --body "%s"' % FAKE_TV),   # the documented hatch
 ]
 
 # --- heredocs: the inversion against tv-lock-guard.py -----------------------------------------
@@ -230,12 +230,12 @@ def file_payload_case():
 
 
 def recording_case():
-    """The restructure's privacy rules (spec §5.6): a `plxnative-recordings/` descendant is refused by
+    """The restructure's privacy rules (spec §5.6): a `nativejelly-recordings/` descendant is refused by
     PATH wherever it sits; a payload carrying the envelope grammar is refused by CONTENT; the one
     exception is a file under tests/fixtures/replay/ whose every string is in the synthetic
     alphabet — and a fixture with a household string in it is refused even there."""
     ok = True
-    rec_dir = os.path.join(ROOT, "plxnative-recordings")
+    rec_dir = os.path.join(ROOT, "nativejelly-recordings")
     os.makedirs(rec_dir, exist_ok=True)
     line = '{"f":1,"t":"st","hash":42}\n'
     with open(os.path.join(rec_dir, "rec-0000.jsonl"), "w") as f:
@@ -281,8 +281,8 @@ def recording_case():
                 '"text":[115,48,49,50,51,52,53,54,55],"sz":28,"bold":false},"bits":1}\n')
     bad_metric_paths.append("tests/fixtures/replay/duplicate-metric/rec-0000.jsonl")
     for cmd, want in (
-        ("gh release upload v1 plxnative-recordings/rec-0000.jsonl", BLOCK),
-        ("gh release upload v1 /tmp/anything/plxnative-recordings/rec-0000.jsonl", BLOCK),
+        ("gh release upload v1 nativejelly-recordings/rec-0000.jsonl", BLOCK),
+        ("gh release upload v1 /tmp/anything/nativejelly-recordings/rec-0000.jsonl", BLOCK),
         ("gh pr create --body-file notes.jsonl", BLOCK),
         ("gh pr create --body '{\"f\":3,\"t\":\"st\",\"hash\":1}'", BLOCK),
         ("git add tests/fixtures/replay/demo/rec-0000.jsonl", ALLOW),

@@ -28,7 +28,7 @@ use crate::screens::family::SettingsPage;
 use std::sync::Arc;
 use crate::screens::settings::{Family, RouteSurface};
 use crate::stores::{StoreCmd, StoreId, StoreWork};
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Chrome, Cx, Effects, EntryId, Host, InstanceId, LogicalState, ScreenId,
 };
 use crate::ui::screen::{Mounter, ReturnState, Screen};
@@ -73,24 +73,24 @@ pub(crate) enum AppFx {
 /// main-thread handoff that makes a sign-in the running account. Carries a password, so the
 /// controlled recorder refuses it like [`PreferenceCmd`].
 pub(crate) enum JfAuthCmd {
-    Probe { candidates: Vec<crate::plex::Origin>, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    Probe { candidates: Vec<crate::catalog::Origin>, reply: std::sync::mpsc::Sender<JfAuthReply> },
     Password {
-        origin: crate::plex::Origin,
+        origin: crate::catalog::Origin,
         username: String,
         password: String,
         reply: std::sync::mpsc::Sender<JfAuthReply>,
     },
-    QuickConnectStart { origin: crate::plex::Origin, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    QuickConnectStart { origin: crate::catalog::Origin, reply: std::sync::mpsc::Sender<JfAuthReply> },
     QuickConnectPoll {
-        origin: crate::plex::Origin,
+        origin: crate::catalog::Origin,
         qc: crate::jf::auth::QuickConnect,
         reply: std::sync::mpsc::Sender<JfAuthReply>,
     },
-    Adopt { origin: crate::plex::Origin, signed_in: crate::jf::auth::SignedIn },
+    Adopt { origin: crate::catalog::Origin, signed_in: crate::jf::auth::SignedIn },
 }
 
 pub(crate) enum JfAuthReply {
-    Probed(Result<(crate::plex::Origin, crate::jf::models::PublicSystemInfo), crate::jf::auth::AuthError>),
+    Probed(Result<(crate::catalog::Origin, crate::jf::models::PublicSystemInfo), crate::jf::auth::AuthError>),
     SignedIn(Result<crate::jf::auth::SignedIn, crate::jf::auth::AuthError>),
     QuickConnect(Result<crate::jf::auth::QuickConnect, crate::jf::auth::AuthError>),
     Polled(Result<Option<crate::jf::auth::SignedIn>, crate::jf::auth::AuthError>),
@@ -99,26 +99,26 @@ pub(crate) enum JfAuthReply {
 /// A private live receipt. Requests contain account credentials and are intentionally unsupported
 /// by the controlled recorder/replay codec; the bridge must reject them before execution.
 pub(crate) struct AccountPreferenceReply {
-    pub request: Option<crate::plex::account::PreferenceRequest>,
-    pub outcome: Result<crate::plex::account::PreferenceSnapshot, crate::plex::account::PreferenceError>,
+    pub request: Option<crate::catalog::account::PreferenceRequest>,
+    pub outcome: Result<crate::catalog::account::PreferenceSnapshot, crate::catalog::account::PreferenceError>,
 }
 
 pub(crate) enum PreferenceCmd {
     /// Capture the live profile only after admission: even session::peek can schedule storage IO.
     Load { reply: std::sync::mpsc::Sender<AccountPreferenceReply> },
     Save {
-        request: crate::plex::account::PreferenceRequest,
-        base: crate::plex::account::PreferenceSnapshot,
-        update: crate::plex::account::PreferenceUpdate,
+        request: crate::catalog::account::PreferenceRequest,
+        base: crate::catalog::account::PreferenceSnapshot,
+        update: crate::catalog::account::PreferenceUpdate,
         reply: std::sync::mpsc::Sender<AccountPreferenceReply>,
     },
-    Quality { quality: crate::plex::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
-    DirectPlay { mode: crate::plex::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
-    NextEpisode { mode: crate::plex::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
-    SkipInterval { interval: crate::plex::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
-    SubtitleSize { size: crate::plex::session::SubtitleSize, reply: std::sync::mpsc::Sender<bool> },
-    SubtitlePosition { position: crate::plex::session::SubtitlePosition, reply: std::sync::mpsc::Sender<bool> },
-    Language { language: plx_platform::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
+    Quality { quality: crate::catalog::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
+    DirectPlay { mode: crate::catalog::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
+    NextEpisode { mode: crate::catalog::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
+    SkipInterval { interval: crate::catalog::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
+    SubtitleSize { size: crate::catalog::session::SubtitleSize, reply: std::sync::mpsc::Sender<bool> },
+    SubtitlePosition { position: crate::catalog::session::SubtitlePosition, reply: std::sync::mpsc::Sender<bool> },
+    Language { language: nj_platform::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
 }
 
 /// **What the item context menu asks of the loop**, once its own `step` has resolved the pressed
@@ -152,8 +152,8 @@ pub(crate) enum PreferenceCmd {
 ///   the page being left is not one BACK can return to.
 pub(crate) struct ItemMenuReq {
     pub(crate) act: crate::screens::item_menu::Action,
-    pub(crate) sid: crate::plex::ServerId,
-    pub(crate) item: Option<crate::pms::PmsMovie>,
+    pub(crate) sid: crate::catalog::ServerId,
+    pub(crate) item: Option<crate::catalog_fetch::PmsMovie>,
     pub(crate) loaded_episode: bool,
     pub(crate) from_home: bool,
 }
@@ -232,13 +232,13 @@ pub(crate) enum PlayerReq {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum SearchReq {
     Back,
-    Detail { sid: crate::plex::ServerId, rk: String },
-    Person { sid: crate::plex::ServerId, key: String, guid: String, name: String, thumb: String },
-    ItemMenu { sid: crate::plex::ServerId, rk: String },
+    Detail { sid: crate::catalog::ServerId, rk: String },
+    Person { sid: crate::catalog::ServerId, key: String, guid: String, name: String, thumb: String },
+    ItemMenu { sid: crate::catalog::ServerId, rk: String },
     /// OK on a Collections-shelf hit. `rk` is the collection's ratingKey (empty for a tag-shaped
     /// hit from a server that ignored `includeCollections`), `tag` its tag id; both are checked
     /// against the retained selection before the route is built from it.
-    Collection { sid: crate::plex::ServerId, rk: String, tag: i64 },
+    Collection { sid: crate::catalog::ServerId, rk: String, tag: i64 },
     Tab(HomeTab),
     Account,
 }
@@ -246,9 +246,9 @@ pub(crate) enum SearchReq {
 /// Bounded actions emitted by the owned Home page. Item identity is always server-scoped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum HomeReq {
-    Play { sid: crate::plex::ServerId, rk: String, resume_ns: i64 },
-    Detail { sid: crate::plex::ServerId, rk: String },
-    ItemMenu { sid: crate::plex::ServerId, rk: String },
+    Play { sid: crate::catalog::ServerId, rk: String, resume_ns: i64 },
+    Detail { sid: crate::catalog::ServerId, rk: String },
+    ItemMenu { sid: crate::catalog::ServerId, rk: String },
     /// BACK from the shelves: fold to the hero and seat the engine in its remembered hero group.
     FoldToHero,
     Account,
@@ -274,7 +274,7 @@ pub(crate) enum HomeCmd {
     Flip(i32),
     SelectHero(i32),
     /// [`SelectHero`](Self::SelectHero), then HOLD that slot: the auto-advance stops for the
-    /// life of the page. The screenshot pipeline's pin (`/tmp/plxnative-heropin=<n>`), so a
+    /// life of the page. The screenshot pipeline's pin (`/tmp/nativejelly-heropin=<n>`), so a
     /// capture taken whenever the page settles shows the billboard the scene manifest named.
     PinHero(i32),
     ItemMenu,
@@ -286,9 +286,9 @@ pub(crate) enum LibraryReq {
     /// Evaluated after dispatch by the application, where the input owner can report a live arm.
     PublishShelves { target: crate::stores::browse::SectionAddress, hidden_page: bool, at_head: bool },
     Menu { kind: LibraryMenuKind, anchor: [u32; 4], target: crate::stores::browse::SectionAddress },
-    Play { sid: crate::plex::ServerId, rk: String, resume_ns: i64 },
-    Detail { sid: crate::plex::ServerId, rk: String },
-    ItemMenu { sid: crate::plex::ServerId, rk: String, from_deck: bool },
+    Play { sid: crate::catalog::ServerId, rk: String, resume_ns: i64 },
+    Detail { sid: crate::catalog::ServerId, rk: String },
+    ItemMenu { sid: crate::catalog::ServerId, rk: String, from_deck: bool },
     Account,
     Tab(HomeTab),
     BackToHome { kind: crate::stores::browse::SecKind },
@@ -299,15 +299,15 @@ pub(crate) enum LibraryMenuKind { Sort, Filter, Genre, Sources, Type }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LibraryMenuArg {
-    pub host: plx_machine::machine::InstanceId,
+    pub host: nj_machine::machine::InstanceId,
     pub target: crate::stores::browse::SectionAddress,
     pub kind: LibraryMenuKind,
     /// Bit-preserving rest rectangle; valid in canonical arguments without float equality.
     pub anchor: [u32; 4],
 }
 
-impl plx_machine::machine::LogicalState for LibraryMenuArg {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for LibraryMenuArg {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         c.u32(self.host.0).u32(self.target.epoch).u32(u32::from(self.target.sid.raw()))
             .u64(self.target.section as u64).u32(match self.kind {
                 LibraryMenuKind::Sort => 0, LibraryMenuKind::Filter => 1,
@@ -330,17 +330,17 @@ impl plx_machine::machine::LogicalState for LibraryMenuArg {
 #[derive(Clone)]
 pub(crate) struct ItemMenuArg {
     /// The server every action's ratingKey names — see [`ItemMenuReq`].
-    pub(crate) sid: crate::plex::ServerId,
+    pub(crate) sid: crate::catalog::ServerId,
     /// The item the menu is about. For a card it is the row's own key, repeated here so the
     /// identity questions (`same_instance`, the canonical hash) need not look inside the row.
     pub(crate) rk: String,
     pub(crate) kind: ItemMenuKind,
     /// The PAGE entry the menu hangs off: its focused element is the anchor the panel sits beside
     /// and the tile lifted back out of the modal dim (`app::bridge::redraw_opener`).
-    pub(crate) host: plx_machine::machine::EntryId,
+    pub(crate) host: nj_machine::machine::EntryId,
     /// …and which element that is, as the host page's own focus at the press frame. The surface
     /// takes input the moment it is presented, so the host's live cursor is not the answer.
-    pub(crate) focus: Option<plx_machine::machine::FocusKey<u32>>,
+    pub(crate) focus: Option<nj_machine::machine::FocusKey<u32>>,
     /// The focused tile's drawn rect, bit-preserving so a canonical argument needs no float
     /// equality — [`LibraryMenuArg::anchor`]'s rule. The presenter resolves the centred fallback
     /// (`item_menu::fallback_anchor`) before storing it, so this is always a real rect.
@@ -363,7 +363,7 @@ pub(crate) enum ItemMenuKind {
     Card {
         /// Boxed because it is by far the largest thing an `AppArg` can carry, and every other
         /// variant of that enum would pay for it inline.
-        row: Box<crate::pms::PmsMovie>,
+        row: Box<crate::catalog_fetch::PmsMovie>,
         from_deck: bool,
     },
     /// The detail page's episode filmstrip. `mark` is resolved by the page through the same
@@ -402,8 +402,8 @@ impl PartialEq for ItemMenuArg {
 }
 impl Eq for ItemMenuArg {}
 
-impl plx_machine::machine::LogicalState for ItemMenuArg {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for ItemMenuArg {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         c.u32(u32::from(self.sid.raw())).str(&self.rk);
         match &self.kind {
             ItemMenuKind::Card { row, from_deck } => { c.u32(0).bool(*from_deck).u32(row.kind as u32); }
@@ -422,16 +422,16 @@ impl plx_machine::machine::LogicalState for ItemMenuArg {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LibraryCmd {
     Enter(crate::stores::browse::SecKind),
-    /// Seat focus on one grid card (tests, and the screenshot pipeline's `plxnative-libgrid`).
+    /// Seat focus on one grid card (tests, and the screenshot pipeline's `nativejelly-libgrid`).
     FocusGrid { row: usize, col: usize },
     /// Seat focus on one card of a hub shelf above the grid, `shelf` counted from the top (the
-    /// screenshot pipeline's `plxnative-libshelf`).
+    /// screenshot pipeline's `nativejelly-libshelf`).
     FocusShelf { shelf: usize, col: usize },
     /// Open the Sort or Filter menu exactly as OK on its toolbar chip does (the screenshot
-    /// pipeline's `plxnative-libmenu`).
+    /// pipeline's `nativejelly-libmenu`).
     OpenMenu(LibraryMenuKind),
     /// Choose a TYPE menu value exactly as its row does (the screenshot pipeline's and the fps
-    /// suite's `plxnative-libtype`).
+    /// suite's `nativejelly-libtype`).
     SetType(crate::browse::LibraryType),
     Page(i32),
     Sweep,
@@ -442,7 +442,7 @@ pub(crate) enum LibraryCmd {
 /// Stable section identity. PMS section keys are server-local, never globally unique.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LibrarySectionIdentity {
-    pub(crate) sid: crate::plex::ServerId,
+    pub(crate) sid: crate::catalog::ServerId,
     pub(crate) key: i64,
 }
 
@@ -454,7 +454,7 @@ pub(crate) enum LibraryIdentity {
     Shelf {
         section: LibrarySectionIdentity,
         hub: String,
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         rk: String,
     },
     ShelfSlot {
@@ -465,7 +465,7 @@ pub(crate) enum LibraryIdentity {
     },
     Grid {
         section: LibrarySectionIdentity,
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         rk: String,
     },
     GridSlot {
@@ -510,8 +510,8 @@ pub(crate) struct LibraryViewport {
     pub(crate) shelves: Vec<(String, f32)>,
 }
 
-impl plx_machine::machine::LogicalState for LibraryViewport {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for LibraryViewport {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         let Self { epoch, section, scroll, shelves } = self;
         c.u32(*epoch).u32(u32::from(section.sid.raw())).u64(section.key as u64).f32(*scroll);
         c.seq(shelves.len());
@@ -530,14 +530,14 @@ pub(crate) use crate::stores::ContentArg;
 pub(crate) enum DetailIdentity {
     /// A published placeholder with no server-side identity yet; never equal to a landed item.
     Slot(u32),
-    Season { sid: crate::plex::ServerId, show: String, rk: String },
-    Episode { sid: crate::plex::ServerId, rk: String, text: bool },
-    Related { sid: crate::plex::ServerId, rk: String },
-    Cast { sid: crate::plex::ServerId, key: String, guid: String, name: String, role: String },
-    Extra { sid: crate::plex::ServerId, rk: String },
+    Season { sid: crate::catalog::ServerId, show: String, rk: String },
+    Episode { sid: crate::catalog::ServerId, rk: String, text: bool },
+    Related { sid: crate::catalog::ServerId, rk: String },
+    Cast { sid: crate::catalog::ServerId, key: String, guid: String, name: String, role: String },
+    Extra { sid: crate::catalog::ServerId, rk: String },
     /// A card of the collection shelf. Its own variant rather than `Related`: the two shelves are
     /// different rows, and a movie that moves between them across a refetch is a different card.
-    CollectionMember { sid: crate::plex::ServerId, rk: String },
+    CollectionMember { sid: crate::catalog::ServerId, rk: String },
 }
 
 #[derive(Clone, Debug)]
@@ -555,7 +555,7 @@ pub(crate) struct DetailMemory {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CardIdentity {
-    pub(crate) sid: crate::plex::ServerId,
+    pub(crate) sid: crate::catalog::ServerId,
     pub(crate) rk: String,
     pub(crate) elem: u32,
 }
@@ -576,7 +576,7 @@ impl CardKeys {
 
     /// The element `(sid, rk)` owns, interning a fresh one on first sight. `page` names the page
     /// in the exhaustion panic.
-    pub(crate) fn intern(&mut self, sid: crate::plex::ServerId, rk: &str, page: &str) -> u32 {
+    pub(crate) fn intern(&mut self, sid: crate::catalog::ServerId, rk: &str, page: &str) -> u32 {
         if let Some(elem) = self.elem_for(sid, rk) { return elem; }
         let elem = self.next;
         self.next = elem.checked_add(1).unwrap_or_else(|| panic!("{page} element-key space exhausted"));
@@ -588,8 +588,8 @@ impl CardKeys {
     /// found through one index built for the pass, so a page landing costs O(cards + keys)
     /// rather than a scan of every key per card.
     pub(crate) fn intern_all<'a>(&mut self,
-        cards: impl Iterator<Item = (crate::plex::ServerId, &'a str)>, page: &str) -> Vec<u32> {
-        let mut known: std::collections::HashMap<(crate::plex::ServerId, String), u32> =
+        cards: impl Iterator<Item = (crate::catalog::ServerId, &'a str)>, page: &str) -> Vec<u32> {
+        let mut known: std::collections::HashMap<(crate::catalog::ServerId, String), u32> =
             self.keys.iter().map(|k| ((k.sid, k.rk.clone()), k.elem)).collect();
         cards.map(|(sid, rk)| {
             if let Some(&elem) = known.get(&(sid, rk.to_string())) { return elem; }
@@ -613,8 +613,8 @@ impl CardKeys {
         self.next = self.next.max(saved.next).max(after).max(first);
     }
 
-    pub(crate) fn elem_for(&self, sid: crate::plex::ServerId, rk: &str) -> Option<u32> {
-        self.keys.iter().find(|k| crate::plex::same_item((k.sid, k.rk.as_str()), (sid, rk))).map(|k| k.elem)
+    pub(crate) fn elem_for(&self, sid: crate::catalog::ServerId, rk: &str) -> Option<u32> {
+        self.keys.iter().find(|k| crate::catalog::same_item((k.sid, k.rk.as_str()), (sid, rk))).map(|k| k.elem)
     }
 
     /// The identity that owns `elem`.
@@ -631,7 +631,7 @@ impl CardKeys {
 
     /// This registry's canonical bytes after the page's `next` — `len` then `(sid, rk, elem)` per
     /// key, the order every card page and both [`PageMemory`] arms have always written.
-    fn write_keys(&self, c: &mut plx_machine::machine::Canon) {
+    fn write_keys(&self, c: &mut nj_machine::machine::Canon) {
         for key in &self.keys { c.u32(u32::from(key.sid.raw())).str(&key.rk).u32(key.elem); }
     }
 }
@@ -646,7 +646,7 @@ pub(crate) struct CardPageMemory {
 
 impl CardPageMemory {
     /// `tag` is the [`PageMemory`] arm's canonical tag: 2 for Person, 7 for Collection.
-    fn write(&self, tag: u32, c: &mut plx_machine::machine::Canon) {
+    fn write(&self, tag: u32, c: &mut nj_machine::machine::Canon) {
         c.u32(tag).u32(self.cards.next).bool(self.header_marked).seq(self.cards.len());
         self.cards.write_keys(c);
     }
@@ -677,8 +677,8 @@ pub(crate) struct FilmographyMemory {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HomeHubIdentity {
     ContinueWatching,
-    Identifier { sid: crate::plex::ServerId, id: String, key: String },
-    Key { sid: crate::plex::ServerId, key: String },
+    Identifier { sid: crate::catalog::ServerId, id: String, key: String },
+    Key { sid: crate::catalog::ServerId, key: String },
     Ephemeral { generation: u32, ordinal: u32 },
 }
 
@@ -690,7 +690,7 @@ pub(crate) struct HomeGroupKey {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum HomeItemIdentity {
-    Item { hub: HomeHubIdentity, sid: crate::plex::ServerId, rk: String },
+    Item { hub: HomeHubIdentity, sid: crate::catalog::ServerId, rk: String },
     Slot { hub: HomeHubIdentity, generation: u32, ordinal: u32 },
 }
 
@@ -711,7 +711,7 @@ pub(crate) struct HomeMemory {
     pub(crate) items: Arc<Vec<HomeItemKey>>,
     pub(crate) next_group: u32,
     pub(crate) next_elem: u32,
-    pub(crate) carousel: Option<(crate::plex::ServerId, String)>,
+    pub(crate) carousel: Option<(crate::catalog::ServerId, String)>,
     pub(crate) strip_chosen: bool,
     pub(crate) scroll_y: f32,
     /// Stable group keys, not row ordinals: provider reorder must not transfer a viewport.
@@ -731,8 +731,8 @@ pub(crate) enum PageMemory {
     Search(crate::screens::search::Memory),
 }
 
-impl plx_machine::machine::LogicalState for DetailIdentity {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for DetailIdentity {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         match self {
             Self::Slot(local) => { c.u32(4).u32(*local); }
             Self::Season { sid, show, rk } => { c.u32(0).u32(u32::from(sid.raw())).str(show).str(rk); }
@@ -746,8 +746,8 @@ impl plx_machine::machine::LogicalState for DetailIdentity {
     fn probe(&self, out: &mut String) { out.push_str("detail_identity"); }
 }
 
-impl plx_machine::machine::LogicalState for PageMemory {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for PageMemory {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         match self {
             Self::None => { c.u32(0); }
             Self::Detail(memory) => {
@@ -818,11 +818,11 @@ impl plx_machine::machine::LogicalState for PageMemory {
     fn probe(&self, out: &mut String) { out.push_str("page_memory"); }
 }
 
-fn write_library_section(section: &LibrarySectionIdentity, c: &mut plx_machine::machine::Canon) {
+fn write_library_section(section: &LibrarySectionIdentity, c: &mut nj_machine::machine::Canon) {
     c.u32(u32::from(section.sid.raw())).u64(section.key as u64);
 }
 
-fn write_library_identity(identity: &LibraryIdentity, c: &mut plx_machine::machine::Canon) {
+fn write_library_identity(identity: &LibraryIdentity, c: &mut nj_machine::machine::Canon) {
     match identity {
         LibraryIdentity::Library(section) => { c.u32(0); write_library_section(section, c); }
         LibraryIdentity::Shelf { section, hub, sid, rk } => {
@@ -846,7 +846,7 @@ fn write_library_identity(identity: &LibraryIdentity, c: &mut plx_machine::machi
     }
 }
 
-fn write_home_hub(hub: &HomeHubIdentity, c: &mut plx_machine::machine::Canon) {
+fn write_home_hub(hub: &HomeHubIdentity, c: &mut nj_machine::machine::Canon) {
     match hub {
         HomeHubIdentity::ContinueWatching => { c.u32(0); }
         HomeHubIdentity::Identifier { sid, id, key } => {
@@ -867,7 +867,7 @@ pub(crate) enum ContentReq {
     Play { play: PlayIntent, resume_ns: i64 },
     /// Start a hero preview. Does not push the player route.
     PreviewStart {
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         rk: String,
         part: String,
         vcodec: String,
@@ -917,7 +917,7 @@ pub(crate) enum ContentPanel {
     /// opened it — bit-preserving, so a canonical argument holds it without float equality.
     AltSources { anchor: [u32; 4] },
     /// *Track information* (`screens::tracks_panel`), opened at 1-based `page`. Every interactive
-    /// opening passes 1; `/tmp/plxnative-tracks=<n>` is the only caller that does not, and it is
+    /// opening passes 1; `/tmp/nativejelly-tracks=<n>` is the only caller that does not, and it is
     /// what makes a headless capture of page 2 possible at all.
     Tracks { page: i32 },
     /// *About* (`screens::about_panel`), the footer card's synopsis read in full. It carries
@@ -950,8 +950,8 @@ impl ContentPanel {
     /// `None` back means "this page cannot offer that panel", which the caller drops.
     pub(crate) fn surface(
         self,
-        host: plx_machine::machine::InstanceId,
-        subject: Option<(crate::plex::ServerId, &str)>,
+        host: nj_machine::machine::InstanceId,
+        subject: Option<(crate::catalog::ServerId, &str)>,
     ) -> Option<(crate::ui::containers::modal::Style, AppArg)> {
         use crate::ui::containers::modal::Style;
         Some(match self {
@@ -989,7 +989,7 @@ impl ContentPanel {
 pub(crate) enum PlayIntent {
     /// An item off this page's own metadata.
     Item {
-        sid: crate::plex::ServerId,
+        sid: crate::catalog::ServerId,
         rk: String,
         part: String,
         vcodec: String,
@@ -1001,7 +1001,7 @@ pub(crate) enum PlayIntent {
     /// than a `&'static` catalog borrow: it is held inside `PageAction`/`AppFx` across a frame
     /// boundary, and once Detail's `selected` becomes an owned per-page snapshot (rather than a
     /// process-wide catalog read) there is no `'static` row left to borrow.
-    Movie(crate::pms::PmsMovie),
+    Movie(crate::catalog_fetch::PmsMovie),
 }
 
 pub(crate) trait ContentLike: AppLike<Memory = PageMemory> {}
@@ -1026,7 +1026,7 @@ pub(crate) trait MetadataLike: AppLike + Sized {
 /// A host that publishes Home's retained catalog view. The view is borrowed from the rig-owned
 /// snapshot and is therefore valid for the complete step/draw query without per-frame cloning.
 pub(crate) trait HomeLike: AppLike<Memory = PageMemory> + Sized {
-    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::pms::HubsView<'a>;
+    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::catalog_fetch::HubsView<'a>;
 }
 
 /// A host that publishes this frame's playback session (spec §2.3). The player's owned screens
@@ -1079,9 +1079,9 @@ pub(crate) enum DetailRefreshPhase {
 pub(crate) enum AppMsg {
     Session(crate::auth::owner::SessionEvent),
     Consent(ConsentCmd),
-    RestartReply { correlation: u32, accepted: bool },
-    SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
-    BackReply { correlation: u32, resumed: bool },
+    RestartReply { #[allow(dead_code)] correlation: u32, #[allow(dead_code)] accepted: bool },
+    SelectionReply { #[allow(dead_code)] correlation: u32, #[allow(dead_code)] accepted: bool, #[allow(dead_code)] flow_epoch: u64 },
+    BackReply { #[allow(dead_code)] correlation: u32, #[allow(dead_code)] resumed: bool },
     Store(StoreCmd),
     StoreWork(StoreWork),
     HubsResult(crate::stores::hubs::HubsResult),
@@ -1199,8 +1199,7 @@ pub(crate) mod word {
     /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
     pub(crate) const LOGIN: &str = "login";
-    /// The who's-watching picker (`screens::profiles::ProfilesScreen`). Same spelling as
-    /// `app::words::route_word`'s `AppArg::Profiles` arm — see this module's doc.
+    #[allow(dead_code)]
     pub(crate) const PROFILES: &str = "profiles";
 }
 
@@ -1443,7 +1442,7 @@ mod tests {
 /// wrapped were folded in here in phase 12 (§15.2: the enum is gone) — see the note above.
 ///
 /// **Both owned variants carry the page their inner stack is ROOTED at**, which is there for the
-/// dev boot targets and for nothing else. `/tmp/plxnative-settings=privacy` has to put a headless
+/// dev boot targets and for nothing else. `/tmp/nativejelly-settings=privacy` has to put a headless
 /// run on a page that is normally two presses inside the surface, and the loop cannot press them:
 /// the Settings root's row indices are `RootPage`'s private business (the Favourites row is absent
 /// signed out), so a loop that reached the child by delivering `Activate(<row>)` would be encoding
@@ -1523,7 +1522,7 @@ pub(crate) enum AppArg {
     /// The Settings family, rooted at this page (`SettingsPage::Root` for every real opening).
     Settings(SettingsPage),
     /// The first-run consent question, rooted at this stage byte (0 for every real opening;
-    /// `screens::consent`'s `STAGE_PRODUCT` for `/tmp/plxnative-consent=product`).
+    /// `screens::consent`'s `STAGE_PRODUCT` for `/tmp/nativejelly-consent=product`).
     FirstRunConsent(u8),
 }
 
@@ -1676,13 +1675,13 @@ impl crate::ui::screen::ScreenArg for AppArg {
 /// **What a detail page that is about to mount should be RESTORED to** — the one payload the
 /// container's own `ReturnState` cannot supply, because the page has never been on this stack.
 ///
-/// Its two users are the `/tmp/plxnative-detail` boot trigger (a hard cut onto a page nobody
+/// Its two users are the `/tmp/nativejelly-detail` boot trigger (a hard cut onto a page nobody
 /// navigated from) and a show opened ON A PARTICULAR SEASON, which is the mount a page argument
 /// cannot express: an argument names a PAGE, and a season is a tab inside one. It was a
 /// `ui::trail::Node` until phase 12, i.e. a whole history entry used as a carrier for its `Spot`.
 #[derive(Clone)]
 pub(crate) struct DetailSeed {
-    pub(crate) sid: crate::plex::ServerId,
+    pub(crate) sid: crate::catalog::ServerId,
     pub(crate) rk: String,
     pub(crate) spot: crate::metadata::Spot,
 }
@@ -1719,7 +1718,7 @@ pub(crate) struct AppMounter {
 /// it for its own host exactly as the dispatcher instantiates everything else.
 impl<H> Mounter<H> for AppMounter
 where
-    H: plx_machine::machine::Host<Arg = AppArg> + HomeLike + LibraryLike + SearchLike + PlayerLike + AuthLike + PersonLike + CollectionLike + MetadataLike,
+    H: nj_machine::machine::Host<Arg = AppArg> + HomeLike + LibraryLike + SearchLike + PlayerLike + AuthLike + PersonLike + CollectionLike + MetadataLike,
 {
     fn mount(
         &mut self,
@@ -1729,8 +1728,9 @@ where
         cx: &Cx<'_, H>,
         fx: &mut Effects<'_, H>,
     ) -> Box<dyn Screen<H>> {
+        let _ = fx;
         let entry = match cx.owner {
-            plx_machine::machine::InputOwner::Entry(e) => e,
+            nj_machine::machine::InputOwner::Entry(e) => e,
             _ => EntryId(0),
         };
         match arg {
@@ -1803,24 +1803,10 @@ where
             // failure) or an unanswered persistence warning keeps the Session owner's screen. A
             // saved Jellyfin server that failed at boot, and every other sign-in, is Jellyfin's.
             AppArg::Login => {
-                use crate::auth::Phase;
-                let read = H::auth(cx);
-                let plex_flow = read.0.persistence_warning.is_some()
-                    || matches!(read.0.phase,
-                        Phase::Creating | Phase::Waiting | Phase::Discovering | Phase::Profiles | Phase::Switching)
-                    || (read.0.phase == Phase::Error && crate::jf::store::current().is_none());
-                if plex_flow {
-                    Box::new(crate::screens::login::LoginScreen::new(entry, read))
-                } else {
-                    Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
-                }
+                Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
             }
             AppArg::Profiles => {
-                let screen = crate::screens::profiles::ProfilesScreen::new(entry, H::auth(cx));
-                fx.push(plx_machine::machine::Fx::App(AppFx::Session(
-                    crate::auth::SessionCmd::DismissPinError,
-                )));
-                Box::new(screen)
+                Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
             }
             AppArg::Home => {
                 let mut page = crate::screens::home::HomeScreen::new(entry, id);
@@ -1894,18 +1880,18 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
     use crate::screens::player::overlay::{OverlayKind, PlayerOverlayArg};
     let mut args = vec![
         AppArg::LibraryMenu(LibraryMenuArg {
-            host: plx_machine::machine::InstanceId(1),
+            host: nj_machine::machine::InstanceId(1),
             target: crate::stores::browse::SectionAddress {
-                epoch: 0, sid: crate::plex::ServerId::UNSET, section: 0,
+                epoch: 0, sid: crate::catalog::ServerId::UNSET, section: 0,
             },
             kind: LibraryMenuKind::Sort,
             anchor: [0; 4],
         }),
         AppArg::AccountMenu,
         AppArg::ItemMenu(ItemMenuArg {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             rk: "1".into(),
-            kind: ItemMenuKind::Card { row: Box::new(crate::pms::PmsMovie::default()), from_deck: false },
+            kind: ItemMenuKind::Card { row: Box::new(crate::catalog_fetch::PmsMovie::default()), from_deck: false },
             host: EntryId(0),
             focus: None,
             anchor: [0; 4],
@@ -1918,8 +1904,8 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         // standing a real Detail page up first, would make this derivation depend on the
         // metadata store landing.
         AppArg::AltSources(crate::screens::alt_sources::AltSourcesArg {
-            host: plx_machine::machine::InstanceId(1),
-            sid: crate::plex::ServerId::UNSET,
+            host: nj_machine::machine::InstanceId(1),
+            sid: crate::catalog::ServerId::UNSET,
             rk: "1".into(),
             anchor: [0; 4],
         }),
@@ -2016,7 +2002,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
 ///
 /// A committed replay fixture recorded against a different value cannot be LOADED at all, which is
-/// the cost this exists to make visible rather than silent; `tools/plxnative-rec rerecord` is the
+/// the cost this exists to make visible rather than silent; `tools/nativejelly-rec rerecord` is the
 /// verb (`tests/fixtures/replay/README.md`). The APP-side half is pinned separately in
 /// `app/recorder.rs`, over the shapes that are the loop's, so neither pin moves for the other's
 /// reason.
@@ -2065,7 +2051,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 ///
 /// **Extras shelf** (0xeb69_f6bf_105f_697f → 0xb462_145d_9477_05de): detail `Spot.saved_col` grows a seventh
 /// identity-keyed slot for the extras section, and `DetailIdentity` grows `Extra`. The shape
-/// string moved, so recorded fixtures need `tools/plxnative-rec rerecord` before a scenario
+/// string moved, so recorded fixtures need `tools/nativejelly-rec rerecord` before a scenario
 /// replay is trusted. Host unit tests do not replay them.
 ///
 /// **0.7 forward-port merge** (0xb462_145d_9477_05de → 0x0e66_311c_e4f1_0769): this bump is not one
@@ -2082,7 +2068,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// **Home hub identity keyed by listing key** (0x285a_3a99_d1e2_f068 → this): `HomeHubIdentity::Identifier`
 /// gains the provider-published listing key, keeping mixed-section hubs stable when their leading
 /// item changes libraries while still distinguishing section-specific rows. Recorded fixtures need
-/// `tools/plxnative-rec rerecord` like any other shape-pin bump before replay is trusted.
+/// `tools/nativejelly-rec rerecord` like any other shape-pin bump before replay is trusted.
 ///
 /// **Collection page** (`0x54b1_7d5f_d41a_2606` → this): `ARG_SHAPE` gains the Collection
 /// identity and the `CollectionAbout` summary sheet (the About panel over the collection store),
@@ -2186,14 +2172,14 @@ mod arg_tests {
         }
         for r in [
             AppArg::Content(crate::screens::registry::ContentArg::Detail {
-                sid: crate::plex::ServerId::UNSET, rk: String::new(),
+                sid: crate::catalog::ServerId::UNSET, rk: String::new(),
             }),
             AppArg::Content(crate::screens::registry::ContentArg::Person {
-                sid: crate::plex::ServerId::UNSET, key: String::new(), guid: String::new(),
+                sid: crate::catalog::ServerId::UNSET, key: String::new(), guid: String::new(),
                 name: String::new(), thumb: String::new(),
             }),
             AppArg::Content(crate::screens::registry::ContentArg::Collection(
-                crate::plex::collections::CollectionRef::by_tag(crate::plex::ServerId::UNSET, 0, 1, ""),
+                crate::catalog::collections::CollectionRef::by_tag(crate::catalog::ServerId::UNSET, 0, 1, ""),
             )),
             AppArg::Login,
             AppArg::Profiles,
@@ -2209,8 +2195,8 @@ mod arg_tests {
 
     #[test]
     fn collection_content_arg_has_the_pinned_canonical_field_order() {
-        let sid = crate::plex::ServerId::from_raw(7);
-        let arg = ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let sid = crate::catalog::ServerId::from_raw(7);
+        let arg = ContentArg::Collection(crate::catalog::collections::CollectionRef {
             sid, rk: "50077".into(), sec: 8, tag: 77, name: "Fixture".into(),
         });
         let mut expected = Canon::new();
@@ -2220,8 +2206,8 @@ mod arg_tests {
 
     #[test]
     fn collection_identity_never_compares_a_tag_with_a_rating_key() {
-        let sid = crate::plex::ServerId::from_raw(2);
-        let by_rk = |rk: &str, tag| ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let sid = crate::catalog::ServerId::from_raw(2);
+        let by_rk = |rk: &str, tag| ContentArg::Collection(crate::catalog::collections::CollectionRef {
             sid, rk: rk.into(), sec: 4, tag, name: "A".into(),
         });
         // The rule itself is `CollectionRef::same_collection`'s (graded in `plex::collections`);
@@ -2236,7 +2222,7 @@ mod arg_tests {
     #[test]
     fn the_collection_more_sheet_is_its_own_alert_surface() {
         let (style, arg) = ContentPanel::CollectionAbout
-            .surface(plx_machine::machine::InstanceId(1), None)
+            .surface(nj_machine::machine::InstanceId(1), None)
             .expect("a page with no item subject can still offer its summary");
         assert!(matches!(style, crate::ui::containers::modal::Style::Alert));
         assert!(matches!(arg, AppArg::CollectionAbout));
@@ -2247,16 +2233,16 @@ mod arg_tests {
 
     #[test]
     fn collection_is_its_own_page_identity() {
-        let a = AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef {
-            sid: crate::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 1, name: "A".into(),
+        let a = AppArg::Content(ContentArg::Collection(crate::catalog::collections::CollectionRef {
+            sid: crate::catalog::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 1, name: "A".into(),
         }));
-        let b = AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef {
-            sid: crate::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 9, name: "Renamed".into(),
+        let b = AppArg::Content(ContentArg::Collection(crate::catalog::collections::CollectionRef {
+            sid: crate::catalog::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 9, name: "Renamed".into(),
         }));
         assert_eq!(a.id(), ScreenId(23));
         assert!(a.same_instance(&b));
         assert!(!a.same_instance(&AppArg::Content(ContentArg::Detail {
-            sid: crate::plex::ServerId::UNSET, rk: "50001".into(),
+            sid: crate::catalog::ServerId::UNSET, rk: "50001".into(),
         })));
     }
 }

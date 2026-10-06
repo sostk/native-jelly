@@ -77,7 +77,7 @@ pub(crate) fn publish(page: f32, chrome: f32, tab: Option<usize>) {
 
 /// The cascade alpha for PAGE CONTENT — everything a screen draws that does not survive the swap.
 ///
-/// **Except under the `/tmp/plxnative-navblur` prototype**, where it is a flat 1: that experiment
+/// **Except under the `/tmp/nativejelly-navblur` prototype**, where it is a flat 1: that experiment
 /// replaces the grey trough with a full-bleed blur cross-faded OVER the page (see
 /// [`crate::ui::glassload`]), and a page that also dipped would be showing both transitions at
 /// once. Everything else about the transition is unchanged, so [`blur_amount`] is exactly the ramp
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn a_reader_that_runs_before_the_first_frame_sees_the_rest_values() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         publish(1.0, 1.0, None);
         set_blur_dissolve(false);
         assert_eq!(page_alpha(), 1.0);
@@ -149,7 +149,7 @@ mod tests {
     /// the dip it replaces.
     #[test]
     fn the_pending_pill_overrides_and_the_blur_prototype_reads_the_ramp_inverted() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         publish(0.25, 1.0, Some(2));
         assert_eq!(view_tab(0), 2, "the capsule travels to the queued destination");
         assert_eq!(page_alpha(), 0.25);

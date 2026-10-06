@@ -35,7 +35,7 @@
 //!
 //! # Sending twice is worse than not sending
 //!
-//! `plxnative-crash.log` is append-only and survives relaunch **by design** — `docs/agent-reference.md` calls it the
+//! `nativejelly-crash.log` is append-only and survives relaunch **by design** — `docs/agent-reference.md` calls it the
 //! thing to read after a crash-and-restart, and `tools/crash-report.sh` parses it. So this module
 //! may not truncate it. Instead it records how many bytes it has already reported and skips them,
 //! which means a human and this module can both read the file without either disturbing the other.
@@ -401,10 +401,10 @@ pub(crate) fn sentry_body(
         "event_id": event_id,
         "platform": "native",
         "level": "fatal",
-        "release": concat!("plxnative@", env!("PLX_VERSION")),
+        "release": concat!("nativejelly@", env!("NJ_VERSION")),
         "environment": super::sender::ENVIRONMENT,
         "dist": effective_build_id,
-        "sdk": {"name": "plxnative-fallback", "version": env!("PLX_VERSION")},
+        "sdk": {"name": "nativejelly-fallback", "version": env!("NJ_VERSION")},
         // **The value is built from the NAME and the ADDRESS, both of which this crate owns.** Not
         // the record's own line, which would be one line of code and would make the no-text
         // guarantee depend on what the C tracer happens to write.
@@ -468,9 +468,9 @@ pub(crate) fn panic_sentry_body(
         "event_id": event_id,
         "platform": "native",
         "level": "fatal",
-        "release": concat!("plxnative@", env!("PLX_VERSION")),
+        "release": concat!("nativejelly@", env!("NJ_VERSION")),
         "environment": super::sender::ENVIRONMENT,
-        "sdk": {"name": "plxnative-fallback", "version": env!("PLX_VERSION")},
+        "sdk": {"name": "nativejelly-fallback", "version": env!("NJ_VERSION")},
         "exception": {"values": [{
             "type": "panic",
             // The hash, NOT the message. See the module doc: this is the field a Rust panic would
@@ -588,11 +588,11 @@ pub(crate) fn preview_events() -> Vec<(&'static str, Vec<u8>)> {
 
     vec![
         (
-            plx_platform::i18n::msg::core_preview_fault(),
+            nj_platform::i18n::msg::core_preview_fault(),
             serde_json::to_vec(&fault_json).unwrap_or_default(),
         ),
         (
-            plx_platform::i18n::msg::core_preview_panic(),
+            nj_platform::i18n::msg::core_preview_panic(),
             serde_json::to_vec(&panic_json).unwrap_or_default(),
         ),
     ]
@@ -674,9 +674,9 @@ fn prefix_hash_from(seed: u64, bytes: &[u8]) -> u64 {
 fn log_path() -> std::path::PathBuf {
     #[cfg(test)]
     if let Some(root) = TEST_ROOT.lock().unwrap().as_ref() {
-        return root.join("plxnative-crash.log");
+        return root.join("nativejelly-crash.log");
     }
-    plx_base::paths::in_runtime_dir(plx_base::paths::runtime_file::CRASH)
+    nj_base::paths::in_runtime_dir(nj_base::paths::runtime_file::CRASH)
 }
 
 fn mark_paths() -> Vec<std::path::PathBuf> {
@@ -684,7 +684,7 @@ fn mark_paths() -> Vec<std::path::PathBuf> {
     if let Some(root) = TEST_ROOT.lock().unwrap().as_ref() {
         return vec![root.join("telemetry-crashmark.json")];
     }
-    plx_base::paths::telemetry_crashmark_candidates()
+    nj_base::paths::telemetry_crashmark_candidates()
 }
 
 #[cfg(test)]
@@ -696,12 +696,12 @@ static TEST_ROOT: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mute
 fn read_snapshot(path: &std::path::Path) -> std::io::Result<Snapshot> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
-    let (file, meta) = match crate::plex::session::open_owned_regular(path) {
+    let (file, meta) = match crate::catalog::session::open_owned_regular(path) {
         Ok(opened) => opened,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Snapshot::default()),
         Err(e) => return Err(e),
     };
-    let max = crate::plex::session::MAX_OWNED_FILE;
+    let max = crate::catalog::session::MAX_OWNED_FILE;
     let mut bytes = Vec::new();
     file.take(max + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > max {
@@ -720,7 +720,7 @@ fn read_snapshot(path: &std::path::Path) -> std::io::Result<Snapshot> {
 fn cutoff_mark(path: &std::path::Path) -> std::io::Result<Mark> {
     use std::io::Read;
     use std::os::unix::fs::MetadataExt;
-    let (mut file, meta) = match crate::plex::session::open_owned_regular(path) {
+    let (mut file, meta) = match crate::catalog::session::open_owned_regular(path) {
         Ok(opened) => opened,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Snapshot::default().mark()),
         Err(e) => return Err(e),
@@ -905,7 +905,7 @@ fn recover_pending_at(path: &std::path::Path) {
     let (snapshot, readable) = match read_snapshot(path) {
         Ok(s) => (s, true),
         Err(e) => {
-            plx_base::eventlog::log(&format!("telemetry: crash log not imported: {:?}", e.kind()));
+            nj_base::eventlog::log(&format!("telemetry: crash log not imported: {:?}", e.kind()));
             (Snapshot::default(), false)
         }
     };
@@ -994,7 +994,7 @@ fn recover_pending_at(path: &std::path::Path) {
     let native_wins = plan.report_native.iter().filter(|n| n.is_some()).count();
     let panic_wins = plan.native_panic.iter().filter(|p| p.is_some()).count();
     if !reports.is_empty() || !natives.is_empty() {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "telemetry: crash log had {} report(s), queued {}, native envelopes {}, native_wins={native_wins}, panic_wins={panic_wins}, symbols={}",
             reports.len(),
             io.queued,
@@ -1017,7 +1017,7 @@ pub(crate) fn discard_pending_before_opt_in() -> bool {
     match cutoff_mark(&log_path()) {
         Ok(mark) => write_mark(&mark),
         Err(e) => {
-            plx_base::eventlog::log(&format!("telemetry: crash log cutoff not taken: {:?}", e.kind()));
+            nj_base::eventlog::log(&format!("telemetry: crash log cutoff not taken: {:?}", e.kind()));
             false
         }
     }
@@ -1044,7 +1044,7 @@ fn resume_from(snapshot: &Snapshot, mark: Option<&Mark>) -> usize {
         || offset > snapshot.bytes.len()
         || Some(prefix_hash(&snapshot.bytes[..offset])) != mark.prefix_hash
     {
-        plx_base::eventlog::log("telemetry: crash log is not the one the watermark measured — reading it from the start");
+        nj_base::eventlog::log("telemetry: crash log is not the one the watermark measured — reading it from the start");
         return 0;
     }
     offset
@@ -1053,7 +1053,7 @@ fn resume_from(snapshot: &Snapshot, mark: Option<&Mark>) -> usize {
 fn read_mark() -> Option<Mark> {
     mark_paths()
         .iter()
-        .filter_map(|p| crate::plex::session::read_owned_regular(p))
+        .filter_map(|p| crate::catalog::session::read_owned_regular(p))
         .find_map(|b| serde_json::from_slice::<Mark>(&b).ok())
 }
 
@@ -1063,12 +1063,12 @@ fn write_mark(mark: &Mark) -> bool {
     };
     let stored = mark_paths()
         .iter()
-        .any(|p| crate::plex::session::write_atomic(p, &json).is_ok());
+        .any(|p| crate::catalog::session::write_atomic(p, &json).is_ok());
     if !stored {
         // Loud, because the consequence is re-reporting the same crash on every boot until it
         // succeeds — bounded by the deterministic `event_id`, which Sentry dedupes, but still a
         // request per launch that says nothing new.
-        plx_base::eventlog::log("telemetry: could not persist the crash watermark to ANY candidate path");
+        nj_base::eventlog::log("telemetry: could not persist the crash watermark to ANY candidate path");
     }
     stored
 }
@@ -1079,7 +1079,7 @@ fn write_mark(mark: &Mark) -> bool {
 /// is one of two prefixes (`/media/developer/…` or `/media/cryptofs/…`) and reporting which would
 /// say how the person installed the app — a small fact about them rather than about the crash.
 /// Sentry only uses this string to label the image in the UI; the pairing is done by `debug_id`.
-const CODE_FILE: &str = "plxnative";
+const CODE_FILE: &str = "nativejelly";
 
 #[cfg(test)]
 mod tests {
@@ -1090,7 +1090,7 @@ mod tests {
                        *** SIGNAL 11 (SIGSEGV) addr=0x0 pc=0x88ef8 lr=0x4bccd0\n\
                        reg: sp=0xbe8f1a90 fp=0x0 ip=0x1 cpsr=0x60000010 r0=0x0 r1=0x2a\n\
                        at: b6f00000-b6f21000 r-xp 00000000 fe:01 1234 /lib/libc.so.6\n\
-                       bin: 00010000-00600000 r-xp 00000000 fe:01 99 /media/developer/x/plxnative\n";
+                       bin: 00010000-00600000 r-xp 00000000 fe:01 99 /media/developer/x/nativejelly\n";
 
     /// The one fault a log holds, for the tests that are about a fault rather than about ordering.
     fn only_fault(log: &str) -> Fault {
@@ -1271,7 +1271,7 @@ mod tests {
         assert_eq!(v["environment"], super::super::sender::ENVIRONMENT);
         assert_eq!(
             v["release"],
-            concat!("plxnative@", env!("PLX_VERSION"))
+            concat!("nativejelly@", env!("NJ_VERSION"))
         );
         assert_eq!(v["debug_meta"]["images"][0]["image_size"], 0x5f0000);
         assert_eq!(
@@ -1286,7 +1286,7 @@ mod tests {
     fn the_reported_image_path_says_nothing_about_the_install() {
         let body =
             String::from_utf8(sentry_body(&only_fault(REC), "e", "b", Some("d"), None)).unwrap();
-        assert!(body.contains("plxnative"));
+        assert!(body.contains("nativejelly"));
         assert!(
             !body.contains("/media/"),
             "the install prefix must not be reported"
@@ -1464,7 +1464,7 @@ mod tests {
     /// to the file it measured, not to whatever file now has that name.
     #[test]
     fn a_recreated_longer_crash_log_does_not_inherit_the_old_offset() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let root = std::env::temp_dir().join(format!("plx-crash-generation-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
@@ -1513,7 +1513,7 @@ mod tests {
 
     #[test]
     fn an_oversized_local_log_cannot_disable_error_reporting_opt_in() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let root = std::env::temp_dir().join(format!("plx-crash-large-cutoff-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
@@ -1531,7 +1531,7 @@ mod tests {
 
     #[test]
     fn a_symlinked_crash_log_is_not_followed() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let root = std::env::temp_dir().join(format!("plx-crash-symlink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
@@ -1754,15 +1754,15 @@ mod tests {
     #[test]
     fn a_build_without_a_sentry_dsn_reads_no_crash_data() {
         use super::super::{consent, spool};
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         if super::super::sender::has_sentry() {
             return; // a developer build with a DSN compiled in cannot exercise this branch
         }
         let dir = std::env::temp_dir()
-            .join(format!("plxnative-crashreport-nodsn-{}", std::process::id()));
+            .join(format!("nativejelly-crashreport-nodsn-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let log = dir.join("plxnative-crash.log");
+        let log = dir.join("nativejelly-crash.log");
         std::fs::write(&log, REC).unwrap();
         let spool_file = dir.join("spool.bin");
         spool::set_test_path(Some(spool_file.clone()));

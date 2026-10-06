@@ -2,8 +2,8 @@
 """Module-cycle ratchet: the app crate's top-level module cycle may lose members, never gain them.
 
 `rust-modules/src` has ~63 top-level modules (the non-test `mod` lines of lib.rs). The intended
-layering is gfx/text/i18n < ui < screens < app and plex < route/player < app. A handful of thin
-upward references (ui -> screens, ui -> app, gfx/text -> ui, plex -> route) once closed one
+layering is gfx/text/i18n < ui < screens < app and catalog < route/player < app. A handful of thin
+upward references (ui -> screens, ui -> app, gfx/text -> ui, catalog -> route) once closed one
 strongly connected component holding 44 of them; the module-layer migration (docs/module-layers.md,
 gated per reference by ci/check-module-layers.py) cut it to 13 by step L14 (the set since is recorded in
 ci/module-cycle-baseline.json), whose remaining edges are ones that
@@ -61,7 +61,7 @@ BASELINE = ROOT / "ci" / "module-cycle-baseline.json"
 # upward reference (a "layer break"). Nothing is enforced from this table.
 LAYER_CHAINS = [
     [["gfx", "text", "i18n"], ["ui"], ["screens"], ["app"]],
-    [["plex"], ["route", "player"], ["app"]],
+    [["catalog"], ["route", "player"], ["app"]],
 ]
 THIN_EDGE = 20  # --report: an edge with at most this many references is "thin"
 

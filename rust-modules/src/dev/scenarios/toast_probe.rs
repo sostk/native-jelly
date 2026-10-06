@@ -1,4 +1,4 @@
-//! `/tmp/plxnative-toast=<text>` — ask the television's notification service, in-process and jailed
+//! `/tmp/nativejelly-toast=<text>` — ask the television's notification service, in-process and jailed
 //! as the app, whether it will show `<text>` as a system toast. A measurement, not the feature: the
 //! product toast is `app::clock_notice`, and this trigger asks the same service with arbitrary
 //! text, plain and as the app, logging each outcome.
@@ -13,7 +13,7 @@
 //! and [`GAP`] apart, so a screenshot can be timed against the log (a toast lives only a few
 //! seconds). Read once at boot; absent from shipping builds with the rest of the trigger surface.
 
-use plx_platform::tv::toast::{probe_line, send, Identity};
+use nj_platform::tv::toast::{probe_line, send, Identity};
 use std::time::Duration;
 
 /// Boot settle time before the first attempt, so the first toast is not behind the splash.
@@ -23,10 +23,10 @@ const GAP: Duration = Duration::from_secs(8);
 
 /// Called once from `app::boot`. A no-op without the trigger or with an empty value.
 pub(crate) fn arm_at_boot() {
-    let Some(text) = plx_base::devtrig::read("toast").filter(|t| !t.is_empty()) else { return };
-    plx_base::eventlog::log("toast-probe armed");
-    if plx_base::task::spawn("toast-probe", move || run(&text)).is_none() {
-        plx_base::eventlog::log("toast-probe IGNORED — the worker thread could not start");
+    let Some(text) = nj_base::devtrig::read("toast").filter(|t| !t.is_empty()) else { return };
+    nj_base::eventlog::log("toast-probe armed");
+    if nj_base::task::spawn("toast-probe", move || run(&text)).is_none() {
+        nj_base::eventlog::log("toast-probe IGNORED — the worker thread could not start");
     }
 }
 
@@ -39,6 +39,6 @@ fn run(text: &str) {
         if i > 0 {
             std::thread::sleep(GAP);
         }
-        plx_base::eventlog::log(&probe_line(label, &send(text, identity)));
+        nj_base::eventlog::log(&probe_line(label, &send(text, identity)));
     }
 }

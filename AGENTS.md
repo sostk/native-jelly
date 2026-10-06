@@ -2,10 +2,11 @@
 
 ## Project
 
-PlxNative is a production-quality native Plex client for rooted LG webOS 4.5 TVs. Most of the
-application is Rust under `rust-modules/src/`; `src/main.c` is the boot/crash shim,
-`src/starfish.c` is the StarfishMediaAPIs/ACB seam, and `src/svg.c` rasterizes SVGs. Keep changes
-properly factored and finished; "only a demo" is never a reason to leave a shortcut behind.
+Native Jelly is a production-quality native Jellyfin client for LG webOS 4.5 TVs (a fork of
+PlxNative). Most of the application is Rust under `rust-modules/src/`; `src/main.c` is the
+boot/crash shim, `src/starfish.c` is the StarfishMediaAPIs/ACB seam, and `src/svg.c` rasterizes
+SVGs. Keep changes properly factored and finished; "only a demo" is never a reason to leave a
+shortcut behind.
 
 The target is a cross-compiled 32-bit ARM application with a hardware video plane. Host tests and
 the macOS simulator are valuable, but they cannot prove every device behavior.
@@ -16,7 +17,9 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   reference. Read the relevant section before changing a subsystem; do not load the whole file
   when a narrower section is enough.
 - Before playback work, read `rust-modules/src/player/CLAUDE.md`.
-- Before Plex data-layer work, read `rust-modules/src/plex/CLAUDE.md` and `docs/pms-api.md`.
+- Before catalog / Jellyfin data-layer work, read `rust-modules/src/catalog/CLAUDE.md` and
+  `rust-modules/src/jf/`. Live traffic goes through `jf/`; `catalog/` is the Plex-shaped DTO
+  facade (`ratingKey`, `MediaContainer`, hub ids) that screens and stores still speak.
 - Before UI work, read `rust-modules/src/ui/CLAUDE.md` and use the shared theme, layout, and widget
   systems instead of adding screen-local visual primitives. Before touching a screen, also read
   `rust-modules/src/screens/CLAUDE.md`; the restructure's design record is
@@ -81,7 +84,7 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   worktree): a second invocation waits and prints the holder's pid/worktree/start time every 60 s
   rather than compiling alongside it, because concurrent cold builds thrash one Mac far worse than
   queuing (measured 2026-09-28: a lone run ~10 min, seven at once made one take 60 min).
-  `PLX_CHECK_LOCK=off` bypasses the lock. Never launch it in the foreground with a short tool
+  `NJ_CHECK_LOCK=off` bypasses the lock. Never launch it in the foreground with a short tool
   timeout — a queued run can wait a long time before it even starts building.
 - A PR that touches `Makefile`, `Cargo.toml`, `Cargo.lock`, `build.rs`, `.cargo/` config,
   `.github/workflows/` or the module layout pastes a before/after `make build-bench` table in its
@@ -102,7 +105,7 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   `tools/build-gc.sh --incremental|--lanes|--stale|--all` deletes only rebuildable output. After tearing
   a fleet down, run `--worktrees` (removes finished lanes — clean, unlocked, already on `main` —
   which `git branch --merged` cannot see once they are squash-merged) and then `--orphans` (lane
-  target dirs live outside the repo under `$PLX_FLEET_DIR` and outlive their worktree).
+  target dirs live outside the repo under `$NJ_FLEET_DIR` and outlive their worktree).
   `docs/agent-reference.md` keeps the measurements behind this. None of this has to be run by
   hand any more: `tools/build-gc.sh --auto` stages the same reclaim on its own, gated by free
   space and (for `--lanes`) an idle guard, from a `SessionEnd` hook and the optional hourly

@@ -9,7 +9,7 @@
 //! whole cost of having the modal up. Measured on the television at commit `c75d50ae`: the detail
 //! page under an open track panel presented every frame at `draw≈75 ms` — `loop=30` while paging —
 //! against 60 fps and `worstframe≈29 ms` for the same page with no panel. The class bisect
-//! (`/tmp/plxnative-drawmask`) priced it as fill and nothing else: `all` 17 ms (the compositor
+//! (`/tmp/nativejelly-drawmask`) priced it as fill and nothing else: `all` 17 ms (the compositor
 //! floor), `glass` 50, `rect` 51, `grad` 50, `card` 73, `text` 75 — i.e. the page's own full-screen
 //! ground, the modal scrim and the panel's glass each cost a vsync slot and they overlap.
 //!
@@ -104,7 +104,7 @@ pub(crate) fn surface_closing(cached: bool) {
     if cached {
         HOST_CLOSING.fetch_add(1, Relaxed);
     }
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// The surface left for good: release its host user (and its closing mark, if it was fading).
@@ -147,9 +147,9 @@ static HOST_CLOSING: AtomicU32 = AtomicU32::new(0);
 /// Attribute the spring motion of a popover's own `update` to the POPOVER rather than to the page
 /// it stands on — one line at the top of that `update`, held for the body.
 ///
-/// This is [`plx_machine::idle::MotionScope`], so the panel's springs never read as the PAGE's
+/// This is [`nj_machine::idle::MotionScope`], so the panel's springs never read as the PAGE's
 /// (`idle::PAGE_MOVING`, which [`host_refresh`] asks for a fading panel), plus an
-/// [`plx_machine::idle::OwnScope`] so that every `idle::invalidate` the update raises (the appear
+/// [`nj_machine::idle::OwnScope`] so that every `idle::invalidate` the update raises (the appear
 /// spring's, a marquee's) is the panel's own damage rather than the page's. Said once here so
 /// every panel's `update` is one line rather than six, and so that a panel added tomorrow inherits
 /// it.
@@ -158,15 +158,15 @@ static HOST_CLOSING: AtomicU32 = AtomicU32::new(0);
 /// this changes who the motion is ATTRIBUTED to, never whether it counts as motion.
 #[must_use = "the scope is only open for this guard's lifetime"]
 pub(crate) struct OwnMotion(
-    #[allow(dead_code)] plx_machine::idle::MotionScope,
-    #[allow(dead_code)] plx_machine::idle::OwnScope,
+    #[allow(dead_code)] nj_machine::idle::MotionScope,
+    #[allow(dead_code)] nj_machine::idle::OwnScope,
 );
 
 /// See [`OwnMotion`].
 pub(crate) fn own_motion() -> OwnMotion {
     OwnMotion(
-        plx_machine::idle::MotionScope::open(),
-        plx_machine::idle::OwnScope::open(),
+        nj_machine::idle::MotionScope::open(),
+        nj_machine::idle::OwnScope::open(),
     )
 }
 
@@ -385,7 +385,7 @@ impl Popover {
     /// read as the PAGE's — the distinction [`host_refresh`] rests on for a fading panel. Reports
     /// whether the spring moved.
     fn step_appear(&mut self, target: f32, dt: f32) -> bool {
-        let scope = plx_machine::idle::MotionScope::open();
+        let scope = nj_machine::idle::MotionScope::open();
         self.appear.step(target, K_APPEAR, dt);
         scope.close()
     }
@@ -404,7 +404,7 @@ impl Popover {
         self.release();
         self.closing = true;
         self.enter_closing();
-        plx_machine::idle::invalidate();
+        nj_machine::idle::invalidate();
     }
     pub(crate) fn is_open(&self) -> bool {
         self.open
@@ -645,7 +645,7 @@ pub(crate) mod host {
     /// Exclusive borrower of the existing texture. It never allocates another FrameCache.
     #[derive(Default)]
     pub(crate) struct TransitionSnapshot {
-        target: Option<plx_base::surface::PageTarget>,
+        target: Option<nj_base::surface::PageTarget>,
     }
     static TRANSITION_OWNS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -678,7 +678,7 @@ pub(crate) mod host {
             if !self.valid() { return; }
             if clear {
                 let c = crate::ui::theme::CLEAR_RGB;
-                plx_gfx::gfx::frame_clear(c.0, c.1, c.2);
+                nj_gfx::gfx::frame_clear(c.0, c.1, c.2);
             }
             unsafe { (*std::ptr::addr_of!(CACHE)).draw_alpha(alpha); }
         }
@@ -692,7 +692,7 @@ pub(crate) mod host {
     use std::sync::atomic::Ordering::Relaxed;
 
     #[cfg(not(test))]
-    use plx_gfx::gfx::FrameCache;
+    use nj_gfx::gfx::FrameCache;
     #[cfg(test)]
     use tests::FrameCache;
 
@@ -724,7 +724,7 @@ pub(crate) mod host {
     /// The page being drawn straight INTO [`CACHE`] this frame (`gfx::FrameCache::render_into`),
     /// opened by [`page_pass`] when it owes a capture and closed by [`capture_now`] at the instant
     /// the capture would otherwise have been copied. `None` on every other frame.
-    static mut TARGET: Option<plx_base::surface::PageTarget> = None;
+    static mut TARGET: Option<nj_base::surface::PageTarget> = None;
 
     /// Is the ground already on this frame's framebuffer, either drawn live and captured or
     /// served from the cache? A popover reaches [`live`] twice (its scrim and its panel), and a
@@ -810,7 +810,7 @@ pub(crate) mod host {
 
     /// See [`GROUND_DEFERRED`].
     pub(crate) fn defer_ground(defer: bool) {
-        if plx_gfx::gfx::blur_source_pass() { return; }
+        if nj_gfx::gfx::blur_source_pass() { return; }
         GROUND_DEFERRED.store(defer, Relaxed);
     }
 
@@ -825,8 +825,8 @@ pub(crate) mod host {
     /// re-render Home behind it. NOT around lifecycle or window events, which are the app's and
     /// may change the page under the panel. `None` — no scope — once every holder is fading, when
     /// input has gone back to the page and its damage is the page's.
-    pub(crate) fn input_scope() -> Option<plx_machine::idle::OwnScope> {
-        (users() > 0 && !fading_only()).then(plx_machine::idle::OwnScope::open)
+    pub(crate) fn input_scope() -> Option<nj_machine::idle::OwnScope> {
+        (users() > 0 && !fading_only()).then(nj_machine::idle::OwnScope::open)
     }
 
     /// Is every one of them a dismissed panel still fading out? See [`super::host_refresh`].
@@ -859,7 +859,7 @@ pub(crate) mod host {
         }
     }
 
-    /// [`plx_gfx::gfx::blur_invalidate`] **plus** the popover's GROUND stage — what every caller outside
+    /// [`nj_gfx::gfx::blur_invalidate`] **plus** the popover's GROUND stage — what every caller outside
     /// `gfx` means by "retake the blur".
     ///
     /// A popover's ground snapshot contains that popover's frost, composited from the very snapshot
@@ -869,7 +869,7 @@ pub(crate) mod host {
     /// cache — it sits below `ui` — so it drops its own snapshot and this drops the ground, in that
     /// order, which is the order `gfx::blur_invalidate` itself used to run them in.
     pub(crate) fn blur_invalidate() {
-        plx_gfx::gfx::blur_invalidate();
+        nj_gfx::gfx::blur_invalidate();
         ground_invalidate();
     }
 
@@ -926,7 +926,7 @@ pub(crate) mod host {
         // hole. The player path already did not call this (`app/run.rs`'s player branch says so);
         // this is the same rule stated where it can be BROKEN rather than where it happens to be
         // obeyed, and keyed on the plane being bound rather than on the route.
-        if plx_gfx::gfx::video_plane_refuses("popover::host::begin_frame") {
+        if nj_gfx::gfx::video_plane_refuses("popover::host::begin_frame") {
             return;
         }
         // This frame's page verdict — the scoped one app.rs threads in (Home, the Library, Search,
@@ -938,7 +938,7 @@ pub(crate) mod host {
         // wash dithers on every frame now — `gfx::draw_ambient`.)
         // Taken every drawn frame, holder or not, so the count never carries over into the first
         // frame of the next panel to open.
-        let page_dirty = plx_machine::idle::take_page_damage();
+        let page_dirty = nj_machine::idle::take_page_damage();
         CAPTURE_OWED.store(false, Relaxed);
         GROUND_DRAWN.store(false, Relaxed);
         GROUND_DEFERRED.store(false, Relaxed);
@@ -949,7 +949,7 @@ pub(crate) mod host {
         // Modal snapshots contain chrome and possibly a dim. A page-only transition image
         // must never be mistaken for that prefix when a surface interrupts navigation.
         if TRANSITION_OWNS.swap(false, Relaxed) { invalidate(); }
-        let moving = plx_machine::idle::page_moving() || page_moving;
+        let moving = nj_machine::idle::page_moving() || page_moving;
         CAPTURE_POINTLESS.store(fading_only() && moving, Relaxed);
         if super::host_refresh(fading_only(), page_dirty, moving) {
             invalidate();
@@ -969,7 +969,7 @@ pub(crate) mod host {
         /// picture the spinner reported from IS the snapshot being taken, so the snapshot pauses
         /// it, which is what the freeze has always done to a decoration nobody can reach.
         #[allow(dead_code)]
-        own: Option<plx_machine::idle::OwnScope>,
+        own: Option<nj_machine::idle::OwnScope>,
     }
 
     /// Begin a host-page draw. Draws the cached quad and arms the freeze when there is a snapshot;
@@ -977,7 +977,7 @@ pub(crate) mod host {
     pub(crate) fn page_pass() -> PagePass {
         if users() == 0 {
             return PagePass {
-                was_frozen: plx_gfx::gfx::page_frozen(),
+                was_frozen: nj_gfx::gfx::page_frozen(),
                 own: None,
             };
         }
@@ -995,7 +995,7 @@ pub(crate) mod host {
             // Draw this page into the snapshot rather than onto the frame and copy it out after:
             // see `FrameCache::render_into` for what the copy cost. Not in a blur source pass (the
             // capture is refused there anyway) and not when the capture would be thrown away.
-            if !plx_gfx::gfx::blur_source_pass() && !CAPTURE_POINTLESS.load(Relaxed) {
+            if !nj_gfx::gfx::blur_source_pass() && !CAPTURE_POINTLESS.load(Relaxed) {
                 unsafe {
                     if (*std::ptr::addr_of!(TARGET)).is_none() {
                         TARGET = (*std::ptr::addr_of_mut!(CACHE)).render_into();
@@ -1004,8 +1004,8 @@ pub(crate) mod host {
             }
         }
         PagePass {
-            was_frozen: plx_gfx::gfx::set_page_frozen(served),
-            own: Some(plx_machine::idle::OwnScope::open()),
+            was_frozen: nj_gfx::gfx::set_page_frozen(served),
+            own: Some(nj_machine::idle::OwnScope::open()),
         }
     }
 
@@ -1015,8 +1015,8 @@ pub(crate) mod host {
         /// with the freeze armed would otherwise leave every later frame refusing every quad — a
         /// frozen picture with no crash, no log line and no way back.
         fn drop(&mut self) {
-            plx_gfx::gfx::set_page_frozen(self.was_frozen);
-            if plx_gfx::gfx::blur_source_pass() { return; }
+            nj_gfx::gfx::set_page_frozen(self.was_frozen);
+            if nj_gfx::gfx::blur_source_pass() { return; }
             // Nobody lifted: this page's popovers draw AFTER the closure (the two menus,
             // `account_menu`). The framebuffer holds the completed undimmed page, which is exactly
             // what the snapshot is.
@@ -1050,23 +1050,23 @@ pub(crate) mod host {
         /// Everything drawn under this guard is the panel's own: an `idle::invalidate` raised by
         /// its marquee or spinner must not read as page damage to `begin_frame`.
         #[allow(dead_code)]
-        own: plx_machine::idle::OwnScope,
+        own: nj_machine::idle::OwnScope,
     }
 
     /// See [`Live`].
     pub(crate) fn live() -> Live {
         if crate::ui::frame::backdrop::discovering() {
             return Live {
-                was_frozen: plx_gfx::gfx::page_frozen(),
-                own: plx_machine::idle::OwnScope::open(),
+                was_frozen: nj_gfx::gfx::page_frozen(),
+                own: nj_machine::idle::OwnScope::open(),
             };
         }
-        if plx_gfx::gfx::blur_source_pass() {
+        if nj_gfx::gfx::blur_source_pass() {
             let ground = matches!(held(), Held::Ground(_));
             if ground && held_ceiling().is_some_and(crate::ui::frame::backdrop::claim_snapshot) { draw_held(); }
             return Live {
-                was_frozen: plx_gfx::gfx::set_page_frozen(ground && freezes_current_layer()),
-                own: plx_machine::idle::OwnScope::open(),
+                was_frozen: nj_gfx::gfx::set_page_frozen(ground && freezes_current_layer()),
+                own: nj_machine::idle::OwnScope::open(),
             };
         }
         if matches!(held(), Held::Ground(_)) {
@@ -1076,8 +1076,8 @@ pub(crate) mod host {
                 draw_held();
             }
             return Live {
-                was_frozen: plx_gfx::gfx::set_page_frozen(freezes_current_layer()),
-                own: plx_machine::idle::OwnScope::open(),
+                was_frozen: nj_gfx::gfx::set_page_frozen(freezes_current_layer()),
+                own: nj_machine::idle::OwnScope::open(),
             };
         }
         if CAPTURE_OWED.swap(false, Relaxed) {
@@ -1088,8 +1088,8 @@ pub(crate) mod host {
             }
         }
         Live {
-            was_frozen: plx_gfx::gfx::set_page_frozen(false),
-            own: plx_machine::idle::OwnScope::open(),
+            was_frozen: nj_gfx::gfx::set_page_frozen(false),
+            own: nj_machine::idle::OwnScope::open(),
         }
     }
 
@@ -1110,13 +1110,13 @@ pub(crate) mod host {
     pub(crate) fn ground_drawn(settled: bool) {
         crate::ui::frame::backdrop::boundary();
         if crate::ui::frame::backdrop::discovering() { return; }
-        if plx_gfx::gfx::page_frozen() {
-            plx_gfx::gfx::set_page_frozen(false);
+        if nj_gfx::gfx::page_frozen() {
+            nj_gfx::gfx::set_page_frozen(false);
             return;
         }
         if settled
             && held() == Held::Page
-            && !plx_gfx::gfx::blur_source_pass()
+            && !nj_gfx::gfx::blur_source_pass()
             && !GROUND_DEFERRED.load(Relaxed)
         {
             if unsafe { (*std::ptr::addr_of_mut!(CACHE)).capture() } {
@@ -1127,7 +1127,7 @@ pub(crate) mod host {
 
     impl Drop for Live {
         fn drop(&mut self) {
-            plx_gfx::gfx::set_page_frozen(self.was_frozen);
+            nj_gfx::gfx::set_page_frozen(self.was_frozen);
         }
     }
     #[cfg(test)]
@@ -1140,7 +1140,7 @@ pub(crate) mod host {
         use super::*;
         #[test]
         fn layers_above_a_frozen_prefix_remain_live_in_both_draw_walks() {
-            let _guard=plx_base::testlock::serial();
+            let _guard=nj_base::testlock::serial();
             let old=held(); let drawn=GROUND_DRAWN.swap(true,Relaxed);
             unsafe {HELD=Held::Ground(crate::ui::frame::backdrop::Z::surface(0));}
             let mut frozen=Vec::new();
@@ -1148,14 +1148,14 @@ pub(crate) mod host {
                 let sources=std::rc::Rc::new(std::cell::RefCell::new(crate::ui::frame::backdrop::Sources::default()));
                 let _walk=crate::ui::frame::backdrop::enter(sources,ceiling);
                 let _layer=crate::ui::frame::backdrop::layer(crate::ui::frame::backdrop::Z::surface(1),false);
-                let _live=live(); frozen.push(plx_gfx::gfx::page_frozen());
+                let _live=live(); frozen.push(nj_gfx::gfx::page_frozen());
             }
             unsafe {HELD=old;} GROUND_DRAWN.store(drawn,Relaxed);
             assert_eq!(frozen,vec![false,false]);
         }
         #[test]
         fn promoting_a_ground_does_not_repaint_over_later_foreground() {
-            let _guard=plx_base::testlock::serial();
+            let _guard=nj_base::testlock::serial();
             let old=held(); let drawn=GROUND_DRAWN.swap(false,Relaxed);
             hold_ground();
             let already_present=GROUND_DRAWN.load(Relaxed);
@@ -1165,7 +1165,7 @@ pub(crate) mod host {
 
         #[test]
         fn a_frozen_ground_records_the_last_layer_it_contains() {
-            let _guard=plx_base::testlock::serial();
+            let _guard=nj_base::testlock::serial();
             let old=held();
             let drawn=GROUND_DRAWN.load(Relaxed);
             let sources=std::rc::Rc::new(std::cell::RefCell::new(crate::ui::frame::backdrop::Sources::default()));
@@ -1188,7 +1188,7 @@ pub(crate) mod host {
 
         #[test]
         fn a_source_walk_preserves_the_frozen_ground_and_its_visible_draw_ledger() {
-            let _guard=plx_base::testlock::serial();
+            let _guard=nj_base::testlock::serial();
             let old=held();
             let drawn=GROUND_DRAWN.swap(false,Relaxed);
             unsafe { HELD=Held::Ground(crate::ui::frame::backdrop::Z::surface(0)); }
@@ -1217,7 +1217,7 @@ mod tests {
         // `open`/`close` touch the shared `OPEN_COUNT` static — the same reason the round-trip
         // test below takes this lock, and for the same reason this one must not skip it: two
         // popovers opening at once on different threads would otherwise race that counter.
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut pop = Popover::new();
         pop.open();
         assert!(!pop.appear_settled(), "a fresh open has not ramped in yet");
@@ -1239,7 +1239,7 @@ mod tests {
     /// was the report (2026-09-02); every popover took the mechanism.
     #[test]
     fn dismiss_fades_out_over_frames_while_close_hides_at_once() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut pop = Popover::new();
         pop.open();
         for _ in 0..240 {
@@ -1283,7 +1283,7 @@ mod tests {
     /// register at all, however many times it is opened.
     #[test]
     fn only_a_caching_popover_registers_a_frozen_host_and_the_count_round_trips() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let base = HOST_USERS.load(Relaxed);
         let users = || HOST_USERS.load(Relaxed) - base;
 
@@ -1317,7 +1317,7 @@ mod tests {
     /// property worth pinning is the whole round trip, not a single call.
     #[test]
     fn the_open_count_survives_re_opens_redundant_closes_and_overlap() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // Whatever the process arrived with (a static, and other tests may have moved it), the
         // assertions below are all RELATIVE to it — the invariant is the round trip, not zero.
         let base = OPEN_COUNT.load(Relaxed);
@@ -1358,7 +1358,7 @@ mod tests {
     /// the live path — the laggy dismissal every cached panel had.
     #[test]
     fn a_cached_popover_holds_its_frozen_host_through_the_fade_and_releases_at_the_end() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let base = HOST_USERS.load(Relaxed);
         let closing_base = HOST_CLOSING.load(Relaxed);
         let users = || HOST_USERS.load(Relaxed) - base;

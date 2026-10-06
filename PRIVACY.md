@@ -28,7 +28,7 @@ address for a server you reach over the internet.
 Native Jelly has a developer-only input/frame recorder used to reproduce and test bugs. It is not
 part of the app you installed: a release build has the developer-trigger inputs, including the
 recorder, compiled out — there is no code path in a release binary that can open, write or read a
-recording, on this television or off it. The unconditional `plxnative-*.log` files are create-only
+recording, on this television or off it. The unconditional `nativejelly-*.log` files are create-only
 diagnostics, not trigger inputs. The recorder exists only in development builds used to build and
 test Native Jelly itself, is started only by explicitly arming it on that build, and its recordings
 never leave the device it was made on.
@@ -115,25 +115,6 @@ a sign-in could not be saved, a `persistence` failure class, the `keymanager_sta
 step stopped at and the key service's own numeric `service_error_code`. A storage-helper failure
 also carries fixed startup, connection, activation or backend stages, wire/DB8 error codes, and
 up to eight failed storage-candidate errno numbers. It carries no candidate paths, file owners or helper generation identifiers.
-The fields in the rest of this paragraph that describe plex.tv discovery are produced only by the
-Plex sign-in inherited from PlxNative, which a Jellyfin sign-in never uses.
-When a server was found but answered only over an unencrypted connection, it also carries a fixed
-outcome class (`absent`, `timeout`, `dns`, `tls`, `refused` and the like) for each secure route to
-that server — `https_lan`, `https_public`, `https_custom` and `https_relay` — and, about the
-unencrypted answer, only fixed facts: whether plex.tv marked that connection local
-(`plaintext_local`), whether plex.tv saw this television behind the server's own network address
-(`public_address_matches`), whether the server is `owned` by the signed-in account, whether it
-requires secure connections (`https_required`), the kind of address it was (`plaintext_scope`:
-private, link-local, unique-local, loopback, public or a name) and its family
-(`plaintext_family`: v4, v6 or unknown), whether the app could offer to connect without encryption
-on your home network or the fixed reason it could not (`plaintext_eligibility`: eligible,
-https_required, not_local, not_same_network, not_private_address, identity_unverified,
-https_unsettled or https_answered) and, when it asked, what became of the question
-(`plaintext_consent`: offered, accepted, declined or revoked) — never the address itself, the
-server or whose it is. When the account has no
-server, it carries how many other devices plex.tv listed (`resources`, bucketed) and whether that
-happened right after signing in or on a retry (`discovery_trigger`). For unreachable discovery it
-also says whether the failed target was plex.tv or the listed servers (`discovery_target`).
 It also carries whether the report was `consent`ed to as a standing choice or as a one-off, the app version and when it
 happened. It never includes your account name, tokens, PIN, sign-in code or network addresses. With
 crash reports on, it is sent automatically, carries the Crash report ID, and the sign-in screen

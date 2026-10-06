@@ -4,16 +4,16 @@ use super::*;
 use std::ffi::CString;
 use super::tests::Fixture;
 
-fn sid(n: u16) -> crate::plex::ServerId {
-    crate::plex::ServerId::from_raw(n)
+fn sid(n: u16) -> crate::catalog::ServerId {
+    crate::catalog::ServerId::from_raw(n)
 }
 
 fn group(name: &str, handle: &str, state: crate::browse::SourceState,
-    tier: Option<crate::plex::probe::Location>) -> crate::browse::SrcGroup {
+    tier: Option<crate::catalog::probe::Location>) -> crate::browse::SrcGroup {
     crate::browse::SrcGroup { name: name.into(), handle: handle.into(), state, tier }
 }
 
-fn section(source: crate::plex::ServerId, key: i64, index: usize, title: &str, current: bool)
+fn section(source: crate::catalog::ServerId, key: i64, index: usize, title: &str, current: bool)
     -> crate::browse::view::SectionView {
     crate::browse::view::SectionView { sid: Some(source), key, kind: SecKind::Movie,
         row: crate::browse::SrcRow { section: index, title: title.into(), pinned: true, current,
@@ -28,9 +28,9 @@ fn section(source: crate::plex::ServerId, key: i64, index: usize, title: &str, c
 /// labels never change with the cell. That invariance, not any one cell, is what this pins.
 #[test]
 fn every_connection_tier_and_source_state_draws_the_same_selector() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::browse::SourceState;
-    use crate::plex::probe::Location;
+    use crate::catalog::probe::Location;
     let tiers = [None, Some(Location::Local), Some(Location::Remote), Some(Location::Relay)];
     let states = [SourceState::NotProbed, SourceState::Reachable, SourceState::Unauthorized,
         SourceState::Unreachable, SourceState::InsecureOnly];
@@ -78,7 +78,7 @@ fn every_connection_tier_and_source_state_draws_the_same_selector() {
 /// F=2, and asserts the pill COUNT tracks F alone.
 #[test]
 fn ownership_does_not_change_how_many_pills_are_drawn() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::browse::SourceState;
     let rosters: [(&str, &[(&str, &str)]); 5] = [
         ("one owned source", &[("Cinema server", "")]),
@@ -127,7 +127,7 @@ fn ownership_does_not_change_how_many_pills_are_drawn() {
 /// ordinary owned library, never like a share.
 #[test]
 fn a_pill_carries_its_owners_handle_and_a_household_library_carries_none() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::browse::SourceState;
     let friend = sid(0);
     let own = sid(1);
@@ -162,7 +162,7 @@ fn a_pill_carries_its_owners_handle_and_a_household_library_carries_none() {
 /// "fix" this from a test; it is pinned so a future change to it is a deliberate, reviewed one.
 #[test]
 fn two_owned_servers_with_the_same_library_title_draw_two_identical_pills() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::browse::SourceState;
     let a = sid(0);
     let b = sid(1);
@@ -187,7 +187,7 @@ fn two_owned_servers_with_the_same_library_title_draw_two_identical_pills() {
 /// so a dead favourite reads on the strip exactly like a live one.
 #[test]
 fn an_unreachable_favourite_stays_in_the_selector() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     use crate::browse::SourceState;
     let live = sid(0);
     let dead = sid(1);

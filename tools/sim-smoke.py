@@ -143,14 +143,14 @@ def main() -> int:
 
     env = os.environ.copy()
     env.update(
-        PLXNATIVE_RUNTIME_DIR=str(runtime),
-        PLXNATIVE_APP_DIR=str(assets),
-        PLXNATIVE_WIN="1920x1080",
-        PLXNATIVE_SHOT=str(output),
-        PLXNATIVE_SHOT_FRAME="3",
-        PLXNATIVE_SHOT_EXIT="1",
+        NJ_RUNTIME_DIR=str(runtime),
+        NJ_APP_DIR=str(assets),
+        NJ_WIN="1920x1080",
+        NJ_SHOT=str(output),
+        NJ_SHOT_FRAME="3",
+        NJ_SHOT_EXIT="1",
     )
-    events = runtime / "plxnative-events.log"
+    events = runtime / "nativejelly-events.log"
     launched_at = time.time()
     try:
         result = subprocess.run(

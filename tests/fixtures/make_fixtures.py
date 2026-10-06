@@ -23,7 +23,7 @@ TWO TIERS, ONE GENERATOR (`--tier`). Everything above and below describes the IN
 pack: the two Plex-scannable trees `tests/manifest.local.json` maps shape keys into.
 `--tier pipeline` builds a second, much smaller pack for the player-PIPELINE tier, which
 has no Plex in it at all — flat 60 s clips served off the dev Mac by
-`tests/serve_fixtures.py` and played through `/tmp/plxnative-playurl`, which carries the
+`tests/serve_fixtures.py` and played through `/tmp/nativejelly-playurl`, which carries the
 URL *and* the Load payload declaration. Both packs share every builder, every trap below
 and `verify()`; what differs is the table (`PIPE_SHAPES`), the on-disk layout, and the fact
 that nothing in that table is derived from Plex's watched threshold, its marker detector or
@@ -979,7 +979,7 @@ QUICK_SECS = 20
 # THE PIPELINE TIER — a second, much smaller table, for a suite tier with NO PLEX IN IT.
 #
 # `tests/serve_fixtures.py` serves a directory of these clips off the dev Mac, and
-# `/tmp/plxnative-playurl` hands the app one URL plus the Load payload DECLARATION to play
+# `/tmp/nativejelly-playurl` hands the app one URL plus the Load payload DECLARATION to play
 # it with (`player::playurl::PlayUrl` -> `route::set_stream_declaration`). Everything from the socket
 # down is then the same code a real playback runs — `stream.rs`' GET, `ff.rs`' AVIO and
 # demux, the `aq.rs` queues, the pump's `Feed()`, the ACB bind — with the server, the
@@ -1008,7 +1008,7 @@ QUICK_SECS = 20
 #   * AV1. There is no Load payload video codec for it.
 #
 # `declare` IS THE TRIGGER'S PLAYBACK HALF, recorded verbatim into fixtures.json so the
-# harness writes `/tmp/plxnative-playurl` FROM the pack instead of restating it, and read
+# harness writes `/tmp/nativejelly-playurl` FROM the pack instead of restating it, and read
 # back against the finished file by verify(). A declaration that drifts from its own media
 # is precisely the fault this tier cannot otherwise see: the app builds the payload the
 # declaration asked for, never looks at the container, and the case then fails pointing
@@ -1464,7 +1464,7 @@ def out_paths(root, key, spec):
     if spec["kind"] == "clip":
         # The pipeline tier. `tests/serve_fixtures.py` serves a DIRECTORY — the trees below
         # exist for a Plex scanner and this tier has none — and the file is named for the
-        # shape key, so a `plxnative-playurl` URL says which shape it is playing
+        # shape key, so a `nativejelly-playurl` URL says which shape it is playing
         # (`…/pipe_hevc_eac3_4k_dovi_p8.mkv`) without a lookup. The `pipe_` prefix and the
         # separate root are also what keep the two tiers off one path: main()'s "longer on
         # disk, keep it" rule would otherwise hand a 60 s pipeline run the full-length
@@ -2579,7 +2579,7 @@ def verify(key, spec, dur, path, ep=None):
                     problems.append("subtitle[%d] last PGS cue at %.1fs, wanted one at %ds"
                                     % (i, cues[-1], want_cues[-1]))
 
-    # ---- THE DECLARATION (pipeline tier). What `/tmp/plxnative-playurl` will tell the
+    # ---- THE DECLARATION (pipeline tier). What `/tmp/nativejelly-playurl` will tell the
     # television this stream IS, read back against what it actually is. The app builds its
     # Load payload from the declaration and never consults the container, so a declaration
     # that has drifted from its own media is invisible everywhere but the panel — an H264
@@ -2804,8 +2804,8 @@ def main(argv=None):
                          "directories and keep separate fixtures.json documents."
                          % PIPE_SECS)
     ap.add_argument("--out", default=os.environ.get("FIXTURES_OUT")
-                    or str(Path.home() / "plxnative-fixtures"),
-                    help="output root (default: $FIXTURES_OUT, else ~/plxnative-fixtures). "
+                    or str(Path.home() / "nativejelly-fixtures"),
+                    help="output root (default: $FIXTURES_OUT, else ~/nativejelly-fixtures). "
                          "Never inside the repo. `--tier pipeline` writes to <out>/pipeline.")
     # `--quick` and `--secs` are one knob under two names, hence the exclusive group: given
     # both, the loser would silently decide the length of a 20-minute build.
@@ -3147,7 +3147,7 @@ def main(argv=None):
                      "tier the pack serves: `integration` records map to ratingKeys in "
                      "tests/manifest.local.json, while a `pipeline` record is a file served "
                      "over HTTP by tests/serve_fixtures.py and its `declare` block is the "
-                     "playback half of the /tmp/plxnative-playurl trigger, verified here "
+                     "playback half of the /tmp/nativejelly-playurl trigger, verified here "
                      "against the media it describes."),
         "shapes": shapes_doc,
     }
@@ -3173,7 +3173,7 @@ def main(argv=None):
             # as its own default; the harness picks its own.
             print("\n   Next: serve this directory to the television —")
             print("     ./tests/serve_fixtures.py --root %s --port 8020" % root)
-            print("   Each case then arms /tmp/plxnative-playurl with a URL into that server")
+            print("   Each case then arms /tmp/nativejelly-playurl with a URL into that server")
             print("   plus the `declare` block recorded beside the file in fixtures.json.")
             print("   Start it ONCE with a human at the keyboard: the macOS application")
             print("   firewall drops the TV's connections to a new python listener silently.")

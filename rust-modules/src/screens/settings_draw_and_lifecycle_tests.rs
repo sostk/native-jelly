@@ -4,7 +4,7 @@
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
-use plx_machine::machine::Measure as _;
+use nj_machine::machine::Measure as _;
 
 /// Spec §14 phase 8: `Family::Settings`'s scrim/entrance composition reads
 /// `DrawFrame::nav_page_alpha` rather than the `ui::nav` statics — these two pin the
@@ -99,7 +99,7 @@ fn nested_draw_preserves_navigation_at_rest_and_through_push_and_pop() {
 ///
 /// [`RootPage::rebuild`] asks [`signed_in`] whether this television has an account, once at
 /// construction and again on `Enter`, so TWICE per open. That question used to go through
-/// [`crate::plex::session::load`] — the read-modify-WRITE door, whose own doc says a read that
+/// [`crate::catalog::session::load`] — the read-modify-WRITE door, whose own doc says a read that
 /// can turn into a save "is not [an acceptable trade] on a path a keypress can reach", and
 /// "do not add a per-frame reader of this file". On this television the key manager is
 /// unusable ("session protection: no usable key manager; using the 0600 file fallback"), so
@@ -116,12 +116,12 @@ fn nested_draw_preserves_navigation_at_rest_and_through_push_and_pop() {
 #[test]
 fn opening_settings_never_writes_the_session_file() {
     use std::os::unix::fs::MetadataExt;
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let sess = scratch_session("surface-no-session-write");
     let file = sess.path();
     let before = std::fs::metadata(&file).expect("the scratch session exists");
     let mut s = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
     step(&mut s, ScreenEvent::Mount, None);
     let after = std::fs::metadata(&file).expect("the scratch session still exists");
     assert_eq!(
@@ -153,7 +153,7 @@ fn opening_settings_never_writes_the_session_file() {
 /// budget specifically. The device capture is still what finally settles a real elide.
 #[test]
 fn every_root_detail_line_fits_a_known_good_width() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let _sess = multi_user_session("root-detail-widths");
     let page = RootPage::new(EntryId(0), crate::stores::browse::DirectoryView::empty_for_test());
     let sz = theme::size::CAPTION;

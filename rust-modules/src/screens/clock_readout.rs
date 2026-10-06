@@ -11,14 +11,14 @@
 
 use std::ffi::CStr;
 
-use plx_net::net::keypin::Blocked;
+use nj_net::net::keypin::Blocked;
 use crate::ui::icons::Icon;
 
 /// The reason line and glyph for why key mode cannot help, or `None` when nothing says it cannot.
 pub(crate) fn reason_for(blocked: Option<Blocked>) -> Option<(&'static CStr, Icon)> {
     let reason = match blocked? {
-        Blocked::NoKey => plx_platform::i18n::msg::browse_clock_no_key_c(),
-        Blocked::KeyChanged => plx_platform::i18n::msg::browse_clock_key_changed_c(),
+        Blocked::NoKey => nj_platform::i18n::msg::browse_clock_no_key_c(),
+        Blocked::KeyChanged => nj_platform::i18n::msg::browse_clock_key_changed_c(),
     };
     Some((reason, Icon::ClockBadgeAlert))
 }
@@ -36,13 +36,13 @@ impl ClockWatch {
     /// Re-read the fact about `machine` (`None`: the read-out speaks about no known server, so no
     /// server's fact applies); `true` when what the read-out shows changed.
     pub(crate) fn refresh(&mut self, machine: Option<&str>) -> bool {
-        let rev = plx_net::net::keypin::revision();
+        let rev = nj_net::net::keypin::revision();
         if matches!(&self.seen, Some((r, m)) if *r == rev && m.as_deref() == machine) {
             return false;
         }
         self.seen = Some((rev, machine.map(str::to_owned)));
         // The empty id names no server: only a dev-planted fact answers it.
-        let next = plx_net::net::keypin::blocked_for(machine.unwrap_or_default());
+        let next = nj_net::net::keypin::blocked_for(machine.unwrap_or_default());
         std::mem::replace(&mut self.held, next) != next
     }
 
@@ -61,10 +61,10 @@ impl ClockWatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plx_base::fontcov::advances::ShippedMeasure;
+    use nj_base::fontcov::advances::ShippedMeasure;
     use crate::ui::fit::HEADROOM;
-    use plx_platform::i18n::{language_on_this_thread_for_test, msg};
-    use plx_net::net::keypin;
+    use nj_platform::i18n::{language_on_this_thread_for_test, msg};
+    use nj_net::net::keypin;
     use crate::ui::widgets::StatusOverlay;
 
     #[test]
@@ -93,7 +93,7 @@ mod tests {
     /// pair changes nothing and reports nothing. Another server's fact never shows.
     #[test]
     fn the_watch_re_reads_when_the_revision_or_the_machine_moves_and_not_otherwise() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let key = keypin::key_of("clock-watch.invalid", 32400);
         let _scoped = keypin::Scoped::watch_machine("clock-watch-machine", &key);
         let here = Some("clock-watch-machine");
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn both_reasons_fit_the_two_line_slot_in_every_shipped_language() {
         let mut out = Vec::new();
-        for language in plx_platform::i18n::SHIPPED {
+        for language in nj_platform::i18n::SHIPPED {
             let _guard = language_on_this_thread_for_test(language);
             for cause in [Blocked::NoKey, Blocked::KeyChanged] {
                 let (reason, _) = reason_for(Some(cause)).expect("a cause has a reason");

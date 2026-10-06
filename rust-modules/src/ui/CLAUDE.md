@@ -136,20 +136,20 @@ can follow.
 
 | layer | may name |
 |---|---|
-| `ui/` — the LIBRARY | `plx_gfx::{gfx,text}` plus `plx_platform::i18n` and `plx_base::{paths,task,tile}` — **never an application type**. Except the `plx_machine` crate (`machine`, `present`, `idle`, `landgate`, `landing`, `motion`; `rust-modules/machine/`), which `ci/module-layers.ini` places BELOW the library (`docs/module-layers.md`): it names only `plx_base` and itself, never `gfx`/`text`/`i18n` or anything in `ui/` |
+| `ui/` — the LIBRARY | `nj_gfx::{gfx,text}` plus `nj_platform::i18n` and `nj_base::{paths,task,tile}` — **never an application type**. Except the `nj_machine` crate (`machine`, `present`, `idle`, `landgate`, `landing`, `motion`; `rust-modules/machine/`), which `ci/module-layers.ini` places BELOW the library (`docs/module-layers.md`): it names only `nj_base` and itself, never `gfx`/`text`/`i18n` or anything in `ui/` |
 | `appkit/` — widgets several screens share (`player_hud`, `track_menu`, `more_menu`, `info_panel`, `up_next`, `chapters_panel`, `timing_capsule`, `skip_pill`, `source_list`) | `ui/`, `stores/`, `plex/` types, `player/`, `route/` — never `screens/` or `app/`. They are compositions of `ui/` components over application types; they cannot live under `screens/` because the `sibling` gate forbids one screen family naming another |
 | `screens/` — the application's screens | `ui/`, `appkit/`, `stores/`, `plex/` types, `player/` — never a sibling screen |
-| `stores/` | data crates and `plx_machine::machine` only — never `screens/` |
+| `stores/` | data crates and `nj_machine::machine` only — never `screens/` |
 | `app/` | everything |
 
 `ci/check-module-cycle.py` holds which top-level modules sit on the crate's module cycle, not the
 references between them: a module outside the cycle (or a new one) that gains a path into it fails
 with `file:line` (see "Module-cycle ratchet" in `docs/agent-reference.md`). Another `ui` ->
 `screens`/`app` reference between modules already on the cycle passes that
-gate (a `gfx`/`text` -> `ui` one no longer compiles: they are `plx_gfx`), so `ci/check-deps.sh` and review are what stop it; a green `module-cycle: ok` is not permission.
+gate (a `gfx`/`text` -> `ui` one no longer compiles: they are `nj_gfx`), so `ci/check-deps.sh` and review are what stop it; a green `module-cycle: ok` is not permission.
 
 `ui/` is generic over one application bundle and is compiled and tested against `FixtureHost`
-with no Plex type in scope (`fixture.rs`). If you find yourself reaching for `crate::plex` or
+with no Plex type in scope (`fixture.rs`). If you find yourself reaching for `crate::catalog` or
 `crate::browse` from a file in this directory, the design says the code belongs in `screens/`.
 
 A widget that needs a fact about an application row takes it as a plain value the caller fills, and
@@ -222,8 +222,8 @@ process freeze, suspend, debugger stop or observer starvation from a main-thread
 rebases the stall origin, clears any warning, resets the fatal latch and reports nothing for
 that sample. A fresh uninterrupted two-second stall can still become fatal after the rebase.
 A guard's own `abort()` instead records the abort path; its log label identifies the guarded call.
-To investigate without termination, write `log` into `/tmp/plxnative-guard` before launch
-(`/tmp/plxnative-guard=log` notation; simulator: instance runtime directory). This DIAG trigger
+To investigate without termination, write `log` into `/tmp/nativejelly-guard` before launch
+(`/tmp/nativejelly-guard=log` notation; simulator: instance runtime directory). This DIAG trigger
 is latched at loop start and downgrades both fatal paths to log plus warning. It requires
 `devtriggers`; it never suppresses the profile picker. Release builds contain neither warning,
 fatal policy nor signal call, and keep the existing guard/watchdog logs.
@@ -468,7 +468,7 @@ own (the `FocusEngine` does). Tests that seed the shared registry or the remaini
 take `testlock::serial()`; tests using separate production BrowseStore owners isolate their state
 and landings. **`xfade.rs` is
 the cautionary case**: its tests were ordinary and parallel until `tick` started reporting to
-`plx_machine::idle`'s process-global flag, at which point driving a fader began mutating state *another
+`nj_machine::idle`'s process-global flag, at which point driving a fader began mutating state *another
 module's* assertions read. They all take `testlock::serial()` now. Anything you make report to the
 frame gate inherits that obligation — and the lock is ENFORCED rather than merely documented since
 2026-09-10: it records the holding thread, and the shared stores (plus the app frame trunk, which

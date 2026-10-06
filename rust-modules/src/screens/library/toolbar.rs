@@ -9,7 +9,7 @@ pub(super) struct Chip {
     pub note: Option<CString>,
 }
 impl Chip {
-    pub fn width(&self, measure: &dyn plx_machine::machine::Measure) -> f32 {
+    pub fn width(&self, measure: &dyn nj_machine::machine::Measure) -> f32 {
         ValueChip::width(measure, self.name, &self.value, self.note.as_deref())
     }
 }
@@ -58,13 +58,13 @@ impl LibraryScreen {
                 Some(GridAction::LibraryType(kind)) => *kind,
                 _ => listing.library_type(),
             };
-            (plx_platform::i18n::msg::browse_library_type_c(), kind.title(self.kind).to_owned())
+            (nj_platform::i18n::msg::browse_library_type_c(), kind.title(self.kind).to_owned())
         } else if elem == SORT {
             let sort = match queued {
                 Some(GridAction::Sort { key, .. }) => listing.sorts().iter().find(|sort| &sort.key == key),
                 _ => listing.sorts().get(listing.sort_index()),
             };
-            (plx_platform::i18n::msg::browse_library_sort_c(), sort.map_or(plx_platform::i18n::msg::browse_library_title(), |sort| sort.title.as_str()).to_owned())
+            (nj_platform::i18n::msg::browse_library_sort_c(), sort.map_or(nj_platform::i18n::msg::browse_library_title(), |sort| sort.title.as_str()).to_owned())
         } else {
             let genre = match queued {
                 Some(GridAction::Genre { id }) => id.as_ref().and_then(|id| listing.genres().iter().find(|genre| &genre.id == id)),
@@ -74,11 +74,11 @@ impl LibraryScreen {
                 Some(GridAction::Unwatched { desired }) => *desired,
                 _ => listing.unwatched(),
             };
-            (plx_platform::i18n::msg::browse_library_filter_c(), match (genre, unwatched) {
-                (None, false) => plx_platform::i18n::msg::browse_library_all().into(),
-                (None, true) => plx_platform::i18n::msg::browse_library_unwatched().into(),
+            (nj_platform::i18n::msg::browse_library_filter_c(), match (genre, unwatched) {
+                (None, false) => nj_platform::i18n::msg::browse_library_all().into(),
+                (None, true) => nj_platform::i18n::msg::browse_library_unwatched().into(),
                 (Some(genre), false) => genre.into(),
-                (Some(genre), true) => plx_platform::i18n::msg::browse_library_genre_unwatched(genre),
+                (Some(genre), true) => nj_platform::i18n::msg::browse_library_genre_unwatched(genre),
             })
         };
         Chip { name, value: CString::new(format!(" · {value}")).unwrap_or_default(), note: None }

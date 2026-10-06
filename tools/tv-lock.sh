@@ -27,11 +27,11 @@
 # and this project's collisions come from exactly those. It is under /tmp deliberately — a TV
 # reboot clears it, which is the one event that also makes every holder's session meaningless.
 #
-# The name does NOT begin with `plxnative-`, and that is load-bearing rather than cosmetic: for the
+# The name does NOT begin with `nativejelly-`, and that is load-bearing rather than cosmetic: for the
 # stable install the app's runtime root IS /tmp, and any file there matching that prefix marks the
 # boot as automated and suppresses the who's-watching picker (`dev::any_trigger_present`). A lock
-# named `plxnative-tv.lock` would silently change which screen the app boots to — for every
-# session, including the ones it was taken to protect. It is also outside the `plxnative-*` glob
+# named `nativejelly-tv.lock` would silently change which screen the app boots to — for every
+# session, including the ones it was taken to protect. It is also outside the `nativejelly-*` glob
 # that `make run` and `tests/run.py` clear, so a teardown cannot drop somebody's lease.
 #
 # THE CLOCK IS THE HOST'S. Every timestamp written into the lock comes from the machine taking it,
@@ -45,21 +45,21 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REMOTE_LOCK="${PLX_TV_LOCK_PATH:-/tmp/plx-tv.lock}"
-STATE_DIR="${PLX_TV_LOCK_STATE:-$HOME/.plxnative/tv-lock}"
+REMOTE_LOCK="${NJ_TV_LOCK_PATH:-/tmp/plx-tv.lock}"
+STATE_DIR="${NJ_TV_LOCK_STATE:-$HOME/.nativejelly/tv-lock}"
 
 # Lease lengths, in minutes. An EXPLICIT acquire is a session and gets the long one; the implicit
 # lease `require` takes when nobody holds the set is short on purpose, because nothing will ever
 # come back to release it — it exists so a lone `make deploy` still cannot collide, not so a
 # forgotten one can hold the television for an hour.
-TTL_MIN="${PLX_TV_LOCK_TTL:-45}"
+TTL_MIN="${NJ_TV_LOCK_TTL:-45}"
 AUTO_TTL_MIN=10
 
 # ---------------------------------------------------------------- identity ---
 # The LANE, not the process: a lease belongs to a checkout (this worktree), so every Bash call,
 # every `make`, every nested tool in that lane inherits it, and a second worktree on the same Mac
 # is a different lane — which is precisely the fleet case that collides today.
-LANE="${PLX_TV_LOCK_LANE:-$REPO}"
+LANE="${NJ_TV_LOCK_LANE:-$REPO}"
 lane_slug() {
   local h; h=$(printf '%s' "$LANE" | shasum 2>/dev/null | cut -c1-12)
   [ -n "$h" ] || h=$(printf '%s' "$LANE" | cksum | tr -d ' ' | cut -c1-12)
@@ -106,7 +106,7 @@ HOST="$(resolve_tv)"
 # the part that stays out of the repo) only when the set refuses the key, and a fast failure for a
 # set that is unreachable. Its stderr is dropped here: callers decide what an unreachable set means.
 ssh_tv() {
-  PLX_TV_ADDR="$HOST" "$REPO/tools/tv-ssh" ssh tv "$@" 2>/dev/null
+  NJ_TV_ADDR="$HOST" "$REPO/tools/tv-ssh" ssh tv "$@" 2>/dev/null
 }
 
 # ------------------------------------------------------- the protocol itself ---
@@ -133,7 +133,7 @@ why=$(sane "${WHY:-}")
 pid=$$"
 
   local script
-  script="$(cat <<PLX_HDR
+  script="$(cat <<NJ_HDR
 set -u
 L='$REMOTE_LOCK'
 O="\$L/owner"
@@ -141,16 +141,16 @@ NOW=$(now)
 TOK='$TOKEN'
 MODE='$mode'
 FORCE='$force'
-OWNER=\$(cat <<'PLX_OWNER'
+OWNER=\$(cat <<'NJ_OWNER'
 $owner
-PLX_OWNER
+NJ_OWNER
 )
-PLX_HDR
+NJ_HDR
 )"
   script="$script
 $REMOTE_BODY"
 
-  if [ -n "${PLX_TV_LOCK_LOCAL:-}" ]; then printf '%s\n' "$script" | sh
+  if [ -n "${NJ_TV_LOCK_LOCAL:-}" ]; then printf '%s\n' "$script" | sh
   else printf '%s\n' "$script" | ssh_tv 'sh -s'; fi
 }
 
@@ -264,7 +264,7 @@ lease_load() {
   FILE_TOKEN="$TOKEN"
   # An inherited token beats the file: inside `with`, or inside anything it spawned, the lease is
   # the parent's and may not have been written for this lane at all.
-  [ -n "${PLX_TV_LOCK_TOKEN:-}" ] && TOKEN="$PLX_TV_LOCK_TOKEN"
+  [ -n "${NJ_TV_LOCK_TOKEN:-}" ] && TOKEN="$NJ_TV_LOCK_TOKEN"
   [ -n "$TOKEN" ]
 }
 new_token() {
@@ -414,9 +414,9 @@ preflight_note() {
   dd="$(make -s -C "$REPO" FLAVOR=debug  print-appdir 2>/dev/null)"
   [ -n "$sd" ] && [ -n "$dd" ] || return 0
   # ONE round trip for both installs and the ssh count. `fuser` on each install's own binary,
-  # never `pidof plxnative`: both binaries carry that name, so a name-scoped test matches BOTH and
+  # never `pidof nativejelly`: both binaries carry that name, so a name-scoped test matches BOTH and
   # answers in an order busybox does not promise.
-  out="$(ssh_tv "for d in '$sd' '$dd'; do printf '%s ' \"\$(fuser \$d/plxnative 2>/dev/null || echo NONE)\"; done; echo; netstat -an 2>/dev/null | grep -c 'ESTABLISHED.*:22 \|:22 .*ESTABLISHED'")"
+  out="$(ssh_tv "for d in '$sd' '$dd'; do printf '%s ' \"\$(fuser \$d/nativejelly 2>/dev/null || echo NONE)\"; done; echo; netstat -an 2>/dev/null | grep -c 'ESTABLISHED.*:22 \|:22 .*ESTABLISHED'")"
   local apps ssh_n
   apps="$(printf '%s\n' "$out" | head -1)"
   ssh_n="$(printf '%s\n' "$out" | sed -n '2p')"
@@ -433,7 +433,7 @@ preflight_note() {
 cmd_status() {
   parse_opts "$@"
   need_host || exit 2
-  if [ -n "${PLX_VERBOSE:-}" ]; then echo "== TV lock: $HOST"; else echo "== TV lock: the TV"; fi
+  if [ -n "${NJ_VERBOSE:-}" ]; then echo "== TV lock: $HOST"; else echo "== TV lock: the TV"; fi
   if ! ssh_tv true; then bad "TV unreachable (asleep? see the wake-tv skill)"; exit 2; fi
   lease_load || true
   RESP="$(remote_op status 0 0)"; parse_resp
@@ -478,8 +478,8 @@ cmd_break() {
 # command still cannot collide with a fleet job, without anybody having typed anything.
 cmd_require() {
   parse_opts "$@"
-  if [ "${PLX_TV_LOCK_BYPASS:-0}" = 1 ]; then
-    warn "PLX_TV_LOCK_BYPASS=1 — TV lock NOT checked (you are on your own for collisions)"; exit 0
+  if [ "${NJ_TV_LOCK_BYPASS:-0}" = 1 ]; then
+    warn "NJ_TV_LOCK_BYPASS=1 — TV lock NOT checked (you are on your own for collisions)"; exit 0
   fi
   [ -n "$HOST" ] || exit 0            # no TV configured: the caller will fail on its own terms
 
@@ -549,7 +549,7 @@ cmd_with() {
   # Inheriting rather than nesting. A `with` inside a lane that ALREADY holds the set must not
   # release it on the way out — the outer session would silently lose the television mid-task.
   local inherited=0
-  if [ "${PLX_TV_LOCK_INHERITED:-0}" = 1 ]; then inherited=1
+  if [ "${NJ_TV_LOCK_INHERITED:-0}" = 1 ]; then inherited=1
   elif lease_load; then
     RESP="$(remote_op status 0 0)"; parse_resp
     [ "$(fld token "$OWNER_BLK")" = "$TOKEN" ] && inherited=1
@@ -569,7 +569,7 @@ cmd_with() {
   fi
   trap 'rc=$?; [ '"$renewer"' -gt 0 ] && kill '"$renewer"' 2>/dev/null; [ '"$inherited"' = 0 ] && "$0" release >/dev/null; exit $rc' EXIT INT TERM HUP
 
-  PLX_TV_LOCK_TOKEN="$TOKEN" PLX_TV_LOCK_INHERITED=1 "$@"
+  NJ_TV_LOCK_TOKEN="$TOKEN" NJ_TV_LOCK_INHERITED=1 "$@"
 }
 
 cmd_selftest() {
@@ -578,7 +578,7 @@ cmd_selftest() {
   # the decisions: who wins a contended acquire, that a live lease is not stealable, that an
   # expired one is, that release is owner-scoped, that re-acquiring is a renew.
   local d; d="$(mktemp -d)"; trap "rm -rf '$d'" EXIT
-  export PLX_TV_LOCK_LOCAL="$d"
+  export NJ_TV_LOCK_LOCAL="$d"
   REMOTE_LOCK="$d/plx-tv.lock"
   local fails=0
   t() {  # t <name> <expected act> ; RESP already set

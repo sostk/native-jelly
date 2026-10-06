@@ -60,7 +60,7 @@
 //! *right* shape for four corners and the wrong one for 120 cells. Catmull-Rom is C1, so the
 //! reconstruction is done on the CPU, once, into a texture that bilinear magnification then only
 //! has to smooth 32x further. 4x per axis is where the crease stops being findable.
-use plx_gfx::gfx;
+use nj_gfx::gfx;
 use crate::ui::theme;
 use crate::ui::widgets::AmbientWash;
 use crate::ui::{Painter, Rect};
@@ -240,7 +240,7 @@ impl UnderlayField {
                 }
                 gfx::FieldRead::Pending => {
                     self.pending = Some(t);
-                    plx_machine::idle::wake();
+                    nj_machine::idle::wake();
                     return FrameLatch::Pending;
                 }
                 gfx::FieldRead::Lost => {}
@@ -250,7 +250,7 @@ impl UnderlayField {
             Some(t) => {
                 self.pending = Some(t);
                 // A frame for the read to land in, whether or not anything else moves.
-                plx_machine::idle::wake();
+                nj_machine::idle::wake();
                 FrameLatch::Pending
             }
             None => FrameLatch::Refused,

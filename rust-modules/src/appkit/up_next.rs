@@ -142,7 +142,7 @@ pub(crate) fn armed(&self) -> bool {
 /// `app.rs` uses for its deferred-refresh deadline.
 ///
 /// While the screenshot pipeline holds the free-running clocks (`stillclock`,
-/// [`plx_machine::motion::held_clock_ms`]) the countdown holds with them, at that much elapsed: its
+/// [`nj_machine::motion::held_clock_ms`]) the countdown holds with them, at that much elapsed: its
 /// fill then draws one fixed picture and it never runs out. Never in a build without
 /// `devtriggers`.
 fn remaining_ms(&self, now: u32) -> u32 {
@@ -150,7 +150,7 @@ fn remaining_ms(&self, now: u32) -> u32 {
     if d == 0 {
         return 0;
     }
-    if let Some(held) = plx_machine::motion::held_clock_ms() {
+    if let Some(held) = nj_machine::motion::held_clock_ms() {
         return COUNTDOWN_MS.saturating_sub(held).max(1);
     }
     let left = d.wrapping_sub(now);
@@ -249,10 +249,10 @@ pub(crate) fn layout_of(next_w: f32, credits_w: f32) -> Layout {
 /// deliberately NOT a second `ctrl_slot`, because that floor exists to hold the row's right edge
 /// steady, which is the primary's job, and two equal capsules would say the two choices are
 /// equivalent.
-pub(crate) fn layout(row: &mut crate::appkit::player_hud::TransportRow, measure: &dyn plx_machine::machine::Measure) -> Layout {
+pub(crate) fn layout(row: &mut crate::appkit::player_hud::TransportRow, measure: &dyn nj_machine::machine::Measure) -> Layout {
     layout_of(
-        crate::appkit::player_hud::ctrl_slot(row, plx_platform::i18n::msg::widgets_next_episode(), measure).w,
-        crate::ui::widgets::Button::pill_w_measured(plx_platform::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
+        crate::appkit::player_hud::ctrl_slot(row, nj_platform::i18n::msg::widgets_next_episode(), measure).w,
+        crate::ui::widgets::Button::pill_w_measured(nj_platform::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
     )
 }
 
@@ -260,10 +260,10 @@ pub(crate) fn layout(row: &mut crate::appkit::player_hud::TransportRow, measure:
 /// buttons at. Only the two BUTTONS are pointer targets: the still and its caption are not, since
 /// with two actions in the row a click on the artwork has no single obvious meaning, and guessing
 /// one is how a stray click starts an episode the user did not ask for.
-pub(crate) fn layout_peek(row: &crate::appkit::player_hud::TransportRow, measure: &dyn plx_machine::machine::Measure) -> Layout {
+pub(crate) fn layout_peek(row: &crate::appkit::player_hud::TransportRow, measure: &dyn nj_machine::machine::Measure) -> Layout {
     layout_of(
-        crate::appkit::player_hud::ctrl_slot_w(row, plx_platform::i18n::msg::widgets_next_episode(), measure),
-        crate::ui::widgets::Button::pill_w_measured(plx_platform::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
+        crate::appkit::player_hud::ctrl_slot_w(row, nj_platform::i18n::msg::widgets_next_episode(), measure),
+        crate::ui::widgets::Button::pill_w_measured(nj_platform::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
     )
 }
 
@@ -277,7 +277,7 @@ fn caption(u: &UpNext) -> String {
     } else {
         u.ep_title.clone()
     };
-    plx_platform::i18n::msg::widgets_next_caption(&episode)
+    nj_platform::i18n::msg::widgets_next_caption(&episode)
 }
 
 pub(crate) fn draw(
@@ -288,7 +288,7 @@ pub(crate) fn draw(
     focused: bool,
     btn: c_int,
     now: u32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let Some(u) = crate::route::up_next(ps) else {
         return;
@@ -310,7 +310,7 @@ pub(crate) fn draw(
         1.0,
     );
 
-    let elided = plx_gfx::text::elide_by(&caption(u), l.caption.w, false, |t| {
+    let elided = nj_gfx::text::elide_by(&caption(u), l.caption.w, false, |t| {
         measure.width_str(t, theme::size::CAPTION, true)
     });
     if let Ok(cs) = CString::new(elided) {
@@ -323,7 +323,7 @@ pub(crate) fn draw(
     let e = Env::inert();
     // The focus pop is the CONTROL ROW's, not this card's: these two stand in the transport's own
     // slot and share its cursor, so they share its springs (`TransportRow::scale`).
-    Button::new(plx_platform::i18n::msg::widgets_next_credits_c().as_ptr(), theme::size::BODY, l.credits)
+    Button::new(nj_platform::i18n::msg::widgets_next_credits_c().as_ptr(), theme::size::BODY, l.credits)
         .focused(focused && btn == BTN_CREDITS)
         // Both buttons on this card stand on LIVE CREDITS — the video plane, under this card's own
         // scrim — so both take the unkeyed ground (`ControlGround`). It is what the app's
@@ -337,7 +337,7 @@ pub(crate) fn draw(
     // starts. Driven straight off the remaining MILLISECONDS and redrawn every frame, so the sweep
     // is continuous; the label carries no seconds, because the pill's width is derived from its
     // label and a ticking numeral would resize the button and slide its centred text every second.
-    let Ok(label) = CString::new(plx_platform::i18n::msg::widgets_next_episode()) else {
+    let Ok(label) = CString::new(nj_platform::i18n::msg::widgets_next_episode()) else {
         return;
     };
     let mut b = Button::new(label.as_ptr(), theme::size::BODY, l.next)
@@ -345,13 +345,13 @@ pub(crate) fn draw(
         .ground(ControlGround::Unkeyed)
         .scale(pop_next);
     if up.armed() {
-        // It animates from a CLOCK, so `plx_machine::idle`'s spring instrumentation cannot see it — the trap
+        // It animates from a CLOCK, so `nj_machine::idle`'s spring instrumentation cannot see it — the trap
         // `Xfade::tick` and `Spinner::draw` both shipped frozen in. The player route bypasses the
         // frame gate outright today, so this changes nothing now; it is what keeps that reversible.
         // A HELD clock (`remaining_ms`) draws one fixed fill, so there is nothing to redraw — the
         // same exception `widgets::Spinner` makes.
-        if !plx_machine::motion::phase_clocks_held() {
-            plx_machine::idle::invalidate();
+        if !nj_machine::motion::phase_clocks_held() {
+            nj_machine::idle::invalidate();
         }
         b = b.progress(1.0 - (up.remaining_ms(now) as f32 / COUNTDOWN_MS as f32).clamp(0.0, 1.0));
     }

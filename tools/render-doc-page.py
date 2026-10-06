@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Render one of docs/{install-and-verify,troubleshooting}.md into a standalone HTML page
-for plxnative.com, wrapped in the site's own header/footer and styled with site/styles.css.
+for nativejelly.com, wrapped in the site's own header/footer and styled with site/styles.css.
 
 Used by `.github/workflows/pages.yml` ("Stage _site") and locally:
 
@@ -20,7 +20,7 @@ becomes a run of hyphens, not one hyphen: that is what pins the algorithm down, 
 two anchors this repo already depends on — docs/install-and-verify.md's "## Important: Developer
 Mode expires" is linked from README.md as "#important-developer-mode-expires", and its own
 "### Option A — install PlxNative directly" is linked internally as
-"#option-a--install-plxnative-directly", double hyphen and all, where the em dash used to be).
+"#option-a--install-nativejelly-directly", double hyphen and all, where the em dash used to be).
 
 Link rewriting: install-and-verify.md and troubleshooting.md are the only two docs rendered as
 site pages (see PAGES below), so a relative link from one to the other becomes a site path,
@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover - operator-facing message, not exercised
 
 REPO = "GLinnik21/plx-native"
 GITHUB_BLOB = f"https://github.com/{REPO}/blob/main"
-SITE_ORIGIN = "https://plxnative.com"
+SITE_ORIGIN = "https://nativejelly.com"
 
 # Same card every other page reuses for link previews (site/media/og-card.jpg, staged to
 # _site/media/og-card.jpg by pages.yml); these two docs have no screenshot of their own.

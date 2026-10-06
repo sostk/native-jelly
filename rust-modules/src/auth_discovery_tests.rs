@@ -4,7 +4,7 @@
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
-use plx_net::net::{curl_ready, expired_leaf, identity_request, key_of_port, leaf_pin, remember, ymd_from_now, TestCaGuard};
+use nj_net::net::{curl_ready, expired_leaf, identity_request, key_of_port, leaf_pin, remember, ymd_from_now, TestCaGuard};
 
 /// PLX-NATIVE-12: authorization has already succeeded, so a transient failure listing plex.tv
 /// resources must be retried in place instead of becoming the terminal silent verdict.
@@ -20,8 +20,8 @@ fn authorized_discovery_retries_a_dns_blip_before_settling() {
         }
         fn terminal(&self, _: AuthProgress) -> bool { true }
     }
-    let dns = plx_net::net::RequestFailure {
-        cause: plx_net::net::RequestError::Transport,
+    let dns = nj_net::net::RequestFailure {
+        cause: nj_net::net::RequestError::Transport,
         status: None,
         body_limit: None,
         curl_rc: Some(6),
@@ -79,7 +79,7 @@ fn login_home_users_retries_then_falls_back_to_an_empty_roster() {
         fn wait(&mut self, duration: Duration) -> bool { self.0 += duration; true }
     }
     let account = AccountClient::new("client", Some("authorized-token"));
-    let dns = Err(plx_net::net::RequestFailure { cause: plx_net::net::RequestError::Transport,
+    let dns = Err(nj_net::net::RequestFailure { cause: nj_net::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
     let mut calls = 0;
     let users = sign_in_home_users_with_clock(&account, 7, &Live,
@@ -110,7 +110,7 @@ fn login_home_users_publishes_the_first_miss_before_the_second_request_returns()
     }
     let output = Capture(Mutex::new(Vec::new()));
     let account = AccountClient::new("client", Some("authorized-token"));
-    let dns = Err(plx_net::net::RequestFailure { cause: plx_net::net::RequestError::Transport,
+    let dns = Err(nj_net::net::RequestFailure { cause: nj_net::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
     let mut calls = 0;
     let users = sign_in_home_users_with_clock(&account, 9, &output,
@@ -140,7 +140,7 @@ fn background_home_roster_refresh_retries_before_preserving_the_cache() {
         fn wait(&mut self, duration: Duration) -> bool { self.0 += duration; true }
     }
     let account = AccountClient::new("client", Some("token"));
-    let dns = Err(plx_net::net::RequestFailure { cause: plx_net::net::RequestError::Transport,
+    let dns = Err(nj_net::net::RequestFailure { cause: nj_net::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
     let mut calls = 0;
     let graded = home_roster_with_io_and_clock(&account, &mut Clock(Duration::ZERO), |_, _| {
@@ -362,7 +362,7 @@ fn relay_only_server_gets_a_fresh_probe_budget_after_direct_timeouts_and_is_admi
         &[resource], &[], CredentialPolicy::HttpsOnly, &PlaintextAsk::undecided(), &mut probe_one,
         &mut |_| {
             admissions += 1;
-            crate::plex::EndpointAdmission::Usable
+            crate::catalog::EndpointAdmission::Usable
         },
         &mut |_, _, _| {}, &mut || {}, &mut |_, _, _, _| {},
     );
@@ -427,8 +427,8 @@ fn discovery_retries_the_same_server_via_relay_after_direct_admission_times_out(
         let candidate = if probes == 1 { direct.clone() } else { relay.clone() };
         Reach::At(candidate.clone(), candidate.origin().unwrap())
     };
-    let mut admissions = vec![crate::plex::EndpointAdmission::Timeout,
-        crate::plex::EndpointAdmission::Usable].into_iter();
+    let mut admissions = vec![crate::catalog::EndpointAdmission::Timeout,
+        crate::catalog::EndpointAdmission::Usable].into_iter();
     let resolved = resolve_roster_using_admission(
         &[resource], &[], CredentialPolicy::HttpsOnly, &PlaintextAsk::undecided(), &mut probe_one,
         &mut |_| admissions.next().unwrap(), &mut |_, _, _| {},
@@ -778,7 +778,7 @@ fn issue_95_account(with_relay: bool) -> Resource {
 /// the pinning-specific fixture.
 fn issue_95_dial(
     origin: &Origin,
-    _pin: Option<&crate::plex::ResolvePin>,
+    _pin: Option<&crate::catalog::ResolvePin>,
     _budget: Duration,
 ) -> (i32, Vec<u8>) {
     match (origin.host(), origin.is_tls()) {
@@ -982,7 +982,7 @@ fn insecure_only_copy_is_one_shared_const_naming_the_fixable_cause() {
 /// router, which would otherwise make this exact candidate NXDOMAIN.
 fn issue_95_dial_pinned(
     origin: &Origin,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::catalog::ResolvePin>,
     budget: Duration,
 ) -> (i32, Vec<u8>) {
     if origin.host() == "192-168-1-50.h.plex.direct" && origin.is_tls() {
@@ -1098,9 +1098,9 @@ fn e2e95_resource(lan_port: u16, dead_port: u16, relay_port: Option<u16>) -> Res
 
 /// **The real curl/TLS stack reaches the pinned HTTPS LAN candidate and never activates its
 /// plaintext twin.** Issue #95's shape, driven through the PRODUCTION dial
-/// (`get_identity` → `crate::http::request_probe_learning_key` → `plx_net::net::request_result_evidence`) rather
+/// (`get_identity` → `crate::http::request_probe_learning_key` → `nj_net::net::request_result_evidence`) rather
 /// than a fake [`ProbeDial`] closure: a loopback double
-/// ([`plx_net::net::spawn_dual_protocol`]) answers the SAME `/identity` body over
+/// ([`nj_net::net::spawn_dual_protocol`]) answers the SAME `/identity` body over
 /// both a real TLS handshake (against a minted self-signed cert curl is told to trust via
 /// `net::test_ca_bundle`, the same seam `request_tls_evidence` reads `CURLOPT_CAINFO` from)
 /// and plaintext HTTP, on one port — exactly what `probe::candidates` assumes when it
@@ -1110,24 +1110,24 @@ fn e2e95_resource(lan_port: u16, dead_port: u16, relay_port: Option<u16>) -> Res
 /// pinned LAN candidate must win outright, and no plaintext origin may ever be activated.
 #[test]
 fn e2e_real_curl_race_reaches_the_pinned_https_lan_candidate_over_a_real_tls_handshake() {
-    let _serial = plx_base::testlock::serial();
-    if !(plx_net::net::global_init() && plx_net::net::available()) {
+    let _serial = nj_base::testlock::serial();
+    if !(nj_net::net::global_init() && nj_net::net::available()) {
         eprintln!("curl unavailable on this host; skipping");
         return;
     }
     // The verified probe remembers the server's key (issue #380): into a scratch session, never
     // the developer's own.
-    let _session = crate::plex::session::TempSession::new("lan-race");
-    let cert = std::sync::Arc::new(plx_net::net::mint_cert(&[
+    let _session = crate::catalog::session::TempSession::new("lan-race");
+    let cert = std::sync::Arc::new(nj_net::net::mint_cert(&[
         "127-0-0-1.e2e95.plex.direct",
         "127.0.0.1",
     ]));
     let _ca = TestCaGuard::install(&cert.pem, "lan-race");
 
     let body = identity_json("e2e95mid");
-    let lan_port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
-    let relay_port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
-    let dead = plx_net::net::dead_port();
+    let lan_port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
+    let relay_port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
+    let dead = nj_net::net::dead_port();
 
     let resource = e2e95_resource(lan_port, dead, Some(relay_port));
     let plan = probe::plan(&resource, CredentialPolicy::HttpsOnly);
@@ -1158,7 +1158,7 @@ fn e2e_real_curl_race_reaches_the_pinned_https_lan_candidate_over_a_real_tls_han
     // The same race, through `race_batch`'s real worker, taught the session the LAN leaf's key.
     assert_eq!(
         learned_pin("e2e95mid"),
-        Some(plx_base::spki::pin_from_spki_der(&cert.spki_der)),
+        Some(nj_base::spki::pin_from_spki_der(&cert.spki_der)),
         "a verified, accepted LAN answer is remembered"
     );
 }
@@ -1173,23 +1173,23 @@ fn e2e_real_curl_race_reaches_the_pinned_https_lan_candidate_over_a_real_tls_han
 /// admit that rather than blame the CA store, and the test says which one it saw.
 #[test]
 fn an_expired_leaf_is_logged_as_expired_not_as_a_stale_ca_store() {
-    let _serial = plx_base::testlock::serial();
-    if !(plx_net::net::global_init() && plx_net::net::available()) {
+    let _serial = nj_base::testlock::serial();
+    if !(nj_net::net::global_init() && nj_net::net::available()) {
         eprintln!("curl unavailable on this host; skipping");
         return;
     }
-    let cert = std::sync::Arc::new(plx_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-90), ymd_from_now(-30)));
+    let cert = std::sync::Arc::new(nj_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-90), ymd_from_now(-30)));
     let _ca = TestCaGuard::install(&cert.pem, "expired-leaf");
-    let port = plx_net::net::spawn_dual_protocol(std::sync::Arc::clone(&cert), identity_json("expired"));
+    let port = nj_net::net::spawn_dual_protocol(std::sync::Arc::clone(&cert), identity_json("expired"));
 
-    let log = plx_base::eventlog::events_log();
+    let log = nj_base::eventlog::events_log();
     let before = std::fs::metadata(&log).map_or(0, |m| m.len());
-    let out = plx_net::net::request_result_evidence(
+    let out = nj_net::net::request_result_evidence(
         &format!("https://127.0.0.1:{port}/identity"),
         &[],
         "GET",
         None,
-        plx_net::net::API,
+        nj_net::net::API,
         false,
         None,
         None,
@@ -1218,21 +1218,21 @@ fn an_expired_leaf_is_logged_as_expired_not_as_a_stale_ca_store() {
 /// `resolve_roster_using` — what a boot actually stores is `SourceRef::origin_url`.
 #[test]
 fn e2e_real_curl_resolve_roster_only_ever_records_the_pinned_https_origin() {
-    let _serial = plx_base::testlock::serial();
-    if !(plx_net::net::global_init() && plx_net::net::available()) {
+    let _serial = nj_base::testlock::serial();
+    if !(nj_net::net::global_init() && nj_net::net::available()) {
         eprintln!("curl unavailable on this host; skipping");
         return;
     }
-    let _session = crate::plex::session::TempSession::new("lan-roster");
-    let cert = std::sync::Arc::new(plx_net::net::mint_cert(&[
+    let _session = crate::catalog::session::TempSession::new("lan-roster");
+    let cert = std::sync::Arc::new(nj_net::net::mint_cert(&[
         "127-0-0-1.e2e95.plex.direct",
         "127.0.0.1",
     ]));
     let _ca = TestCaGuard::install(&cert.pem, "lan-roster");
 
     let body = identity_json("e2e95mid");
-    let lan_port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
-    let dead = plx_net::net::dead_port();
+    let lan_port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), body.clone());
+    let dead = nj_net::net::dead_port();
 
     let resources = vec![e2e95_resource(lan_port, dead, None)];
     let dial: ProbeDial = Arc::new(get_identity);
@@ -1264,15 +1264,15 @@ fn e2e_real_curl_resolve_roster_only_ever_records_the_pinned_https_origin() {
 
 /// **A real failed TLS handshake plus a real plaintext answer must settle as `InsecureOnly`,
 /// never `Reach::At` plaintext.** The advertised HTTPS uri points at a loopback double that
-/// only ever speaks plaintext ([`plx_net::net::spawn_plain_only`]) — a real curl
+/// only ever speaks plaintext ([`nj_net::net::spawn_plain_only`]) — a real curl
 /// TLS ClientHello against it fails the handshake — while the auto-synthesized plaintext twin
 /// on the SAME port answers 200 with a correct identity body. No relay in this fixture, so
 /// there is nothing else to win: the only verified answer is `!credential_eligible`, and under
 /// `CredentialPolicy::HttpsOnly` that must never become the reachable origin.
 #[test]
 fn e2e_real_curl_tls_failure_with_a_verified_plaintext_answer_yields_insecure_only_not_reach_at() {
-    let _serial = plx_base::testlock::serial();
-    if !(plx_net::net::global_init() && plx_net::net::available()) {
+    let _serial = nj_base::testlock::serial();
+    if !(nj_net::net::global_init() && nj_net::net::available()) {
         eprintln!("curl unavailable on this host; skipping");
         return;
     }
@@ -1281,8 +1281,8 @@ fn e2e_real_curl_tls_failure_with_a_verified_plaintext_answer_yields_insecure_on
     // here makes verification fail as a wrong-machine answer instead of exercising the
     // insecure-plaintext path this test means to prove.
     let body = identity_json("e2e95mid");
-    let plain_port = plx_net::net::spawn_plain_only(body.clone());
-    let dead = plx_net::net::dead_port();
+    let plain_port = nj_net::net::spawn_plain_only(body.clone());
+    let dead = nj_net::net::dead_port();
 
     let resource = e2e95_resource(plain_port, dead, None);
     let plan = probe::plan(&resource, CredentialPolicy::HttpsOnly);
@@ -1355,7 +1355,7 @@ fn a_candidate_whose_label_does_not_encode_its_own_address_gets_no_pin() {
         candidates: vec![mismatched],
         policy: CredentialPolicy::HttpsOnly,
     };
-    let seen_pin: Arc<Mutex<Option<Option<crate::plex::ResolvePin>>>> = Arc::new(Mutex::new(None));
+    let seen_pin: Arc<Mutex<Option<Option<crate::catalog::ResolvePin>>>> = Arc::new(Mutex::new(None));
     let seen_pin_by_dial = Arc::clone(&seen_pin);
     let dial: ProbeDial = status_dial(move |_origin, pin, _budget| {
         *seen_pin_by_dial.lock().unwrap() = Some(pin.cloned());
@@ -1466,38 +1466,38 @@ fn every_server_settlement_publishes_its_specific_state_and_winning_tier() {
 
 #[test]
 fn a_changed_refresh_republishes_reached_unauthorized_and_offline_after_registry_replacement() {
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
     let old = [
-        crate::plex::register_for_test("yes", "10.0.0.1", 32400, "old", "cid"),
-        crate::plex::register_for_test("denied", "10.0.0.2", 32400, "old", "cid"),
-        crate::plex::register_for_test("off", "10.0.0.3", 32400, "old", "cid"),
+        crate::catalog::register_for_test("yes", "10.0.0.1", 32400, "old", "cid"),
+        crate::catalog::register_for_test("denied", "10.0.0.2", 32400, "old", "cid"),
+        crate::catalog::register_for_test("off", "10.0.0.3", 32400, "old", "cid"),
     ];
     for id in old {
-        crate::plex::publish_probe_result(id, Outcome::Reachable);
+        crate::catalog::publish_probe_result(id, Outcome::Reachable);
     }
 
     // The changed=true refresh path resets every old profile fact before installing the final
     // roster. These registrations stand in for install_roster without its network side effect.
-    crate::plex::revoke_for_profile_switch();
+    crate::catalog::revoke_for_profile_switch();
     let installed = [
-        crate::plex::register_for_test("yes", "10.0.0.1", 32400, "new", "cid"),
-        crate::plex::register_for_test("denied", "10.0.0.2", 32400, "new", "cid"),
-        crate::plex::register_for_test("off", "10.0.0.3", 32400, "new", "cid"),
+        crate::catalog::register_for_test("yes", "10.0.0.1", 32400, "new", "cid"),
+        crate::catalog::register_for_test("denied", "10.0.0.2", 32400, "new", "cid"),
+        crate::catalog::register_for_test("off", "10.0.0.3", 32400, "new", "cid"),
     ];
-    crate::plex::client_for(installed[0])
+    crate::catalog::client_for(installed[0])
         .unwrap()
         .set_link(probe::Location::Remote);
-    crate::plex::client_for(installed[1])
+    crate::catalog::client_for(installed[1])
         .unwrap()
         .set_link(probe::Location::Local);
-    crate::plex::client_for(installed[2])
+    crate::catalog::client_for(installed[2])
         .unwrap()
         .set_link(probe::Location::Relay);
-    crate::plex::finish_profile_switch(&installed);
+    crate::catalog::finish_profile_switch(&installed);
     assert!(installed
         .iter()
-        .all(|&id| crate::plex::server_probe_result(id).is_none()));
+        .all(|&id| crate::catalog::server_probe_result(id).is_none()));
 
     publish_settled_probes(&[
         SettledProbe {
@@ -1521,30 +1521,30 @@ fn a_changed_refresh_republishes_reached_unauthorized_and_offline_after_registry
     ]);
 
     assert_eq!(
-        crate::plex::server_probe_result(installed[0]),
+        crate::catalog::server_probe_result(installed[0]),
         Some(Outcome::Reachable)
     );
     assert_eq!(
-        crate::plex::server_probe_result(installed[1]),
+        crate::catalog::server_probe_result(installed[1]),
         Some(Outcome::Unauthorized)
     );
     assert_eq!(
-        crate::plex::server_probe_result(installed[2]),
+        crate::catalog::server_probe_result(installed[2]),
         Some(Outcome::Unreachable)
     );
     assert_eq!(
-        crate::plex::client_for(installed[0]).unwrap().link(),
+        crate::catalog::client_for(installed[0]).unwrap().link(),
         Some(probe::Location::Remote)
     );
     assert_eq!(
-        crate::plex::client_for(installed[1]).unwrap().link(),
+        crate::catalog::client_for(installed[1]).unwrap().link(),
         Some(probe::Location::Local)
     );
     assert_eq!(
-        crate::plex::client_for(installed[2]).unwrap().link(),
+        crate::catalog::client_for(installed[2]).unwrap().link(),
         Some(probe::Location::Relay)
     );
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **Identity is verified before a connection is accepted.** A candidate that answers is not
@@ -1734,7 +1734,7 @@ fn every_advertised_address_is_dialable_and_only_an_impossible_port_is_not() {
     // do differ, which is why this is a value rather than a bool.
     assert_eq!(
         dial_target(&at("203.0.113.9")),
-        Some(crate::plex::Origin::http("203.0.113.9", 32400))
+        Some(crate::catalog::Origin::http("203.0.113.9", 32400))
     );
     assert_eq!(
         dial_target(&cand(Scheme::Https, "203-0-113-9.h.plex.direct", 31234)).map(|o| o.base()),
@@ -2131,8 +2131,8 @@ fn a_refused_token_is_reported_as_authorization_not_as_silence() {
         let refused = [
             Ok(status),
             // A refusal whose body broke is still that refusal (`net::response_status`).
-            Err(plx_net::net::RequestFailure {
-                cause: plx_net::net::RequestError::Transport,
+            Err(nj_net::net::RequestFailure {
+                cause: nj_net::net::RequestError::Transport,
                 status: Some(status),
                 body_limit: None,
                 curl_rc: Some(18),
@@ -2160,16 +2160,16 @@ fn a_refused_token_is_reported_as_authorization_not_as_silence() {
 
 #[test]
 fn terminal_discovery_copy_names_the_target_cause_retry_and_action() {
-    let failure = |rc, cause| Err(plx_net::net::RequestFailure { cause, status: None,
+    let failure = |rc, cause| Err(nj_net::net::RequestFailure { cause, status: None,
         body_limit: None, curl_rc: rc });
     let message = |last| discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
         last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
     })).unwrap().0.into_owned();
-    assert_eq!(message(failure(Some(6), plx_net::net::RequestError::Transport)),
+    assert_eq!(message(failure(Some(6), nj_net::net::RequestError::Transport)),
         "This TV couldn't find plex.tv, so your servers weren't checked. We tried 3 times. Check the TV's internet connection, then try again.");
-    assert_eq!(message(failure(Some(28), plx_net::net::RequestError::TimedOut)),
+    assert_eq!(message(failure(Some(28), nj_net::net::RequestError::TimedOut)),
         "This TV couldn't reach plex.tv, so your servers weren't checked. We tried 3 times. Check the TV's internet connection, then try again.");
-    assert_eq!(message(failure(Some(60), plx_net::net::RequestError::Transport)),
+    assert_eq!(message(failure(Some(60), nj_net::net::RequestError::Transport)),
         "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.");
     for evidence in [Ok(200), Ok(408), Ok(429), Ok(503)] {
         assert_eq!(message(evidence),
@@ -2184,7 +2184,7 @@ fn terminal_discovery_copy_names_the_target_cause_retry_and_action() {
 
 #[test]
 fn a_single_discovery_attempt_uses_grammatical_retry_copy() {
-    let last = Err(plx_net::net::RequestFailure { cause: plx_net::net::RequestError::Transport,
+    let last = Err(nj_net::net::RequestFailure { cause: nj_net::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
     let (message, _) = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
         last, attempts: 1, elapsed: Duration::ZERO, trigger: DiscoveryTrigger::Login,
@@ -2210,7 +2210,7 @@ fn background_resource_call_sites_clamp_each_request_to_the_runner_budget() {
 
 #[test]
 fn dns_copy_never_claims_that_a_plex_server_was_contacted() {
-    let last = Err(plx_net::net::RequestFailure { cause: plx_net::net::RequestError::Transport,
+    let last = Err(nj_net::net::RequestFailure { cause: nj_net::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
     let (caption, _) = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
         last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
@@ -2274,15 +2274,15 @@ fn insecure_evidence_of(d: &Discovery) -> probe::InsecureEvidence {
     *evidence
 }
 
-fn timed_out() -> plx_net::net::RequestFailure {
-    plx_net::net::RequestFailure {
-        cause: plx_net::net::RequestError::TimedOut, status: None, body_limit: None, curl_rc: Some(28),
+fn timed_out() -> nj_net::net::RequestFailure {
+    nj_net::net::RequestFailure {
+        cause: nj_net::net::RequestError::TimedOut, status: None, body_limit: None, curl_rc: Some(28),
     }
 }
 
-fn transport_rc(rc: i32) -> plx_net::net::RequestFailure {
-    plx_net::net::RequestFailure {
-        cause: plx_net::net::RequestError::Transport, status: None, body_limit: None, curl_rc: Some(rc),
+fn transport_rc(rc: i32) -> nj_net::net::RequestFailure {
+    nj_net::net::RequestFailure {
+        cause: nj_net::net::RequestError::Transport, status: None, body_limit: None, curl_rc: Some(rc),
     }
 }
 
@@ -2317,13 +2317,13 @@ fn every_route_server(relay: bool) -> Resource {
 /// and carry the plaintext answer's closed facts — a loopback literal on a `local` connection.
 #[test]
 fn e2e_insecure_only_evidence_names_the_failed_tls_handshake() {
-    let _serial = plx_base::testlock::serial();
-    if !(plx_net::net::global_init() && plx_net::net::available()) {
+    let _serial = nj_base::testlock::serial();
+    if !(nj_net::net::global_init() && nj_net::net::available()) {
         eprintln!("curl unavailable on this host; skipping");
         return;
     }
-    let plain_port = plx_net::net::spawn_plain_only(identity_json("e2e95mid"));
-    let dead = plx_net::net::dead_port();
+    let plain_port = nj_net::net::spawn_plain_only(identity_json("e2e95mid"));
+    let dead = nj_net::net::dead_port();
     let d = insecure_verdict(e2e95_resource(plain_port, dead, None), Arc::new(get_identity));
     let e = insecure_evidence_of(&d);
     assert_eq!(e.https.lan_plex_direct, probe::RouteOutcome::Tls, "{e:?}");
@@ -2473,13 +2473,13 @@ fn no_servers_failure(user_call: impl FnOnce() -> Option<String>)
 #[test]
 fn a_no_servers_sign_in_hands_the_screen_the_account_name() {
     let (message, account, calls, _) = no_servers_failure(|| Some("alexandra".to_owned()));
-    assert_eq!(message, plx_platform::i18n::msg::browse_auth_no_servers(), "the caption stays the fallback");
+    assert_eq!(message, nj_platform::i18n::msg::browse_auth_no_servers(), "the caption stays the fallback");
     assert_eq!(account.as_deref(), Some("alexandra"), "the account is named on the failure");
     assert_eq!(calls, 1, "ONE user call");
 
     let (message, account, calls, _) = no_servers_failure(|| None);
     assert_eq!((message.as_str(), account, calls),
-        (plx_platform::i18n::msg::browse_auth_no_servers(), None, 1),
+        (nj_platform::i18n::msg::browse_auth_no_servers(), None, 1),
         "a failed, timed-out or nameless user call is today's failure, unchanged");
 }
 
@@ -2523,7 +2523,7 @@ fn the_account_name_is_fetched_only_for_a_no_servers_verdict() {
 /// host (the hostname variant below re-addresses it): every plaintext candidate but the remote
 /// custom one answers `/identity` for the machine, every HTTPS route is dead. `relay` switches
 /// the relay back on and lets it verify.
-fn plx10_dial(origin: &Origin, _pin: Option<&crate::plex::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
+fn plx10_dial(origin: &Origin, _pin: Option<&crate::catalog::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
     match (origin.host(), origin.is_tls()) {
         ("custom.example.net", false) => (400, Vec::new()),
         ("relay.example.net", true) => (200, identity_json("issue95mid")),
@@ -2537,7 +2537,7 @@ fn plx10_dial(origin: &Origin, _pin: Option<&crate::plex::ResolvePin>, _budget: 
 /// identity race is tokenless by construction: `ProbeDial` is handed no token at all).
 fn plx10_discover(resource: Resource, ask: &PlaintextAsk) -> (Resolution, Vec<(String, String)>) {
     let (resolved, admitted, _) =
-        plx10_discover_with(resource, ask, plx10_dial, |_| crate::plex::EndpointAdmission::Usable);
+        plx10_discover_with(resource, ask, plx10_dial, |_| crate::catalog::EndpointAdmission::Usable);
     (resolved, admitted)
 }
 
@@ -2548,8 +2548,8 @@ fn plx10_discover(resource: Resource, ask: &PlaintextAsk) -> (Resolution, Vec<(S
 fn plx10_discover_with(
     resource: Resource,
     ask: &PlaintextAsk,
-    dial: fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> (i32, Vec<u8>),
-    answer: impl Fn(&SourceRef) -> crate::plex::EndpointAdmission,
+    dial: fn(&Origin, Option<&crate::catalog::ResolvePin>, Duration) -> (i32, Vec<u8>),
+    answer: impl Fn(&SourceRef) -> crate::catalog::EndpointAdmission,
 ) -> (Resolution, Vec<(String, String)>, Vec<SettledProbe>) {
     let dial: ProbeDial = status_dial(dial);
     let mut probe_one = |plan: &ProbePlan, rejected: &[String]| {
@@ -2583,17 +2583,17 @@ fn plx10_offer(resolved: &Resolution) -> Option<&PlaintextVerdict> {
 /// named an `http://` origin, and no grant exists.
 #[test]
 fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over_plaintext() {
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
     let (resolved, admitted) = plx10_discover(issue_95_account(false), &PlaintextAsk::undecided());
     assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{admitted:?}");
     let verdict = plx10_offer(&resolved).expect("an insecure-only verdict");
     assert_eq!(verdict.eligibility, probe::PlaintextEligibility::Eligible);
     assert_eq!(verdict.choice, PlaintextChoice::Undecided);
     assert!(verdict.offers());
-    assert!(crate::plex::grant::granted_machines().is_empty());
-    assert!(!crate::plex::grant::allowed_under(
+    assert!(crate::catalog::grant::granted_machines().is_empty());
+    assert!(!crate::catalog::grant::allowed_under(
         CredentialPolicy::HttpsOnly, &Origin::http("192.168.1.50", 32400)));
 
     // Declined is recorded, never offered as a question again, and still mints nothing.
@@ -2602,8 +2602,8 @@ fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over
     assert!(admitted.is_empty(), "{admitted:?}");
     let verdict = plx10_offer(&resolved).expect("an insecure-only verdict");
     assert_eq!(verdict.choice, PlaintextChoice::Declined);
-    assert!(crate::plex::grant::granted_machines().is_empty());
-    crate::plex::reset_servers_for_test();
+    assert!(crate::catalog::grant::granted_machines().is_empty());
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **After consent, the plaintext origin is activated and the token goes to it alone**: exactly one
@@ -2611,21 +2611,21 @@ fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over
 /// same host on another port, not another host.
 #[test]
 fn plx10_after_consent_the_token_goes_only_to_the_exact_verified_origin() {
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
     let (resolved, admitted) = plx10_discover(issue_95_account(false), &allowed);
     assert_eq!(admitted, vec![("http://192.168.1.50:32400".to_owned(), "tok-95".to_owned())]);
     let Resolved::Reached(found) = resolved.outcome else { panic!("consent must reach the server") };
     assert_eq!(found[0].origin_url, "http://192.168.1.50:32400");
     let store = CredentialPolicy::HttpsOnly;
-    assert!(crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.50", 32400)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.50", 32401)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.51", 32400)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("custom.example.net", 443)));
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    assert!(crate::catalog::grant::allowed_under(store, &Origin::http("192.168.1.50", 32400)));
+    assert!(!crate::catalog::grant::allowed_under(store, &Origin::http("192.168.1.50", 32401)));
+    assert!(!crate::catalog::grant::allowed_under(store, &Origin::http("192.168.1.51", 32400)));
+    assert!(!crate::catalog::grant::allowed_under(store, &Origin::http("custom.example.net", 443)));
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **Never offered, never granted — even with consent recorded**: a relay that verifies, a server
@@ -2634,7 +2634,7 @@ fn plx10_after_consent_the_token_goes_only_to_the_exact_verified_origin() {
 /// relay), and no admission ever names an `http://` origin.
 #[test]
 fn plx10_consent_never_downgrades_an_ineligible_topology() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
     let variants: Vec<(&str, Resource)> = vec![
         ("relay verifies", issue_95_account(true)),
@@ -2656,14 +2656,14 @@ fn plx10_consent_never_downgrades_an_ineligible_topology() {
         }),
     ];
     for (label, resource) in variants {
-        crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
+        crate::catalog::reset_servers_for_test();
+        crate::catalog::grant::reset_for_test();
         let (resolved, admitted) = plx10_discover(resource, &allowed);
         assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{label}: {admitted:?}");
-        assert!(crate::plex::grant::granted_machines().is_empty(), "{label}: a grant was minted");
+        assert!(crate::catalog::grant::granted_machines().is_empty(), "{label}: a grant was minted");
         assert!(plx10_offer(&resolved).is_none_or(|v| !v.offers()), "{label}: offered");
     }
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **An HTTPS origin refused at ADMISSION is an HTTPS answer, not an absent route.** The server's
@@ -2674,10 +2674,10 @@ fn plx10_consent_never_downgrades_an_ineligible_topology() {
 /// sign-in.
 #[test]
 fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() {
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    fn dial(origin: &Origin, _pin: Option<&crate::plex::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    fn dial(origin: &Origin, _pin: Option<&crate::catalog::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
         match (origin.host(), origin.is_tls()) {
             ("192-168-1-50.h.plex.direct", true) => (200, identity_json("issue95mid")),
             ("192.168.1.50", false) => (200, identity_json("issue95mid")),
@@ -2687,14 +2687,14 @@ fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() 
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
     let (resolved, admitted, _) = plx10_discover_with(issue_95_account(false), &allowed, dial,
         |source| if source.origin_url.starts_with("https://") {
-            crate::plex::EndpointAdmission::Refused(401)
+            crate::catalog::EndpointAdmission::Refused(401)
         } else {
-            crate::plex::EndpointAdmission::Usable
+            crate::catalog::EndpointAdmission::Usable
         });
     assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{admitted:?}");
-    assert!(crate::plex::grant::granted_machines().is_empty(), "a grant was minted");
+    assert!(crate::catalog::grant::granted_machines().is_empty(), "a grant was minted");
     assert!(plx10_offer(&resolved).is_none_or(|v| !v.offers()), "offered");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **A grant does not outlive the verdict that justified it.** A server connected under consent,
@@ -2704,27 +2704,27 @@ fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() 
 /// otherwise carry the token to an origin nothing re-proved.
 #[test]
 fn plx10_a_fresh_verdict_that_does_not_reach_the_granted_origin_revokes_the_grant() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
-    let silent = |_: &Origin, _: Option<&crate::plex::ResolvePin>, _: Duration| (0, Vec::new());
+    let silent = |_: &Origin, _: Option<&crate::catalog::ResolvePin>, _: Duration| (0, Vec::new());
     for (label, resource, dial) in [
         ("no longer eligible", {
             let mut r = issue_95_account(false); r.public_address_matches = false; r
-        }, plx10_dial as fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> (i32, Vec<u8>)),
+        }, plx10_dial as fn(&Origin, Option<&crate::catalog::ResolvePin>, Duration) -> (i32, Vec<u8>)),
         ("no longer answers", issue_95_account(false), silent),
     ] {
-        crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
+        crate::catalog::reset_servers_for_test();
+        crate::catalog::grant::reset_for_test();
         let _ = plx10_discover(issue_95_account(false), &allowed);
-        assert_eq!(crate::plex::grant::granted_machines(), vec!["issue95mid".to_owned()], "{label}");
+        assert_eq!(crate::catalog::grant::granted_machines(), vec!["issue95mid".to_owned()], "{label}");
         let (_, admitted, settled) = plx10_discover_with(resource, &allowed, dial,
-            |_| crate::plex::EndpointAdmission::Usable);
+            |_| crate::catalog::EndpointAdmission::Usable);
         assert!(admitted.is_empty(), "{label}: {admitted:?}");
         publish_settled_probes(&settled);
-        assert!(crate::plex::grant::granted_machines().is_empty(), "{label}: the grant survived");
+        assert!(crate::catalog::grant::granted_machines().is_empty(), "{label}: the grant survived");
     }
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// The user call is not made for a sink that is no longer live (the sign-in was cancelled).
@@ -2746,12 +2746,12 @@ fn a_dead_sink_never_asks_for_the_account_name() {
 
 #[test]
 fn localized_discovery_retries_use_the_whole_sentence_and_belarusian_count_rules() {
-    use plx_platform::i18n::{LocaleContext, Preference};
+    use nj_platform::i18n::{LocaleContext, Preference};
     let be = LocaleContext::resolve(Preference::Be, None, None, None, None);
     for (count, phrase) in [(1, "1 раз."), (2, "2 разы."), (5, "5 разоў."),
         (11, "11 разоў."), (21, "21 раз.")] {
-        for text in [plx_platform::i18n::msg::browse_auth_plex_dns_retry_in(&be, count),
-            plx_platform::i18n::msg::browse_auth_plex_connect_retry_in(&be, count)] {
+        for text in [nj_platform::i18n::msg::browse_auth_plex_dns_retry_in(&be, count),
+            nj_platform::i18n::msg::browse_auth_plex_connect_retry_in(&be, count)] {
             assert!(text.contains(phrase), "{text}");
             assert!(text.contains("plex.tv") && text.contains("Праверце злучэнне"), "{text}");
             assert!(!text.contains("We tried"), "an English sentence fragment must never survive");
@@ -2767,15 +2767,15 @@ fn localized_discovery_retries_use_the_whole_sentence_and_belarusian_count_rules
 /// that did not would fail here rather than skip.
 #[test]
 fn a_verified_tls_answer_carries_the_leaf_pin_only_when_asked() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let cert = std::sync::Arc::new(plx_net::net::mint_cert(&["127.0.0.1"]));
+    let cert = std::sync::Arc::new(nj_net::net::mint_cert(&["127.0.0.1"]));
     let _ca = TestCaGuard::install(&cert.pem, "pin-learn");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
 
     let asked = identity_request(port, "https", true).expect("a trusted loopback leaf verifies");
-    assert_eq!(asked.peer_pin, plx_base::spki::pin_from_pem(&cert.pem), "the served leaf's pin");
-    assert_eq!(asked.peer_pin, Some(plx_base::spki::pin_from_spki_der(&cert.spki_der)), "the key pair's pin");
+    assert_eq!(asked.peer_pin, nj_base::spki::pin_from_pem(&cert.pem), "the served leaf's pin");
+    assert_eq!(asked.peer_pin, Some(nj_base::spki::pin_from_spki_der(&cert.spki_der)), "the key pair's pin");
 
     let not_asked = identity_request(port, "https", false).expect("verifies");
     assert_eq!(not_asked.peer_pin, None, "an ordinary request pays for no chain and learns nothing");
@@ -2786,32 +2786,32 @@ fn a_verified_tls_answer_carries_the_leaf_pin_only_when_asked() {
 /// server does), so the order is what is being proved, not an accident of a one-element list.
 #[test]
 fn the_pin_is_the_leaf_of_a_ca_issued_chain_not_its_issuer() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let cert = Arc::new(plx_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-30), ymd_from_now(30)).serving_chain());
+    let cert = Arc::new(nj_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-30), ymd_from_now(30)).serving_chain());
     let _ca = TestCaGuard::install(&cert.pem, "pin-ca-issued");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
     let resp = identity_request(port, "https", true).expect("a leaf chaining to the trusted CA verifies");
-    assert_eq!(resp.peer_pin, Some(plx_base::spki::pin_from_spki_der(&cert.spki_der)));
-    assert_ne!(resp.peer_pin, plx_base::spki::pin_from_pem(&cert.pem), "not the CA's key");
+    assert_eq!(resp.peer_pin, Some(nj_base::spki::pin_from_spki_der(&cert.spki_der)));
+    assert_ne!(resp.peer_pin, nj_base::spki::pin_from_pem(&cert.pem), "not the CA's key");
 }
 
 #[test]
 fn plaintext_and_failed_verification_learn_no_pin() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let cert = Arc::new(plx_net::net::mint_cert(&["127.0.0.1"]));
+    let cert = Arc::new(nj_net::net::mint_cert(&["127.0.0.1"]));
     let _ca = TestCaGuard::install(&cert.pem, "pin-none");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
     // Plaintext: there is no certificate to read, whatever was asked.
     let plain = identity_request(port, "http", true).expect("the twin answers in the clear");
     assert_eq!(plain.peer_pin, None);
 
     // Verification fails: the expired leaf of `an_expired_leaf_…`. No `Resp` exists to carry a pin,
     // and the failure is the date check the next layer will care about.
-    let expired = Arc::new(plx_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-90), ymd_from_now(-30)));
+    let expired = Arc::new(nj_net::net::mint_ca_issued_cert(&["127.0.0.1"], ymd_from_now(-90), ymd_from_now(-30)));
     let _expired_ca = TestCaGuard::install(&expired.pem, "pin-expired");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&expired), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&expired), identity_json("m"));
     let failure = identity_request(port, "https", true).err().expect("an expired leaf must not verify");
     assert_eq!(failure.curl_rc, Some(60));
 }
@@ -2820,11 +2820,11 @@ fn plaintext_and_failed_verification_learn_no_pin() {
 /// the same strictly verified connection comes back with no pin at all.
 #[test]
 fn only_the_learning_probe_reads_the_peer_key() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let cert = Arc::new(plx_net::net::mint_cert(&["127.0.0.1"]));
+    let cert = Arc::new(nj_net::net::mint_cert(&["127.0.0.1"]));
     let _ca = TestCaGuard::install(&cert.pem, "pin-http");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m"));
     let origin = Origin::parse(&format!("https://127.0.0.1:{port}")).unwrap();
     let get = crate::http::Method::Get;
     let hdr = [crate::http::ACCEPT_JSON];
@@ -2834,13 +2834,13 @@ fn only_the_learning_probe_reads_the_peer_key() {
     assert_eq!(plain_probe.peer_pin, None, "a probe that did not ask");
     let learning = crate::http::request_probe_learning_key(&origin, IDENTITY, get, &hdr, 4096, 5, None)
         .expect("answers");
-    assert_eq!(learning.peer_pin, Some(plx_base::spki::pin_from_spki_der(&cert.spki_der)));
+    assert_eq!(learning.peer_pin, Some(nj_base::spki::pin_from_spki_der(&cert.spki_der)));
 }
 
 /// What the session remembers for `machine_id`, once the queued write has landed.
 fn learned_pin(machine_id: &str) -> Option<String> {
-    plx_base::storage_worker::drain_for_test();
-    crate::plex::session::peek().server_key_pin(machine_id).map(str::to_owned)
+    nj_base::storage_worker::drain_for_test();
+    crate::catalog::session::peek().server_key_pin(machine_id).map(str::to_owned)
 }
 
 /// The hash label of the `plex.direct` names these tests dial; plex.tv's is 32 hex digits.
@@ -2858,7 +2858,7 @@ fn learn_host() -> String {
 fn probe_and_learn(scheme: &str, port: u16, machine_id: &str, location: probe::Location) -> Outcome {
     let (origin, pin) = if scheme == "https" {
         let origin = Origin::parse(&format!("https://{}:{port}", learn_host())).unwrap();
-        let pin = crate::plex::ResolvePin::for_origin(&origin, "127.0.0.1").expect("a dashed plex.direct name pins");
+        let pin = crate::catalog::ResolvePin::for_origin(&origin, "127.0.0.1").expect("a dashed plex.direct name pins");
         (origin, Some(pin))
     } else {
         (Origin::parse(&format!("{scheme}://127.0.0.1:{port}")).unwrap(), None)
@@ -2871,13 +2871,13 @@ fn probe_and_learn(scheme: &str, port: u16, machine_id: &str, location: probe::L
 /// the session without an entry.
 #[test]
 fn an_accepted_identity_over_verified_tls_is_remembered_and_nothing_else_is() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let _session = crate::plex::session::TempSession::new("pin-learn-accept");
-    let cert = Arc::new(plx_net::net::mint_cert(&[&learn_host(), "127.0.0.1"]));
+    let _session = crate::catalog::session::TempSession::new("pin-learn-accept");
+    let cert = Arc::new(nj_net::net::mint_cert(&[&learn_host(), "127.0.0.1"]));
     let _ca = TestCaGuard::install(&cert.pem, "pin-learn-accept");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m-real"));
-    let want = plx_base::spki::pin_from_spki_der(&cert.spki_der);
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&cert), identity_json("m-real"));
+    let want = nj_base::spki::pin_from_spki_der(&cert.spki_der);
 
     // A different machine answering at the address: WrongServer, and no key is anyone's.
     assert_eq!(probe_and_learn("https", port, "m-other", probe::Location::Local), Outcome::WrongServer);
@@ -2904,14 +2904,14 @@ fn an_accepted_identity_over_verified_tls_is_remembered_and_nothing_else_is() {
 
 #[test]
 fn an_identity_that_fails_verification_teaches_no_key() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let _session = crate::plex::session::TempSession::new("pin-learn-unverified");
+    let _session = crate::catalog::session::TempSession::new("pin-learn-unverified");
     // The server's certificate is NOT in the trust store this request verifies against.
-    let trusted = Arc::new(plx_net::net::mint_cert(&[&learn_host()]));
-    let stranger = Arc::new(plx_net::net::mint_cert(&[&learn_host()]));
+    let trusted = Arc::new(nj_net::net::mint_cert(&[&learn_host()]));
+    let stranger = Arc::new(nj_net::net::mint_cert(&[&learn_host()]));
     let _ca = TestCaGuard::install(&trusted.pem, "pin-learn-unverified");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&stranger), identity_json("m-real"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&stranger), identity_json("m-real"));
     assert_eq!(probe_and_learn("https", port, "m-real", probe::Location::Local), Outcome::Unreachable);
     assert_eq!(learned_pin("m-real"), None);
 }
@@ -2921,32 +2921,32 @@ fn an_identity_that_fails_verification_teaches_no_key() {
 #[test]
 fn a_changed_key_replaces_the_entry_and_the_same_key_costs_no_write() {
     use std::os::unix::fs::MetadataExt;
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let session = crate::plex::session::TempSession::new("pin-learn-replace");
+    let session = crate::catalog::session::TempSession::new("pin-learn-replace");
     let file = session.path();
-    let first = Arc::new(plx_net::net::mint_cert(&[&learn_host()]));
-    let second = Arc::new(plx_net::net::mint_cert(&[&learn_host()]));
+    let first = Arc::new(nj_net::net::mint_cert(&[&learn_host()]));
+    let second = Arc::new(nj_net::net::mint_cert(&[&learn_host()]));
     // One trusted certificate at a time: both are minted with the same subject, so a bundle holding
     // the two would let the first shadow the second by name.
     let ca_a = TestCaGuard::install(&first.pem, "pin-learn-replace-a");
-    let port_a = plx_net::net::spawn_dual_protocol(Arc::clone(&first), identity_json("m-real"));
-    let port_b = plx_net::net::spawn_dual_protocol(Arc::clone(&second), identity_json("m-real"));
+    let port_a = nj_net::net::spawn_dual_protocol(Arc::clone(&first), identity_json("m-real"));
+    let port_b = nj_net::net::spawn_dual_protocol(Arc::clone(&second), identity_json("m-real"));
 
     assert_eq!(probe_and_learn("https", port_a, "m-real", probe::Location::Local), Outcome::Reachable);
-    assert_eq!(learned_pin("m-real"), Some(plx_base::spki::pin_from_spki_der(&first.spki_der)));
+    assert_eq!(learned_pin("m-real"), Some(nj_base::spki::pin_from_spki_der(&first.spki_der)));
 
     let stamp = |f: &std::path::Path| (std::fs::read(f).unwrap(), std::fs::metadata(f).unwrap().ino());
     let before = stamp(&file);
     assert_eq!(probe_and_learn("https", port_a, "m-real", probe::Location::Local), Outcome::Reachable);
-    plx_base::storage_worker::drain_for_test();
+    nj_base::storage_worker::drain_for_test();
     assert_eq!(stamp(&file), before, "the same key again must not rewrite the session file");
 
     drop(ca_a);
     let _ca_b = TestCaGuard::install(&second.pem, "pin-learn-replace-b");
     assert_eq!(probe_and_learn("https", port_b, "m-real", probe::Location::Local), Outcome::Reachable);
-    assert_eq!(learned_pin("m-real"), Some(plx_base::spki::pin_from_spki_der(&second.spki_der)));
-    let after = crate::plex::session::peek();
+    assert_eq!(learned_pin("m-real"), Some(nj_base::spki::pin_from_spki_der(&second.spki_der)));
+    let after = crate::catalog::session::peek();
     assert_eq!(after.server_key_pins.len(), 1, "one entry per machine");
     assert_ne!(stamp(&file), before);
 }
@@ -2959,17 +2959,17 @@ fn a_changed_key_replaces_the_entry_and_the_same_key_costs_no_write() {
 /// leaves the proxy's key stored.
 #[test]
 fn a_custom_host_with_its_own_certificate_never_overwrites_the_plex_direct_key() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
-    let _session = crate::plex::session::TempSession::new("pin-learn-flap");
+    let _session = crate::catalog::session::TempSession::new("pin-learn-flap");
     // Different subjects, so one bundle can trust both: a CA-issued leaf behind the plex.direct
     // name, a self-signed certificate behind the proxy.
-    let direct = Arc::new(plx_net::net::mint_ca_issued_cert(&[&learn_host()], ymd_from_now(-30), ymd_from_now(30)).serving_chain());
-    let proxy = Arc::new(plx_net::net::mint_cert(&["127.0.0.1"]));
+    let direct = Arc::new(nj_net::net::mint_ca_issued_cert(&[&learn_host()], ymd_from_now(-30), ymd_from_now(30)).serving_chain());
+    let proxy = Arc::new(nj_net::net::mint_cert(&["127.0.0.1"]));
     let _ca = TestCaGuard::install(&format!("{}{}", direct.pem, proxy.pem), "pin-learn-flap");
     let body = identity_json("flapmid");
-    let direct_port = plx_net::net::spawn_dual_protocol(Arc::clone(&direct), body.clone());
-    let proxy_port = plx_net::net::spawn_dual_protocol(Arc::clone(&proxy), body);
+    let direct_port = nj_net::net::spawn_dual_protocol(Arc::clone(&direct), body.clone());
+    let proxy_port = nj_net::net::spawn_dual_protocol(Arc::clone(&proxy), body);
     let resource = resource(&format!(
         r#"{{"name":"flap","clientIdentifier":"flapmid","provides":"server","owned":true,
             "sourceTitle":null,"publicAddressMatches":true,"httpsRequired":false,
@@ -3008,7 +3008,7 @@ fn a_custom_host_with_its_own_certificate_never_overwrites_the_plex_direct_key()
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
         learned_pin("flapmid"),
-        Some(plx_base::spki::pin_from_spki_der(&direct.spki_der)),
+        Some(nj_base::spki::pin_from_spki_der(&direct.spki_der)),
         "the pin is the plex.direct leaf's; the custom host's answer wrote nothing"
     );
 }
@@ -3021,23 +3021,23 @@ fn a_custom_host_with_its_own_certificate_never_overwrites_the_plex_direct_key()
 // `testlock::serial()` because the CA override they all use is process-global.
 // ---------------------------------------------------------------------------------------------
 
-fn not_yet_valid_leaf(names: &[&str]) -> Arc<plx_net::net::TestCert> {
-    Arc::new(plx_net::net::mint_ca_issued_cert(names, ymd_from_now(30), ymd_from_now(90)))
+fn not_yet_valid_leaf(names: &[&str]) -> Arc<nj_net::net::TestCert> {
+    Arc::new(nj_net::net::mint_ca_issued_cert(names, ymd_from_now(30), ymd_from_now(90)))
 }
 
-fn valid_leaf(names: &[&str]) -> Arc<plx_net::net::TestCert> {
-    Arc::new(plx_net::net::mint_ca_issued_cert(names, ymd_from_now(-30), ymd_from_now(30)))
+fn valid_leaf(names: &[&str]) -> Arc<nj_net::net::TestCert> {
+    Arc::new(nj_net::net::mint_ca_issued_cert(names, ymd_from_now(-30), ymd_from_now(30)))
 }
 
 /// A loopback server serving `cert`, trusted through the test CA override.
-fn serve_trusted(cert: &Arc<plx_net::net::TestCert>, tag: &str) -> (TestCaGuard, u16) {
+fn serve_trusted(cert: &Arc<nj_net::net::TestCert>, tag: &str) -> (TestCaGuard, u16) {
     let ca = TestCaGuard::install(&cert.pem, tag);
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(cert), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(cert), identity_json("m"));
     (ca, port)
 }
 
 /// An expired leaf and the loopback server serving it, trusted through the test CA override.
-fn expired_server(tag: &str) -> (Arc<plx_net::net::TestCert>, TestCaGuard, u16) {
+fn expired_server(tag: &str) -> (Arc<nj_net::net::TestCert>, TestCaGuard, u16) {
     let cert = expired_leaf(&["127.0.0.1"]);
     let (ca, port) = serve_trusted(&cert, tag);
     (cert, ca, port)
@@ -3045,13 +3045,13 @@ fn expired_server(tag: &str) -> (Arc<plx_net::net::TestCert>, TestCaGuard, u16) 
 
 #[test]
 fn an_expired_leaf_is_served_when_its_remembered_key_is_known() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let (cert, _ca, port) = expired_server("clock-expired");
     let _key = remember(port, &cert);
     let resp = identity_request(port, "https", false).expect("the date alone must not refuse the server we know");
     assert_eq!(resp.status, 200);
-    let facts = plx_net::net::keypin::fact_for(&key_of_port(port));
+    let facts = nj_net::net::keypin::fact_for(&key_of_port(port));
     assert!(
         matches!(facts.engaged, Some(Some(year)) if (2025..2200).contains(&year)),
         "key mode engaged, carrying the year the device believed: {facts:?}"
@@ -3061,7 +3061,7 @@ fn an_expired_leaf_is_served_when_its_remembered_key_is_known() {
 
 #[test]
 fn a_not_yet_valid_leaf_is_served_when_its_remembered_key_is_known() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let cert = not_yet_valid_leaf(&["127.0.0.1"]);
     let (_ca, port) = serve_trusted(&cert, "clock-not-yet");
@@ -3072,24 +3072,24 @@ fn a_not_yet_valid_leaf_is_served_when_its_remembered_key_is_known() {
 
 #[test]
 fn an_expired_leaf_whose_key_differs_from_the_remembered_one_is_refused_with_a_pin_mismatch() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let (_cert, _ca, port) = expired_server("clock-other-key");
-    let someone_else = plx_net::net::mint_cert(&["127.0.0.1"]);
+    let someone_else = nj_net::net::mint_cert(&["127.0.0.1"]);
     let _key = remember(port, &someone_else);
     let failure = identity_request(port, "https", false).err().expect("a stranger's key is not the server's");
     assert_eq!(failure.curl_rc, Some(90));
-    assert!(!plx_net::net::keypin::is_latched(&key_of_port(port)), "a refusal never latches");
+    assert!(!nj_net::net::keypin::is_latched(&key_of_port(port)), "a refusal never latches");
     assert_eq!(
-        plx_net::net::keypin::fact_for(&key_of_port(port)).blocked,
-        Some(plx_net::net::keypin::Blocked::KeyChanged),
+        nj_net::net::keypin::fact_for(&key_of_port(port)).blocked,
+        Some(nj_net::net::keypin::Blocked::KeyChanged),
         "the control plane publishes the changed key",
     );
 }
 
 #[test]
 fn an_expired_leaf_for_another_name_is_refused_even_with_its_key_remembered() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     // The leaf is issued for a name that is not the one dialled: the host check stays ON in key
     // mode, so remembering the key cannot make any certificate the server's for any name.
@@ -3098,59 +3098,59 @@ fn an_expired_leaf_for_another_name_is_refused_even_with_its_key_remembered() {
     let _key = remember(port, &cert);
     let failure = identity_request(port, "https", false).err().expect("the name check still applies");
     assert!(matches!(failure.curl_rc, Some(51 | 60)), "{failure:?}");
-    assert!(!plx_net::net::keypin::is_latched(&key_of_port(port)));
+    assert!(!nj_net::net::keypin::is_latched(&key_of_port(port)));
 }
 
 #[test]
 fn an_expired_leaf_with_no_remembered_key_is_refused_as_before() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let (_cert, _ca, port) = expired_server("clock-no-key");
-    let _watched = plx_net::net::keypin::Scoped::watch(&key_of_port(port));
+    let _watched = nj_net::net::keypin::Scoped::watch(&key_of_port(port));
     let failure = identity_request(port, "https", false).err().expect("nothing to recognise it by");
     assert_eq!(failure.curl_rc, Some(60));
     assert_eq!(
-        plx_net::net::keypin::fact_for(&key_of_port(port)).blocked,
-        Some(plx_net::net::keypin::Blocked::NoKey),
+        nj_net::net::keypin::fact_for(&key_of_port(port)).blocked,
+        Some(nj_net::net::keypin::Blocked::NoKey),
         "a date failure with no key to fall back on is published",
     );
 }
 
 #[test]
 fn an_untrusted_issuer_is_refused_even_with_the_leafs_key_remembered() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     // Valid dates, but the CA this request trusts is not the one that issued the leaf: the date
     // fallback is for dates only.
     let served = valid_leaf(&["127.0.0.1"]);
-    let trusted = plx_net::net::mint_cert(&["127.0.0.1"]);
+    let trusted = nj_net::net::mint_cert(&["127.0.0.1"]);
     let _ca = TestCaGuard::install(&trusted.pem, "clock-untrusted");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&served), identity_json("m"));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&served), identity_json("m"));
     let _key = remember(port, &served);
     let failure = identity_request(port, "https", false).err().expect("an untrusted issuer is not a date problem");
     assert_eq!(failure.curl_rc, Some(60));
-    assert!(!plx_net::net::keypin::is_latched(&key_of_port(port)));
-    assert_eq!(plx_net::net::keypin::fact_for(&key_of_port(port)).blocked, None, "not a date failure, not a fact");
+    assert!(!nj_net::net::keypin::is_latched(&key_of_port(port)));
+    assert_eq!(nj_net::net::keypin::fact_for(&key_of_port(port)).blocked, None, "not a date failure, not a fact");
 }
 
 #[test]
 fn a_valid_leaf_is_served_strictly_and_key_mode_is_never_engaged() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let cert = valid_leaf(&["127.0.0.1"]);
     let _ca = TestCaGuard::install(&cert.pem, "clock-valid");
-    let served = plx_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
+    let served = nj_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
     let key = key_of_port(served.port);
-    let _key = plx_net::net::keypin::Scoped::new(key.clone(), &leaf_pin(&cert));
+    let _key = nj_net::net::keypin::Scoped::new(key.clone(), &leaf_pin(&cert));
     let resp = identity_request(served.port, "https", true).expect("verifies");
     assert_eq!(resp.peer_pin, Some(leaf_pin(&cert)), "strict mode still learns");
-    assert!(!plx_net::net::keypin::is_latched(&key));
+    assert!(!nj_net::net::keypin::is_latched(&key));
     assert_eq!(served.accepted(), 1, "one handshake: no retry");
 }
 
 #[test]
 fn a_key_mode_answer_carries_no_peer_pin_and_teaches_nothing() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let (cert, ca, port) = expired_server("clock-no-learn");
     let _key = remember(port, &cert);
@@ -3160,37 +3160,37 @@ fn a_key_mode_answer_carries_no_peer_pin_and_teaches_nothing() {
 
     // And through the real probe, which is the only thing that learns: the answer is accepted for
     // the machine and still no key reaches the session.
-    let _session = crate::plex::session::TempSession::new("clock-no-learn");
+    let _session = crate::catalog::session::TempSession::new("clock-no-learn");
     let named = expired_leaf(&[&learn_host()]);
     let _named_ca = TestCaGuard::install(&named.pem, "clock-no-learn-named");
-    let port = plx_net::net::spawn_dual_protocol(Arc::clone(&named), identity_json("m-real"));
-    let _named_key = plx_net::net::keypin::Scoped::new(
-        plx_net::net::keypin::key_of(&learn_host(), i32::from(port)), &leaf_pin(&named));
+    let port = nj_net::net::spawn_dual_protocol(Arc::clone(&named), identity_json("m-real"));
+    let _named_key = nj_net::net::keypin::Scoped::new(
+        nj_net::net::keypin::key_of(&learn_host(), i32::from(port)), &leaf_pin(&named));
     assert_eq!(probe_and_learn("https", port, "m-real", probe::Location::Local), Outcome::Reachable);
     assert_eq!(learned_pin("m-real"), None, "a key-mode handshake never reaches learn_server_key");
 }
 
 #[test]
 fn after_a_fallback_succeeds_later_requests_make_one_handshake_until_the_pin_changes() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let cert = expired_leaf(&["127.0.0.1"]);
     let _ca = TestCaGuard::install(&cert.pem, "clock-latch");
-    let served = plx_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
+    let served = nj_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
     let key = key_of_port(served.port);
-    let _key = plx_net::net::keypin::Scoped::new(key.clone(), &leaf_pin(&cert));
+    let _key = nj_net::net::keypin::Scoped::new(key.clone(), &leaf_pin(&cert));
 
     identity_request(served.port, "https", false).expect("first: strict fails, key mode serves");
     assert_eq!(served.accepted(), 2, "the failed strict handshake and the key-mode one");
-    assert!(plx_net::net::keypin::is_latched(&key));
+    assert!(nj_net::net::keypin::is_latched(&key));
 
     identity_request(served.port, "https", false).expect("second: straight to key mode");
     assert_eq!(served.accepted(), 3, "exactly one handshake");
 
     // A pin change for the host clears the latch: the next request starts strict again.
-    let other = plx_net::net::mint_cert(&["127.0.0.1"]);
-    plx_net::net::keypin::set_for_test(&key, &leaf_pin(&other));
-    assert!(!plx_net::net::keypin::is_latched(&key));
+    let other = nj_net::net::mint_cert(&["127.0.0.1"]);
+    nj_net::net::keypin::set_for_test(&key, &leaf_pin(&other));
+    assert!(!nj_net::net::keypin::is_latched(&key));
     let failure = identity_request(served.port, "https", false).err().expect("the new pin is not the server's");
     assert_eq!(failure.curl_rc, Some(90));
     assert_eq!(served.accepted(), 5, "strict first again, then key mode");
@@ -3198,44 +3198,44 @@ fn after_a_fallback_succeeds_later_requests_make_one_handshake_until_the_pin_cha
 
 #[test]
 fn a_pin_mismatch_in_key_mode_clears_the_latch_and_is_the_failure() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let cert = expired_leaf(&["127.0.0.1"]);
     let _ca = TestCaGuard::install(&cert.pem, "clock-latch-mismatch");
-    let served = plx_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
+    let served = nj_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
     let key = key_of_port(served.port);
     // The latch stands on a key the server does not present (it rotated while we were latched).
-    let wrong = leaf_pin(&plx_net::net::mint_cert(&["127.0.0.1"]));
-    let _key = plx_net::net::keypin::Scoped::new(key.clone(), &wrong);
-    plx_net::net::keypin::key_established(&key, &wrong, Some(10));
-    assert!(plx_net::net::keypin::is_latched(&key));
+    let wrong = leaf_pin(&nj_net::net::mint_cert(&["127.0.0.1"]));
+    let _key = nj_net::net::keypin::Scoped::new(key.clone(), &wrong);
+    nj_net::net::keypin::key_established(&key, &wrong, Some(10));
+    assert!(nj_net::net::keypin::is_latched(&key));
     let failure = identity_request(served.port, "https", false).err().expect("the key changed");
     assert_eq!(failure.curl_rc, Some(90));
     assert_eq!(served.accepted(), 1, "latched: no strict attempt first");
-    assert!(!plx_net::net::keypin::is_latched(&key), "rc 90 ends key mode for the host");
+    assert!(!nj_net::net::keypin::is_latched(&key), "rc 90 ends key mode for the host");
     assert_eq!(
-        plx_net::net::keypin::fact_for(&key).blocked,
-        Some(plx_net::net::keypin::Blocked::KeyChanged),
+        nj_net::net::keypin::fact_for(&key).blocked,
+        Some(nj_net::net::keypin::Blocked::KeyChanged),
         "the engaged fact stands and the change is published",
     );
-    assert!(plx_net::net::keypin::fact_for(&key).engaged.is_some(), "…and the engaged fact survives the refusal");
+    assert!(nj_net::net::keypin::fact_for(&key).engaged.is_some(), "…and the engaged fact survives the refusal");
 }
 
 #[test]
 fn a_post_body_survives_the_retry_once_and_intact() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let cert = expired_leaf(&["127.0.0.1"]);
     let _ca = TestCaGuard::install(&cert.pem, "clock-post");
-    let served = plx_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
+    let served = nj_net::net::spawn_observed(Arc::clone(&cert), identity_json("m"));
     let _key = remember(served.port, &cert);
     let payload: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
-    let resp = plx_net::net::request_result_evidence(
+    let resp = nj_net::net::request_result_evidence(
         &format!("https://127.0.0.1:{}/hubs/search", served.port),
         &["Content-Type: application/octet-stream".to_owned()],
         "POST",
         Some(&payload),
-        plx_net::net::API,
+        nj_net::net::API,
         false,
         None,
         None,
@@ -3263,16 +3263,16 @@ fn a_post_body_survives_the_retry_once_and_intact() {
 /// reason") the next strict failure ends it, so *Try again* stops blaming a clock that is right.
 #[test]
 fn a_later_strict_failure_that_is_not_the_date_ends_no_key_on_the_control_plane() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     if !curl_ready() { return; }
     let (_cert, ca, port) = expired_server("clock-later-control");
     let key = key_of_port(port);
-    let _watched = plx_net::net::keypin::Scoped::watch(&key);
+    let _watched = nj_net::net::keypin::Scoped::watch(&key);
     let failure = identity_request(port, "https", false).err().expect("nothing to recognise it by");
     assert_eq!(failure.curl_rc, Some(60));
-    assert_eq!(plx_net::net::keypin::fact_for(&key).blocked, Some(plx_net::net::keypin::Blocked::NoKey));
+    assert_eq!(nj_net::net::keypin::fact_for(&key).blocked, Some(nj_net::net::keypin::Blocked::NoKey));
     drop(ca);
     let failure = identity_request(port, "https", false).err().expect("the issuer is no longer trusted");
     assert_eq!(failure.curl_rc, Some(60));
-    assert_eq!(plx_net::net::keypin::fact_for(&key).blocked, None, "the date is no longer what fails");
+    assert_eq!(nj_net::net::keypin::fact_for(&key).blocked, None, "the date is no longer what fails");
 }

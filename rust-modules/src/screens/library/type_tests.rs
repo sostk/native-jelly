@@ -3,7 +3,7 @@ use crate::browse::LibraryType;
 
 fn tv_fixture(kind: LibraryType, total: usize) -> Fixture {
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::catalog::ServerId::from_raw(0);
     fixture.listing = fixture.listing.with_library_type(kind).with_total(total);
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, vec![
         crate::browse::view::SectionView { sid: Some(sid), key: 1, kind: SecKind::Show,
@@ -22,10 +22,10 @@ fn tv_page(fixture: &Fixture) -> LibraryScreen {
 /// three of them collection rows.
 fn collections_fixture(total: usize) -> Fixture {
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
-    let rows = (0..total.min(3)).map(|i| crate::pms::PmsMovie {
+    let sid = crate::catalog::ServerId::from_raw(0);
+    let rows = (0..total.min(3)).map(|i| crate::catalog_fetch::PmsMovie {
         sid, rk: format!("{}", 50_001 + i), title: format!("Collection {i}"),
-        kind: crate::pms::KIND_COLLECTION, child_count: i as i64 + 1, ..Default::default()
+        kind: crate::catalog_fetch::KIND_COLLECTION, child_count: i as i64 + 1, ..Default::default()
     }).collect();
     fixture.listing = fixture.listing.with_library_type(LibraryType::Collections).with_total(total).with_page(0, rows);
     fixture
@@ -33,7 +33,7 @@ fn collections_fixture(total: usize) -> Fixture {
 
 #[test]
 fn every_library_kind_offers_the_type_selector_and_it_opens_its_own_menu() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let movies = Fixture::new();
     let movie_page = movies.screen();
     assert_eq!(movie_page.toolbar_elems(), [TYPE, SORT, FILTER], "Movies / Collections is a real choice");
@@ -50,7 +50,7 @@ fn every_library_kind_offers_the_type_selector_and_it_opens_its_own_menu() {
     }
     assert!(right < layout::GRID_RIGHT);
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     page.activate(TYPE, false, &fixture.cx(Some(page.key(TYPE))),
         &mut Effects::new(&mut output, MachineId::Instance(InstanceId(19)), &mut present));
     assert!(output.iter().any(|effect| matches!(effect.fx,
@@ -59,7 +59,7 @@ fn every_library_kind_offers_the_type_selector_and_it_opens_its_own_menu() {
 
 #[test]
 fn episode_navigation_and_page_jumps_follow_four_columns() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = tv_fixture(LibraryType::Episodes, 36);
     let mut page = tv_page(&fixture);
     page.initial = false;
@@ -74,7 +74,7 @@ fn episode_navigation_and_page_jumps_follow_four_columns() {
     let rect = <LibraryScreen as Focusable<HostFixture>>::place(&page, &focused.elem, &fixture.cx(Some(focused)), At::SpringTarget).unwrap().rect;
     assert!((rect.w / rect.h - 16.0 / 9.0).abs() < 0.01);
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     page.command(LibraryCmd::Page(1), &fixture.cx(Some(focused)),
         &mut Effects::new(&mut output, MachineId::Instance(InstanceId(19)), &mut present));
     assert!(output.iter().any(|effect| matches!(&effect.fx,
@@ -84,7 +84,7 @@ fn episode_navigation_and_page_jumps_follow_four_columns() {
 
 #[test]
 fn empty_episode_results_keep_type_selector_available() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = tv_fixture(LibraryType::Episodes, 0);
     let mut page = tv_page(&fixture);
     page.grid_fade = Xfade::new();
@@ -98,13 +98,13 @@ fn empty_episode_results_keep_type_selector_available() {
 
 #[test]
 fn type_menu_command_preserves_plaintext_alert_control_keys() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     assert_ne!(TYPE, PLAINTEXT_CANCEL);
     assert_ne!(TYPE, PLAINTEXT_CONNECT);
     let fixture = tv_fixture(LibraryType::Primary, 36);
     let mut page = tv_page(&fixture);
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     assert_eq!(page.command(LibraryCmd::OpenMenu(crate::screens::registry::LibraryMenuKind::Type),
         &fixture.cx(None),
         &mut Effects::new(&mut output, MachineId::Instance(InstanceId(19)), &mut present)), Handled::Yes);
@@ -114,7 +114,7 @@ fn type_menu_command_preserves_plaintext_alert_control_keys() {
 
 #[test]
 fn empty_tv_library_names_the_selected_listing_type() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for (kind, expected) in [
         (LibraryType::Primary, "No shows in Television"),
         (LibraryType::Seasons, "No seasons in Television"),
@@ -135,7 +135,7 @@ fn empty_tv_library_names_the_selected_listing_type() {
 /// and the TYPE chip names what is listed.
 #[test]
 fn a_collections_listing_hides_the_filter_control() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = collections_fixture(36);
     let page = fixture.screen();
     assert_eq!(page.listed(), LibraryType::Collections);
@@ -148,7 +148,7 @@ fn a_collections_listing_hides_the_filter_control() {
 /// it keeps the heading row so TYPE can leave it.
 #[test]
 fn an_empty_collections_listing_says_so_and_keeps_the_type_selector() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = collections_fixture(0);
     let mut page = fixture.screen();
     page.grid_fade = Xfade::new();
@@ -166,13 +166,13 @@ fn an_empty_collections_listing_says_so_and_keeps_the_type_selector() {
 /// `activate_card` routes kind 4 to `ContentArg::Collection` (pinned in `app/input.rs`).
 #[test]
 fn ok_on_a_collection_card_requests_its_page() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = collections_fixture(36);
     let mut page = fixture.screen();
     page.initial = false;
     let elem = page.pair.detail.elems[1];
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     assert_eq!(page.activate(elem, false, &fixture.cx(Some(page.key(elem))),
         &mut Effects::new(&mut output, MachineId::Instance(InstanceId(19)), &mut present)), Handled::Yes);
     assert!(output.iter().any(|effect| matches!(&effect.fx,
@@ -184,11 +184,11 @@ fn ok_on_a_collection_card_requests_its_page() {
 /// section on the page.
 #[test]
 fn the_set_type_command_is_the_menu_rows_edit() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut page = fixture.screen();
     let mut output = Vec::new();
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     assert_eq!(page.command(LibraryCmd::SetType(LibraryType::Collections), &fixture.cx(None),
         &mut Effects::new(&mut output, MachineId::Instance(InstanceId(19)), &mut present)), Handled::Yes);
     assert!(matches!(page.pending.grid(), Some((_, GridAction::LibraryType(LibraryType::Collections)))),
@@ -201,7 +201,7 @@ fn the_set_type_command_is_the_menu_rows_edit() {
 /// heading row instead, and the read-out stands in it and scrolls with the page.
 #[test]
 fn an_empty_answer_under_shelves_stands_below_its_heading() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let mut fixture = Fixture::shelves(&["Recently Added"], 6);
     fixture.listing = fixture.listing.clone().with_library_type(LibraryType::Collections).with_fetch(SecFetch::Ready, 0);
     let mut page = fixture.screen();

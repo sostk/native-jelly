@@ -202,7 +202,7 @@ pub(crate) fn fmt_size(bytes: i64) -> Option<String> {
     }
     // Below a kilobyte the Info panel spells the count in words rather than as a bare `B`.
     Some(if bytes < 1024 {
-        plx_platform::i18n::msg::widgets_tracks_bytes(bytes)
+        nj_platform::i18n::msg::widgets_tracks_bytes(bytes)
     } else {
         crate::ui::fmt::bytes(bytes, (2, 2, 2))
     })
@@ -253,7 +253,7 @@ fn title_case(s: &str) -> String {
 /// `"10-bit · 4:2:0"` — bit depth and chroma as ONE fact, because neither is meaningful without
 /// the other. Either half alone still draws, so a container that reports only one is not silent.
 pub(crate) fn fmt_depth_chroma(bit_depth: i64, chroma: &str) -> Option<String> {
-    let d = (bit_depth > 0).then(|| plx_platform::i18n::msg::widgets_tracks_depth(bit_depth));
+    let d = (bit_depth > 0).then(|| nj_platform::i18n::msg::widgets_tracks_depth(bit_depth));
     let c = (!chroma.trim().is_empty()).then(|| chroma.trim().to_string());
     match (d, c) {
         (Some(d), Some(c)) => Some(format!("{d} \u{b7} {c}")),
@@ -277,7 +277,7 @@ pub(crate) fn fmt_fps(fps: f64) -> Option<String> {
         return None;
     }
     let rate = localized_precision(fps, 3);
-    Some(plx_platform::i18n::msg::widgets_tracks_fps(&rate))
+    Some(nj_platform::i18n::msg::widgets_tracks_fps(&rate))
 }
 
 /// `"2.35"` — the display aspect as PMS sends it, trailing zeros trimmed.
@@ -296,7 +296,7 @@ fn localized_precision(value: f64, max_scale: i16) -> String {
         coefficient /= 10;
         scale -= 1;
     }
-    plx_platform::i18n::current().decimal(coefficient, scale)
+    nj_platform::i18n::current().decimal(coefficient, scale)
 }
 
 /// A channel layout in the design's spelling: `"5.1(side)"` → `"5.1"`, `"stereo"` → `"Stereo"`.
@@ -310,9 +310,9 @@ pub(crate) fn fmt_layout(layout: &str, channels: i64) -> String {
     if base.is_empty() {
         return match channels {
             0 => String::new(),
-            1 => plx_platform::i18n::msg::widgets_tracks_mono().to_string(),
-            2 => plx_platform::i18n::msg::widgets_tracks_stereo().to_string(),
-            n => plx_platform::i18n::msg::widgets_tracks_channels(n),
+            1 => nj_platform::i18n::msg::widgets_tracks_mono().to_string(),
+            2 => nj_platform::i18n::msg::widgets_tracks_stereo().to_string(),
+            n => nj_platform::i18n::msg::widgets_tracks_channels(n),
         };
     }
     // a numeric layout ("5.1", "7.1") is already how it is written; a word one is capitalised
@@ -320,8 +320,8 @@ pub(crate) fn fmt_layout(layout: &str, channels: i64) -> String {
         base.to_string()
     } else {
         match base {
-            "mono" => plx_platform::i18n::msg::widgets_tracks_mono().to_string(),
-            "stereo" => plx_platform::i18n::msg::widgets_tracks_stereo().to_string(),
+            "mono" => nj_platform::i18n::msg::widgets_tracks_mono().to_string(),
+            "stereo" => nj_platform::i18n::msg::widgets_tracks_stereo().to_string(),
             _ => title_case(base),
         }
     }
@@ -368,7 +368,7 @@ pub(crate) fn audio_detail(s: &Stream) -> String {
         parts.push(b);
     }
     if s.selected {
-        parts.push(plx_platform::i18n::msg::widgets_tracks_playing().to_string());
+        parts.push(nj_platform::i18n::msg::widgets_tracks_playing().to_string());
     }
     parts.join(" \u{b7} ")
 }
@@ -384,7 +384,7 @@ pub(crate) fn audio_rows(audio: &[Stream]) -> Vec<TrackRow> {
         .iter()
         .map(|s| TrackRow {
             name: if s.lang.trim().is_empty() {
-                plx_platform::i18n::msg::widgets_tracks_unknown().to_string()
+                nj_platform::i18n::msg::widgets_tracks_unknown().to_string()
             } else {
                 s.lang.clone()
             },
@@ -412,7 +412,7 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
     let mut out: Vec<(String, String, String, usize)> = Vec::new();
     for s in subs {
         let name = if s.lang.trim().is_empty() {
-            plx_platform::i18n::msg::widgets_tracks_unknown().to_string()
+            nj_platform::i18n::msg::widgets_tracks_unknown().to_string()
         } else {
             s.lang.clone()
         };
@@ -426,9 +426,9 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
         // has; the parsed kind only ADDS a flag the title spelled out.
         let (forced, sdh) = track_label::flags(&label, s.forced, s.sdh);
         for (on, tag) in [
-            (forced, plx_platform::i18n::msg::widgets_tracks_forced()),
-            (sdh, plx_platform::i18n::msg::widgets_badge_sdh()),
-            (s.external, plx_platform::i18n::msg::widgets_tracks_external()),
+            (forced, nj_platform::i18n::msg::widgets_tracks_forced()),
+            (sdh, nj_platform::i18n::msg::widgets_badge_sdh()),
+            (s.external, nj_platform::i18n::msg::widgets_tracks_external()),
         ] {
             if on {
                 head = if head.is_empty() {
@@ -455,9 +455,9 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
         .map(|(_, name, head, n)| {
             let detail = match (head.is_empty(), n) {
                 (true, 1) => String::new(),
-                (true, n) => plx_platform::i18n::msg::widgets_tracks_count(n as i64),
+                (true, n) => nj_platform::i18n::msg::widgets_tracks_count(n as i64),
                 (false, 1) => head,
-                (false, n) => plx_platform::i18n::msg::widgets_tracks_count_detail(n as i64, &head),
+                (false, n) => nj_platform::i18n::msg::widgets_tracks_count_detail(n as i64, &head),
             };
             TrackRow { name, detail }
         })
@@ -473,16 +473,16 @@ pub(crate) fn file_rows(d: &Detail) -> Vec<Pair> {
         }
     };
     push(
-        plx_platform::i18n::msg::widgets_tracks_container(),
+        nj_platform::i18n::msg::widgets_tracks_container(),
         (!d.container.is_empty()).then(|| d.container.to_uppercase()),
     );
-    push(plx_platform::i18n::msg::widgets_tracks_size(), fmt_size(d.size));
-    push(plx_platform::i18n::msg::widgets_tracks_total_bitrate(), fmt_bitrate(d.bitrate));
+    push(nj_platform::i18n::msg::widgets_tracks_size(), fmt_size(d.size));
+    push(nj_platform::i18n::msg::widgets_tracks_total_bitrate(), fmt_bitrate(d.bitrate));
     push(
-        plx_platform::i18n::msg::widgets_tracks_duration(),
+        nj_platform::i18n::msg::widgets_tracks_duration(),
         (d.dur_ms > 0).then(|| crate::ui::fmt::clock(d.dur_ms)),
     );
-    push(plx_platform::i18n::msg::widgets_tracks_aspect(), fmt_aspect(d.aspect_ratio));
+    push(nj_platform::i18n::msg::widgets_tracks_aspect(), fmt_aspect(d.aspect_ratio));
     v
 }
 
@@ -502,14 +502,14 @@ pub(crate) fn video_rows(d: &Detail) -> Vec<Pair> {
         .filter(|s| !s.is_empty())
         .unwrap_or(d.vcodec.as_str());
     let profile = vs.map(|s| s.profile.as_str()).unwrap_or("");
-    push(plx_platform::i18n::msg::widgets_tracks_codec(), fmt_codec_profile(codec, profile));
-    push(plx_platform::i18n::msg::widgets_tracks_resolution(), fmt_frame_size(d.width, d.height));
-    push(plx_platform::i18n::msg::widgets_tracks_frame_rate(), fmt_fps(d.video_fps));
+    push(nj_platform::i18n::msg::widgets_tracks_codec(), fmt_codec_profile(codec, profile));
+    push(nj_platform::i18n::msg::widgets_tracks_resolution(), fmt_frame_size(d.width, d.height));
+    push(nj_platform::i18n::msg::widgets_tracks_frame_rate(), fmt_fps(d.video_fps));
     // the STREAM's bitrate, not the file's — `d.bitrate` is already the FILE column's own row, and
     // repeating it here would state the same number twice under two different labels
-    push(plx_platform::i18n::msg::widgets_tracks_bitrate(), vs.and_then(|s| fmt_bitrate(s.bitrate)));
+    push(nj_platform::i18n::msg::widgets_tracks_bitrate(), vs.and_then(|s| fmt_bitrate(s.bitrate)));
     push(
-        plx_platform::i18n::msg::widgets_tracks_bit_depth(),
+        nj_platform::i18n::msg::widgets_tracks_bit_depth(),
         vs.and_then(|s| fmt_depth_chroma(s.bit_depth, &s.chroma)),
     );
     v
@@ -530,17 +530,17 @@ pub(crate) fn dovi_rows(d: &Detail) -> Vec<Pair> {
             v.push(Pair { label, value });
         }
     };
-    push(plx_platform::i18n::msg::widgets_tracks_profile(), (dv.profile > 0).then(|| dv.profile.to_string()));
-    push(plx_platform::i18n::msg::widgets_tracks_level(), (dv.level > 0).then(|| dv.level.to_string()));
-    push(plx_platform::i18n::msg::widgets_tracks_version(), dv.version_str());
-    push(plx_platform::i18n::msg::widgets_tracks_base_layer(), dv.bl_present.then(|| plx_platform::i18n::msg::widgets_tracks_present().to_string()));
-    push("RPU", dv.rpu_present.then(|| plx_platform::i18n::msg::widgets_tracks_present().to_string()));
+    push(nj_platform::i18n::msg::widgets_tracks_profile(), (dv.profile > 0).then(|| dv.profile.to_string()));
+    push(nj_platform::i18n::msg::widgets_tracks_level(), (dv.level > 0).then(|| dv.level.to_string()));
+    push(nj_platform::i18n::msg::widgets_tracks_version(), dv.version_str());
+    push(nj_platform::i18n::msg::widgets_tracks_base_layer(), dv.bl_present.then(|| nj_platform::i18n::msg::widgets_tracks_present().to_string()));
+    push("RPU", dv.rpu_present.then(|| nj_platform::i18n::msg::widgets_tracks_present().to_string()));
     v
 }
 
 /// A section head as it is drawn: `AUDIO · 8 TRACKS`. Caps, because the head names the group.
 pub(crate) fn track_head(word: &str, n: usize) -> String {
-    plx_platform::i18n::msg::widgets_tracks_count_heading(n as i64, word)
+    nj_platform::i18n::msg::widgets_tracks_count_heading(n as i64, word)
 }
 
 // ---- the scroll: pages, mask edges and the rail (also PURE) --------------------------------------
@@ -625,7 +625,7 @@ pub(crate) const SHAPE: &str = "TracksPanelScreen{page:i32,scroll:Spring{pos:f32
 
 /// What the container is asked to present.
 ///
-/// `page` is a boot ADDRESS, not an identity — `/tmp/plxnative-tracks=<n>` opens the sheet already
+/// `page` is a boot ADDRESS, not an identity — `/tmp/nativejelly-tracks=<n>` opens the sheet already
 /// scrolled, which is the only way a headless capture reaches page 2, and every interactive opening
 /// passes 1. It is the same distinction `AppArg::Settings`'s root page draws, and it is why
 /// `ScreenArg::same_instance` compares the SCREEN and not the payload.
@@ -634,8 +634,8 @@ pub(crate) struct TracksPanelArg {
     pub(crate) page: c_int,
 }
 
-impl plx_machine::machine::LogicalState for TracksPanelArg {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for TracksPanelArg {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         c.u32(self.page as u32);
     }
     fn probe(&self, out: &mut String) {
@@ -644,7 +644,7 @@ impl plx_machine::machine::LogicalState for TracksPanelArg {
 }
 
 pub(crate) struct TracksPanelScreen {
-    entry: plx_machine::machine::EntryId,
+    entry: nj_machine::machine::EntryId,
     /// 1-based page. The panel's whole cursor: it has no focusable control, so there is nothing else
     /// a key press can move.
     page: c_int,
@@ -659,7 +659,7 @@ pub(crate) struct TracksPanelScreen {
 }
 
 impl TracksPanelScreen {
-    pub(crate) fn new(entry: plx_machine::machine::EntryId, arg: TracksPanelArg) -> Self {
+    pub(crate) fn new(entry: nj_machine::machine::EntryId, arg: TracksPanelArg) -> Self {
         Self {
             entry,
             page: arg.page.max(1),
@@ -700,7 +700,7 @@ impl TracksPanelScreen {
         // Guarded on having MEASURED something, because the first tick runs before the first
         // `draw` and `content_h` is 0 until one has: clamping against an unmeasured body would say
         // "one page" and silently undo a page set before the first frame — which is exactly what
-        // `/tmp/plxnative-tracks=<n>` does.
+        // `/tmp/nativejelly-tracks=<n>` does.
         if self.content_h > 0.0 {
             self.page = self.page.clamp(1, pages_for(self.content_h, view));
         }
@@ -728,7 +728,7 @@ struct Flow<'a> {
     /// The text-measurement capability (spec §4.3, D4) — named `tm` rather than `measure` because
     /// this struct's own `measure` field already means "measuring pass, not drawing" (see the doc
     /// above); the two are unrelated booleans-vs-capability and sharing a name would read as one.
-    tm: &'a dyn plx_machine::machine::Measure,
+    tm: &'a dyn nj_machine::machine::Measure,
 }
 
 impl Flow<'_> {
@@ -765,7 +765,7 @@ impl Flow<'_> {
                 // elide by CHARACTER, which `text::elide` does — the file path and every language
                 // name here can be non-ASCII (`"Українська"`), and a byte-wise cut would split a
                 // UTF-8 sequence
-                let cut = plx_gfx::text::elide_by(s, w, false, |t| self.tm.width_str(t, sz, bold));
+                let cut = nj_gfx::text::elide_by(s, w, false, |t| self.tm.width_str(t, sz, bold));
                 if let Ok(cs) = CString::new(cut) {
                     let mut l = Label::new(cs.as_ptr(), sz, col).v(VAlign::CapTop).h(align);
                     if bold {
@@ -849,7 +849,7 @@ fn track_line(f: &mut Flow, row: &TrackRow, x: f32, w: f32) {
         if a > 0.002 {
             let pa = f.p.alpha(a);
             let nw = w * NAME_FRAC;
-            if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&row.name, nw, false, |t| {
+            if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&row.name, nw, false, |t| {
                 f.tm.width_str(t, theme::size::LABEL, true)
             })) {
                 Label::new(cs.as_ptr(), theme::size::LABEL, theme::TEXT_HEADING)
@@ -863,8 +863,8 @@ fn track_line(f: &mut Flow, row: &TrackRow, x: f32, w: f32) {
                 // which at a smaller rung is not the same cap-top — `baseline_y` is the helper
                 // that exists so this is not a hand-tuned offset
                 let dy =
-                    plx_gfx::text::baseline_y(theme::size::CAPTION, 0, theme::size::LABEL, 1, f.y);
-                if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&row.detail, dw, false, |t| {
+                    nj_gfx::text::baseline_y(theme::size::CAPTION, 0, theme::size::LABEL, 1, f.y);
+                if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&row.detail, dw, false, |t| {
                     f.tm.width_str(t, theme::size::CAPTION, false)
                 })) {
                     Label::new(cs.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
@@ -900,8 +900,8 @@ struct Content {
 fn content_of(d: &Detail) -> Content {
     Content {
         cols: [
-            (plx_platform::i18n::msg::widgets_tracks_file_heading(), file_rows(d)),
-            (plx_platform::i18n::msg::widgets_tracks_video_heading(), video_rows(d)),
+            (nj_platform::i18n::msg::widgets_tracks_file_heading(), file_rows(d)),
+            (nj_platform::i18n::msg::widgets_tracks_video_heading(), video_rows(d)),
             ("DOLBY VISION", dovi_rows(d)),
         ],
         audio: (d.audio.len(), audio_rows(&d.audio)),
@@ -919,7 +919,7 @@ fn body_flow(
     edges: (bool, bool),
     p: Painter,
     measure: bool,
-    tm: &dyn plx_machine::machine::Measure,
+    tm: &dyn nj_machine::machine::Measure,
 ) -> f32 {
     let mut f = Flow {
         p,
@@ -959,7 +959,7 @@ fn body_flow(
     // subtitles those are different numbers — that is the whole point of grouping them, and
     // passing `rows.len()` here is how the head came to say "SUBTITLES · 3 TRACKS" over a list
     // describing nine of them.
-    for (word, (total, rows)) in [(plx_platform::i18n::msg::widgets_tracks_audio_heading(), &c.audio), (plx_platform::i18n::msg::widgets_tracks_subtitles_heading(), &c.subs)] {
+    for (word, (total, rows)) in [(nj_platform::i18n::msg::widgets_tracks_audio_heading(), &c.audio), (nj_platform::i18n::msg::widgets_tracks_subtitles_heading(), &c.subs)] {
         if rows.is_empty() {
             continue;
         }
@@ -984,7 +984,7 @@ impl TracksPanelScreen {
         &mut self,
         d: &Detail,
         appear: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         field: Option<&crate::ui::underlay::UnderlayField>,
     ) {
         let r = panel_rect();
@@ -996,13 +996,13 @@ impl TracksPanelScreen {
         let cx = r.x + PAD;
         let cw = PANEL_W - 2.0 * PAD;
         let mut y = r.y + PAD;
-        let eyebrow = plx_platform::i18n::msg::widgets_tracks_heading_c();
+        let eyebrow = nj_platform::i18n::msg::widgets_tracks_heading_c();
         Label::new(eyebrow.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY).h(theme::alert::TEXT_ALIGN)
             .bold()
             .v(VAlign::CapTop)
             .draw(p, Rect::new(cx, y, cw, theme::alert::EYEBROW_LEAD));
         y += theme::alert::EYEBROW_LEAD + GAP_EYEBROW_TITLE;
-        if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&d.title, cw, false, |t| {
+        if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&d.title, cw, false, |t| {
             measure.width_str(t, theme::size::TITLE, true)
         })) {
             Label::new(cs.as_ptr(), theme::size::TITLE, theme::TEXT_PRIMARY).h(theme::alert::TEXT_ALIGN)
@@ -1014,7 +1014,7 @@ impl TracksPanelScreen {
         // the server's own path for the part. One line, ellipsised, micro, tertiary — it is the
         // panel's subject, not its content, and it can be arbitrarily long.
         if !d.file.is_empty() {
-            if let Ok(cs) = CString::new(plx_gfx::text::elide_by(&d.file, cw, false, |t| {
+            if let Ok(cs) = CString::new(nj_gfx::text::elide_by(&d.file, cw, false, |t| {
                 measure.width_str(t, theme::size::MICRO, false)
             })) {
                 Label::new(cs.as_ptr(), theme::size::MICRO, theme::TEXT_TERTIARY).h(theme::alert::TEXT_ALIGN)
@@ -1077,7 +1077,7 @@ impl TracksPanelScreen {
         // The design's `gap:12` applies between EVERY item in this run, the label included — the loop
         // above already advances by 12, so the label takes the pen where it is rather than adding a
         // second nudge of its own (which is what made this one gap 16 while its neighbour was 12).
-        let hint = plx_platform::i18n::msg::widgets_hint_scroll_c();
+        let hint = nj_platform::i18n::msg::widgets_hint_scroll_c();
         Label::new(hint.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
             .draw(p, Rect::new(gx, fy, cw, FOOTER_H));
         // right: Press [BACK] to return, RIGHT-aligned on the padding edge. The shared
@@ -1085,22 +1085,22 @@ impl TracksPanelScreen {
         // `right - width()`. (This was a local `key_cap_hint` that built its cap out of `keyline_chip`
         // — which HUGS its label's cap band, where the design's KeyCap is a fixed 82x36 with a MICRO
         // bold label. The shared cap is the fixed band, so the panels all draw one object.)
-        let back_hint = crate::ui::widgets::KeyHint::translated(plx_platform::i18n::msg::widgets_hint_return("\u{fffc}"), c"BACK");
+        let back_hint = crate::ui::widgets::KeyHint::translated(nj_platform::i18n::msg::widgets_hint_return("\u{fffc}"), c"BACK");
         back_hint.draw(p, cx + cw - back_hint.width(measure), cy, measure);
     }
 }
 
 // ---- the Screen contract --------------------------------------------------------------------
 
-impl<H: crate::screens::registry::AppLike> plx_machine::machine::Machine<H> for TracksPanelScreen {
+impl<H: crate::screens::registry::AppLike> nj_machine::machine::Machine<H> for TracksPanelScreen {
     type Ev = crate::ui::screen::ScreenEvent<H>;
     fn step(
         &mut self,
         ev: &Self::Ev,
-        _cx: &plx_machine::machine::Cx<'_, H>,
-        fx: &mut plx_machine::machine::Effects<'_, H>,
-    ) -> plx_machine::machine::Handled {
-        use plx_machine::machine::{Edge, Fx, Handled, InputKind, Key, NavOp};
+        _cx: &nj_machine::machine::Cx<'_, H>,
+        fx: &mut nj_machine::machine::Effects<'_, H>,
+    ) -> nj_machine::machine::Handled {
+        use nj_machine::machine::{Edge, Fx, Handled, InputKind, Key, NavOp};
         use crate::ui::screen::ScreenEvent;
         match ev {
             ScreenEvent::Tick(t) => {
@@ -1128,7 +1128,7 @@ impl<H: crate::screens::registry::AppLike> plx_machine::machine::Machine<H> for 
                     ..
                 } => {
                     if self.step_page(sym as c_int) {
-                        fx.invalidate(plx_machine::present::Provenance::Input);
+                        fx.invalidate(nj_machine::present::Provenance::Input);
                     }
                     Handled::Yes
                 }
@@ -1151,9 +1151,9 @@ impl<H: crate::screens::registry::AppLike> plx_machine::machine::Machine<H> for 
 /// `Handled::Yes`), so the engine's own direction/OK arms in `after_step` never fire for this
 /// screen — the mechanism swap changes nothing this sheet's keys or clicks do.
 impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for TracksPanelScreen {
-    fn groups(&self, _cx: &plx_machine::machine::Cx<'_, H>, out: &mut Vec<crate::ui::screen::GroupSpec>) {
+    fn groups(&self, _cx: &nj_machine::machine::Cx<'_, H>, out: &mut Vec<crate::ui::screen::GroupSpec>) {
         out.push(crate::ui::screen::GroupSpec {
-            id: plx_machine::machine::GroupId(0),
+            id: nj_machine::machine::GroupId(0),
             kind: crate::ui::screen::GroupKind::Document,
             seat: crate::ui::screen::Seat::First,
             reachable: crate::ui::screen::AxisMask::BOTH,
@@ -1163,14 +1163,14 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for T
             elem: crate::ui::screen::ElemKind::Control,
         });
     }
-    fn group_of(&self, key: &u32, _cx: &plx_machine::machine::Cx<'_, H>) -> Option<plx_machine::machine::GroupId> {
-        (*key == 0).then_some(plx_machine::machine::GroupId(0))
+    fn group_of(&self, key: &u32, _cx: &nj_machine::machine::Cx<'_, H>) -> Option<nj_machine::machine::GroupId> {
+        (*key == 0).then_some(nj_machine::machine::GroupId(0))
     }
     fn neighbour(
         &self,
-        _key: plx_machine::machine::FocusKey<u32>,
+        _key: nj_machine::machine::FocusKey<u32>,
         _dir: crate::ui::screen::Dir,
-        _cx: &plx_machine::machine::Cx<'_, H>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
     ) -> crate::ui::screen::Step<u32> {
         // The one element never MOVES — paging is the screen's own arm, not the engine's (see the
         // impl doc) — so every direction answers `Edge`, which `EdgeRule::Stop` turns into "stay
@@ -1180,7 +1180,7 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for T
     fn place(
         &self,
         key: &u32,
-        _cx: &plx_machine::machine::Cx<'_, H>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
         _at: crate::ui::screen::At,
     ) -> Option<crate::ui::screen::Placed> {
         (*key == 0).then(|| crate::ui::screen::Placed {
@@ -1192,13 +1192,13 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for T
     }
     fn reconcile(
         &self,
-        want: plx_machine::machine::FocusKey<u32>,
-        _cx: &plx_machine::machine::Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
+        want: nj_machine::machine::FocusKey<u32>,
+        _cx: &nj_machine::machine::Cx<'_, H>,
+    ) -> nj_machine::machine::FocusKey<u32> {
         if want.elem == 0 {
             want
         } else {
-            plx_machine::machine::FocusKey {
+            nj_machine::machine::FocusKey {
                 entry: self.entry,
                 elem: 0,
             }
@@ -1206,19 +1206,19 @@ impl<H: crate::screens::registry::AppLike> crate::ui::screen::Focusable<H> for T
     }
     fn seat(
         &self,
-        _g: plx_machine::machine::GroupId,
+        _g: nj_machine::machine::GroupId,
         _from: crate::ui::screen::Placed,
-        _cx: &plx_machine::machine::Cx<'_, H>,
-    ) -> plx_machine::machine::FocusKey<u32> {
-        plx_machine::machine::FocusKey {
+        _cx: &nj_machine::machine::Cx<'_, H>,
+    ) -> nj_machine::machine::FocusKey<u32> {
+        nj_machine::machine::FocusKey {
             entry: self.entry,
             elem: 0,
         }
     }
 }
 
-impl plx_machine::machine::LogicalState for TracksPanelScreen {
-    fn write(&self, c: &mut plx_machine::machine::Canon) {
+impl nj_machine::machine::LogicalState for TracksPanelScreen {
+    fn write(&self, c: &mut nj_machine::machine::Canon) {
         c.u32(self.page as u32)
             .f32(self.scroll.pos)
             .f32(self.scroll.vel)
@@ -1233,13 +1233,13 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
     fn name(&self) -> &'static str {
         "tracks"
     }
-    fn state(&self) -> &dyn plx_machine::machine::LogicalState {
+    fn state(&self) -> &dyn nj_machine::machine::LogicalState {
         self
     }
-    fn crumb(&self, _cx: &plx_machine::machine::Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
+    fn crumb(&self, _cx: &nj_machine::machine::Cx<'_, H>) -> Option<std::borrow::Cow<'_, str>> {
         None
     }
-    fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &plx_machine::machine::Cx<'_, H>) {}
+    fn prepare(&mut self, _b: &mut crate::ui::frame::Budget, _cx: &nj_machine::machine::Cx<'_, H>) {}
     /// The modal dim, asked for rather than drawn — the design's `scrimStill`, at the PANEL role
     /// ([`theme::underlay::DIM_PANEL`]). Nothing is lifted: this sheet replaces the middle of the frame and holds no
     /// control, so there is no element under it the dim must spare.
@@ -1264,7 +1264,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
         // The container owns the appear spring; `DrawFrame::page_alpha` IS `Surface::motion.appear`
         // for a surface, which is what this panel's own `Popover` used to hold.
         let appear = f.page_alpha;
-        // Named for `/tmp/plxnative-cpuprof` beside the page's own phases, so a slow frame while
+        // Named for `/tmp/nativejelly-cpuprof` beside the page's own phases, so a slow frame while
         // this sheet is up can be read as the PANEL or as the host under it rather than as one
         // `main.ui` total. It is the scene `fps:page-panel` grades.
         let measure = f.measure;
@@ -1833,7 +1833,7 @@ mod tests {
     // `Outcome::Nothing`). These tests pin exactly that bookkeeping, plus the unchanged step()
     // contract, against ANY future regression that tries to grow this sheet a second cursor.
     use crate::screens::registry::{AppFx, AppMsg};
-    use plx_machine::machine::{
+    use nj_machine::machine::{
         Edge, EntryId, FocusKey, FocusRead, GroupId, Handled, Host, InputEvent, InputKind,
         InputOwner, Key, LogicalState, Machine, PressRead, Source, Tick,
     };
@@ -1842,15 +1842,15 @@ mod tests {
     #[derive(Clone)]
     struct FixtureArg;
     impl LogicalState for FixtureArg {
-        fn write(&self, _: &mut plx_machine::machine::Canon) {}
+        fn write(&self, _: &mut nj_machine::machine::Canon) {}
         fn probe(&self, _: &mut String) {}
     }
     impl ScreenArg for FixtureArg {
-        fn chrome(&self) -> plx_machine::machine::Chrome {
-            plx_machine::machine::Chrome::None
+        fn chrome(&self) -> nj_machine::machine::Chrome {
+            nj_machine::machine::Chrome::None
         }
-        fn id(&self) -> plx_machine::machine::ScreenId {
-            plx_machine::machine::ScreenId(1)
+        fn id(&self) -> nj_machine::machine::ScreenId {
+            nj_machine::machine::ScreenId(1)
         }
         fn title(&self) -> Option<&str> {
             None
@@ -1881,12 +1881,12 @@ mod tests {
     }
 
     impl crate::screens::registry::MetadataLike for HostFixture {
-        fn metadata<'a>(_cx: &plx_machine::machine::Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
+        fn metadata<'a>(_cx: &nj_machine::machine::Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
             test_store().view()
         }
     }
-    fn fixture_cx(focus: Option<FocusKey<u32>>) -> plx_machine::machine::Cx<'static, HostFixture> {
-        plx_machine::machine::Cx {
+    fn fixture_cx(focus: Option<FocusKey<u32>>) -> nj_machine::machine::Cx<'static, HostFixture> {
+        nj_machine::machine::Cx {
             views: (),
             tick: Tick::default(),
             measure: &crate::ui::fixture::FixtureMeasure,
@@ -1981,31 +1981,31 @@ mod tests {
         let mut p = panel(entry);
         let cx = fixture_cx(Some(FocusKey { entry, elem: 0 }));
         let mut buf = Vec::new();
-        let mut present = plx_machine::present::Present::default();
+        let mut present = nj_machine::present::Present::default();
 
         {
-            let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+            let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
             let back = key_event(Key::Back, 0);
             assert_eq!(Machine::step(&mut p, &back, &cx, &mut fx), Handled::Yes);
         }
         assert!(
             matches!(
                 buf.last().map(|s| &s.fx),
-                Some(plx_machine::machine::Fx::Nav(plx_machine::machine::NavOp::Dismiss(e))) if *e == entry
+                Some(nj_machine::machine::Fx::Nav(nj_machine::machine::NavOp::Dismiss(e))) if *e == entry
             ),
             "BACK dismisses the sheet exactly as it always did"
         );
         buf.clear();
 
         {
-            let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+            let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
             let ok = key_event(Key::Ok, 0);
             assert_eq!(Machine::step(&mut p, &ok, &cx, &mut fx), Handled::Yes);
         }
         assert!(
             matches!(
                 buf.last().map(|s| &s.fx),
-                Some(plx_machine::machine::Fx::Nav(plx_machine::machine::NavOp::Dismiss(e))) if *e == entry
+                Some(nj_machine::machine::Fx::Nav(nj_machine::machine::NavOp::Dismiss(e))) if *e == entry
             ),
             "OK dismisses too — there is nothing here to commit"
         );
@@ -2014,7 +2014,7 @@ mod tests {
         p.content_h = body_rect().h * 3.0; // several pages of content
         assert_eq!(p.page, 1);
         {
-            let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+            let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
             let down = key_event(Key::Down, SDLK_DOWN);
             assert_eq!(Machine::step(&mut p, &down, &cx, &mut fx), Handled::Yes);
         }

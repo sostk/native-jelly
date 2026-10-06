@@ -28,7 +28,7 @@ struct PlxAss {
     ASS_Track *track;
     uint8_t *rgba;
     size_t bytes, font_bytes;
-    PlxAssBitmap regions[PLX_ASS_MAX_REGIONS];
+    PlxAssBitmap regions[NJ_ASS_MAX_REGIONS];
     struct ImageKey *images;
     size_t image_capacity, image_count, region_count;
     int cache_valid;
@@ -178,7 +178,7 @@ static void add_bounds(struct Bounds *regions, size_t *count, struct Bounds box)
         }
     }
     /* An unusually fragmented script stays bounded without dropping any image. */
-    if (*count == PLX_ASS_MAX_REGIONS) {
+    if (*count == NJ_ASS_MAX_REGIONS) {
         for (size_t i = 0; i < *count; ++i) box = unite(box, regions[i]);
         *count = 0;
     }
@@ -248,7 +248,7 @@ static int retained_regions(PlxAss *ctx, ASS_Image *images, int width, int heigh
 static void place_regions(PlxAss *ctx, const struct Bounds *bounds, size_t count,
                            const int *retained)
 {
-    size_t old_offset[PLX_ASS_MAX_REGIONS], next_offset[PLX_ASS_MAX_REGIONS];
+    size_t old_offset[NJ_ASS_MAX_REGIONS], next_offset[NJ_ASS_MAX_REGIONS];
     size_t old = 0, next = 0;
     for (size_t i = 0; i < count; ++i) {
         old_offset[i] = old;
@@ -306,7 +306,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
         return 0;
     }
     ctx->first = 0;
-    struct Bounds bounds[PLX_ASS_MAX_REGIONS];
+    struct Bounds bounds[NJ_ASS_MAX_REGIONS];
     size_t region_count = 0;
     int image_count = 0;
     for (ASS_Image *p = images; p; p = p->next) {
@@ -327,7 +327,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
         ctx->cache_valid = 1;
         return 1;
     }
-    int retained[PLX_ASS_MAX_REGIONS];
+    int retained[NJ_ASS_MAX_REGIONS];
     if (retained_regions(ctx, images, width, height, bounds, region_count,
                          (size_t)image_count, reusable, retained) < 0) return -1;
     size_t bytes = 0;

@@ -1,7 +1,7 @@
 //! Search as an owned page: lifecycle, retention and leave events.
 
 use super::*;
-use plx_machine::machine::Chrome;
+use nj_machine::machine::Chrome;
 use crate::ui::screen::ScreenArg;
 #[allow(unused_imports)]
 use super::test_support::*;
@@ -26,7 +26,7 @@ impl OwnedLeaveTrace {
 }
 
 impl crate::ui::dispatch::Tap<AppHost> for OwnedLeaveTrace {
-    fn effect(&mut self, _frame: u64, stamped: &plx_machine::machine::Stamped<AppHost>) {
+    fn effect(&mut self, _frame: u64, stamped: &nj_machine::machine::Stamped<AppHost>) {
         let Fx::Deliver(MachineId::Instance(instance), Delivery::Screen(event)) = &stamped.fx
             else { return };
         let name = match event {
@@ -36,8 +36,8 @@ impl crate::ui::dispatch::Tap<AppHost> for OwnedLeaveTrace {
             ScreenEvent::RestoreMemory(_) => "restore-memory",
             ScreenEvent::Cover => "cover",
             ScreenEvent::Uncover => "uncover",
-            ScreenEvent::WillLeave(plx_machine::machine::Leave::Deeper) => "will-leave-deeper",
-            ScreenEvent::WillLeave(plx_machine::machine::Leave::ForGood) => "will-leave-for-good",
+            ScreenEvent::WillLeave(nj_machine::machine::Leave::Deeper) => "will-leave-deeper",
+            ScreenEvent::WillLeave(nj_machine::machine::Leave::ForGood) => "will-leave-for-good",
             ScreenEvent::Unmount => "unmount",
             _ => return,
         };
@@ -52,10 +52,10 @@ impl crate::ui::dispatch::Tap<AppHost> for OwnedLeaveTrace {
 /// oracle; the dispatcher records the lifecycle it actually delivered.
 #[test]
 fn every_back_reachable_owned_page_is_retained_and_restored_by_identity() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-leave-retention");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-leave-retention");
     session.watching("synthetic-leave-retention");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     // Search is owned per-Bridge now; each iteration below constructs its own `rig`, so there is
     // no process-wide state left to reset here.
 
@@ -139,7 +139,7 @@ fn every_back_reachable_owned_page_is_retained_and_restored_by_identity() {
         assert!(d.nav.entry(child_entry).is_none(), "the for-good child entry must be pruned");
     }
 
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Search is retained while a result is above it, but selecting Home retires Search for good.
@@ -147,10 +147,10 @@ fn every_back_reachable_owned_page_is_retained_and_restored_by_identity() {
 /// keyboard calls are the teardown side effect the old route table carried by hand.
 #[test]
 fn owned_search_is_covered_for_a_result_then_unmounted_for_good_at_home() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-leave-contract");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-leave-contract");
     session.watching("synthetic-search-leave-contract");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
 
@@ -208,13 +208,13 @@ fn owned_search_is_covered_for_a_result_then_unmounted_for_good_at_home() {
     assert!(!d.input.keyboard);
     assert_eq!(rig.keyboard_calls, [true, false, true, false]);
 
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
 fn owned_search_external_departure_never_submits_the_draft() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-external-leave");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-external-leave");
     session.watching("synthetic-external-leave");
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("unfinished draft".into()));
@@ -224,7 +224,7 @@ fn owned_search_external_departure_never_submits_the_draft() {
     let split = rig.split();
     let cx = parts.cx::<AppHost>(split.views, split.measure);
     for event in [ScreenEvent::Suspend, ScreenEvent::Cover, ScreenEvent::Unmount,
-        ScreenEvent::WillLeave(plx_machine::machine::Leave::Deeper)] {
+        ScreenEvent::WillLeave(nj_machine::machine::Leave::Deeper)] {
         let mut screen = crate::screens::search::SearchScreen::new(EntryId(1), InstanceId(1));
         let mut out = Vec::new();
         let mut present = Present::new();
@@ -246,7 +246,7 @@ fn owned_search_external_departure_never_submits_the_draft() {
 
 #[test]
 fn owned_search_ticks_request_search_work_once_after_step() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let mut rig = Bridge::for_test(|| 0);
     let parts = CxParts { tick: tick(0), press: Default::default(), focus: Default::default(),
         owner: InputOwner::Entry(EntryId(1)) };
@@ -269,16 +269,16 @@ fn owned_search_ticks_request_search_work_once_after_step() {
 
 #[test]
 fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-wheel");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-wheel");
     session.watching("synthetic-wheel");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("wheel".into()));
     rig.stores.search.publish_shelves_for_test([crate::search::Kind::Movie, crate::search::Kind::Show,
         crate::search::Kind::Episode].into_iter().map(|kind| crate::search::Shelf { kind,
-            items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+            items: vec![crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
                 rk: format!("synthetic-{kind:?}"), title: "Synthetic wheel result".into(), ..Default::default()
             })] }).collect());
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -318,10 +318,10 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
 
 #[test]
 fn owned_search_dispatch_advances_debounce_once_and_only_while_page_updates() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-debounce");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-debounce");
     session.watching("synthetic-debounce");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("not sent to any server".into()));
@@ -343,10 +343,10 @@ fn owned_search_dispatch_advances_debounce_once_and_only_while_page_updates() {
 
 #[test]
 fn owned_search_carried_work_keeps_the_originating_tick_delta() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-carried-pump");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-carried-pump");
     session.watching("synthetic-carried-pump");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("carried search".into()));
@@ -369,10 +369,10 @@ fn owned_search_carried_work_keeps_the_originating_tick_delta() {
 
 #[test]
 fn owned_search_observed_keyboard_dismissal_releases_native_latch_and_reopens() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-observed-dismissal");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-observed-dismissal");
     session.watching("synthetic-observed-dismissal");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -388,15 +388,15 @@ fn owned_search_observed_keyboard_dismissal_releases_native_latch_and_reopens() 
 
 #[test]
 fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-adopt");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-adopt");
     session.watching("synthetic-adopt-profile");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("ab".into()));
     rig.stores.search.publish_shelves_for_test(vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+        items: vec![crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
             rk: "adopt-result".into(), title: "Synthetic result".into(), ..Default::default()
         })] }]);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -423,15 +423,15 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
 
 #[test]
 fn owned_search_opens_edits_and_closes_in_one_input_batch_in_order() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-ingress-order");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-ingress-order");
     session.watching("synthetic-ingress-order");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
     let text = |s: &str, at| InputEvent { at, source: Source::Script,
-        kind: InputKind::Text(plx_machine::machine::TextEdit::Commit(s.into())) };
+        kind: InputKind::Text(nj_machine::machine::TextEdit::Commit(s.into())) };
     let mut events = script_key(Key::Ok, tick(1));
     events.push(text("a", tick(1)));
     events.extend(script_key(Key::Left, tick(1)));
@@ -448,10 +448,10 @@ fn owned_search_opens_edits_and_closes_in_one_input_batch_in_order() {
 
 #[test]
 fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-keyboard-owner");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-keyboard-owner");
     session.watching("synthetic-keyboard-owner");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -481,10 +481,10 @@ fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
 
 #[test]
 fn covering_owned_search_releases_its_native_keyboard() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-covered-keyboard");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-covered-keyboard");
     session.watching("synthetic-covered-search");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -499,17 +499,17 @@ fn covering_owned_search_releases_its_native_keyboard() {
 
 #[test]
 fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-ack");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-ack");
     session.watching("synthetic-ack-profile");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
     let target = MachineId::Instance(d.nav.top_page().unwrap().inst.as_ref().unwrap().id);
     for kind in [InputKind::SystemKeyboard(true),
-        InputKind::Text(plx_machine::machine::TextEdit::Commit("a".into())),
-        InputKind::Text(plx_machine::machine::TextEdit::Backspace)] {
+        InputKind::Text(nj_machine::machine::TextEdit::Commit("a".into())),
+        InputKind::Text(nj_machine::machine::TextEdit::Backspace)] {
         d.emit(MachineId::Input, Fx::Deliver(target, Delivery::Screen(ScreenEvent::Input(InputEvent {
             at: tick(1), source: Source::Script, kind,
         }))));
@@ -526,10 +526,10 @@ fn owned_search_unrelated_store_notice_cannot_ack_a_net_zero_edit_batch() {
 
 #[test]
 fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-text");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-text");
     session.watching("synthetic-search-profile");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -537,7 +537,7 @@ fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
     let retained = rig.search.clone();
     let mut input = vec![InputEvent { at: tick(1), source: Source::Script, kind: InputKind::SystemKeyboard(true) }];
     input.extend(["s", "u", "m", "summer "].map(|text| InputEvent {
-        at: tick(1), source: Source::Script, kind: InputKind::Text(plx_machine::machine::TextEdit::Commit(text.into())),
+        at: tick(1), source: Source::Script, kind: InputKind::Text(nj_machine::machine::TextEdit::Commit(text.into())),
     }));
     frame(&mut d, &mut rig, AppArg::Search, tick(1), input);
     assert_eq!(rig.stores.search.query(), "summer ", "the real store received every committed edit");
@@ -552,10 +552,10 @@ fn owned_search_keeps_several_commits_while_the_frame_view_is_frozen() {
 
 #[test]
 fn owned_search_opens_system_ownership_and_empty_down_keeps_editing() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-keyboard");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-keyboard");
     session.watching("synthetic-empty-search-profile");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -577,20 +577,20 @@ fn owned_search_opens_system_ownership_and_empty_down_keeps_editing() {
 
 #[test]
 fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-results");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-results");
     session.watching("synthetic-result-profile");
     // This test grades navigation, not disk workers. The accepted term is already first, so
     // RememberRecent remains the production no-op and no detached save can outlive the fixture.
-    crate::plex::session::update(|s| {
+    crate::catalog::session::update(|s| {
         let mut next = s.clone();
         next.set_recents_for("synthetic-result-profile", vec!["synthetic".into()]);
         Some(next)
     });
-    crate::plex::reset_servers_for_test();
-    let a = crate::plex::register_for_test("search-a", "127.0.0.1", 1, "a", "search");
-    let b = crate::plex::register_for_test("search-b", "127.0.0.1", 2, "b", "search");
-    let item = |sid| crate::search::Item::Media(crate::pms::PmsMovie {
+    crate::catalog::reset_servers_for_test();
+    let a = crate::catalog::register_for_test("search-a", "127.0.0.1", 1, "a", "search");
+    let b = crate::catalog::register_for_test("search-b", "127.0.0.1", 2, "b", "search");
+    let item = |sid| crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
         sid, rk: "same-local-key".into(), title: "Synthetic movie".into(), ..Default::default()
     });
     let mut d = Dispatcher::<AppHost>::new();
@@ -629,16 +629,16 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
     frame(&mut d, &mut rig, AppArg::Search, tick(35), script_key(Key::Back, tick(35)));
     assert!(rig.take_search_reqs().iter().any(|(_, req, _)| matches!(req,
         crate::screens::registry::SearchReq::Back)), "BACK differs from selecting the Home pill");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
 fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-profile");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-profile");
     session.watching("synthetic-departing-profile");
-    crate::plex::reset_servers_for_test();
-    let old_generation = crate::plex::session::current_gen();
+    crate::catalog::reset_servers_for_test();
+    let old_generation = crate::catalog::session::current_gen();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -649,7 +649,7 @@ fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
     frame(&mut d, &mut rig, AppArg::Search, tick(1), vec![]);
     assert_eq!(rig.stores.search.query(), "");
     assert!(owned_search_probe(&d).contains("caret=0"));
-    let next_generation = crate::plex::session::current_gen();
+    let next_generation = crate::catalog::session::current_gen();
     d.emit(MachineId::Input, Fx::App(AppFx::Store(StoreId::Search, StoreCmd::Search(
         crate::stores::search::SearchCmd::SetQueryScoped { profile_generation: next_generation, query: "replacement text".into() }))));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
@@ -660,12 +660,12 @@ fn owned_search_rejects_a_queued_query_from_the_departing_profile() {
 
 #[test]
 fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-return");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-return");
     session.watching("synthetic-return-profile");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let catalog = || vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: (0..8).map(|i| crate::search::Item::Media(crate::pms::PmsMovie {
+        items: (0..8).map(|i| crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
             rk: format!("item-{i}"), title: format!("Synthetic {i}"), ..Default::default()
         })).collect() }];
     let mut d = Dispatcher::<AppHost>::new();
@@ -694,7 +694,7 @@ fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
         let cx = parts.cx::<AppHost>(rig.views_with(crate::route::idle_session_for_test()), &rig.measure);
         let mut restored = crate::screens::search::SearchScreen::new(key.entry, InstanceId(900));
         restored.restore(memory);
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut commands = Vec::new();
         let mut fx = Effects::new(&mut commands, MachineId::Instance(InstanceId(900)), &mut present);
         restored.step(&ScreenEvent::Mount, &cx, &mut fx);
@@ -718,10 +718,10 @@ fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
 /// underflow it, ▶ comes back onto the first pill, and ▼ off the bar is the field again.
 #[test]
 fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-strip");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-strip");
     session.watching("synthetic-strip");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -746,7 +746,7 @@ fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
     assert_eq!(d.focus(), Some(field), "▼ off the bar lands on the field, whatever pill it was on");
 }
 
-/// What the `/tmp/plxnative-search[=<query>]` boot trigger now does, once the retired legacy
+/// What the `/tmp/nativejelly-search[=<query>]` boot trigger now does, once the retired legacy
 /// screen's own `enter()` no longer exists to seed it: write the query into the STORE before the
 /// fresh `SearchScreen`'s first `sync()` ever runs, stand on Search exactly as an interactive
 /// arrival does, and let that first sync pick the query up off `AppViews.search` exactly as an
@@ -768,16 +768,16 @@ fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
 /// exactly the same evidence "the draft holds the query" would be, one layer down.
 #[test]
 fn a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-boot-seed");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-boot-seed");
     session.watching("synthetic-boot-seed");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     crate::dev::scenarios::apply_search_boot_trigger("dune", &mut d, &mut rig);
     rig.stores.search.publish_shelves_for_test([crate::search::Kind::Movie].into_iter()
         .map(|kind| crate::search::Shelf { kind, items: vec![crate::search::Item::Media(
-            crate::pms::PmsMovie { rk: "synthetic-boot-seed".into(), title: "Dune".into(), ..Default::default() })] })
+            crate::catalog_fetch::PmsMovie { rk: "synthetic-boot-seed".into(), title: "Dune".into(), ..Default::default() })] })
         .collect());
     // Mirror the loop's own next step: the first frame mounts the page the trigger just rooted the
     // container on.
@@ -811,10 +811,10 @@ fn a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync() {
 /// no observable behaviour — it deleted a call that was never the one doing the work.
 #[test]
 fn leaving_owned_search_through_a_real_route_change_releases_its_keyboard() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-real-nav-teardown");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-real-nav-teardown");
     session.watching("synthetic-real-nav-teardown");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -841,7 +841,7 @@ fn leaving_owned_search_through_a_real_route_change_releases_its_keyboard() {
 ///
 /// **This drives `Bridge::draws_chrome_for` directly** — the exact predicate `draw_chrome` calls
 /// as its guard — rather than re-deriving the same condition inline: `draw_chrome`'s own body
-/// calls into real text measurement (`plx_gfx::text::text_width`, off `self.chrome.labels()`'s real
+/// calls into real text measurement (`nj_gfx::text::text_width`, off `self.chrome.labels()`'s real
 /// strings) with no font loaded on a host test, so a test cannot drive the paint itself end to end
 /// and must instead pin the exact decision the guard makes. The fix derives that guard FROM the
 /// one chrome predicate instead of listing pages a second time (the drift this bug was), so a
@@ -998,15 +998,15 @@ fn update_still_steps_the_shared_strip_on_search_the_way_home_and_library_do() {
 /// pressed — the exact "grades nothing about Search" gap the finding named.
 #[test]
 fn owned_search_content_probe_reports_zone_row_col_pill_and_card_as_focus_moves() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-fingerprint");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-fingerprint");
     session.watching("synthetic-fingerprint");
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("fingerprint".into()));
     rig.stores.search.publish_shelves_for_test(vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+        items: vec![crate::search::Item::Media(crate::catalog_fetch::PmsMovie {
             rk: "fp-result".into(), title: "Fingerprint result".into(), ..Default::default()
         })] }]);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -1053,19 +1053,19 @@ fn owned_search_content_probe_reports_zone_row_col_pill_and_card_as_focus_moves(
 /// the item detail a bare ratingKey would open.
 #[test]
 fn owned_search_ok_on_a_collection_requests_its_collection_page() {
-    let _serial = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-collection");
+    let _serial = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("owned-search-collection");
     session.watching("synthetic-collection-profile");
-    crate::plex::session::update(|s| {
+    crate::catalog::session::update(|s| {
         let mut next = s.clone();
         next.set_recents_for("synthetic-collection-profile", vec!["synthetic".into()]);
         Some(next)
     });
-    crate::plex::reset_servers_for_test();
-    let a = crate::plex::register_for_test("search-coll", "127.0.0.1", 1, "a", "search");
+    crate::catalog::reset_servers_for_test();
+    let a = crate::catalog::register_for_test("search-coll", "127.0.0.1", 1, "a", "search");
     let hit = crate::search::Item::Collection(crate::search::CollectionHit {
-        item: crate::pms::PmsMovie { sid: a, rk: "50007".into(), sec: 1, title: "Synthetic set".into(),
-            kind: crate::pms::KIND_COLLECTION, ..Default::default() },
+        item: crate::catalog_fetch::PmsMovie { sid: a, rk: "50007".into(), sec: 1, title: "Synthetic set".into(),
+            kind: crate::catalog_fetch::KIND_COLLECTION, ..Default::default() },
         tag: 7 });
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
@@ -1086,5 +1086,5 @@ fn owned_search_ok_on_a_collection_requests_its_collection_page() {
     let entry = d.nav.top_page().unwrap().id;
     let (selected, _) = rig.search_selection(&d, entry, ret.focus).unwrap();
     assert!(matches!(selected, crate::search::Item::Collection(c) if c.item.rk == "50007"));
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }

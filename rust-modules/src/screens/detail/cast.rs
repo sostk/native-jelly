@@ -3,10 +3,10 @@
 use std::ffi::CString;
 
 use crate::metadata::Detail;
-use crate::plex::ServerId;
+use crate::catalog::ServerId;
 use crate::ui::card_row::{self, CardRow, RowStyle};
 use crate::ui::label::{HAlign, Label, VAlign};
-use plx_machine::machine::{GroupId, Measure};
+use nj_machine::machine::{GroupId, Measure};
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::Art;
 use crate::ui::{theme, Painter, Rect};
@@ -99,10 +99,10 @@ pub(crate) fn draw(
     row: &CardRow,
     top: f32,
     focused: Option<usize>,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     p.text(
-        plx_platform::i18n::msg::browse_detail_cast_c().as_ptr(),
+        nj_platform::i18n::msg::browse_detail_cast_c().as_ptr(),
         crate::ui::consts::MARGIN_X,
         top - row.lift(),
         theme::size::HEADLINE,
@@ -176,7 +176,7 @@ fn label_frames(cx: f32, row_y: f32, drop: f32, measure: &dyn Measure) -> (Rect,
 }
 
 fn name_caption(name: &str, width: f32, focused: bool, measure: &dyn Measure) -> String {
-    plx_gfx::text::elide_by(name, width, false, |text| measure.width_str(text, theme::size::LABEL, focused))
+    nj_gfx::text::elide_by(name, width, false, |text| measure.width_str(text, theme::size::LABEL, focused))
 }
 
 fn role_view<'a>(role: &'a str, measure: &'a dyn Measure) -> TextView<'a> {
@@ -260,9 +260,9 @@ mod tests {
     fn combined_crew_captions_fit_two_caption_lines_at_both_safe_edges() {
         let measure = LabelMeasure;
         let safe = crate::ui::consts::SAFE;
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-            let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-            let caption = plx_platform::i18n::msg::browse_crew_director_writer_in(&locale);
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+            let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
+            let caption = nj_platform::i18n::msg::browse_crew_director_writer_in(&locale);
             for center in [safe.x + RowStyle::CAST.w * 0.5,
                 safe.x + safe.w - RowStyle::CAST.w * 0.5] {
                 let (_, frame) = label_frames(center, 100.0, 0.0, &measure);

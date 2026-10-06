@@ -66,7 +66,7 @@ static ATTEMPT: AtomicI64 = AtomicI64::new(0);
 /// (a fresh `Client` published over the same slot) relabel `started`/`ended` events that reported
 /// `local` a moment ago as `unknown`, or worse, as whatever the NEW server's connection happens to
 /// be — neither is the connection THIS attempt actually used.
-static ATTEMPT_CONNECTION: AtomicU32 = AtomicU32::new(pack_connection(crate::plex::ServerId::UNSET.raw(), 0, 0));
+static ATTEMPT_CONNECTION: AtomicU32 = AtomicU32::new(pack_connection(crate::catalog::ServerId::UNSET.raw(), 0, 0));
 
 const fn pack_connection(server: u16, link: u8, ip: u8) -> u32 {
     (server as u32) | ((link as u32) << 16) | ((ip as u32) << 24)
@@ -76,10 +76,10 @@ fn unpack_connection(word: u32) -> (u16, u8, u8) {
     (word as u16, (word >> 16) as u8, (word >> 24) as u8)
 }
 
-// Link/IP encode-decode is the one pair `crate::plex::client` owns (`encode_link`/`decode_link`,
+// Link/IP encode-decode is the one pair `crate::catalog::client` owns (`encode_link`/`decode_link`,
 // `encode_ip`/`decode_ip`) — this module used to keep a second private copy of both tables, which
 // is exactly the drift the shared pair exists to rule out.
-use crate::plex::{decode_ip, decode_link, encode_ip, encode_link};
+use crate::catalog::{decode_ip, decode_link, encode_ip, encode_link};
 /// Process-local trace generation. Unlike `ATTEMPT`, this is never sent; it only prevents an
 /// outgoing demux worker from writing its late transitions into the next Play's reset trace.
 static NEXT_TRACE_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -441,7 +441,7 @@ fn presented_event(ps: &crate::route::PlaybackSession) -> TraceEvent {
 ///
 /// Mints the id and clears every latch, so a second Play on the same item is a second attempt with
 /// its own funnel rather than a silent no-op against the first one's latches.
-pub(crate) fn requested(ps: &crate::route::PlaybackSession, server: crate::plex::ServerId) -> u32 {
+pub(crate) fn requested(ps: &crate::route::PlaybackSession, server: crate::catalog::ServerId) -> u32 {
     resolve_replaced_attempt(ps);
     let id = new_attempt_id();
     let at = now_ms();
@@ -469,7 +469,7 @@ pub(crate) fn requested(ps: &crate::route::PlaybackSession, server: crate::plex:
     // Snapshot the server slot AND the connection together, in one store — see
     // `ATTEMPT_CONNECTION`'s doc for why `emit` must never re-read the live client, and why this
     // must not be three separate stores.
-    let (link, ip) = crate::plex::client_for(server)
+    let (link, ip) = crate::catalog::client_for(server)
         .map(|c| (c.link(), c.ip_version()))
         .unwrap_or((None, None));
     ATTEMPT_CONNECTION.store(pack_connection(server.raw(), encode_link(link), encode_ip(ip)), Relaxed);
@@ -504,7 +504,7 @@ pub(crate) fn requested(ps: &crate::route::PlaybackSession, server: crate::plex:
 /// mid-attempt re-point without driving the whole consent/spool pipeline `emit` feeds.
 #[cfg(test)]
 pub(crate) fn attempt_connection_snapshot_for_test(
-) -> (Option<crate::plex::probe::Location>, Option<crate::plex::IpVersion>) {
+) -> (Option<crate::catalog::probe::Location>, Option<crate::catalog::IpVersion>) {
     let (_, link, ip) = unpack_connection(ATTEMPT_CONNECTION.load(Relaxed));
     (decode_link(link), decode_ip(ip))
 }
@@ -513,7 +513,7 @@ fn emit(event: DiagEvent) {
     // One load, not three — see `ATTEMPT_CONNECTION`'s doc for why a concurrent `requested` must
     // never be observable as a torn mix of the old server slot and the new connection or back.
     let (server, link, ip) = unpack_connection(ATTEMPT_CONNECTION.load(Relaxed));
-    let sid = crate::plex::ServerId::from_raw(server);
+    let sid = crate::catalog::ServerId::from_raw(server);
     let link = decode_link(link);
     let ip = decode_ip(ip);
     crate::diag::event_for_connection(event, sid, link, ip);
@@ -912,45 +912,45 @@ mod tests {
     /// attempt. A live `client_for(server)` read at emit time would have.
     #[test]
     fn requested_snapshots_the_connection_and_a_mid_attempt_repoint_does_not_change_it() {
-        let _g = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let o = crate::plex::Origin::http("10.0.0.9", 32400);
-        let connection = crate::plex::ConnectionFacts::new(
-            Some(crate::plex::probe::Location::Local),
-            Some(crate::plex::IpVersion::V4),
+        let _g = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
+        let o = crate::catalog::Origin::http("10.0.0.9", 32400);
+        let connection = crate::catalog::ConnectionFacts::new(
+            Some(crate::catalog::probe::Location::Local),
+            Some(crate::catalog::IpVersion::V4),
         );
-        let sid = crate::plex::register_pinned_with_client_id(
+        let sid = crate::catalog::register_pinned_with_client_id(
             "m1", &o, "tok", None, "cid", connection,
         );
         let ps = crate::route::PlaybackSession::default();
         requested(&ps, sid);
         assert_eq!(
             attempt_connection_snapshot_for_test(),
-            (Some(crate::plex::probe::Location::Local), Some(crate::plex::IpVersion::V4)),
+            (Some(crate::catalog::probe::Location::Local), Some(crate::catalog::IpVersion::V4)),
             "snapshotted at requested time"
         );
         // Mid-attempt re-point: a DIFFERENT origin for the same machine id, e.g. a roster refresh
         // finally reaching the LAN candidate — publishes a fresh `Client` with its own tier/ip.
-        let o2 = crate::plex::Origin::http("10.0.0.20", 32400);
-        let repoint = crate::plex::ConnectionFacts::new(
-            Some(crate::plex::probe::Location::Relay),
-            Some(crate::plex::IpVersion::V6),
+        let o2 = crate::catalog::Origin::http("10.0.0.20", 32400);
+        let repoint = crate::catalog::ConnectionFacts::new(
+            Some(crate::catalog::probe::Location::Relay),
+            Some(crate::catalog::IpVersion::V6),
         );
-        let repointed = crate::plex::register_pinned_with_client_id(
+        let repointed = crate::catalog::register_pinned_with_client_id(
             "m1", &o2, "tok", None, "cid", repoint,
         );
         assert_eq!(repointed, sid, "re-pointed in place — same slot id");
         assert_eq!(
-            crate::plex::client_for(sid).unwrap().link(),
-            Some(crate::plex::probe::Location::Relay),
+            crate::catalog::client_for(sid).unwrap().link(),
+            Some(crate::catalog::probe::Location::Relay),
             "the live client really did change"
         );
         assert_eq!(
             attempt_connection_snapshot_for_test(),
-            (Some(crate::plex::probe::Location::Local), Some(crate::plex::IpVersion::V4)),
+            (Some(crate::catalog::probe::Location::Local), Some(crate::catalog::IpVersion::V4)),
             "the attempt's snapshot is untouched by the re-point"
         );
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     #[test]
@@ -982,7 +982,7 @@ mod tests {
     /// telemetry a viewer never experienced as one.
     #[test]
     fn a_claim_hold_is_not_a_rebuffer() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let ps = crate::route::PlaybackSession::IDLE;
         REBUFFER_COUNT.store(0, Relaxed);
         SAW_START.store(true, Relaxed);
@@ -1020,7 +1020,7 @@ mod tests {
     /// actually asked for. A refusal has no delivery and no requested quality; the report must say so.
     #[test]
     fn a_refused_plan_reports_no_delivery_and_no_requested_quality() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for verdict in [
             crate::route::PlayVerdict::Server("Cannot convert this item.".into(), Default::default()),
             crate::route::PlayVerdict::Server(String::new(), Default::default()),
@@ -1043,7 +1043,7 @@ mod tests {
     /// `delivery` itself stays `unknown`, because nothing was installed.
     #[test]
     fn a_server_refusal_reports_its_codes_the_attempted_route_and_the_source_codecs() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         use crate::route::DecisionCodes as C;
         // (remux, hls) -> the attempt. Remux is checked after HLS, as `delivery_class` does.
         for (remux, hls, attempted) in [
@@ -1091,7 +1091,7 @@ mod tests {
     /// event holds none of them while still holding the closed fields.
     #[test]
     fn no_free_text_from_the_server_decision_reaches_the_serialized_event() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         use crate::route::DecisionCodes as C;
         let sentence = "Cannot convert /media/Private Films/Secret Title (2020)/secret.mkv on SERVER-NAME-9 \
                         token=abc123 http://192.168.1.50:32400/library";
@@ -1134,7 +1134,7 @@ mod tests {
     /// server codes and no attempted transcode, and a playback with a route is not a refusal.
     #[test]
     fn only_a_server_refusal_carries_the_refusal_block() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         for verdict in [
             crate::route::PlayVerdict::DirectPlayDisabled,
             crate::route::PlayVerdict::Forced(crate::route::ForcedFailure::Video),
@@ -1192,7 +1192,7 @@ mod tests {
     /// it was derived from the absence of an encoder session, and a refusal has none.
     #[test]
     fn a_refused_plan_reports_mode_unknown_and_a_real_route_keeps_its_mode() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut refused = crate::route::PlaybackSession::default();
         crate::route::refuse_by_server_for_test(&mut refused, "", Default::default(), true, false, "", "");
         assert_eq!(mode(&refused), "unknown");
@@ -1208,7 +1208,7 @@ mod tests {
     /// The other half: a failure on a playback that DID install a route keeps the real tags.
     #[test]
     fn an_installed_route_keeps_its_real_delivery_and_requested_quality() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let direct = crate::route::PlaybackSession::default();
         let ctx = error_context(&direct);
         assert_eq!((ctx.delivery.code(), ctx.requested), ("original_direct", QualityClass::Original));
@@ -1360,7 +1360,7 @@ mod tests {
     #[test]
     fn a_failed_preview_trace_is_erased_through_telemetrys_hook() {
         use crate::telemetry::consent::{self, Consent};
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let previous = consent::current();
         let mut enabled = Consent::default();
         enabled.errors = true;

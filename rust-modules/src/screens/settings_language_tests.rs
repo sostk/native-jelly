@@ -1,10 +1,10 @@
 //! Language persistence is install-wide; selection must not change this launch's locale.
 use super::*;
 use super::test_support::*;
-use plx_platform::i18n::Preference;
+use nj_platform::i18n::Preference;
 use crate::ui::form::FormId;
-use plx_machine::machine::{Edge, InputEvent, InputKind, Source};
-use plx_machine::present::Present;
+use nj_machine::machine::{Edge, InputEvent, InputKind, Source};
+use nj_machine::present::Present;
 
 fn activate(page: &mut LanguagePage, row: u32) -> Vec<Stamped<InnerHost>> {
     let mut out = Vec::new();
@@ -20,10 +20,10 @@ fn contribute() -> u32 { LangId::Contribute.key().0 }
 
 struct SavedLanguage(Preference);
 impl SavedLanguage {
-    fn new(value: Preference) -> Self { Self(plx_platform::i18n::saved_preference_for_test(value)) }
+    fn new(value: Preference) -> Self { Self(nj_platform::i18n::saved_preference_for_test(value)) }
 }
 impl Drop for SavedLanguage {
-    fn drop(&mut self) { plx_platform::i18n::saved_preference_for_test(self.0); }
+    fn drop(&mut self) { nj_platform::i18n::saved_preference_for_test(self.0); }
 }
 
 fn save_request(effects: Vec<Stamped<InnerHost>>) -> (Preference, std::sync::mpsc::Sender<bool>) {
@@ -38,9 +38,9 @@ fn save_request(effects: Vec<Stamped<InnerHost>>) -> (Preference, std::sync::mps
 
 #[test]
 fn language_selection_waits_for_durable_receipt_and_keeps_running_locale() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _saved = SavedLanguage::new(Preference::System);
-    let running = plx_platform::i18n::current().language().tag();
+    let running = nj_platform::i18n::current().language().tag();
     let mut page = LanguagePage::new(EntryId(0));
     let before = page.state.hash();
     let (requested, reply) = save_request(activate(&mut page, lang(Preference::Be)));
@@ -54,13 +54,13 @@ fn language_selection_waits_for_durable_receipt_and_keeps_running_locale() {
     assert!(page.poll_save());
     assert_eq!(page.state.selected, Preference::Be);
     assert!(!page.state.busy && !page.state.failed);
-    assert_eq!(plx_platform::i18n::current().language().tag(), running);
-    assert_eq!(page.pending(), Preference::Be != plx_platform::i18n::current().preference());
+    assert_eq!(nj_platform::i18n::current().language().tag(), running);
+    assert_eq!(page.pending(), Preference::Be != nj_platform::i18n::current().preference());
 }
 
 #[test]
 fn choosing_system_default_saves_the_preference_instead_of_resolved_language() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _saved = SavedLanguage::new(Preference::Be);
     let mut page = LanguagePage::new(EntryId(0));
     let (requested, reply) = save_request(activate(&mut page, lang(Preference::System)));
@@ -73,17 +73,17 @@ fn choosing_system_default_saves_the_preference_instead_of_resolved_language() {
 
 #[test]
 fn language_entry_seats_the_engine_on_the_saved_preference() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _session = scratch_session("language-saved-seat");
     for preference in LANGUAGES.iter().copied() {
         let _saved = SavedLanguage::new(preference);
         let entry = EntryId(7);
         let mut surface = RouteSurface::new(
-            entry, InstanceId(0), Family::Settings, SettingsPage::Language, crate::pms::HubsSnapshot::empty_for_test().view(),
+            entry, InstanceId(0), Family::Settings, SettingsPage::Language, crate::catalog_fetch::HubsSnapshot::empty_for_test().view(),
         );
         let effects = step(&mut surface, ScreenEvent::Mount, None);
         let mut engine = crate::ui::focus::FocusEngine::new();
-        let owner = plx_machine::machine::InputOwner::Entry(entry);
+        let owner = nj_machine::machine::InputOwner::Entry(entry);
         // The modal lifecycle seats its generic group before draining queued mount effects.
         // Merely remembering another row after this does not move the current focus.
         engine.enter(owner, &surface, FocusTarget::ContainerGroup(GroupId(0)), None, &cx(None));
@@ -103,7 +103,7 @@ fn language_entry_seats_the_engine_on_the_saved_preference() {
 
 #[test]
 fn failed_or_disconnected_language_save_keeps_confirmed_selection_and_can_retry() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _saved = SavedLanguage::new(Preference::En);
     for disconnected in [false, true] {
         let mut page = LanguagePage::new(EntryId(0));
@@ -124,7 +124,7 @@ fn failed_or_disconnected_language_save_keeps_confirmed_selection_and_can_retry(
 
 #[test]
 fn contribution_is_focusable_and_right_opens_the_guide() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _session = scratch_session("language-contribution");
     let mut page = LanguagePage::new(EntryId(0));
     let key = FocusKey { entry: EntryId(0), elem: contribute() };
@@ -138,14 +138,14 @@ fn contribution_is_focusable_and_right_opens_the_guide() {
     page.step(&ScreenEvent::Input(InputEvent { at: Tick::default(), source: Source::Sdl,
         kind: InputKind::Key { key: Key::Right, sym: 0, wcode: 0, edge: Edge::Down, at_edge: true } }), &cx, &mut fx);
     assert!(out.iter().any(|effect| matches!(effect.fx, Fx::Nav(NavOp::Push(SettingsPage::Contribute)))));
-    assert!(crate::ui::qr::QrCode::new(plx_platform::i18n::CONTRIBUTE_URL).is_ok());
+    assert!(crate::ui::qr::QrCode::new(nj_platform::i18n::CONTRIBUTE_URL).is_ok());
 }
 
 #[test]
 fn signed_out_settings_reaches_language_and_back_restores_it_after_contribution() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let _session = scratch_session("language-back");
-    let mut surface = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root, crate::pms::HubsSnapshot::empty_for_test().view());
+    let mut surface = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root, crate::catalog_fetch::HubsSnapshot::empty_for_test().view());
     step(&mut surface, ScreenEvent::Mount, None);
     step(&mut surface, ScreenEvent::Activate(root_key(RootId::Language)), None);
     assert_eq!(surface.inner.top().unwrap().arg, SettingsPage::Language);

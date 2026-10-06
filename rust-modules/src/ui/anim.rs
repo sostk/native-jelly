@@ -1,5 +1,5 @@
 //! Animation diagnostic — probe the critically-damped springs that drive the UI and, when enabled
-//! (via /tmp/plxnative-anim, or the ANIM overlay toggle), (a) log each spring's settle metrics (frames,
+//! (via /tmp/nativejelly-anim, or the ANIM overlay toggle), (a) log each spring's settle metrics (frames,
 //! ms, overshoot %) and (b) draw a live overlay with the approach curve. Instrument a spring by
 //! calling `anim::probe(name, pos, vel, target, dt)` right after `Spring::step`. Zero cost when off.
 #![allow(dead_code)]
@@ -113,14 +113,14 @@ pub(crate) fn probe(name: &'static str, pos: f32, vel: f32, target: f32, dt: f32
 }
 
 // Separate stream from the main event log — the per-settle (and, if extended, per-frame) trace can
-// get large, and it should never drown the primary /tmp/plxnative-events.log debugging surface.
+// get large, and it should never drown the primary /tmp/nativejelly-events.log debugging surface.
 //
 // Gated on `devtriggers` — like every other per-trigger diagnostic sink (`gpu_timer`'s
-// `plxnative-gputime.jsonl`, `ui::profile`'s `plxnative-hwcnt.jsonl`) — rather than left to
+// `nativejelly-gputime.jsonl`, `ui::profile`'s `nativejelly-hwcnt.jsonl`) — rather than left to
 // `enabled()`'s runtime `false`: `ENABLED` is only ever flipped true from
 // `dev::scenarios::arm_anim`, which is itself compiled out without the feature, but a runtime
 // latch is not how this crate keeps a trigger's own NAME out of a release binary's bytes. Without
-// this gate the literal `plxnative-anim.log` path stayed in `--no-default-features` release
+// this gate the literal `nativejelly-anim.log` path stayed in `--no-default-features` release
 // binaries even though nothing could ever open it — exactly the class of leak
 // `ci/check-package.py`'s dev-trigger-catalog check now audits for.
 #[cfg(feature = "devtriggers")]
@@ -129,7 +129,7 @@ fn log(m: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&plx_base::paths::in_runtime_dir(plx_base::paths::runtime_file::ANIMATION))
+        .open(&nj_base::paths::in_runtime_dir(nj_base::paths::runtime_file::ANIMATION))
     {
         let _ = writeln!(f, "{m}");
     }

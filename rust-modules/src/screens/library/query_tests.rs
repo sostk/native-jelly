@@ -1,6 +1,6 @@
 #[test]
 fn query_reset_intent_and_observed_query_are_canonical_in_return_memory() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let fixture = Fixture::new();
     let mut page = fixture.screen();
     let hash = |state: &dyn LogicalState| {
@@ -25,8 +25,8 @@ fn query_reset_intent_and_observed_query_are_canonical_in_return_memory() {
 
 #[test]
 fn accepted_queries_reset_engine_grid_memory_but_keep_the_toolbar_during_loading() {
-    let _guard = plx_base::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-query-reset");
+    let _guard = nj_base::testlock::serial();
+    let session = crate::catalog::session::TempSession::new("library-query-reset");
     session.watching("u-library-query-reset");
     for edit in [
         QueryEdit::Sort {
@@ -84,7 +84,7 @@ fn accepted_queries_reset_engine_grid_memory_but_keep_the_toolbar_during_loading
             let mut cx = fixture.cx(Some(toolbar));
             cx.focus = engine.read(OWNER);
             let mut output = Vec::new();
-            let mut present = plx_machine::present::Present::new();
+            let mut present = nj_machine::present::Present::new();
             page.step(
                 &ScreenEvent::App(AppMsg::LibraryEdit {
                     target: SectionAddress {

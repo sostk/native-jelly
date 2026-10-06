@@ -1,7 +1,7 @@
 //! The video sink: the verbs the player speaks to the television's media pipeline. The webOS port
 //! implements them over Starfish and ACB (`player::ffi`); the simulator implements them over its
 //! own clock (`player::ffi_host`).
-use plx_base::task::MainThread;
+use nj_base::task::MainThread;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 

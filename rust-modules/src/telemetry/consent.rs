@@ -225,8 +225,8 @@ struct CanonicalIds {
 
 #[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)), test))]
 /// Split consent into the three DB8-public slots the canonical state clears atomically on logout.
-pub(crate) fn split_canonical(consent: &Consent) -> Result<plx_platform::storage::state::ConsentPayload, ()> {
-    Ok(plx_platform::storage::state::ConsentPayload {
+pub(crate) fn split_canonical(consent: &Consent) -> Result<nj_platform::storage::state::ConsentPayload, ()> {
+    Ok(nj_platform::storage::state::ConsentPayload {
         consent: serde_json::to_value(CanonicalDecision {
             asked_version: consent.asked_version,
             errors: consent.errors,
@@ -250,7 +250,7 @@ pub(crate) fn split_canonical(consent: &Consent) -> Result<plx_platform::storage
 }
 
 #[cfg(any(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)), test))]
-pub(crate) fn join_canonical(payload: &plx_platform::storage::state::ConsentPayload) -> Result<Consent, ()> {
+pub(crate) fn join_canonical(payload: &nj_platform::storage::state::ConsentPayload) -> Result<Consent, ()> {
     let decision: CanonicalDecision = serde_json::from_value(payload.consent.clone()).map_err(|_| ())?;
     let scopes: CanonicalScopes = serde_json::from_value(payload.scopes.clone()).map_err(|_| ())?;
     let ids: CanonicalIds = serde_json::from_value(payload.ids.clone()).map_err(|_| ())?;
@@ -461,7 +461,7 @@ pub(crate) fn errors_id() -> Option<String> {
     })
 }
 
-/// `/tmp/plxnative-consentstate=unset|yes4|yes7|no` — boot with this consent record instead of
+/// `/tmp/nativejelly-consentstate=unset|yes4|yes7|no` — boot with this consent record instead of
 /// the stored one: never asked, error reports allowed at scope 4 (before the onboarding report
 /// existed) or 7, or declined. Installed through `consent::install` like a real load, and written
 /// nowhere. `None` without the trigger or with an unknown value (which is logged). Unused under
@@ -472,7 +472,7 @@ pub(crate) fn errors_id() -> Option<String> {
 /// may not name.
 #[cfg_attr(test, allow(dead_code))]
 pub(crate) fn state_override() -> Option<Consent> {
-    let spec = plx_base::devtrig::read("consentstate")?;
+    let spec = nj_base::devtrig::read("consentstate")?;
     // An answered record as `consent::apply` would have written it: errors on at `scope` with a
     // freshly minted Crash report ID, or errors off with nothing kept.
     let answered = |errors: bool, scope: u32| Consent {
@@ -488,11 +488,11 @@ pub(crate) fn state_override() -> Option<Consent> {
         "yes7" => answered(true, ONBOARDING_REPORT_SCOPE),
         "no" => answered(false, 0),
         other => {
-            plx_base::eventlog::log(&format!("dev: consentstate — unknown value {other:?}, ignored"));
+            nj_base::eventlog::log(&format!("dev: consentstate — unknown value {other:?}, ignored"));
             return None;
         }
     };
-    plx_base::eventlog::log(&format!("dev: consentstate={spec} — booting with that consent record"));
+    nj_base::eventlog::log(&format!("dev: consentstate={spec} — booting with that consent record"));
     Some(consent)
 }
 
@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn report_permission_now_reads_the_snapshot() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = CURRENT.read().ok().and_then(|g| g.clone());
         if let Ok(mut g) = CURRENT.write() {
             *g = None;
@@ -792,7 +792,7 @@ mod tests {
     /// stale-policy yes, or an unanswered decision, yields no id however the field is set.
     #[test]
     fn the_errors_id_accessor_fails_closed_with_the_gate() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = CURRENT.read().ok().and_then(|g| g.clone());
         install(Consent {
             asked_version: POLICY_VERSION - 1,
@@ -834,7 +834,7 @@ mod tests {
             "an answer to an older policy is not an answer to this one"
         );
         assert!(should_ask(&old, false));
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = CURRENT.read().ok().and_then(|g| g.clone());
         install(old);
         assert!(
@@ -857,7 +857,7 @@ mod tests {
     /// The event path fails CLOSED: with nothing installed, nothing is allowed.
     #[test]
     fn the_event_path_fails_closed() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = CURRENT.read().ok().and_then(|g| g.clone());
 
         install(Consent::default());
@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn every_published_decision_invalidates_an_in_flight_sender_batch() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let saved = CURRENT.read().ok().and_then(|g| g.clone());
         let before = revision();
         install(Consent {

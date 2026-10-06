@@ -3,7 +3,7 @@
 //! persisted, and a stale request leaves rather than writing.
 use super::*;
 use super::super::tests::{drive, popped, preference_commands, tick, Account, context};
-use plx_machine::machine::{Source, Stamped, Tick};
+use nj_machine::machine::{Source, Stamped, Tick};
 
 fn save_reply(emitted: Vec<Stamped<InnerHost>>) -> mpsc::Sender<AccountPreferenceReply> {
     for e in emitted {
@@ -22,8 +22,8 @@ fn audio_picker(account: &Account, field: PickerKind) -> PickerPage {
 
 #[test]
 fn a_picker_opens_on_the_checked_option_with_position_keys() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-opens-checked");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-opens-checked");
     let previous = crate::route::quality();
     crate::route::restore_quality(Quality::P480);
     let page = PickerPage::new(EntryId(0), PickerKind::Quality);
@@ -37,8 +37,8 @@ fn a_picker_opens_on_the_checked_option_with_position_keys() {
 
 #[test]
 fn choosing_the_checked_value_pops_without_a_write() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-checked-noop");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-checked-noop");
     let previous = crate::route::quality();
     crate::route::restore_quality(Quality::P480);
     let mut page = PickerPage::new(EntryId(0), PickerKind::Quality);
@@ -54,8 +54,8 @@ fn choosing_the_checked_value_pops_without_a_write() {
 /// all the canonical `pt-BR` in place of the stored deprecated `pb`; a different one still does.
 #[test]
 fn picking_the_already_current_language_writes_nothing_and_a_different_one_still_does() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-noop-language");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-noop-language");
     let account = Account::new("picker-noop-language", 21, AudioPreferences { stated_language: Some("pb".into()), ..Default::default() });
     let mut page = audio_picker(&account, PickerKind::AudioLanguage);
     let same = key_of(&page, &Value::Language("pt-BR".into()));
@@ -71,8 +71,8 @@ fn picking_the_already_current_language_writes_nothing_and_a_different_one_still
 
 #[test]
 fn a_durable_account_receipt_pops_and_a_failed_one_keeps_the_page_with_retry() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-receipt");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-receipt");
     let account = Account::new("picker-receipt", 22, AudioPreferences::default());
     let mut page = audio_picker(&account, PickerKind::SubtitleMode);
     let always = key_of(&page, &Value::Mode(2));
@@ -94,8 +94,8 @@ fn a_durable_account_receipt_pops_and_a_failed_one_keeps_the_page_with_retry() {
 
 #[test]
 fn a_local_write_pops_on_its_receipt_and_a_refusal_keeps_the_page() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-local");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-local");
     let previous = crate::route::quality();
     crate::route::restore_quality(Quality::Original);
     for ok in [true, false] {
@@ -114,8 +114,8 @@ fn a_local_write_pops_on_its_receipt_and_a_refusal_keeps_the_page() {
 
 #[test]
 fn force_requires_acknowledgement_and_cancel_never_saves() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("force-confirm-cancel");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("force-confirm-cancel");
     crate::route::restore_direct_play_mode(DirectPlayMode::Auto);
     let mut page = PickerPage::new(EntryId(0), PickerKind::DirectPlay);
     let forced = key_of(&page, &Value::DirectPlay(DirectPlayMode::Forced));
@@ -136,14 +136,14 @@ fn force_requires_acknowledgement_and_cancel_never_saves() {
 
 #[test]
 fn confirming_force_emits_a_preference_effect_without_executing_it() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("force-confirm-yes");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("force-confirm-yes");
     let previous = crate::route::direct_play_mode();
     crate::route::restore_direct_play_mode(DirectPlayMode::Auto);
     let mut page = PickerPage::new(EntryId(0), PickerKind::DirectPlay);
     let forced = key_of(&page, &Value::DirectPlay(DirectPlayMode::Forced));
     drive(&mut page, ScreenEvent::Activate(forced), forced);
-    let emitted = drive(&mut page, ScreenEvent::PressCommit(plx_machine::machine::PressId(1)), ALERT + 1);
+    let emitted = drive(&mut page, ScreenEvent::PressCommit(nj_machine::machine::PressId(1)), ALERT + 1);
     assert!(page.state.io.busy);
     assert!(emitted.iter().any(|event| matches!(&event.fx,
         Fx::App(AppFx::Preferences(PreferenceCmd::DirectPlay { mode: DirectPlayMode::Forced, .. })))));
@@ -156,8 +156,8 @@ fn confirming_force_emits_a_preference_effect_without_executing_it() {
 /// picker leaves, and the field list beneath reloads.
 #[test]
 fn a_stale_request_leaves_the_picker_without_a_write_and_the_list_reloads() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-stale");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-stale");
     let account = Account::new("picker-stale", 23, AudioPreferences::default());
     let mut parent = super::super::tests::loaded_audio_page(&account);
     let mut page = PickerPage::new(EntryId(0), PickerKind::ForcedSubtitles);
@@ -173,15 +173,15 @@ fn a_stale_request_leaves_the_picker_without_a_write_and_the_list_reloads() {
 
 #[test]
 fn back_is_held_while_an_account_write_is_in_flight() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-back-held");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-back-held");
     let account = Account::new("picker-back-held", 24, AudioPreferences::default());
     let mut page = audio_picker(&account, PickerKind::ForcedSubtitles);
     let other = key_of(&page, &Value::Forced(1));
     drive(&mut page, ScreenEvent::Activate(other), other);
     let back = ScreenEvent::Input(InputEvent { at: Tick::default(), source: Source::RemoteFifo,
         kind: InputKind::Key { key: Key::Back, edge: Edge::Down, sym: 0, wcode: 0, at_edge: false } });
-    let mut out = Vec::new(); let mut present = plx_machine::present::Present::new();
+    let mut out = Vec::new(); let mut present = nj_machine::present::Present::new();
     let handled = page.step(&back, &context(other), &mut Effects::new(&mut out, MachineId::Instance(InstanceId(0)), &mut present));
     assert_eq!(handled, Handled::Yes, "BACK is swallowed until the receipt lands");
 }
@@ -190,8 +190,8 @@ fn back_is_held_while_an_account_write_is_in_flight() {
 /// write; another entry emits exactly its command and pops on the receipt.
 #[test]
 fn the_subtitle_pickers_write_locally_and_pop_on_the_receipt() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-subtitle-local");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-subtitle-local");
     let (size, position) = (crate::route::subtitle_size(), crate::route::subtitle_position());
     crate::route::restore_subtitle_size(crate::route::SubtitleSize::Medium);
     crate::route::restore_subtitle_position(crate::route::SubtitlePosition::Low);
@@ -222,8 +222,8 @@ fn the_subtitle_pickers_write_locally_and_pop_on_the_receipt() {
 /// checkmark on the next tick instead of waiting for the write.
 #[test]
 fn the_size_picker_moves_its_checkmark_when_the_live_value_is_published() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-optimistic-check");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-optimistic-check");
     let (size, position) = (crate::route::subtitle_size(), crate::route::subtitle_position());
     crate::route::restore_subtitle_size(crate::route::SubtitleSize::Medium);
     let mut page = PickerPage::new(EntryId(0), PickerKind::SubtitleSize);
@@ -239,8 +239,8 @@ fn the_size_picker_moves_its_checkmark_when_the_live_value_is_published() {
 /// keeps the old one. OK on that checked row must write again, not pop and strand the pick.
 #[test]
 fn ok_on_the_checked_size_after_a_failed_write_retries_the_write() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("picker-size-retry");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("picker-size-retry");
     let (size, position) = (crate::route::subtitle_size(), crate::route::subtitle_position());
     crate::route::restore_subtitle_size(crate::route::SubtitleSize::Medium);
     let mut page = PickerPage::new(EntryId(0), PickerKind::SubtitleSize);
@@ -269,8 +269,8 @@ fn ok_on_the_checked_size_after_a_failed_write_retries_the_write() {
 /// must not read as the Audio & Subtitles page, and must not carry the account note.
 #[test]
 fn the_local_subtitle_pickers_never_touch_the_plex_account() {
-    let _serial = plx_base::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("pref-local-subtitle-pickers");
+    let _serial = nj_base::testlock::serial();
+    let _session = crate::catalog::session::TempSession::new("pref-local-subtitle-pickers");
     for field in [PickerKind::SubtitleSize, PickerKind::SubtitlePosition] {
         let mut page = PickerPage::new(EntryId(0), field);
         let mut emitted = drive(&mut page, ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::ContainerGroup(GroupId(0)) }), 0);
@@ -280,8 +280,8 @@ fn the_local_subtitle_pickers_never_touch_the_plex_account() {
         assert!(!page.state.io.busy, "{field:?}: not busy");
         assert!(page.state.io.status.is_empty(), "{field:?}: no loading status");
         assert!(page.form.index_of_key(RowKey(RETRY_KEY)).is_none(), "{field:?}: no Retry row");
-        assert!(!page.copy.contains(plx_platform::i18n::msg::settings_audio_account_note()), "{field:?}: no account note");
+        assert!(!page.copy.contains(nj_platform::i18n::msg::settings_audio_account_note()), "{field:?}: no account note");
         assert_eq!(field.kind(), Kind::Playback, "{field:?} belongs to the Video & playback page");
-        assert_eq!(field.kind().title(), plx_platform::i18n::msg::settings_playback_title(), "{field:?}: the crumb names the page it opened from");
+        assert_eq!(field.kind().title(), nj_platform::i18n::msg::settings_playback_title(), "{field:?}: the crumb names the page it opened from");
     }
 }

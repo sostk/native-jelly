@@ -3,7 +3,7 @@
 
 usage: tools/ci-history.py --in FILE --out FILE [--repo OWNER/NAME] [--max-pages N] [--full] [--workers N]
 
-This is the data behind the live chart at https://plxnative.com/ci/ (site/ci/index.html). The
+This is the data behind the live chart at https://nativejelly.com/ci/ (site/ci/index.html). The
 `ci-metrics` workflow runs it after every CI / Simulator CI run on main and commits the result to
 the orphan `ci-metrics` branch; the page fetches that file from raw.githubusercontent.com.
 

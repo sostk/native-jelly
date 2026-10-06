@@ -60,7 +60,7 @@ fn unavailable_randomness_refuses_the_channel_it_failed_for() {
 /// choice leak an event before the real machine has seen it.
 #[test]
 fn settings_done_commits_through_the_consent_machine_and_pops_the_surface() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let saved = consent::current();
     consent::install(Consent::default());
     let m = FixtureMeasure;
@@ -143,7 +143,7 @@ fn the_product_stage_combines_both_answers_into_one_record_and_dismisses_the_sur
 /// entirely ungraded by anything that looks like a real press.
 #[test]
 fn a_settings_toggle_commits_through_the_activate_event() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let saved = consent::current();
     consent::install(Consent::default());
     let m = FixtureMeasure;
@@ -193,8 +193,8 @@ fn a_first_run_answer_commits_through_the_presscommit_event() {
 /// notice.
 #[test]
 fn the_two_switches_name_two_different_purposes() {
-    assert_ne!(plx_platform::i18n::msg::settings_consent_crash_row(), plx_platform::i18n::msg::settings_consent_usage_row());
-    assert_ne!(plx_platform::i18n::msg::settings_consent_crash_detail(), plx_platform::i18n::msg::settings_consent_usage_detail());
+    assert_ne!(nj_platform::i18n::msg::settings_consent_crash_row(), nj_platform::i18n::msg::settings_consent_usage_row());
+    assert_ne!(nj_platform::i18n::msg::settings_consent_crash_detail(), nj_platform::i18n::msg::settings_consent_usage_detail());
 }
 
 /// The prose carries the four things WP260's first layer needs — who, why, that it is
@@ -207,19 +207,19 @@ fn the_two_switches_name_two_different_purposes() {
 /// half is that file's own invariant to keep now, not this one's.)
 #[test]
 fn first_run_separates_crash_and_product_consent() {
-    assert!(plx_platform::i18n::msg::settings_consent_crash_body().contains("signal"));
-    assert!(plx_platform::i18n::msg::settings_consent_crash_body().contains("product analytics identifier"));
+    assert!(nj_platform::i18n::msg::settings_consent_crash_body().contains("signal"));
+    assert!(nj_platform::i18n::msg::settings_consent_crash_body().contains("product analytics identifier"));
     assert!(
-        plx_platform::i18n::msg::settings_consent_crash_body().contains("crash report identifier"),
+        nj_platform::i18n::msg::settings_consent_crash_body().contains("crash report identifier"),
         "the crash question must disclose the identifier it now carries"
     );
-    assert!(plx_platform::i18n::msg::settings_consent_product_body().contains("random Analytics ID"));
-    for body in [plx_platform::i18n::msg::settings_consent_crash_body(), plx_platform::i18n::msg::settings_consent_product_body()] {
+    assert!(nj_platform::i18n::msg::settings_consent_product_body().contains("random Analytics ID"));
+    for body in [nj_platform::i18n::msg::settings_consent_crash_body(), nj_platform::i18n::msg::settings_consent_product_body()] {
         assert!(
             body.contains("turn it off or delete all local data"),
             "each question must say what ends the identifier; a Jellyfin sign-out does not"
         );
     }
-    assert!(plx_platform::i18n::msg::settings_consent_product_body().contains("exact viewing history"));
-    assert_ne!(plx_platform::i18n::msg::settings_consent_crash_title(), plx_platform::i18n::msg::settings_consent_product_title());
+    assert!(nj_platform::i18n::msg::settings_consent_product_body().contains("exact viewing history"));
+    assert_ne!(nj_platform::i18n::msg::settings_consent_crash_title(), nj_platform::i18n::msg::settings_consent_product_title());
 }

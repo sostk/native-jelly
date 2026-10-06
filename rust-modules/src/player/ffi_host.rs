@@ -16,14 +16,14 @@
 //! an agent that playback is broken when it is merely absent. Failing honestly and immediately is
 //! the whole contract of that path.
 //!
-//! # Opt-in: a REFUSED Load (`plxnative-refuseload[=N]`)
+//! # Opt-in: a REFUSED Load (`nativejelly-refuseload[=N]`)
 //!
 //! With the sink armed, refuse the first N Loads (bare flag: every Load) the way webOS 10.3.1
 //! refused the 4K60 H.264 envelope — asynchronously, by callback, after `Load()` returned ok=1.
 //! See `sf_load`. It exists so the failure read-out that refusal reaches can be driven and
 //! screenshotted on a Mac, and so a rollback that reloads can be made to fail a second time.
 //!
-//! # Opt-in: the CLOCK SINK (`plxnative-clocksink`)
+//! # Opt-in: the CLOCK SINK (`nativejelly-clocksink`)
 //!
 //! **It accepts access units, throws them away, and advances a presentation clock at real time.**
 //! Nothing decodes and nothing is displayed. What it makes runnable on a Mac is everything
@@ -60,8 +60,8 @@
 //! `player::sink()` in the hostsim tests. The `*_for_test` hooks stay here, next to the statics
 //! they touch, and the tests reach them as `crate::player::ffi_host::<hook>`.
 
-use plx_base::task::MainThread;
-use plx_platform::tv::sink::VideoSink;
+use nj_base::task::MainThread;
+use nj_platform::tv::sink::VideoSink;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering::Relaxed};
@@ -88,7 +88,7 @@ const TICK_MS: u64 = 200;
 
 /// **Test-only arming, deliberately NOT the trigger file.** `enabled()` latches in a `OnceLock`
 /// and the runtime root it consults latches in another, both process-wide — so a unit test that
-/// armed the sink by writing `plxnative-clocksink` would pass alone and fail in a full run,
+/// armed the sink by writing `nativejelly-clocksink` would pass alone and fail in a full run,
 /// depending on which test touched a root first. It would also have to write into the same
 /// directory a real simulator reads. This overrides the answer directly instead, so the test is
 /// deterministic and leaves no file behind.
@@ -208,9 +208,9 @@ fn enabled() -> bool {
     }
     static ONCE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ONCE.get_or_init(|| {
-        let on = plx_base::devtrig::flag("clocksink");
+        let on = nj_base::devtrig::flag("clocksink");
         if on {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "clocksink: ARMED — AUs are accepted and discarded, and the presentation clock \
                  advances at real time. NOTHING IS DECODED and no number from this run is a \
                  device measurement.",
@@ -424,7 +424,7 @@ impl Clock {
             });
         if spawned.is_err() {
             TICKING.store(false, Relaxed);
-            plx_base::eventlog::log("clocksink: could not spawn the position thread; no position will report");
+            nj_base::eventlog::log("clocksink: could not spawn the position thread; no position will report");
         }
     }
 }
@@ -434,7 +434,7 @@ unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
         return 0; // "pipeline could not be constructed" — the engine's existing failure path
     }
     Clock::rewind();
-    // `plxnative-simvideo`: the screenshot picture (`player::sim_video`) learns the codec here.
+    // `nativejelly-simvideo`: the screenshot picture (`player::sim_video`) learns the codec here.
     if !payload.is_null() {
         let payload = std::ffi::CStr::from_ptr(payload).to_string_lossy();
         crate::player::sim_video::load(&payload, Clock::position_ns);
@@ -447,7 +447,7 @@ unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
     OBJECT_READY.store(true, Relaxed);
     LOADED.store(true, Relaxed);
     if take_refusal() {
-        // **`plxnative-refuseload[=N]`: the webOS 10.3.1 refusal, on a Mac.** The sequence is the
+        // **`nativejelly-refuseload[=N]`: the webOS 10.3.1 refusal, on a Mac.** The sequence is the
         // lab set's own (`docs/webos10-lab-report.md` §3.2): the pipeline acknowledges, echoes the
         // sink envelope it was handed as `type=5`, and then refuses with `type=18 num=601` —
         // AFTER `Load()` has returned ok=1. That asynchronous shape is what left the app on a black
@@ -496,20 +496,20 @@ unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
     1
 }
 
-/// How many more host Loads `plxnative-refuseload[=N]` still refuses. Read once (a trigger is a
+/// How many more host Loads `nativejelly-refuseload[=N]` still refuses. Read once (a trigger is a
 /// boot-time fact like every other), counted down per `sf_load`; `i64::MAX` for the bare flag.
 static REFUSALS_LEFT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
 fn take_refusal() -> bool {
     static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     ONCE.get_or_init(|| {
-        let n = match plx_base::devtrig::read("refuseload") {
+        let n = match nj_base::devtrig::read("refuseload") {
             None => 0,
             Some(v) if v.trim().is_empty() => i64::MAX,
             Some(v) => v.trim().parse::<i64>().unwrap_or(0),
         };
         if n > 0 {
-            plx_base::eventlog::log(&format!(
-                "clocksink: plxnative-refuseload armed — the next {} Load(s) get the webOS 10.3.1 \
+            nj_base::eventlog::log(&format!(
+                "clocksink: nativejelly-refuseload armed — the next {} Load(s) get the webOS 10.3.1 \
                  type=18 num=601 refusal after Load() returns ok=1",
                 if n == i64::MAX { "∞".to_string() } else { n.to_string() }
             ));
@@ -695,9 +695,9 @@ unsafe fn sf_quarantine() {
 /// rather than faked. Faking ACB would mean modelling a bind order this file cannot verify.
 unsafe fn vp_mode() -> c_int {
     if enabled() {
-        plx_platform::tv::sink::VP_EXPORTED
+        nj_platform::tv::sink::VP_EXPORTED
     } else {
-        plx_platform::tv::sink::VP_NONE
+        nj_platform::tv::sink::VP_NONE
     }
 }
 unsafe fn vp_create_window() -> *const c_char {
@@ -887,8 +887,8 @@ mod tests {
     /// The seam state is process-global and the engine's hostsim tests drive the same atomics.
     /// Use the crate-wide lock rather than a module-local mutex: two different locks made both
     /// suites individually serial while still allowing them to overwrite `FED_MAX_NS` together.
-    fn lock() -> plx_base::testlock::Serial {
-        plx_base::testlock::serial()
+    fn lock() -> nj_base::testlock::Serial {
+        nj_base::testlock::serial()
     }
 
     fn fresh() {

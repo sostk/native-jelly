@@ -1,6 +1,6 @@
 //! Host link configuration for the gfx layer's own test binary, and nothing else.
 //!
-//! `plx_gfx` declares the GLES2, EGL, SDL2_ttf and nanosvg symbols its drawing code calls. Its
+//! `nj_gfx` declares the GLES2, EGL, SDL2_ttf and nanosvg symbols its drawing code calls. Its
 //! `--test` binary is a real executable that reaches them (the drawing tests make `gfx` and `text`
 //! live), so on the host it needs the same SDL, GL and nanosvg object the application crate's build
 //! script supplies to the application's binaries. The lines are the same ones, from the same file

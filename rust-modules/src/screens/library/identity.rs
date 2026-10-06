@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::screens::registry::{
     LibraryIdentity, LibraryKey, LibraryMemory, LibrarySectionIdentity,
 };
-use plx_machine::machine::GroupId;
+use nj_machine::machine::GroupId;
 
 const LIBRARY_BASE: u32 = 0x2100_0000;
 const SHELF_BASE: u32 = 0x2200_0000;
@@ -201,13 +201,13 @@ mod tests {
     use super::*;
 
     fn section(sid: u16) -> LibrarySectionIdentity {
-        LibrarySectionIdentity { sid: crate::plex::ServerId::from_raw(sid), key: 1 }
+        LibrarySectionIdentity { sid: crate::catalog::ServerId::from_raw(sid), key: 1 }
     }
 
     fn grid(sid: u16, rk: &str) -> LibraryIdentity {
         LibraryIdentity::Grid {
             section: section(sid),
-            sid: crate::plex::ServerId::from_raw(sid),
+            sid: crate::catalog::ServerId::from_raw(sid),
             rk: rk.into(),
         }
     }

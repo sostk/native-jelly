@@ -30,12 +30,12 @@ work.mkdir(parents=True)
 compiler=Path(subprocess.check_output(['rustc','+'+a.rust_toolchain,'--print','sysroot'],text=True).strip())
 isolated=work/'compiler'
 shutil.copytree(compiler,isolated,ignore=lambda directory,names:['src'] if Path(directory)==compiler/'lib/rustlib' else [])
-source=work/'source';env=dict(os.environ,RUSTUP_HOME=str(work/'rustup'),CARGO_HOME=str(work/'cargo'),CARGO_NET_OFFLINE='true',PLX_BUILD_CACHE=str(work/'cache'))
+source=work/'source';env=dict(os.environ,RUSTUP_HOME=str(work/'rustup'),CARGO_HOME=str(work/'cargo'),CARGO_NET_OFFLINE='true',NJ_BUILD_CACHE=str(work/'cache'))
 commands=[
  [sys.executable,str(Path(__file__).with_name('restore-source-inputs.py')),str(a.archive.resolve()),'--expect-snapshot',a.expect_snapshot,'--destination',str(source),'--rust-sysroot',str(isolated)],
  ['rustup','toolchain','link','source-rebuild',str(isolated)],
  ['make','-C',str(source),'RUST_NIGHTLY=source-rebuild','RELEASE=1','FLAVOR=stable',
-  'PLX_SENTRY_DSN=','PLX_POSTHOG_KEY=','PLX_SENTRY_DSN_DEV=','PLX_POSTHOG_KEY_DEV=','ipk']]
+  'NJ_SENTRY_DSN=','NJ_POSTHOG_KEY=','NJ_SENTRY_DSN_DEV=','NJ_POSTHOG_KEY_DEV=','ipk']]
 result={'ndk_gcc_sha256':ndk_hash,'source_snapshot_sha256':a.expect_snapshot,'rebuild_status':'FAIL','configuration':'production ARM stable, no private telemetry configuration','bit_for_bit':'NOT_CLAIMED','commands':commands}
 with (work/'build.log').open('w') as log:
  for command in commands:

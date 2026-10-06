@@ -20,14 +20,14 @@ use super::*;
 /// Falls back to the canvas size if SDL cannot answer, which is the behaviour this replaced.
 #[cfg(feature = "hostsim")]
 pub(crate) fn desktop_window_size() -> (c_int, c_int) {
-    // `PLXNATIVE_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
+    // `NJ_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
     // It exists because the fit below is chosen for a HUMAN looking at a window, and a screenshot
     // is not that: on a 1x display the divisor lands on 2 and every shot comes back 960x540, which
     // is half the canvas the UI is authored at. A hairline, a 1px edge-sheen and a snapped glyph
     // are exactly the things that do not survive that, so a shot taken to JUDGE the interface has
     // to be asked for at full size. Off-screen edges are fine for a headless grab: the drawable is
     // the window's own framebuffer, not the part of it the compositor happens to show.
-    if let Some(v) = std::env::var_os("PLXNATIVE_WIN") {
+    if let Some(v) = std::env::var_os("NJ_WIN") {
         let v = v.to_string_lossy().to_lowercase();
         if let Some((w, h)) = v.split_once('x') {
             if let (Ok(w), Ok(h)) = (w.trim().parse::<c_int>(), h.trim().parse::<c_int>()) {
@@ -87,11 +87,11 @@ pub(crate) fn install_panic_logger() {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&plx_base::paths::in_runtime_dir(plx_base::paths::runtime_file::CRASH))
+            .open(&nj_base::paths::in_runtime_dir(nj_base::paths::runtime_file::CRASH))
         {
             let _ = writeln!(f, "{line}");
         }
-        default(info); // preserve default behaviour (stderr -> plxnative-stderr.log)
+        default(info); // preserve default behaviour (stderr -> nativejelly-stderr.log)
     }));
 }
 
@@ -106,9 +106,9 @@ pub(crate) fn install_panic_logger() {
 ///   telemetry/consent legacy-file sweep a durable sign-out runs. It exists only where the sweep does
 ///   (ARM, not the simulator, not a test build); unset, `plex` reads it as already retired.
 pub(crate) fn install_plex_seams() {
-    crate::plex::session::install_auto_quality_ready(crate::route::auto_quality_ready);
+    crate::catalog::session::install_auto_quality_ready(crate::route::auto_quality_ready);
     #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)))]
-    crate::plex::session::install_account_clear_cleanup(crate::telemetry::cleanup_after_account_clear);
+    crate::catalog::session::install_account_clear_cleanup(crate::telemetry::cleanup_after_account_clear);
 }
 
 #[cfg(test)]
@@ -146,13 +146,13 @@ mod seam_order_tests {
     /// The storage diagnostics worker probes `app_dir()` on its own thread, so it starts only after the
     /// live identity preamble has written the first two event-log lines. Reads the source like the
     /// test above, for the same reason: no host test can run `enter_application`. It lived in
-    /// `plx_platform::storage::diagnostics` until that crate stopped being able to see this file.
+    /// `nj_platform::storage::diagnostics` until that crate stopped being able to see this file.
     #[test]
     fn worker_start_follows_the_live_boot_identity_preamble() {
         let source = include_str!("mod.rs");
         assert_eq!(
             source
-                .matches("plx_platform::storage::diagnostics::start(")
+                .matches("nj_platform::storage::diagnostics::start(")
                 .count(),
             1,
             "every start site must stay behind the identity preamble"
@@ -166,7 +166,7 @@ mod seam_order_tests {
             .0;
         let install = pre_boot.find("\"install: id=").expect("install line");
         let app_dir = pre_boot
-            .find("plx_base::paths::app_dir_line()")
+            .find("nj_base::paths::app_dir_line()")
             .expect("appdir line");
         assert!(install < app_dir);
         let body = source
@@ -180,7 +180,7 @@ mod seam_order_tests {
             .find(".then(pre_boot_diagnostics)")
             .expect("identity preamble");
         let diagnostics = body
-            .find("plx_platform::storage::diagnostics::start(")
+            .find("nj_platform::storage::diagnostics::start(")
             .expect("diagnostics start");
         let boot = body.find("boot(pms_host").expect("application boot");
         assert!(identity < diagnostics && diagnostics < boot);
@@ -199,9 +199,9 @@ mod seam_order_tests {
             .expect("construct")
             .1;
         let user_agent = body
-            .find(concat!("plx_net::net::", "set_user_agent("))
+            .find(concat!("nj_net::net::", "set_user_agent("))
             .expect("construct must install the User-Agent");
-        let init = body.find(concat!("plx_net::net::", "global_init()")).expect("construct's libcurl init");
+        let init = body.find(concat!("nj_net::net::", "global_init()")).expect("construct's libcurl init");
         assert!(user_agent < init, "set_user_agent must come before net::global_init");
     }
 }
@@ -222,10 +222,10 @@ pub(crate) unsafe fn hide_cursor() {
 /// elapsed, recompute `loop_shown`, reset the window, and return `true` so the caller logs the
 /// heartbeat with its own route/overlay tag. Shared by the player and home/detail draw paths.
 ///
-/// This counts **loop iterations, not frames**. Since the present gate (`plx_machine::idle`) landed the two
+/// This counts **loop iterations, not frames**. Since the present gate (`nj_machine::idle`) landed the two
 /// are different numbers, and conflating them is the single most reliable way to misread this app:
 /// a settled screen runs the loop at the `IDLE_POLL_MS` rate while swapping nothing. The frame
-/// count lives beside it in the heartbeat as `fps=`, from `plx_machine::idle::take_presents`.
+/// count lives beside it in the heartbeat as `fps=`, from `nj_machine::idle::take_presents`.
 pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i32, now: u32) -> bool {
     *iters_ct += 1;
     if now.wrapping_sub(*loop_t) < 1000 {
@@ -236,8 +236,8 @@ pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i
     *loop_t = now;
     true
 }
-/// How many times a finished `plxnative-playurl` playback may start itself AGAIN — the
-/// `/tmp/plxnative-replay` trigger's content, as a number (LG App Self Checklist #46).
+/// How many times a finished `nativejelly-playurl` playback may start itself AGAIN — the
+/// `/tmp/nativejelly-replay` trigger's content, as a number (LG App Self Checklist #46).
 ///
 /// A named function rather than a closure at the one call site, for `note_global_press`'s reason
 /// one step removed: the call site is inside the SDL event loop, which no host test can enter, and
@@ -295,19 +295,19 @@ mod replay_budget_tests {
 
 /// Resolve the server half of a direct dev-screen request.
 ///
-/// An absent trigger preserves the historical `plxnative-play=<rk>` contract and uses the current
+/// An absent trigger preserves the historical `nativejelly-play=<rk>` contract and uses the current
 /// server. Once an explicit slot was written, however, failure is terminal: rating keys are local
 /// to one PMS, so falling back could open a different item on another server.
 pub(crate) fn resolve_direct_server(
     requested: Option<Result<u16, String>>,
-    current: crate::plex::ServerId,
-    registered: impl Fn(crate::plex::ServerId) -> bool,
-) -> Result<crate::plex::ServerId, String> {
+    current: crate::catalog::ServerId,
+    registered: impl Fn(crate::catalog::ServerId) -> bool,
+) -> Result<crate::catalog::ServerId, String> {
     let Some(slot) = requested else {
         return Ok(current);
     };
     let raw = slot?;
-    let sid = crate::plex::ServerId::from_raw(raw);
+    let sid = crate::catalog::ServerId::from_raw(raw);
     registered(sid)
         .then_some(sid)
         .ok_or_else(|| format!("server slot {raw} is not registered"))
@@ -322,8 +322,8 @@ mod direct_server_tests {
 
     #[test]
     fn an_explicit_direct_screen_server_never_falls_back_to_current() {
-        let current = crate::plex::ServerId::from_raw(0);
-        let secondary = crate::plex::ServerId::from_raw(1);
+        let current = crate::catalog::ServerId::from_raw(0);
+        let secondary = crate::catalog::ServerId::from_raw(1);
         assert_eq!(
             resolve_direct_server(None, current, |_| false),
             Ok(current),
@@ -343,34 +343,33 @@ mod direct_server_tests {
     }
 }
 
-pub(crate) fn direct_trigger_server() -> Result<crate::plex::ServerId, String> {
+pub(crate) fn direct_trigger_server() -> Result<crate::catalog::ServerId, String> {
     resolve_direct_server(
         crate::dev::server_slot(),
-        crate::plex::current_server(),
-        |sid| crate::plex::client_for(sid).is_some(),
+        crate::catalog::current_server(),
+        |sid| crate::catalog::client_for(sid).is_some(),
     )
 }
 
 // ---- boot, and the loop's own between-frame state ---------------------------------------------
-/// Which screen the boot gate landed on — see the gate itself in `plex_run`, which is where the
+/// Which screen the boot gate landed on — see the gate itself in `nj_run`, which is where the
 /// order of its four cases is argued.
 pub(crate) enum BootTo {
     Home,
     Login,
-    Profiles,
 }
 
 /// Pure capture boundary shared by actual boot and owner bootstrap regression fixtures.
-pub(crate) fn captured_session_for_boot(saved: crate::plex::session::Session,
-    dev_primary: Option<crate::plex::session::ServerRef>,
-    extras: Vec<crate::plex::session::SourceRef>) -> crate::auth::SessionInit {
+pub(crate) fn captured_session_for_boot(saved: crate::catalog::session::Session,
+    dev_primary: Option<crate::catalog::session::ServerRef>,
+    extras: Vec<crate::catalog::session::SourceRef>) -> crate::auth::SessionInit {
     crate::auth::SessionInit::captured_boot(saved, dev_primary, extras)
 }
 
-fn captured_dev_sources(servers: &[crate::dev::DevServer]) -> Vec<crate::plex::session::SourceRef> {
+fn captured_dev_sources(servers: &[crate::dev::DevServer]) -> Vec<crate::catalog::session::SourceRef> {
     servers.iter().filter(|s| s.usable()).filter_map(|s| {
         let origin = s.origin()?;
-        Some(crate::plex::session::SourceRef { machine_id: s.machine_id.clone(), name: s.name.clone(),
+        Some(crate::catalog::session::SourceRef { machine_id: s.machine_id.clone(), name: s.name.clone(),
             address: s.resolve_pin().map_or_else(|| s.host.clone(), |pin| pin.addr().to_string()),
             port: s.port, origin_url: origin.base(), token: s.token.clone(),
             shared_by: s.handle.clone(), owned: s.handle.is_empty(), tier: s.tier, ..Default::default() })
@@ -408,11 +407,11 @@ pub(super) fn activate_server_owned(
     // routes control and media requests through the matching transport.
 pub(super) fn install_pms_owned(
     bridge: &mut super::bridge::Bridge,
-    origin: &crate::plex::Origin,
+    origin: &crate::catalog::Origin,
     address: &str,
     token: &str,
-    tier: Option<crate::plex::probe::Location>,
-    pin: Option<&crate::plex::ResolvePin>,
+    tier: Option<crate::catalog::probe::Location>,
+    pin: Option<&crate::catalog::ResolvePin>,
     install: &crate::auth::owner::ReadyInstall,
 ) -> crate::stores::EndpointRefreshSet {
     if let crate::auth::owner::ReadyInstall::PrimaryAndExtras(extras) = install {
@@ -422,10 +421,10 @@ pub(super) fn install_pms_owned(
 }
 /// Everything before the loop: SDL and the window, GL, text, the poster workers, the boot gate
 /// (login / token / session / picker), every dev trigger read once, and the `App` literal —
-/// `plex_run`'s former body up to `while app.running`, moved verbatim in phase 1b-ii. An early
-/// exit is the process exit code `plex_run` returns.
+/// `nj_run`'s former body up to `while app.running`, moved verbatim in phase 1b-ii. An early
+/// exit is the process exit code `nj_run` returns.
 ///
-/// `mt`, THE main-thread token, is minted once by `plex_run` itself (`plx_base::task::MainThread::
+/// `mt`, THE main-thread token, is minted once by `nj_run` itself (`nj_base::task::MainThread::
 /// assume()` — that function IS the SDL main thread) and MOVES into `App.adapters.player` here,
 /// from where a `&mut PlayerAdapter` is the proof it is still held: the ACB/Starfish seam takes
 /// `&MainThread` (which is `!Send`, so `task::spawn` rejects any closure that captured one), and
@@ -433,7 +432,7 @@ pub(super) fn install_pms_owned(
 pub(crate) unsafe fn boot(
     pms_host: *const c_char,
     pms_port: c_int,
-    mt: plx_base::task::MainThread,
+    mt: nj_base::task::MainThread,
     preflight: super::bootstrap::Preflight,
 ) -> Result<App, c_int> {
     // The Up Next still prefetch `route::pump_play` asks for is `ui`'s, which `route` may not name,
@@ -457,8 +456,8 @@ pub(crate) unsafe fn boot(
 }
 
 pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
-    gate: &plx_machine::landgate::Gate,
-    deferred: crate::plex::session::DeferredLoad) -> Result<(), &'static str> {
+    gate: &nj_machine::landgate::Gate,
+    deferred: crate::catalog::session::DeferredLoad) -> Result<(), &'static str> {
     if let Err(reason) = deferred.apply() {
         rec.abort_startup(gate)?;
         return Err(reason);
@@ -467,15 +466,15 @@ pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
 }
 
 pub(crate) unsafe fn construct(
-    pms_host: *const c_char, pms_port: c_int, mt: plx_base::task::MainThread,
+    pms_host: *const c_char, pms_port: c_int, mt: nj_base::task::MainThread,
     preflight: super::bootstrap::Preflight, initial: Option<super::bootstrap::Initial>,
-    deferred: Option<crate::plex::session::DeferredLoad>,
+    deferred: Option<crate::catalog::session::DeferredLoad>,
 ) -> Result<App, c_int> {
     let controlled = preflight.controlled();
     if let Some(initial) = &initial {
         crate::stores::tape::init(initial.person_credits(), preflight.replay());
         initial.home.restore(&mt).map_err(|_| 1)?;
-        crate::plex::Client::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
+        crate::catalog::Client::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
     }
     SDL_SetMainReady();
     // DEAD END, measured 2026-07-31 — do not re-try this. The obvious answer to "a parked TV
@@ -554,7 +553,7 @@ pub(crate) unsafe fn construct(
     #[cfg(feature = "hostsim")]
     let title = c"Native Jelly";
     #[cfg(not(feature = "hostsim"))]
-    let title = c"plxnative";
+    let title = c"nativejelly";
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, SDL_WINDOW_FLAGS);
     if win.is_null() {
         log("CreateWindow failed");
@@ -565,8 +564,8 @@ pub(crate) unsafe fn construct(
         log("GL ctx failed");
         return Err(1);
     }
-    plx_base::surface::probe(win);
-    // vsync on → the frame rate locks to the panel refresh. `/tmp/plxnative-novsync` uncaps it so
+    nj_base::surface::probe(win);
+    // vsync on → the frame rate locks to the panel refresh. `/tmp/nativejelly-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
     // blocking, so the software budget in `run` follows the same switch.
     let vsync_enabled = controlled || !crate::dev::scenarios::novsync_armed();
@@ -584,7 +583,7 @@ pub(crate) unsafe fn construct(
         }
         // A CPU rasterizer's frame time is not a main-thread hang (`task::runtime_check`).
         #[cfg(feature = "threadcheck")]
-        plx_base::task::runtime_check::note_renderer(renderer.as_deref());
+        nj_base::task::runtime_check::note_renderer(renderer.as_deref());
     }
     // The system on-screen keyboard, PROBED — see `crate::textinput`'s module doc. Both facts
     // on this line are preconditions that fail in complete silence, and nothing in this tree
@@ -605,11 +604,11 @@ pub(crate) unsafe fn construct(
     // `-lEGL` would kill the process at exec() on the very firmwares this app runs on.
     // No platform carve-out: the probe asks EGL nothing unless an EGL context is current on this
     // thread (`egl::current_with`), which is what makes it safe on a GLX-backed Linux simulator.
-    plx_gfx::egl::probe();
+    nj_gfx::egl::probe();
     crate::textinput::bind(win);
     // …and the same handshake for the ROOT press: `tv::home::go_home`'s fallback leg minimizes
     // this window, and the window is created here, a long way from where BACK is decided.
-    plx_platform::tv::window::bind_window(win);
+    nj_platform::tv::window::bind_window(win);
     let wflags = SDL_GetWindowFlags(win);
     log(&format!(
         "keyboard: support={} active={} focus={} winflags=0x{wflags:x}",
@@ -618,22 +617,22 @@ pub(crate) unsafe fn construct(
         i32::from(wflags & SDL_WINDOW_INPUT_FOCUS != 0)
     ));
 
-    plx_platform::tv::window::grab(win);
-    // EXPERIMENT (`/tmp/plxnative-opaque`), no-op without the trigger: build the full-surface
+    nj_platform::tv::window::grab(win);
+    // EXPERIMENT (`/tmp/nativejelly-opaque`), no-op without the trigger: build the full-surface
     // wl_region once, so `opaque_route` below can declare the UI plane opaque on every screen
     // that has nothing behind it. See `system.rs`'s section on it.
-    plx_platform::tv::window::arm_opaque_region();
-    plx_gfx::gfx::init_gl();
-    plx_gfx::text::init_text();
-    plx_gfx::gfx::init_image();
-    plx_gfx::gfx::init_blur();
+    nj_platform::tv::window::arm_opaque_region();
+    nj_gfx::gfx::init_gl();
+    nj_gfx::text::init_text();
+    nj_gfx::gfx::init_image();
+    nj_gfx::gfx::init_blur();
     // The transport takes the client's `User-Agent` as a value (it names no Plex layer): hand it
     // over before any request can be made, so the first one already carries it.
-    plx_net::net::set_user_agent(crate::plex::identity::user_agent());
+    nj_net::net::set_user_agent(crate::catalog::identity::user_agent());
     // One-time libcurl bind + init (main thread) before any threaded HTTPS call. A false here
     // means this device has no libcurl we can bind, so plex.tv sign-in will not work — the app
     // still runs, and `net::global_init` has already said so in the event log.
-    let _ = plx_net::net::global_init();
+    let _ = nj_net::net::global_init();
     // Drain whatever the LAST session left behind, on a worker — and **after `global_init`,
     // which is the whole reason this line is here and not beside `telemetry::boot()` 170 lines
     // up.** It was there first, and the end-to-end run showed why that was wrong: the worker
@@ -653,7 +652,7 @@ pub(crate) unsafe fn construct(
 
     // NO token is compiled into this binary. PMS access comes from the signed-in session,
     // or — for automated runs only (the regression harness, headless captures) — from the
-    // /tmp/plxnative-token dev trigger. The value is NEVER logged (only that one is in effect).
+    // /tmp/nativejelly-token dev trigger. The value is NEVER logged (only that one is in effect).
     let dev_token = match &initial {
         Some(initial) => {
             let crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } = &initial.session.authority
@@ -662,20 +661,20 @@ pub(crate) unsafe fn construct(
         }
         _ => crate::dev::scenarios::dev_token(),
     };
-    // dev: /tmp/plxnative-servers — credentials for a SECOND (third, …) server, so an automated
+    // dev: /tmp/nativejelly-servers — credentials for a SECOND (third, …) server, so an automated
     // run can reach a friend's SHARED server beside the one above. A shared server is its own
     // authority: its own machineIdentifier, its own per-(user,server) access token, and a 401
-    // for anybody else's — which is precisely what ONE `plxnative-token` cannot express, and
+    // for anybody else's — which is precisely what ONE `nativejelly-token` cannot express, and
     // why no two-source state could be graded headlessly before this.
     //
-    // ADDITIVE and nothing more. The primary is still `plxnative-token` (or the stored session)
+    // ADDITIVE and nothing more. The primary is still `nativejelly-token` (or the stored session)
     // against the configured host/port (or the explicit dev-only pms-origin fixture override),
     // so an ordinary run that names one server behaves as before. `dev::servers()` is the accessor — memoized, so the harness's
     // /tmp wipe cannot change what this boot was handed — and `dev::DevServer` is the shape.
     //
     // It is NOT on the DIAG exemption list (`dev.rs`), deliberately: unlike a log or the anim
     // overlay, this file names a host AND the token to trust it with, so it must mark the boot
-    // automated and skip the who's-watching picker exactly as `plxnative-token` does. A run
+    // automated and skip the who's-watching picker exactly as `nativejelly-token` does. A run
     // that landed on the picker instead of Home would grade the wrong screen.
     //
     // Tokens are never logged: `DevServer` has no `Debug`, and `describe()` prints all of it
@@ -685,7 +684,7 @@ pub(crate) unsafe fn construct(
         // `_e`: the only reader is the gated log line (see `dev.rs` on why literals are gated).
         Err(_e) => {
             #[cfg(feature = "devtriggers")]
-            log(&format!("servers: /tmp/plxnative-servers IGNORED — not valid JSON: {_e}"));
+            log(&format!("servers: /tmp/nativejelly-servers IGNORED — not valid JSON: {_e}"));
         }
         Ok(v) if !v.is_empty() => {
             let usable = v.iter().filter(|s| s.usable()).count();
@@ -733,14 +732,14 @@ pub(crate) unsafe fn construct(
     // so the boot who's-watching picker is skipped. Pure diagnostics (the logs, the profiler,
     // the anim overlay) don't count as automation.
     // The scan itself, and the DIAG exemption list that decides what does NOT count as
-    // automation, live in `dev::any_trigger_present` — together with the `plxnative-anim.log`
+    // automation, live in `dev::any_trigger_present` — together with the `nativejelly-anim.log`
     // bug that list was rewritten for. It is the one dev-trigger surface that names no file,
     // so it is also the one a release build had to be taught about explicitly.
     let automated_boot = || controlled || crate::dev::any_trigger_present();
 
     // Boot gate. Order matters:
-    //  1. /tmp/plxnative-login forces the QR login screen (to exercise the flow on demand).
-    //  2. /tmp/plxnative-token (the harness / headless runs) beats the stored session — automation
+    //  1. /tmp/nativejelly-login forces the QR login screen (to exercise the flow on demand).
+    //  2. /tmp/nativejelly-token (the harness / headless runs) beats the stored session — automation
     //     must run as the injected test identity no matter who is signed in on the TV.
     //  3. A stored session (offline-capable LAN server) → Home. A multi-user Plex Home roster
     //     still goes through the who's-watching picker first on interactive boots, unless
@@ -749,34 +748,34 @@ pub(crate) unsafe fn construct(
     //  4. Nothing → the QR sign-in flow (no credentials are compiled in — like a real client).
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
-    // dev: /tmp/plxnative-pickuser=<index> — force the boot picker even on an automated boot and
+    // dev: /tmp/nativejelly-pickuser=<index> — force the boot picker even on an automated boot and
     // auto-select that roster tile once it's up (headless exercise of the who's-watching flow).
     let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
     let session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
-        None => crate::plex::session::load(),
+        None => crate::catalog::session::load(),
     };
     // The remembered server keys of the session this boot runs on, handed over before any request
     // can leave: a captured session was never READ through the cache that projects them.
-    crate::plex::session::project_server_keys(&session, false);
-    // dev: /tmp/plxnative-tls-selftest — exercises the wrong-clock TLS fallback on both planes with
+    crate::catalog::session::project_server_keys(&session, false);
+    // dev: /tmp/nativejelly-tls-selftest — exercises the wrong-clock TLS fallback on both planes with
     // no account (a no-op without the trigger; absent in shipping builds). Armed HERE, after the
     // projection above, and not beside `global_init`: the projection replaces the key table
     // wholesale, and the self-test's pin is filed under a machine no session holds, so a projection
     // landing while round 1's first handshake is in flight would wipe it and the round be refused.
     #[cfg(feature = "devtriggers")]
     crate::dev::scenarios::tls_selftest::arm_at_boot();
-    // dev: /tmp/plxnative-toast=<text> — asks the TV's notification service for a system toast,
+    // dev: /tmp/nativejelly-toast=<text> — asks the TV's notification service for a system toast,
     // once plain and once as the app, and logs each full outcome (`toast-probe …`).
     #[cfg(feature = "devtriggers")]
     crate::dev::scenarios::toast_probe::arm_at_boot();
-    // dev: /tmp/plxnative-clockfact=nokey|keychanged|engaged[:<year>] — plants a wrong-clock fact
+    // dev: /tmp/nativejelly-clockfact=nokey|keychanged|engaged[:<year>] — plants a wrong-clock fact
     // (`net::keypin`) so the Home/Library read-out and the toast can be looked at with no
     // television. Armed after the projection above, whose sign-out arm only clears bound hosts.
     #[cfg(feature = "devtriggers")]
     crate::dev::scenarios::clock_fact::arm_at_boot();
     #[cfg(not(test))]
-    plx_platform::i18n::initialize(session.language, controlled);
+    nj_platform::i18n::initialize(session.language, controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
     // A kept Jellyfin sign-in boots exactly as the injected dev primary does — one server, its
     // token, no plex.tv — under its own seat. The injected token still wins, as it does over a
@@ -789,22 +788,22 @@ pub(crate) unsafe fn construct(
         log(&format!("boot: stored Jellyfin sign-in at {}", origin.log_form()));
     }
     let dev_primary = if let Some((origin, stored)) = &jf_stored {
-        Some(crate::plex::session::ServerRef {
+        Some(crate::catalog::session::ServerRef {
             address: origin.host().to_owned(), port: i64::from(origin.port()),
             origin_url: origin.base(), token: stored.token.clone(),
-            tier: Some(crate::plex::probe::configured_tier(origin.host())), ..Default::default()
+            tier: Some(crate::catalog::probe::configured_tier(origin.host())), ..Default::default()
         })
     } else { (!forced_login && !dev_token.is_empty()).then(|| {
         let origin = crate::dev::scenarios::pms_origin()
-            .unwrap_or_else(|| crate::plex::Origin::http(&host_s, pms_port));
+            .unwrap_or_else(|| crate::catalog::Origin::http(&host_s, pms_port));
         if crate::dev::scenarios::jf_armed() {
             crate::jf::seat::register(&origin);
-            plx_base::eventlog::log("jf: the injected primary is a Jellyfin server");
+            nj_base::eventlog::log("jf: the injected primary is a Jellyfin server");
         }
-        crate::plex::session::ServerRef {
+        crate::catalog::session::ServerRef {
             address: origin.host().to_owned(), port: i64::from(origin.port()),
             origin_url: origin.base(), token: dev_token.clone(),
-            tier: Some(crate::plex::probe::configured_tier(origin.host())), ..Default::default()
+            tier: Some(crate::catalog::probe::configured_tier(origin.host())), ..Default::default()
         }
     }) };
     let session_init = match &initial {
@@ -813,10 +812,10 @@ pub(crate) unsafe fn construct(
             captured_dev_sources(&dev_servers.unwrap_or_default())),
     };
     let mut bridge = if controlled {
-        super::bridge::Bridge::controlled_home(plx_base::diag::heartbeat::now_us,
+        super::bridge::Bridge::controlled_home(nj_base::diag::heartbeat::now_us,
             initial.as_ref().expect("controlled initialization"), &mt, preflight.replay())
     } else {
-        super::bridge::Bridge::new(plx_base::diag::heartbeat::now_us, session_init,
+        super::bridge::Bridge::new(nj_base::diag::heartbeat::now_us, session_init,
             crate::telemetry::consent::current().unwrap_or_default(), &mt)
     };
     // Construct the one dispatcher before bootstrap commands; move this same queue into App.
@@ -838,7 +837,7 @@ pub(crate) unsafe fn construct(
     // The subtitle tone rides the same file and the same moment: a preference, restored once.
     crate::player::restore_subtitle_tone(session.subtitle_tone());
     crate::player::restore_audio_enhancements(session.audio_enhancements());
-    // dev: /tmp/plxnative-audioenh=off|boost|loudness — force the PERSISTED enhancement
+    // dev: /tmp/nativejelly-audioenh=off|boost|loudness — force the PERSISTED enhancement
     // preference right after it was restored from whatever the install actually has saved, so a
     // harness case's starting preference never depends on what an earlier run's pick left behind.
     // Unlike every other boot override on this page, this one calls the real persisting setter —
@@ -849,11 +848,7 @@ pub(crate) unsafe fn construct(
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         rec: &mut super::recorder::Recplay| {
         if forced_login {
-        super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-        pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
-            rec, false);
-        #[cfg(feature = "devtriggers")]
-        log("boot: /tmp/plxnative-login — starting QR login");
+        log("boot: forced login — Jellyfin sign-in");
         BootTo::Login
     } else if !dev_token.is_empty() || jf_stored.is_some() {
         // `Origin::http` names the assumption out loud: the host and port compiled into the
@@ -865,13 +860,13 @@ pub(crate) unsafe fn construct(
         // bootstrap, since `abr::bootstrap` is only consulted once a tier exists. See
         // `probe::configured_tier` for why address shape is honest enough here.
         if jf_stored.is_none() {
-            let tier = crate::plex::probe::configured_tier(&host_s);
+            let tier = crate::catalog::probe::configured_tier(&host_s);
             log(&format!(
                 "boot: dev token — link={tier:?} (classified from the configured address)"
             ));
         }
         super::bridge::execute_session_command(pages, crate::auth::SessionCmd::ActivateDevBootstrap);
-        pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
+        pages.frame_with(bridge, nj_machine::machine::Tick::default(), Vec::new(), Vec::new(),
             rec, false);
         if let Some(ready) = bridge.take_session_ready() {
             if controlled {
@@ -880,7 +875,7 @@ pub(crate) unsafe fn construct(
                     return BootTo::Login;
                 }
                 use crate::stores::{StoreCmd, StoreWork};
-                use plx_machine::machine::{Fx, MachineId};
+                use nj_machine::machine::{Fx, MachineId};
                 use crate::screens::registry::AppFx;
                 for cmd in [
                     StoreCmd::Browse(crate::stores::browse::BrowseCmd::Reset),
@@ -888,7 +883,7 @@ pub(crate) unsafe fn construct(
                     StoreCmd::Hubs(crate::stores::hubs::HubsCmd::RefetchHubs),
                 ] { pages.emit(MachineId::Nav, Fx::App(AppFx::Store(cmd.store(), cmd))); }
                 pages.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
-                pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(), rec, false);
+                pages.frame_with(bridge, nj_machine::machine::Tick::default(), Vec::new(), Vec::new(), rec, false);
             } else {
                 let endpoints = install_pms_owned(bridge, &ready.origin, &ready.address,
                     &ready.token, ready.tier, ready.pin.as_ref(), &ready.install);
@@ -896,55 +891,8 @@ pub(crate) unsafe fn construct(
             }
             BootTo::Home
         } else { BootTo::Login }
-    } else if session.can_go_local() {
-        if session.boot_shows_picker(automated_boot(), pick_user.is_some()) {
-            // The Session owner installs the avatar read client and retained grants, publishes
-            // the captured profile, then owns the picker/refresh flows. It does NOT issue the
-            // Ready handoff before a viewer is selected. Boot BACK therefore retains its
-            // protected/unknown-profile refusal policy rather than silently entering Home.
-            super::bridge::execute_session_command(pages,
-                crate::auth::SessionCmd::StartSwitch(crate::auth::Picker::Boot));
-            pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
-                rec, false);
-            log("boot: stored session — who's watching");
-            BootTo::Profiles
-        } else {
-            // The owner restores the granted roster and publishes WHO is watching before
-            // install_pms can read any per-profile stores. Stored boot does not re-save its
-            // credentials. This is the normal bounded dispatcher drain over the same owner
-            // and queue later moved into App, not a recursive bootstrap reducer.
-            super::bridge::execute_session_command(pages, crate::auth::SessionCmd::ResumeStored);
-            pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
-                rec, false);
-            if let Some(ready) = bridge.take_session_ready() {
-                let endpoints = install_pms_owned(bridge, &ready.origin, &ready.address,
-                    &ready.token, ready.tier, ready.pin.as_ref(), &ready.install);
-                super::bridge::execute_endpoint_outcomes(pages, endpoints);
-                // Refresh only AFTER installing the captured primary, so a fast accepted
-                // endpoint observation cannot be overwritten by that older boot snapshot.
-                super::bridge::execute_session_command(pages, crate::auth::SessionCmd::RefreshRoster);
-                pages.frame_with(bridge, plx_machine::machine::Tick::default(), Vec::new(), Vec::new(),
-                    rec, false);
-                if session.auto_sign_in()
-                    && session.home_users.len() > 1
-                    && session.seated_in_roster()
-                    && !automated_boot()
-                    && pick_user.is_none()
-                {
-                    log("boot: stored session — auto sign-in");
-                } else {
-                    log("boot: stored session — local server (offline-capable)");
-                }
-                BootTo::Home
-            } else {
-                super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-                log("boot: stored session could not be activated — starting QR sign-in");
-                BootTo::Login
-            }
-        }
     } else {
-        // Nothing kept: the Jellyfin sign-in page (`screens::jf_login`), which asks plex.tv for
-        // nothing — so no Session flow is started under it.
+        // Nothing kept: Jellyfin sign-in. Legacy plex.tv sessions are not resumed.
         log("boot: no session — Jellyfin sign-in");
         BootTo::Login
     }
@@ -957,22 +905,18 @@ pub(crate) unsafe fn construct(
         crate::player::acb_init(&mt);
         crate::ff::boot(); // Live playback resource boot; controlled Home cannot invoke ABI probes.
     }
-                       // dev: /tmp/plxnative-logintest validates the plex.tv account path end-to-end on the device — a
-                       // real typed create_pin() through the libcurl transport + DTO deserialize. Logs only the
-                       // public pin id + code length + that authToken is still null (never a token/secret).
-    if !controlled { crate::dev::scenarios::arm_logintest(); }
-    // dev: the animation-diagnostic overlay is OFF by default; /tmp/plxnative-anim enables it (its
-    // trace goes to /tmp/plxnative-anim.log, a separate stream from the main event log)
+    // dev: the animation-diagnostic overlay is OFF by default; /tmp/nativejelly-anim enables it (its
+    // trace goes to /tmp/nativejelly-anim.log, a separate stream from the main event log)
     if !controlled { crate::dev::scenarios::arm_anim(); }
-    // dev: /tmp/plxnative-stillclock=<ms> holds every free-running animation clock (spinners)
+    // dev: /tmp/nativejelly-stillclock=<ms> holds every free-running animation clock (spinners)
     // still, so a screenshot of a waiting screen settles on one deterministic frame.
     if !controlled { crate::dev::scenarios::arm_stillclock(); }
     // dev: profile is asynchronous EXT_disjoint_timer_query timing; hwcnt is the serialized
     // direct Mali counter-attribution run. Their content names ONE phase (empty = frame.ui).
     // Combining them would perturb the timer result, so fail closed when both are present.
-    // dev: /tmp/plxnative-glassload is the backdrop-glass LOAD DIAL — a sweep of glass-surface
+    // dev: /tmp/nativejelly-glassload is the backdrop-glass LOAD DIAL — a sweep of glass-surface
     // count, size and refresh cadence that cycles its own steps inside one launch, so legs are
-    // interleaved by construction. /tmp/plxnative-navblur is the blurred-route-transition
+    // interleaved by construction. /tmp/nativejelly-navblur is the blurred-route-transition
     // prototype. Both live in `ui::glassload`; both are absent from a release build.
     // The plan is built HERE rather than in the `App` literal below so the dial is armed at the
     // point in boot it always was: `configure` logs what it will run, and that line's position in
@@ -983,10 +927,10 @@ pub(crate) unsafe fn construct(
         crate::dev::scenarios::arm_navblur(&mut glass);
     }
     // dev: the two OVERDRAW surfaces (`ui::overdraw`, docs/backdrop-blur-profiling.md Part 5).
-    // `plxnative-overdraw` arms the CPU-side per-draw-class ledger — how much screen-visible
+    // `nativejelly-overdraw` arms the CPU-side per-draw-class ledger — how much screen-visible
     // quad area this app submits, per primitive family, per frame. It is not billed for the
     // wayland compositor's work and is not `glFinish`-serialised, which is what the GPU's
-    // global FRAG_QUADS_RAST cannot say. `plxnative-drawmask=<classes>` REFUSES every draw of
+    // global FRAG_QUADS_RAST cannot say. `nativejelly-drawmask=<classes>` REFUSES every draw of
     // the named classes, so a whole-frame `frame.ui` A/B against the unmasked control prices
     // that class as the frame sees it; `all` draws nothing and is therefore the compositor
     // floor. A masked leg is a broken picture on purpose.
@@ -994,19 +938,19 @@ pub(crate) unsafe fn construct(
         crate::dev::scenarios::arm_overdraw();
         crate::dev::scenarios::arm_drawmask();
     }
-    // dev: /tmp/plxnative-heroground — draw the hero's photograph and BOTH of its scrim fields
+    // dev: /tmp/nativejelly-heroground — draw the hero's photograph and BOTH of its scrim fields
     // in one pass instead of the art plus four blended gradient quads over it. Absent, the
     // shipped four-quad path draws, which is what makes this an A/B on one binary.
     if !controlled { crate::dev::scenarios::arm_heroground(); }
-    // dev: /tmp/plxnative-nobudget — the frame budget's A/B CONTROL leg (spec §8.1). Read here
+    // dev: /tmp/nativejelly-nobudget — the frame budget's A/B CONTROL leg (spec §8.1). Read here
     // with the other boot triggers; applied to the one `Budget` below, once the tree exists.
     let nobudget = !controlled && crate::dev::scenarios::nobudget_armed();
     if !controlled { crate::dev::scenarios::arm_profile_hwcnt(); }
-    // dev: /tmp/plxnative-cpuprof — the render thread's OWN time per phase, every phase at
+    // dev: /tmp/nativejelly-cpuprof — the render thread's OWN time per phase, every phase at
     // once, no glFinish. The one mode that can see a frame the frame-drop detector reports as
     // all `draw=` and no `swap=`; the two GPU modes above are blind to it by construction.
     if !controlled { crate::dev::scenarios::arm_cpuprof(); }
-    // dev: /tmp/plxnative-noidle turns the whole-frame present gate (plx_machine::idle) OFF, so a still
+    // dev: /tmp/nativejelly-noidle turns the whole-frame present gate (nj_machine::idle) OFF, so a still
     // screen goes back to repainting at panel rate. It is a DIAG trigger (see the list above)
     // precisely so an A/B costs one file and does not also change which screen you boot to —
     // and so that if a frame ever looks wrong on the panel, ruling this feature out is one
@@ -1016,12 +960,12 @@ pub(crate) unsafe fn construct(
         crate::player::seed_dev_track_names();
     }
     if let Some(initial) = &initial {
-        plx_machine::idle::set_enabled(!plx_base::devtrig::listed(&initial.triggers, "noidle"));
+        nj_machine::idle::set_enabled(!nj_base::devtrig::listed(&initial.triggers, "noidle"));
     } else { crate::dev::scenarios::arm_noidle(); }
-    // dev: /tmp/plxnative-detailosc (read once at boot, like the other triggers) makes the detail scroll
+    // dev: /tmp/nativejelly-detailosc (read once at boot, like the other triggers) makes the detail scroll
     // perpetually swing hero<->bottom so the FPS heartbeat samples the transition, not the ends.
     let detail_osc = !controlled && crate::dev::scenarios::detailosc_armed();
-    // dev: /tmp/plxnative-homeosc — perpetually sweep the home grid focus DOWN to the bottom then
+    // dev: /tmp/nativejelly-homeosc — perpetually sweep the home grid focus DOWN to the bottom then
     // UP to the top (~3s each way, one row per 350ms), so a headless run reproduces the top↔bottom
     // vertical-scroll judder for the frame-drop detector / retui profiler.
     let home_osc = !controlled && crate::dev::scenarios::homeosc_armed();
@@ -1035,23 +979,23 @@ pub(crate) unsafe fn construct(
     let home_fold_osc = !controlled && crate::dev::scenarios::homefoldosc_armed();
     let home_fold_osc_last = 0u32;
     let home_fold_down = true;
-    // dev: /tmp/plxnative-libosc — the Library twin of homeosc: sweep the browse grid focus
+    // dev: /tmp/nativejelly-libosc — the Library twin of homeosc: sweep the browse grid focus
     // down↔up perpetually for the library_scroll FPS scene.
     let lib_osc = !controlled && crate::dev::scenarios::libosc_armed();
     let lib_osc_last = 0u32;
-    // dev: /tmp/plxnative-libswitch — exercise EVERY Library switch on a timer (tab switch,
+    // dev: /tmp/nativejelly-libswitch — exercise EVERY Library switch on a timer (tab switch,
     // sort menu open/move/close, unwatched on/off, filter open/close) for the library_switch
     // FPS scene, so the re-query + popover paths are perf-gated, not just the scroll.
     let lib_switch = !controlled && crate::dev::scenarios::libswitch_armed();
     let lib_switch_last = 0u32;
     let lib_switch_step = 0u32;
-    // dev: /tmp/plxnative-searchosc — the Search twin of homeosc/libosc: sweep the result
+    // dev: /tmp/nativejelly-searchosc — the Search twin of homeosc/libosc: sweep the result
     // shelves' focus down↔up perpetually for the `fps:search-type` scene. It does NOT reach the
-    // screen on its own — pair it with `/tmp/plxnative-search=<query>`, and with a query the
+    // screen on its own — pair it with `/tmp/nativejelly-search=<query>`, and with a query the
     // library actually matches, or there are no shelves to sweep and the scene grades nothing.
     let search_osc = !controlled && crate::dev::scenarios::searchosc_armed();
     let search_osc_last = 0u32;
-    // dev: /tmp/plxnative-settings=<root|home|privacy|legal|playback|picker-quality> opens the Settings modal (and,
+    // dev: /tmp/nativejelly-settings=<root|home|privacy|legal|playback|picker-quality> opens the Settings modal (and,
     // optionally, one of its real child panels) once Home is available. `settingsosc` turns
     // that settled modal into a continuous render-throughput scene: it alternates the focused
     // row and explicitly keeps the present gate awake. Without the latter an efficient,
@@ -1066,19 +1010,19 @@ pub(crate) unsafe fn construct(
     let settings_osc = !controlled && crate::dev::scenarios::settingsosc_armed();
     let settings_osc_last = 0u32;
     let settings_osc_down = true;
-    // dev: /tmp/plxnative-modalosc — with `plxnative-settings=root`, OPEN and DISMISS the
+    // dev: /tmp/nativejelly-modalosc — with `nativejelly-settings=root`, OPEN and DISMISS the
     // Settings modal every 1500 ms through the same `open`/`on_back` the chip and BACK use, so
     // `fps:modal-ramp` grades the appear/disappear RAMP (host snapshot, scrim, ground) under
     // `worst_ceiling_ms` rather than a settled modal. It reverses on a clock because the ramp
     // itself has no end the app reports.
     let modal_osc = !controlled && crate::dev::scenarios::modalosc_armed();
     let modal_osc_last = 0u32;
-    // dev: /tmp/plxnative-legaldoc — with `plxnative-settings=legal`, press OK on the Legal
+    // dev: /tmp/nativejelly-legaldoc — with `nativejelly-settings=legal`, press OK on the Legal
     // index ONCE so the boot lands on a pushed DOCUMENT (the reader over the frozen ground),
     // which no boot trigger reached before: `fps:legal-document`.
     let legal_doc = !controlled && crate::dev::scenarios::legaldoc_armed();
     let legal_doc_tried = false;
-    // dev: /tmp/plxnative-alert — with `plxnative-settings=privacy`, open the "Delete all local
+    // dev: /tmp/nativejelly-alert — with `nativejelly-settings=privacy`, open the "Delete all local
     // data?" DECISION ALERT once the privacy panel is up. It is the one shared yes/no alert in
     // the app and nothing headless could reach it: `fps:decision-alert`. Opening it is all this
     // does — nothing is deleted, and Cancel is what a BACK would press.
@@ -1106,7 +1050,7 @@ pub(crate) unsafe fn construct(
     let onboard_osc = !controlled && crate::dev::scenarios::onboardosc_armed();
     let onboard_osc_last = 0u32;
     let onboard_osc_right = true;
-    // dev: /tmp/plxnative-navosc — bounce the ROUTE on a timer, so the page cross-fade
+    // dev: /tmp/nativejelly-navosc — bounce the ROUTE on a timer, so the page cross-fade
     // (`ui::nav`) is FPS-gated like every other motion in the app. These are the only scenes
     // that change route, and therefore the only ones that sample a whole-screen cascade alpha
     // over both screens' full draw. 1400 ms matches `libswitch`: long enough that the ~225 ms
@@ -1123,10 +1067,10 @@ pub(crate) unsafe fn construct(
     let nav_osc_rk = nav_osc_rk.unwrap_or_default();
     let nav_osc_last = 0u32;
 
-    // dev: /tmp/plxnative-pushbench[=<n>[,<ratingKey>]] — the counted, deterministic stress
+    // dev: /tmp/nativejelly-pushbench[=<n>[,<ratingKey>]] — the counted, deterministic stress
     // benchmark twin of `navosc` (spec: `docs/agent-reference.md`'s fps-scene section). Its
     // Detail leg reuses `navosc`'s own ratingKey when the bench's own trigger carries none, so
-    // `plxnative-navosc=<rk>` alone is enough to point both oscillators at the same item.
+    // `nativejelly-navosc=<rk>` alone is enough to point both oscillators at the same item.
     let push_bench = (!controlled)
         .then(crate::dev::scenarios::pushbench_value)
         .flatten()
@@ -1134,7 +1078,7 @@ pub(crate) unsafe fn construct(
             let rk = if rk.is_empty() { nav_osc_rk.clone() } else { rk };
             crate::dev::scenarios::bench::PushBench::new(n, rk)
         });
-    // dev: /tmp/plxnative-modalbench[=<n>[,<ratingKey>]] — the modal-ramp twin of the above, same
+    // dev: /tmp/nativejelly-modalbench[=<n>[,<ratingKey>]] — the modal-ramp twin of the above, same
     // n,rk shape. Its item-menu leg reuses `navosc`'s ratingKey ONLY when the bench's own trigger
     // carries none, exactly like the push leg above — see `modalbench_value`'s doc for why a
     // scene that wants the item menu but not navosc's own competing bounce sets its own rk here
@@ -1147,7 +1091,7 @@ pub(crate) unsafe fn construct(
             let rk = if rk.is_empty() { nav_osc_rk.clone() } else { rk };
             crate::dev::scenarios::bench::ModalBench::new(n, rk)
         });
-    // dev: /tmp/plxnative-deepbench[=<depth>[,<ratingKey>]] — the DEEP-stack twin of the two
+    // dev: /tmp/nativejelly-deepbench[=<depth>[,<ratingKey>]] — the DEEP-stack twin of the two
     // above: pushes `depth` pages with no pop in between (rotating Detail/Person — never Library,
     // see `bench::DeepBench::targets`'s doc), then pops all the way back to the root one page at a
     // time. Same empty-ratingKey resolution against `navosc`'s own value as the two legs above.
@@ -1159,7 +1103,7 @@ pub(crate) unsafe fn construct(
             crate::dev::scenarios::bench::DeepBench::new(depth, rk)
         });
 
-    // dev: /tmp/plxnative-framedrop — the FRAME-DROP DETECTOR. When present, each frame is timed with
+    // dev: /tmp/nativejelly-framedrop — the FRAME-DROP DETECTOR. When present, each frame is timed with
     // the high-res perf counter (pump / draw / swap, NO glFinish so it doesn't perturb the pipeline),
     // and any frame whose total exceeds a threshold (ms; file content overrides the 22ms default) is
     // logged with its phase breakdown + GL texture-upload count — so a scroll judder shows *what* stalled
@@ -1170,12 +1114,12 @@ pub(crate) unsafe fn construct(
         .and_then(|s| s.parse().ok())
         .filter(|v: &f64| *v > 0.0)
         .unwrap_or(22.0);
-    let mut instr = plx_base::diag::heartbeat::Instruments::new(framedrop_on, framedrop_thresh);
+    let mut instr = nj_base::diag::heartbeat::Instruments::new(framedrop_on, framedrop_thresh);
     if let Some(slow_ms) = crate::dev::scenarios::framering_ms().filter(|_| !controlled) {
         instr.arm_ring(slow_ms);
     }
     if framedrop_on {
-        plx_base::diag::spans::arm();
+        nj_base::diag::spans::arm();
     }
 
     let last_input = initial.as_ref().map_or_else(clock::now, |initial| initial.clock_start);
@@ -1210,7 +1154,7 @@ pub(crate) unsafe fn construct(
     // ungated, and `on_auto_repeat`'s doc for the one thing left on the legacy side (the
     // deferred press's liveness beat, and nothing else since phase 12).
     let modal_repeat = RepeatGate::IDLE;
-    let marker_tried = false; // dev: the /tmp/plxnative-marker jump has been resolved
+    let marker_tried = false; // dev: the /tmp/nativejelly-marker jump has been resolved
     let player = crate::player::machine::Player::new();
     // The token stops being an argument here and becomes a field. `PlayerAdapter::new` CONSUMES
     // it, so the adapter is the only thing in the process that holds one, and a `&mut` to it is
@@ -1227,10 +1171,10 @@ pub(crate) unsafe fn construct(
     // values share one name (every `Route::Player` is "player"), and an overlay
     // opening is not a screen change.
     let last_route_reported: &'static str = "";
-    let press_tried = false; // dev: /tmp/plxnative-press fires one simulated grid-card press
+    let press_tried = false; // dev: /tmp/nativejelly-press fires one simulated grid-card press
     let press_release_at = 0u32; // …and the tick at which that simulated press releases
-    let itemmenu_tried = false; // dev: /tmp/plxnative-itemmenu opens the card context menu once
-    let acct_tried = false; // dev: /tmp/plxnative-acct opens the profile menu once
+    let itemmenu_tried = false; // dev: /tmp/nativejelly-itemmenu opens the card context menu once
+    let acct_tried = false; // dev: /tmp/nativejelly-acct opens the profile menu once
     let ptr = Pointer::IDLE;
 
     // Initial route from the boot gate: Login when we have no usable creds, Profiles for the
@@ -1245,9 +1189,9 @@ pub(crate) unsafe fn construct(
     // has a real answer by this line. An AUTOMATED boot is exempt for the reason the picker is
     // — a harness run must land on a deterministic Home.
     //
-    // dev: `/tmp/plxnative-firstrun` forces it — a screen that is by definition asked once is
+    // dev: `/tmp/nativejelly-firstrun` forces it — a screen that is by definition asked once is
     // otherwise unreachable the moment you have answered it, and the two-source roster it
-    // needs comes from `/tmp/plxnative-servers`, which marks the boot automated. Both halves
+    // needs comes from `/tmp/nativejelly-servers`, which marks the boot automated. Both halves
     // are why looking at this screen headlessly requires a trigger of its own.
     bridge.refresh_browse_directory();
     let ask_first_run = || !controlled && (crate::dev::scenarios::firstrun_armed()
@@ -1281,9 +1225,8 @@ pub(crate) unsafe fn construct(
         // Both of these enter the `Route::Login | Route::Profiles` block below, which asks as
         // soon as the account is authorized — earlier than here, and before the picker.
         BootTo::Login => AppArg::Login,
-        BootTo::Profiles => AppArg::Profiles,
     };
-    // (dev: /tmp/plxnative-acct used to open the profile menu HERE, beside a
+    // (dev: /tmp/nativejelly-acct used to open the profile menu HERE, beside a
     // `route = Route::Account { over: BarHost::Home }`. The menu is a `ModalStack` surface since
     // phase 10 and the container does not exist yet at this point in the boot, so the trigger is
     // an ordinary per-frame arm — `dev::scenarios::acct_arm`, beside `itemmenu_arm`.)
@@ -1298,7 +1241,7 @@ pub(crate) unsafe fn construct(
     // `PageDip`.)
 
     let auto_tried = false;
-    // dev: `/tmp/plxnative-replay[=N]` — how many times a finished `plxnative-playurl`
+    // dev: `/tmp/nativejelly-replay[=N]` — how many times a finished `nativejelly-playurl`
     // playback may be started AGAIN (LG App Self Checklist #46, "replay after completion").
     //
     // A COUNTER re-arming `auto_tried`, rather than the latch being lifted: `auto_tried` also
@@ -1317,17 +1260,17 @@ pub(crate) unsafe fn construct(
     let grid_tried = false;
     let settings_tried = settings_boot.is_none();
     let seek_tried = false;
-    // /tmp/plxnative-autoseek seek script (see the parse site): pending steps, the tick of
+    // /tmp/nativejelly-autoseek seek script (see the parse site): pending steps, the tick of
     // the last fired step, the gap between steps, and the last REQUESTED target (the base
     // for "+10"/"-10" tap-relative steps, like taps on the HUD's frozen scrub playhead).
     let seek_script: Vec<String> = Vec::new();
     let seek_script_at = 0u32;
     let seek_gap_ms = 300u32;
     let seek_script_last = 0i64;
-    // /tmp/plxnative-qualityswitch: the rungs still to switch to, the tick of the last one
+    // /tmp/nativejelly-qualityswitch: the rungs still to switch to, the tick of the last one
     // fired, and the gap between them. Same shape as the seek script above, for the same
     // reason — a person changing quality mid-playback does it more than once.
-    let quality_script: Vec<crate::plex::session::PlaybackQuality> = Vec::new();
+    let quality_script: Vec<crate::catalog::session::PlaybackQuality> = Vec::new();
     let quality_script_at = 0u32;
     let quality_gap_ms = 0u32;
     let quality_tried = false;
@@ -1339,7 +1282,7 @@ pub(crate) unsafe fn construct(
     let menupick_tried = false;
     let menupick_target = None;
     let pause_tried = false;
-    // `/tmp/plxnative-autopause`: an authored Pause edge, plus the optional Resume edge which
+    // `/tmp/nativejelly-autopause`: an authored Pause edge, plus the optional Resume edge which
     // owns the same script. External effects retry until the synchronized player state machine
     // accepts them; a busy native transition cannot silently consume the test operation.
     let pause_script: Option<(u32, Option<u32>, Option<u32>)> = None;
@@ -1351,7 +1294,7 @@ pub(crate) unsafe fn construct(
     let refresh_hubs_at = 0u32;
 
     let ev = [0u8; 128];
-    // dev/testing remote: drain any tokens written to /tmp/plxnative-remote and push
+    // dev/testing remote: drain any tokens written to /tmp/nativejelly-remote and push
     // them as synthetic key events BEFORE the poll loop, so they're consumed this frame
     // by the ONE real key handler (see crate::remote / tools/stream-screen.py).
     let remote = crate::remote::Remote::open();
@@ -1396,7 +1339,7 @@ pub(crate) unsafe fn construct(
         rec: super::recorder::Recplay::Off,
         boot_initial: initial,
         telemetry_guard: None,
-        present: plx_machine::present::Present::new(),
+        present: nj_machine::present::Present::new(),
         glass,
         // **The application's page stack runs the route DIP** (§6.2). It ran `Immediate` until
         // phase 12 while `ui::nav` held a second fader and the loop applied its own route change
@@ -1490,7 +1433,7 @@ pub(crate) unsafe fn construct(
             },
         },
     };
-    // dev: /tmp/plxnative-nobudget — put the ONE frame budget (the tree's, spec §2.2) into its
+    // dev: /tmp/nativejelly-nobudget — put the ONE frame budget (the tree's, spec §2.2) into its
     // pre-phase-11 shape for the A/B's control leg. The tree exists now, which is why this is
     // here rather than beside the trigger read.
     //
@@ -1500,7 +1443,7 @@ pub(crate) unsafe fn construct(
     if app.scenarios.dev.nobudget {
         app.pages.budget = crate::ui::frame::Budget::pre_phase_11();
         #[cfg(feature = "devtriggers")]
-        plx_base::eventlog::log("budget: pre-phase-11 admission (quota only) by /tmp/plxnative-nobudget");
+        nj_base::eventlog::log("budget: pre-phase-11 admission (quota only) by /tmp/nativejelly-nobudget");
     }
     if controlled {
         let initial = app.snapshot_init().expect("controlled constructor retains initial inputs");
@@ -1546,8 +1489,8 @@ pub(crate) unsafe fn construct(
     // an empty stack mints the first entry, which is what makes this a hard CUT — there is no
     // outgoing screen to dip.
     if controlled {
-        app.pages.emit(plx_machine::machine::MachineId::Nav,
-            plx_machine::machine::Fx::Nav(plx_machine::machine::NavOp::Root(route)));
+        app.pages.emit(nj_machine::machine::MachineId::Nav,
+            nj_machine::machine::Fx::Nav(nj_machine::machine::NavOp::Root(route)));
     } else {
         super::bridge::nav_root(&mut app.pages, route);
     }

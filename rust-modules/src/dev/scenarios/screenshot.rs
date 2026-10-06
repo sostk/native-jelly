@@ -57,7 +57,7 @@ impl ScreenshotArms {
     }
 }
 
-/// `/tmp/plxnative-stillclock=<ms>` — hold every free-running clock animator (`motion::Phase`:
+/// `/tmp/nativejelly-stillclock=<ms>` — hold every free-running clock animator (`motion::Phase`:
 /// spinners, stall timers) at `<ms>` elapsed. A waiting screen then draws one fixed picture and
 /// comes to rest, which is what a settled capture needs; springs and ramps are untouched, they
 /// settle on their own.
@@ -65,10 +65,10 @@ impl ScreenshotArms {
 /// the body rather than a second, empty twin of this function.
 pub(crate) fn arm_stillclock() {
     #[cfg(feature = "devtriggers")]
-    if let Some(v) = plx_base::devtrig::read("stillclock") {
+    if let Some(v) = nj_base::devtrig::read("stillclock") {
         let ms = v.parse().unwrap_or(0);
-        plx_machine::motion::hold_phase_clocks(Some(ms));
-        plx_base::eventlog::log(&format!("motion: free-running clocks held at {ms} ms by /tmp/plxnative-stillclock"));
+        nj_machine::motion::hold_phase_clocks(Some(ms));
+        nj_base::eventlog::log(&format!("motion: free-running clocks held at {ms} ms by /tmp/nativejelly-stillclock"));
     }
 }
 
@@ -84,12 +84,12 @@ pub(super) fn parse_cell(v: &str) -> Option<(usize, usize)> {
 /// so an arm that opens a menu while the page under it is still scrolling or still waiting for its
 /// art photographs a half-landed page forever. The arms that open a surface over a page therefore
 /// accept a rest period, and hold the surface back until the page has stopped changing. The signal
-/// is `plx_machine::idle`'s change clock, which only the simulator keeps; on the television there is none,
+/// is `nj_machine::idle`'s change clock, which only the simulator keeps; on the television there is none,
 /// the wait is skipped, and the arm behaves exactly as it did before it took a value.
 pub(crate) fn at_rest(now: u32, rest: Option<u32>) -> bool {
     #[cfg(feature = "hostsim")]
     {
-        rest.is_none_or(|ms| now.wrapping_sub(plx_machine::idle::last_change_ms()) >= ms)
+        rest.is_none_or(|ms| now.wrapping_sub(nj_machine::idle::last_change_ms()) >= ms)
     }
     #[cfg(not(feature = "hostsim"))]
     {
@@ -122,7 +122,7 @@ fn parse_type(v: &str) -> Option<LibraryType> {
     })
 }
 
-/// `/tmp/plxnative-libtype=<movies|shows|seasons|episodes|collections>` — on the Library page,
+/// `/tmp/nativejelly-libtype=<movies|shows|seasons|episodes|collections>` — on the Library page,
 /// choose that TYPE menu value the way its row does, once the section's listing is there. Done
 /// when the page's committed listing REPORTS that type; `libgrid` and `libmenu` wait for it, so a
 /// seat or a menu lands on the listing this trigger asked for.
@@ -130,23 +130,23 @@ pub(crate) fn libtype_arm(app: &mut App, fr: &Frame) {
     if app.scenarios.shots.libtype_done {
         return;
     }
-    let Some(v) = plx_base::devtrig::read("libtype") else {
+    let Some(v) = nj_base::devtrig::read("libtype") else {
         app.scenarios.shots.libtype_done = true;
         return;
     };
     let Some(kind) = parse_type(&v) else {
         #[cfg(feature = "devtriggers")]
-        plx_base::eventlog::log(&format!("BADTRIGGER libtype {v:?}: expected movies, shows, seasons, episodes or collections"));
+        nj_base::eventlog::log(&format!("BADTRIGGER libtype {v:?}: expected movies, shows, seasons, episodes or collections"));
         app.scenarios.shots.libtype_done = true;
         return;
     };
     if crate::app::bridge::Bridge::library_listed(&app.pages) == Some(kind) {
-        plx_base::eventlog::log(&format!("libtype: listing {}", v.trim()));
+        nj_base::eventlog::log(&format!("libtype: listing {}", v.trim()));
         app.scenarios.shots.libtype_done = true;
         return;
     }
     if fr.now.wrapping_sub(app.t0) > CEILING_MS {
-        plx_base::eventlog::log(&format!("libtype: gave up; the listing never became {}", v.trim()));
+        nj_base::eventlog::log(&format!("libtype: gave up; the listing never became {}", v.trim()));
         app.scenarios.shots.libtype_done = true;
         return;
     }
@@ -156,7 +156,7 @@ pub(crate) fn libtype_arm(app: &mut App, fr: &Frame) {
     }
 }
 
-/// `/tmp/plxnative-libgrid=<row>,<col>` — on the Library page, seat focus on that grid card once
+/// `/tmp/nativejelly-libgrid=<row>,<col>` — on the Library page, seat focus on that grid card once
 /// the grid has landed. Done when the page REPORTS focus there.
 pub(crate) fn libgrid_arm(app: &mut App, fr: &Frame) {
     if !app.scenarios.shots.libtype_done {
@@ -164,14 +164,14 @@ pub(crate) fn libgrid_arm(app: &mut App, fr: &Frame) {
     }
     let on_library = matches!(app.route(), AppArg::Library);
     let arm = &mut app.scenarios.shots.libgrid;
-    let Some((row, col)) = arm.pending("libgrid", || plx_base::devtrig::read("libgrid"), "focus seated at row {0} col {1}",
+    let Some((row, col)) = arm.pending("libgrid", || nj_base::devtrig::read("libgrid"), "focus seated at row {0} col {1}",
         fr, app.t0, || crate::app::bridge::Bridge::library_grid_position(&app.pages)) else { return };
     if on_library && arm.resend(fr.now) {
         crate::app::bridge::Bridge::library_command(&mut app.pages, LibraryCmd::FocusGrid { row, col });
     }
 }
 
-/// `/tmp/plxnative-libshelf=<shelf>,<col>` — on the Library page, seat focus on card `<col>` of
+/// `/tmp/nativejelly-libshelf=<shelf>,<col>` — on the Library page, seat focus on card `<col>` of
 /// hub shelf `<shelf>` (0 is Continue Watching when there is one) once the shelves have landed.
 /// Focus on a lower shelf scrolls the ones above it up under the tab bar. Done when the page
 /// REPORTS focus there.
@@ -181,7 +181,7 @@ pub(crate) fn libshelf_arm(app: &mut App, fr: &Frame) {
     }
     let on_library = matches!(app.route(), AppArg::Library);
     let arm = &mut app.scenarios.shots.libshelf;
-    let Some((shelf, col)) = arm.pending("libshelf", || plx_base::devtrig::read("libshelf"), "focus seated on shelf {0} col {1}",
+    let Some((shelf, col)) = arm.pending("libshelf", || nj_base::devtrig::read("libshelf"), "focus seated on shelf {0} col {1}",
         fr, app.t0, || crate::app::bridge::Bridge::library_shelf_position(&app.pages)) else { return };
     if on_library && arm.resend(fr.now) {
         crate::app::bridge::Bridge::library_command(&mut app.pages, LibraryCmd::FocusShelf { shelf, col });
@@ -212,18 +212,18 @@ impl SeatArm {
         };
         let Some(cell) = parse_cell(&v) else {
             #[cfg(feature = "devtriggers")]
-            plx_base::eventlog::log(&format!("BADTRIGGER {name} {v:?}: expected <a>,<b>"));
+            nj_base::eventlog::log(&format!("BADTRIGGER {name} {v:?}: expected <a>,<b>"));
             self.done = true;
             return None;
         };
         let say = |text: &str| text.replace("{0}", &cell.0.to_string()).replace("{1}", &cell.1.to_string());
         if at() == Some(cell) {
-            plx_base::eventlog::log(&format!("{name}: {}", say(reached)));
+            nj_base::eventlog::log(&format!("{name}: {}", say(reached)));
             self.done = true;
             return None;
         }
         if fr.now.wrapping_sub(t0) > CEILING_MS {
-            plx_base::eventlog::log(&format!("{name}: gave up; focus never reached {}", say("{0},{1}")));
+            nj_base::eventlog::log(&format!("{name}: gave up; focus never reached {}", say("{0},{1}")));
             self.done = true;
             return None;
         }
@@ -240,14 +240,14 @@ impl SeatArm {
     }
 }
 
-/// `/tmp/plxnative-libmenu=<sort|filter|type>[,<rest ms>]` — on the Library page, open that toolbar
+/// `/tmp/nativejelly-libmenu=<sort|filter|type>[,<rest ms>]` — on the Library page, open that toolbar
 /// menu, after `libgrid` (if armed) has seated its focus and, with a rest period, once the page has
 /// stopped moving ([`at_rest`]). Done when the menu SURFACE is up.
 pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
     if app.scenarios.shots.libmenu_done || !app.scenarios.shots.libgrid.done {
         return;
     }
-    let Some(v) = plx_base::devtrig::read("libmenu") else {
+    let Some(v) = nj_base::devtrig::read("libmenu") else {
         app.scenarios.shots.libmenu_done = true;
         return;
     };
@@ -258,18 +258,18 @@ pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
         "type" => LibraryMenuKind::Type,
         _other => {
             #[cfg(feature = "devtriggers")]
-            plx_base::eventlog::log(&format!("BADTRIGGER libmenu {_other:?}: expected sort, filter or type"));
+            nj_base::eventlog::log(&format!("BADTRIGGER libmenu {_other:?}: expected sort, filter or type"));
             app.scenarios.shots.libmenu_done = true;
             return;
         }
     };
     if crate::app::bridge::library_menu_up(&app.pages) {
-        plx_base::eventlog::log(&format!("libmenu: {name} menu up"));
+        nj_base::eventlog::log(&format!("libmenu: {name} menu up"));
         app.scenarios.shots.libmenu_done = true;
         return;
     }
     if fr.now.wrapping_sub(app.t0) > CEILING_MS {
-        plx_base::eventlog::log(&format!("libmenu: gave up; the {name} menu never opened"));
+        nj_base::eventlog::log(&format!("libmenu: gave up; the {name} menu never opened"));
         app.scenarios.shots.libmenu_done = true;
         return;
     }
@@ -282,7 +282,7 @@ pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
     }
 }
 
-/// `/tmp/plxnative-clockstop=<ms>` — simulator only: stop the clock sink at that movie position
+/// `/tmp/nativejelly-clockstop=<ms>` — simulator only: stop the clock sink at that movie position
 /// and leave the transport PLAYING, so the player holds a moment of playback that pausing would
 /// change (the Up Next tile, which exists only while playing). Logs once when the playhead is
 /// there. The stop is a stall of the sink's own making (`ffi_host.rs::stop_clock_at`), re-armed
@@ -292,10 +292,10 @@ pub(crate) fn clockstop_arm(app: &mut App, fr: &Frame) {
     {
         let arms = &mut app.scenarios.shots;
         if arms.clockstop.is_none() {
-            arms.clockstop = Some(plx_base::devtrig::read("clockstop").map(|v| match v.parse::<u32>() {
+            arms.clockstop = Some(nj_base::devtrig::read("clockstop").map(|v| match v.parse::<u32>() {
                 Ok(ms) => Some(ms),
                 Err(_) => {
-                    plx_base::eventlog::log(&format!("BADTRIGGER clockstop {v:?}: expected <ms>"));
+                    nj_base::eventlog::log(&format!("BADTRIGGER clockstop {v:?}: expected <ms>"));
                     None
                 }
             }).unwrap_or(None));
@@ -312,11 +312,11 @@ pub(crate) fn clockstop_arm(app: &mut App, fr: &Frame) {
         }
         if crate::app::playback::playpos() >= at {
             arms.clockstop_reached = true;
-            plx_base::eventlog::log(&format!("clockstop: clock held at {ms} ms, still playing"));
+            nj_base::eventlog::log(&format!("clockstop: clock held at {ms} ms, still playing"));
         } else if fr.now.wrapping_sub(app.t0) > CLOCKSTOP_CEILING_MS {
             // Reached or not, the arm stops holding the capture back (`pending`).
             arms.clockstop_reached = true;
-            plx_base::eventlog::log(&format!("clockstop: gave up; the playhead never reached {ms} ms"));
+            nj_base::eventlog::log(&format!("clockstop: gave up; the playhead never reached {ms} ms"));
         }
     }
     #[cfg(not(feature = "hostsim"))]

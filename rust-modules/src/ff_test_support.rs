@@ -66,7 +66,7 @@ pub(super) fn with_counting_listener(
     std::thread::scope(|sc| {
         sc.spawn(|| {
             while !stop.load(Ordering::Acquire) {
-                match plx_base::testnet::accept(&srv) {
+                match nj_base::testnet::accept(&srv) {
                     Ok((s, _)) => {
                         accepts.fetch_add(1, Ordering::AcqRel);
                         let (rq, st) = (&requests, &stop);
@@ -144,8 +144,8 @@ pub(super) fn opened_stream_with_aborted_lane(
 ) -> (Box<HttpStream>, Box<AuQueue>, CString, CString) {
     let ip = CString::new("127.0.0.1").unwrap();
     let path = CString::new("/library/parts/1/file.mkv").unwrap();
-    let mut hs = plx_net::stream::http_stream_boxed();
-    let rv = plx_net::stream::http_open(
+    let mut hs = nj_net::stream::http_stream_boxed();
+    let rv = nj_net::stream::http_open(
         &mut *hs,
         ip.as_ptr(),
         port as c_int,
@@ -172,9 +172,9 @@ pub(super) fn opened_stream_with_aborted_lane(
 /// test — `curlio`'s one-source registry is a process-global these two contend on with
 /// `curlio`'s own suite, in another module, which is exactly what `testlock` is for. `None`
 /// on a host with no libcurl at all, where these two would be grading nothing.
-pub(super) fn curl_gate() -> Option<plx_base::testlock::Serial> {
-    let g = plx_base::testlock::serial();
-    if plx_net::net::global_init() && crate::curlio::available() {
+pub(super) fn curl_gate() -> Option<nj_base::testlock::Serial> {
+    let g = nj_base::testlock::serial();
+    if nj_net::net::global_init() && crate::curlio::available() {
         Some(g)
     } else {
         None

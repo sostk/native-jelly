@@ -70,9 +70,9 @@ def verdict(log, returncode, counts):
 
 def run_fixture(binary, assets, fixture, mode, output, timeout):
     runtime = Path(tempfile.mkdtemp(prefix=fixture.name + '-' + mode + '-', dir=output))
-    (runtime / 'plxnative-recplay').write_text('v1\n' + mode + '\n' + str(fixture))
-    env = dict(os.environ, PLXNATIVE_RUNTIME_DIR=str(runtime), PLXNATIVE_APP_DIR=str(assets),
-               PLXNATIVE_WIN='1920x1080')
+    (runtime / 'nativejelly-recplay').write_text('v1\n' + mode + '\n' + str(fixture))
+    env = dict(os.environ, NJ_RUNTIME_DIR=str(runtime), NJ_APP_DIR=str(assets),
+               NJ_WIN='1920x1080')
     command = [str(binary), '127.0.0.1', '9']
     if sys.platform == 'darwin':
         command = ['/usr/bin/sandbox-exec', '-p',
@@ -83,7 +83,7 @@ def run_fixture(binary, assets, fixture, mode, output, timeout):
                                      timeout=timeout, check=False)
         except subprocess.TimeoutExpired as error:
             raise ValueError(f'{fixture.name}/{mode}: timeout; evidence {runtime}') from error
-    log = runtime / 'plxnative-events.log'
+    log = runtime / 'nativejelly-events.log'
     try:
         summary = verdict(log.read_text() if log.exists() else '', process.returncode,
                           expected_counts(fixture))
@@ -107,7 +107,7 @@ def main():
         parser.error(str(error))
     if args.timeout <= 0:
         parser.error('--timeout must be positive')
-    output = args.output or Path(tempfile.mkdtemp(prefix='plxnative-replay-gate-'))
+    output = args.output or Path(tempfile.mkdtemp(prefix='nativejelly-replay-gate-'))
     output.mkdir(parents=True, exist_ok=True)
     failures = []
     for fixture in fixtures:

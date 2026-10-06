@@ -133,9 +133,9 @@ pub(crate) fn event_body(
         "event_id": event_id,
         "platform": "native",
         "level": "error",
-        "release": concat!("plxnative@", env!("PLX_VERSION")),
+        "release": concat!("nativejelly@", env!("NJ_VERSION")),
         "environment": super::sender::ENVIRONMENT,
-        "sdk": {"name": "plxnative-handled", "version": env!("PLX_VERSION")},
+        "sdk": {"name": "nativejelly-handled", "version": env!("NJ_VERSION")},
         "logger": "playback",
         "transaction": "playback",
         "culprit": format!("playback::{code}"),
@@ -205,7 +205,7 @@ pub(crate) fn report_error(kind: FailureClass, context: PlaybackErrorContext, tr
         return;
     }
     let Some(event_id) = crate::diag::random_hex_id() else {
-        plx_base::eventlog::log("telemetry: no /dev/urandom — handled playback error was not queued");
+        nj_base::eventlog::log("telemetry: no /dev/urandom — handled playback error was not queued");
         return;
     };
     let body = event_body(
@@ -225,7 +225,7 @@ pub(crate) fn report_error(kind: FailureClass, context: PlaybackErrorContext, tr
     match super::spool::append_if(&record, super::consent::allows_errors) {
         Some(true) => super::flush_soon(),
         Some(false) => {
-            plx_base::eventlog::log("telemetry: handled playback error did not fit the durable spool")
+            nj_base::eventlog::log("telemetry: handled playback error did not fit the durable spool")
         }
         None => {} // consent changed while the event was being shaped
     }
@@ -346,7 +346,7 @@ pub(crate) fn preview_domains() -> String {
     };
     use crate::telemetry::classes::{AudioCodecClass as Z, DecisionCodeClass as N, VideoCodecClass as V};
     use FailureClass as F;
-    use plx_platform::i18n::msg;
+    use nj_platform::i18n::msg;
     // The labels are the reader's words; the codes after them are the wire values themselves.
     let domains: [(&str, String); 17] = [
         (msg::core_preview_domain_failure_kind(), codes(

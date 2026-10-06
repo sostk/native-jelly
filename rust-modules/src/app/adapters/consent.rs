@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn fixture_neither_reads_nor_publishes_the_global_snapshot() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let published_before = consent::current();
         let revision_before = consent::revision();
         let previous = decision("owned");
@@ -137,9 +137,9 @@ mod tests {
             }
         }
 
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let dir = std::env::temp_dir().join(format!(
-            "plxnative-consent-adapter-fixture-{}",
+            "nativejelly-consent-adapter-fixture-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -162,7 +162,7 @@ mod tests {
     /// television — and must not run that call on the caller's own thread, since the caller here
     /// is the frame loop's message dispatch (`app::bridge::AppRig::deliver`). `release/v0.6`'s
     /// equivalent (`telemetry::mod.rs::record_with_receipt`/`forget_with_receipt`) submitted the
-    /// same work to `plx_base::storage_worker` for exactly this reason; this test pins the live
+    /// same work to `nj_base::storage_worker` for exactly this reason; this test pins the live
     /// adapter to the same off-thread contract.
     #[test]
     fn commit_live_persists_off_the_calling_thread() {
@@ -174,9 +174,9 @@ mod tests {
             }
         }
 
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let dir = std::env::temp_dir().join(format!(
-            "plxnative-consent-adapter-live-thread-{}",
+            "nativejelly-consent-adapter-live-thread-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -191,7 +191,7 @@ mod tests {
         let mut adapter = ConsentAdapter::live();
 
         adapter.commit(&previous, &next);
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert_ne!(
             crate::telemetry::persistence::last_call_thread(),
             Some(caller_thread),
@@ -199,7 +199,7 @@ mod tests {
         );
 
         adapter.forget(&next);
-        plx_base::storage_worker::drain_for_test();
+        nj_base::storage_worker::drain_for_test();
         assert_ne!(
             crate::telemetry::persistence::last_call_thread(),
             Some(caller_thread),
@@ -222,10 +222,10 @@ mod tests {
             }
         }
 
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let saved = consent::current();
         let dir = std::env::temp_dir().join(format!(
-            "plxnative-consent-adapter-oneoff-{}",
+            "nativejelly-consent-adapter-oneoff-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -273,10 +273,10 @@ mod tests {
             }
         }
 
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let saved = consent::current();
         let dir = std::env::temp_dir().join(format!(
-            "plxnative-consent-adapter-held-{}",
+            "nativejelly-consent-adapter-held-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);

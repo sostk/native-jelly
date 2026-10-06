@@ -1,10 +1,10 @@
 //! Related-shelf geometry and actions for [`super::DetailScreen`].
 
 use crate::metadata::Detail;
-use crate::pms::PmsMovie;
+use crate::catalog_fetch::PmsMovie;
 use crate::screens::registry::tile_facts;
 use crate::ui::card_row::{self, CardRow, RowStyle};
-use plx_machine::machine::GroupId;
+use nj_machine::machine::GroupId;
 use crate::ui::widgets::Art;
 use crate::ui::{theme, Painter, Rect};
 
@@ -30,7 +30,7 @@ pub(crate) fn locate(key: u32) -> Option<usize> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Action {
     None,
-    OpenDetail(crate::plex::ServerId, String),
+    OpenDetail(crate::catalog::ServerId, String),
 }
 
 pub(crate) fn action(d: &Detail, key: u32) -> Action {
@@ -77,11 +77,11 @@ pub(crate) fn draw(
     row: &CardRow,
     top: f32,
     focused: Option<usize>,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let lift = row.lift();
     p.text(
-        plx_platform::i18n::msg::browse_detail_related_c().as_ptr(),
+        nj_platform::i18n::msg::browse_detail_related_c().as_ptr(),
         crate::ui::consts::MARGIN_X,
         top - lift,
         theme::size::HEADLINE,
@@ -100,7 +100,7 @@ pub(crate) fn draw_strip(
     row: &CardRow,
     top: f32,
     focused: Option<usize>,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     card_row::strip(
         p,
@@ -127,7 +127,7 @@ pub(crate) fn draw_focused(
     index: usize,
     top: f32,
     press: f32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     draw_focused_in(p, &d.related, row, index, top, press, measure);
 }
@@ -140,7 +140,7 @@ pub(crate) fn draw_focused_in(
     index: usize,
     top: f32,
     press: f32,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) {
     let Some(item) = items.get(index) else {
         return;

@@ -99,8 +99,8 @@ SRC=rust-modules/src
 # below them and stays as it is, UNLESS the files it policed there were moved out: `machine` came
 # from ui/, so the rules scoped to $SRC/ui read $SRC_MACHINE too. `platform` is the layer that held
 # `tv/` and `storage/`, and the rules that name a moved module by path (`crate::tv::window::`,
-# `crate::storage::`) now spell it `plx_platform::`. `gfx` held `text.rs`, the one file the textmeasure
-# rule exempts, and the rule's pattern now accepts `plx_gfx::text::`. `net` held the loopback fixtures
+# `crate::storage::`) now spell it `nj_platform::`. `gfx` held `text.rs`, the one file the textmeasure
+# rule exempts, and the rule's pattern now accepts `nj_gfx::text::`. `net` held the loopback fixtures
 # the `threads` gate skips as test code; they are `cfg(any(test, feature = "test-support"))` now,
 # which it accepts.
 SRC_BASE=rust-modules/base/src
@@ -515,7 +515,7 @@ hubs_owner_matches=$({
   owner_declarations "$hubs_facades" "$hubs_selectors" \
     'PmsState|PmsAdapter|HubsStore|Landing|Src|SourceBuild' \
     "$SRC/pms.rs" "$SRC/pms/initial.rs" "$SRC/stores/hubs.rs"
-  grep_code_owner "(crate::pms|crate::stores::hubs|stores::hubs)::($hubs_facades)\("
+  grep_code_owner "(crate::catalog_fetch|crate::stores::hubs|stores::hubs)::($hubs_facades)\("
 } | sort -u)
 if [ -z "$hubs_owner_matches" ]; then
   ok "hubs-owner: zero global storage, transport, selectors, and free facades"
@@ -701,7 +701,7 @@ gate sessionwrite 'session::load\(' "$SRC/screens" "$SRC/ui" "$SRC_MACHINE" "$SR
 # `crate::{gfx,text,paths,task}`). A ui-owned sweep that needs the app's removal rule takes it as an
 # injected `fn` (`ui::rec::erase_owned_artifacts`). Zero, no allowlist. The wider table is not a
 # grep yet: ui/ still names other application modules, mostly from tests and dev instruments.
-gate uistorage '(crate|super|plx_platform)::storage::' "$SRC/ui" "$SRC_MACHINE"
+gate uistorage '(crate|super|nj_platform)::storage::' "$SRC/ui" "$SRC_MACHINE"
 
 # legacypage: the word itself, anywhere under src — a doc that still describes the type is as much
 # a hit as a declaration, which is the point (nothing compiles the prose either).
@@ -749,7 +749,7 @@ else fail "sibling: $sib_bad file(s) name a sibling screen (use crate::screens::
 # only finished for as long as nothing re-introduces the shape.
 # ============================================================================================
 
-# textmeasure (phase 12, D4 — ZERO now, was an allowlist): crate::text::(text_width|elide|cap_h) (`plx_gfx::text::` since the gfx split)
+# textmeasure (phase 12, D4 — ZERO now, was an allowlist): crate::text::(text_width|elide|cap_h) (`nj_gfx::text::` since the gfx split)
 # outside the three files that own the raw primitives (`gfx/src/text.rs`, `ui/text_view.rs`,
 # `ui/text_buffer.rs` — the TextView component built directly on them) and the BODY of an
 # `impl … Measure for …` block. That second exemption is structural, not a path: `Measure`
@@ -777,10 +777,10 @@ while IFS= read -r f; do
   done < <(awk '
     skip>0 { n=gsub(/\{/,"{"); m=gsub(/\}/,"}"); depth+=n-m; if (depth<=0) skip=0; next }
     /impl[ \t].*Measure.*[ \t]for[ \t]/ { skip=1; depth=gsub(/\{/,"{")-gsub(/\}/,"}"); if (depth<=0) skip=0; next }
-    { print NR":"$0 }' "$f" | grep -E '(crate|plx_gfx)::text::(text_width|elide|cap_h)\(' | grep -vE '^[0-9]+:[[:space:]]*//' || true)
+    { print NR":"$0 }' "$f" | grep -E '(crate|nj_gfx)::text::(text_width|elide|cap_h)\(' | grep -vE '^[0-9]+:[[:space:]]*//' || true)
 # ...over the files that spell a raw measurement call at all: the `awk` below only DROPS the body of
 # an `impl … Measure for …` block, so a file with no raw call has nothing for it to find.
-done < <(grep -rlE --include='*.rs' '(crate|plx_gfx)::text::(text_width|elide|cap_h)\(' "$SRC" "$SRC_GFX" 2>/dev/null | sort)
+done < <(grep -rlE --include='*.rs' '(crate|nj_gfx)::text::(text_width|elide|cap_h)\(' "$SRC" "$SRC_GFX" 2>/dev/null | sort)
 if [ "$tm_bad" -eq 0 ]; then ok "textmeasure"; else fail "textmeasure: $tm_bad line(s) outside the Measure seam"; fi
 
 # dt (phase 12, D4 — ZERO now, was an allowlist): idle::dt() (deleted from machine/src/idle.rs entirely —
@@ -821,7 +821,7 @@ gate_zero hittest 'pointer_focus\(|\b(failure_quality|icon|scrub)_hit\(' "$SRC/a
 # frame: the three privileged OS-primitive calls, ZERO-TOLERANCE outside `app/run.rs` (D4) — no
 # allowlist file, because there is exactly one legitimate home once D1 lands: `app/run.rs` is the
 # frame loop, and `app/bridge.rs`'s `Rig` impl delegates to `run::rig_opaque_route`/
-# `rig_clear_opaque_region` (a one-line pass-through) rather than naming `plx_platform::tv::window::` itself,
+# `rig_clear_opaque_region` (a one-line pass-through) rather than naming `nj_platform::tv::window::` itself,
 # which is what keeps this gate's text out of bridge.rs without splitting the `impl Rig<AppHost>
 # for Bridge` block (a trait's impl for a type is one syntactic unit; it carries two dozen other
 # methods beside these three). A self-test that spells two of the three call shapes as STRING
@@ -832,7 +832,7 @@ gate_zero hittest 'pointer_focus\(|\b(failure_quality|icon|scrub)_hit\(' "$SRC/a
 # double-quote-depth tracking `tmppath` below uses), rather than exempting files by name: an
 # actual call typed outside a string still fails this gate. `// `-prefixed comment lines (`app/run.rs` keeps one, describing where a call
 # used to live) are stripped the same way `grep_code` above does for every other rule.
-frame_pat='(crate|plx_platform)::tv::window::(pump_bus|opaque_route|clear_opaque_region)\('
+frame_pat='(crate|nj_platform)::tv::window::(pump_bus|opaque_route|clear_opaque_region)\('
 frame_bad=0
 while IFS= read -r f; do
   [ "$f" = "$SRC/app/run.rs" ] && continue
@@ -881,7 +881,7 @@ else
 fi
 
 # fnlen: app/run.rs::run <= 200 lines, run_application (app/mod.rs, the D4 skeleton) <= 10 and
-# plex_run (port.rs: install, then hand over) <= 10 — counted by brace
+# nj_run (port.rs: install, then hand over) <= 10 — counted by brace
 # depth from the `fn` line to its matching close, not by grep pattern.
 fn_body_lines() {
   # fn_body_lines <file> <fn-name-pattern> — prints the line count of the first matching fn's body
@@ -900,9 +900,9 @@ else fail "fnlen: app/run.rs::run is ${run_len:-unknown} lines, budget 200 — a
 runapp_len=$(fn_body_lines "$SRC/app/mod.rs" 'run_application')
 if [ -n "$runapp_len" ] && [ "$runapp_len" -le 10 ]; then ok "fnlen: run_application (app/mod.rs) ($runapp_len lines)"
 else fail "fnlen: run_application (app/mod.rs) is ${runapp_len:-unknown} lines, budget 10"; fi
-plexrun_len=$(fn_body_lines "$SRC/port.rs" 'plex_run')
-if [ -n "$plexrun_len" ] && [ "$plexrun_len" -le 10 ]; then ok "fnlen: plex_run (port.rs) ($plexrun_len lines)"
-else fail "fnlen: plex_run (port.rs) is ${plexrun_len:-unknown} lines, budget 10"; fi
+plexrun_len=$(fn_body_lines "$SRC/port.rs" 'nj_run')
+if [ -n "$plexrun_len" ] && [ "$plexrun_len" -le 10 ]; then ok "fnlen: nj_run (port.rs) ($plexrun_len lines)"
+else fail "fnlen: nj_run (port.rs) is ${plexrun_len:-unknown} lines, budget 10"; fi
 
 # testmod: `#[cfg(test)] mod` count in app/mod.rs = 0 (D4/D8) — every test module named in D8's
 # table is meant to have moved to its subject's own file by the time this gate is added.
@@ -952,9 +952,9 @@ threads_declared=$(sed -n 's/^# count: *//p' ci/allow/threads.txt | head -1)
 if [ "$threads_bad" -eq "${threads_declared:-0}" ]; then ok "threads"
 else fail "threads: $threads_bad line(s) outside ci/allow/threads.txt (declared count is exactly ${threads_declared:-0}, not a ceiling)"; fi
 
-# tmppath: a literal `/tmp/plxnative-` string outside dev.rs and the log sinks, = 0 (D4). The
+# tmppath: a literal `/tmp/nativejelly-` string outside dev.rs and the log sinks, = 0 (D4). The
 # earlier version matched only a literal and a filesystem-open VERB co-occurring on the SAME
-# LINE, which passed a two-line split (`let p = format!("/tmp/plxnative-x"); File::open(p)`)
+# LINE, which passed a two-line split (`let p = format!("/tmp/nativejelly-x"); File::open(p)`)
 # straight through. Rewritten as the D4 wording actually reads: strip comments, then find the
 # literal, then walk the CALL that encloses it — the same paren-depth-outside-literals shape
 # `tmppath`'s own header used to point at `ci/check-scrub` for; that script does not exist
@@ -966,15 +966,15 @@ else fail "threads: $threads_bad line(s) outside ci/allow/threads.txt (declared 
 # maintains a stack of the CALL NAME behind every currently-open, not-yet-closed `(` (the token
 # immediately before it) — which is what lets a match inside `crate::eventlog::log(&format!("…"))`
 # see BOTH enclosing calls, `format!` innermost and the log call beneath it, across as many lines as the
-# call spans. A hit is a `/tmp/plxnative-` match that is NOT inside a string, or is inside one but
+# call spans. A hit is a `/tmp/nativejelly-` match that is NOT inside a string, or is inside one but
 # no enclosing call on that stack is `log`/`crate::eventlog::log`/`log!` — i.e. exactly the two exemptions
-# D4 names, comment and log-message text, and nothing else (a bare `let s = "/tmp/plxnative-x";`
+# D4 names, comment and log-message text, and nothing else (a bare `let s = "/tmp/nativejelly-x";`
 # with no log() around it is a hit, deliberately, even though it opens nothing — the spec's own
 # wording is "any literal…unless", not "any literal that is also an open"). `dev.rs` is the one
 # structural exemption; a second category ("the log sinks") is named in the spec but resolves to
 # NOTHING in this tree today — `eventlog::events_log`/`app/boot.rs`'s crash-log open both build the
-# path through `paths::in_runtime_dir("plxnative-…")`, a bare filename with no `/tmp/` prefix, so
-# neither one is a `/tmp/plxnative-` literal in the first place and there is no second file to
+# path through `paths::in_runtime_dir("nativejelly-…")`, a bare filename with no `/tmp/` prefix, so
+# neither one is a `/tmp/nativejelly-` literal in the first place and there is no second file to
 # name here (re-verify this if a log sink is ever given a hardcoded `/tmp/` path).
 tmp_hits=$(python3 - "$SRC" "$SRC_BASE" "$SRC_MACHINE" "$SRC_PLATFORM" "$SRC_GFX" "$SRC_NET" <<'PY'
 import os, sys
@@ -982,8 +982,8 @@ import os, sys
 src = sys.argv[1]
 roots = sys.argv[1:]
 exempt_files = {os.path.join(src, "dev.rs")}
-needle = "/tmp/plxnative-"
-log_names = {"log", "crate::eventlog::log", "plx_base::eventlog::log", "log!"}
+needle = "/tmp/nativejelly-"
+log_names = {"log", "crate::eventlog::log", "nj_base::eventlog::log", "log!"}
 
 def scan(path, text):
     hits = []
@@ -1065,7 +1065,7 @@ tmp_status=$?
 if [ "$tmp_status" -eq 0 ] && [ -z "$tmp_hits" ]; then ok "tmppath"
 else
   echo "$tmp_hits" | sed 's/^/    /'
-  fail "tmppath: $(echo "$tmp_hits" | grep -c . ) line(s) of a literal /tmp/plxnative- path outside dev.rs, not comment or log-message text"
+  fail "tmppath: $(echo "$tmp_hits" | grep -c . ) line(s) of a literal /tmp/nativejelly- path outside dev.rs, not comment or log-message text"
 fi
 
 

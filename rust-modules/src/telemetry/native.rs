@@ -3,7 +3,7 @@
 //! The SDK is linked only on the television and is built with `SENTRY_TRANSPORT=none`. Its native
 //! backend owns the fatal-signal handler and an out-of-process daemon: on a fault the daemon can
 //! still read the stopped process, walk ARM frame chains and copy registers into a JSON event. It
-//! then launches this same executable with the envelope path. [`plx_sentry_spool_external`] is
+//! then launches this same executable with the envelope path. [`nj_sentry_spool_external`] is
 //! that executable's deliberately tiny alternate entry point; it moves the envelope into a
 //! private pending directory and exits before the ordinary boot opens or truncates any log.
 //!
@@ -26,10 +26,10 @@
 
 use std::path::{Path, PathBuf};
 
-const DATABASE_DIR: &str = "plxnative-sentry-db";
-const PENDING_DIR: &str = "plxnative-sentry-pending";
+const DATABASE_DIR: &str = "nativejelly-sentry-db";
+const PENDING_DIR: &str = "nativejelly-sentry-pending";
 
-/// Keep the capture backend alive until the app leaves `plex_run` cleanly (see the `Drop` impl).
+/// Keep the capture backend alive until the app leaves `nj_run` cleanly (see the `Drop` impl).
 pub(crate) struct Guard;
 
 /// Enough identity to pair a native envelope with the crash log's record of the same death. There
@@ -41,7 +41,7 @@ pub(crate) struct CrashKey {
 }
 
 /// **A Guard dropped by a panic's unwind leaves the backend armed.** The Guard lives in
-/// `plex_run`'s frame (inside `App`), so a panic that drops it is unwinding towards that
+/// `nj_run`'s frame (inside `App`), so a panic that drops it is unwinding towards that
 /// `extern "C"` boundary, and the boundary aborts the process. Tearing the backend down here — stopping it and deleting its
 /// database — would take the SIGABRT handler away microseconds before the abort it exists to
 /// capture, so no envelope would ever be written. Only a clean exit shuts it down.
@@ -88,11 +88,11 @@ pub(crate) fn sync_change(c: &super::consent::Consent) {
 }
 
 fn database_dir() -> PathBuf {
-    plx_base::paths::in_runtime_dir(DATABASE_DIR)
+    nj_base::paths::in_runtime_dir(DATABASE_DIR)
 }
 
 fn pending_dir() -> PathBuf {
-    plx_base::paths::in_runtime_dir(PENDING_DIR)
+    nj_base::paths::in_runtime_dir(PENDING_DIR)
 }
 
 fn remove_database() {
@@ -202,7 +202,7 @@ fn spool_external_in(source: &Path, database: &Path, dest_dir: &Path) -> bool {
 /// # Safety
 /// `path` must be null or point to a valid NUL-terminated string for the duration of the call.
 #[no_mangle]
-pub unsafe extern "C" fn plx_sentry_spool_external(
+pub unsafe extern "C" fn nj_sentry_spool_external(
     path: *const std::os::raw::c_char,
 ) -> std::os::raw::c_int {
     if path.is_null() {
@@ -283,8 +283,8 @@ const USER_FIELDS: &[&str] = &["id"];
 const SDK_FIELDS: &[&str] = &["name", "version"];
 const OS_FIELDS: &[&str] = &["type", "name", "version", "build", "kernel_version"];
 const WEBOS_FIELDS: &[&str] = &["type", "name", "release", "codename", "api"];
-/// issue #74: `rtkmem` (`ok`/`missing`/`n/a`, from [`plx_platform::tv::sandbox::context`]) and `install`
-/// (`devmode`/`homebrew`/`unknown`, from [`plx_base::paths::install_kind`]) ride on every native
+/// issue #74: `rtkmem` (`ok`/`missing`/`n/a`, from [`nj_platform::tv::sandbox::context`]) and `install`
+/// (`devmode`/`homebrew`/`unknown`, from [`nj_base::paths::install_kind`]) ride on every native
 /// crash report beside the existing hardware compatibility class — the same two closed-enum
 /// sandbox facts PostHog's usage envelope carries as super-properties (`telemetry::posthog`'s
 /// `envelope_props`), so a chassis's crash-at-start rate is queryable by sandbox on either side.
@@ -525,10 +525,10 @@ pub(crate) fn preview_event() -> Vec<u8> {
         "timestamp": "<crash time>",
         "platform": "native",
         "level": "fatal",
-        "release": concat!("plxnative@", env!("PLX_VERSION")),
+        "release": concat!("nativejelly@", env!("NJ_VERSION")),
         "environment": super::sender::ENVIRONMENT,
         "dist": "<ELF build id>",
-        "sdk": {"name": "plxnative", "version": "0.16.5"},
+        "sdk": {"name": "nativejelly", "version": "0.16.5"},
         "user": {"id": PREVIEW_USER_ID},
         "contexts": {
             "os": {"type": "os", "name": "Linux", "version": "<kernel release>",
@@ -547,11 +547,11 @@ pub(crate) fn preview_event() -> Vec<u8> {
             "stacktrace": {
                 "frames": [
                     {"instruction_addr": "<caller address>", "symbol_addr": "<symbol address>",
-                        "function": "<compiled function>", "package": "/private/app/plxnative",
+                        "function": "<compiled function>", "package": "/private/app/nativejelly",
                         "filename": "/private/source/example.rs", "lineno": "<source line>",
                         "colno": "<source column>", "in_app": true, "trust": "fp",
                         "addr_mode": "abs"},
-                    {"instruction_addr": "<fault address>", "trust": "context", "package": "/private/app/plxnative"}
+                    {"instruction_addr": "<fault address>", "trust": "context", "package": "/private/app/nativejelly"}
                 ],
                 "registers": {"r0": "<address>", "r1": "<address>", "r2": "<address>",
                     "r3": "<address>", "r4": "<address>", "r5": "<address>",
@@ -566,7 +566,7 @@ pub(crate) fn preview_event() -> Vec<u8> {
             "stacktrace": {
                 "frames": [{"instruction_addr": "<thread instruction address>",
                     "symbol_addr": "<symbol address>", "function": "<compiled function>",
-                    "package": "/private/app/plxnative", "filename": "/private/source/example.rs",
+                    "package": "/private/app/nativejelly", "filename": "/private/source/example.rs",
                     "lineno": "<source line>", "colno": "<source column>", "in_app": true,
                     "trust": "context", "addr_mode": "abs"}],
                 "registers": {"r0": "<address>", "r1": "<address>", "r2": "<address>",
@@ -577,8 +577,8 @@ pub(crate) fn preview_event() -> Vec<u8> {
                     "pc": "<address>", "cpsr": "<flags>"}
             }}]},
         "debug_meta": {"images": [{
-            "type": "elf", "code_file": "/private/app/plxnative",
-            "debug_file": "/private/app/plxnative.debug", "code_id": "<ELF code id>",
+            "type": "elf", "code_file": "/private/app/nativejelly",
+            "debug_file": "/private/app/nativejelly.debug", "code_id": "<ELF code id>",
             "debug_id": "<ELF debug id>", "image_addr": "<load address>",
             "image_size": "<bytes>", "image_vmaddr": "<ELF virtual address>", "arch": "arm"
         }]}
@@ -752,7 +752,7 @@ fn read_pending_in(dir: &Path) -> Vec<PendingNative> {
         }
     }
     if rejected != 0 || deferred != 0 {
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "telemetry: native crash envelopes rejected={rejected} deferred={deferred}"
         ));
     }
@@ -770,7 +770,7 @@ fn import_all() {
         }
     }
     if queued != 0 {
-        plx_base::eventlog::log(&format!("telemetry: native crash envelopes queued={queued}"));
+        nj_base::eventlog::log(&format!("telemetry: native crash envelopes queued={queued}"));
     }
 }
 
@@ -799,7 +799,7 @@ mod sdk {
         fn sentry_options_set_crash_reporting_mode(options: *mut c_void, value: c_int);
         fn sentry_init(options: *mut c_void) -> c_int;
         fn sentry_close() -> c_int;
-        fn plx_sentry_set_webos_context(
+        fn nj_sentry_set_webos_context(
             name: *const c_char,
             release: *const c_char,
             codename: *const c_char,
@@ -810,8 +810,8 @@ mod sdk {
             rtkmem: *const c_char,
             install: *const c_char,
         );
-        fn plx_sentry_set_user_id(id: *const c_char);
-        fn plx_sentry_window_breadcrumb(stage: *const c_char, playing: c_int,
+        fn nj_sentry_set_user_id(id: *const c_char);
+        fn nj_sentry_window_breadcrumb(stage: *const c_char, playing: c_int,
             major: c_int, minor: c_int, patch: c_int, display: c_int, surface: c_int);
     }
 
@@ -824,7 +824,7 @@ mod sdk {
         }
         let id = id.filter(|id| !id.is_empty()).and_then(cstring);
         unsafe {
-            plx_sentry_set_user_id(id.as_ref().map_or(std::ptr::null(), |id| id.as_ptr()));
+            nj_sentry_set_user_id(id.as_ref().map_or(std::ptr::null(), |id| id.as_ptr()));
         }
     }
 
@@ -834,7 +834,7 @@ mod sdk {
         let version = observation.version.map(|v| v.map(c_int::from)).unwrap_or([-1; 3]);
         let bit = |v: Option<bool>| v.map(c_int::from).unwrap_or(-1);
         unsafe {
-            plx_sentry_window_breadcrumb(stage.as_ptr(), bit(observation.playing),
+            nj_sentry_window_breadcrumb(stage.as_ptr(), bit(observation.playing),
                 version[0], version[1], version[2], bit(observation.display), bit(observation.surface));
         }
     }
@@ -854,7 +854,7 @@ mod sdk {
             return;
         };
         let Some(handler) = cstring(
-            plx_base::paths::app_dir()
+            nj_base::paths::app_dir()
                 .join("sentry-crash")
                 .as_os_str()
                 .as_encoded_bytes(),
@@ -867,7 +867,7 @@ mod sdk {
         let Some(executable) = cstring(executable_path.as_os_str().as_encoded_bytes()) else {
             return;
         };
-        let Some(release) = cstring(format!("plxnative@{}", env!("PLX_VERSION"))) else {
+        let Some(release) = cstring(format!("nativejelly@{}", env!("NJ_VERSION"))) else {
             return;
         };
         let Some(environment) = cstring(super::super::sender::ENVIRONMENT) else {
@@ -876,19 +876,19 @@ mod sdk {
         let Some(dist) = cstring(super::super::sentry::build_id()) else {
             return;
         };
-        let webos = plx_platform::tv::device::info();
+        let webos = nj_platform::tv::device::info();
         let webos_name = cstring(webos.name.as_bytes());
         let webos_release = cstring(webos.release.as_bytes());
         let webos_codename = cstring(webos.codename.as_bytes());
         let webos_api = cstring(webos.api.as_bytes());
-        let hardware = plx_platform::tv::device::device();
+        let hardware = nj_platform::tv::device::device();
         let model = cstring(hardware.model.as_bytes());
         let soc = cstring(hardware.board.as_bytes());
         let hardware_revision = cstring(hardware.hw_revision.as_bytes());
         // issue #74: the same two closed-enum sandbox facts the PostHog envelope carries, so a
         // native crash report can be graded by chassis AND sandbox without a second dashboard.
-        let rtkmem = cstring(plx_platform::tv::sandbox::context().as_bytes());
-        let install = cstring(plx_base::paths::install_kind().as_bytes());
+        let rtkmem = cstring(nj_platform::tv::sandbox::context().as_bytes());
+        let install = cstring(nj_base::paths::install_kind().as_bytes());
         let ptr = |value: &Option<CString>| {
             value
                 .as_ref()
@@ -914,7 +914,7 @@ mod sdk {
             sentry_options_set_debug(options, 0);
             sentry_options_set_crash_reporting_mode(options, 1); // NATIVE, no minidump
             if sentry_init(options) == 0 {
-                plx_sentry_set_webos_context(
+                nj_sentry_set_webos_context(
                     ptr(&webos_name),
                     ptr(&webos_release),
                     ptr(&webos_codename),
@@ -929,10 +929,10 @@ mod sdk {
                 // After ACTIVE, because `set_user` refuses to touch a backend that is not running;
                 // still inside `start`, so no caller can observe an active backend with no id.
                 set_user(super::super::consent::errors_id().as_deref());
-                plx_base::eventlog::log("telemetry: native ARM crash capture active");
+                nj_base::eventlog::log("telemetry: native ARM crash capture active");
             } else {
                 // `sentry_init` takes ownership even when backend startup fails.
-                plx_base::eventlog::log(
+                nj_base::eventlog::log(
                     "telemetry: native crash capture unavailable; C fallback remains active",
                 );
             }
@@ -1035,7 +1035,7 @@ mod tests {
     #[test]
     #[ignore = "requires the envelope produced by ci/window-breadcrumb-probe.c on the TV"]
     fn device_window_breadcrumbs_survive_the_real_importer() {
-        let path = std::env::var("PLX_WINDOW_PROBE_ENVELOPE").expect("set PLX_WINDOW_PROBE_ENVELOPE");
+        let path = std::env::var("NJ_WINDOW_PROBE_ENVELOPE").expect("set NJ_WINDOW_PROBE_ENVELOPE");
         let bytes = std::fs::read(path).unwrap();
         let (_, body, _) = event_from_envelope(&bytes).expect("device envelope must import");
         let event: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -1104,9 +1104,9 @@ mod tests {
 
     #[test]
     fn external_mode_moves_only_the_sdks_regular_envelope() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let root =
-            std::env::temp_dir().join(format!("plxnative-sentry-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("nativejelly-sentry-test-{}", std::process::id()));
         let database = root.join("db");
         let external = database.join("external");
         let pending = root.join("pending");
@@ -1140,7 +1140,7 @@ mod tests {
                 "request": {"url": "must-not-pass"},
                 "extra": {"future_sdk_field": "must-not-pass"},
                 "arbitrary": "must-not-pass",
-                "sdk": {"name": "plxnative", "version": "0.16.5", "future": "must-not-pass"},
+                "sdk": {"name": "nativejelly", "version": "0.16.5", "future": "must-not-pass"},
                 "contexts": {
                     "os": {"name": "Linux", "future": "must-not-pass"},
                     "webos": {"type": "webos", "name": "webOS TV", "release": "4.10.2",
@@ -1153,7 +1153,7 @@ mod tests {
                 "exception": {"values": [{
                     "mechanism": {"meta": {"signal": {"number": 11, "name": "SIGSEGV"}}},
                     "stacktrace": {"frames": [
-                    {"instruction_addr": "0x1234", "package": "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/plxnative", "vars": "must-not-pass"},
+                    {"instruction_addr": "0x1234", "package": "/media/developer/apps/usr/palm/applications/com.sostk.nativejelly/nativejelly", "vars": "must-not-pass"},
                     {"instruction_addr": "0xf00", "filename": "/private/source/main.c"}
                 ], "registers": {"pc": "0x1234", "sp": "0xbeef", "future": "must-not-pass"},
                     "future": "must-not-pass"}, "future": "must-not-pass"}]},
@@ -1162,7 +1162,7 @@ mod tests {
                     {"package": "/lib/libc-2.24.so"}
                 ]}}]},
                 "debug_meta": {"future": "must-not-pass", "images": [{
-                    "type": "elf", "code_file": "/media/developer/apps/x/plxnative",
+                    "type": "elf", "code_file": "/media/developer/apps/x/nativejelly",
                     "image_addr": "0x10000", "image_size": 4096,
                     "debug_id": "44332211-6655-8877-9900-aabbccddeeff",
                     "future": "must-not-pass"
@@ -1200,9 +1200,9 @@ mod tests {
         );
         assert_eq!(
             v["exception"]["values"][0]["stacktrace"]["frames"][0]["package"],
-            "plxnative"
+            "nativejelly"
         );
-        assert_eq!(v["debug_meta"]["images"][0]["code_file"], "plxnative");
+        assert_eq!(v["debug_meta"]["images"][0]["code_file"], "nativejelly");
         assert_eq!(v["debug_meta"]["images"][0]["image_size"], 4096);
         assert_eq!(v["contexts"]["webos"]["release"], "4.10.2");
         assert!(v["contexts"]["webos"].get("model").is_none());
@@ -1272,7 +1272,7 @@ mod tests {
     /// an `extern "C"` boundary in an abort, and that abort is the crash worth capturing.
     #[test]
     fn a_guard_dropped_while_unwinding_keeps_the_native_database() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let db = database_dir();
         std::fs::create_dir_all(&db).unwrap();
         let unwound = std::panic::catch_unwind(|| {
@@ -1291,7 +1291,7 @@ mod tests {
     /// The other branch: a clean exit still tears the backend down and removes its database.
     #[test]
     fn a_guard_dropped_on_a_clean_exit_tears_the_backend_down() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let db = database_dir();
         std::fs::create_dir_all(&db).unwrap();
         drop(Guard);
@@ -1307,7 +1307,7 @@ mod tests {
     fn an_unreadable_envelope_is_deferred_and_a_malformed_one_deleted() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir()
-            .join(format!("plxnative-sentry-defer-test-{}", std::process::id()));
+            .join(format!("nativejelly-sentry-defer-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let unreadable_id = "91ad1844535b4dac89d95384165d703c";

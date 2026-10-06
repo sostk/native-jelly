@@ -41,9 +41,9 @@ const ADMIN_ID: i64 = 4_242;
 /// because `false` only meant "not owned", which is true of a household server as well. `outside`
 /// makes a claim, and the claim was wrong: the assertion below wanted the credit to go away
 /// BECAUSE this machine is the house's, and stating the opposite meant it passed for the right
-/// value and the wrong reason. See [`crate::plex::GrantEvidence::household`].
-fn house_evidence() -> crate::plex::GrantEvidence {
-    crate::plex::GrantEvidence::household(ADMIN_ID)
+/// value and the wrong reason. See [`crate::catalog::GrantEvidence::household`].
+fn house_evidence() -> crate::catalog::GrantEvidence {
+    crate::catalog::GrantEvidence::household(ADMIN_ID)
 }
 /// A copy on server `s`, in `library`, owned by `owner` (`""` = this account), at class `res`.
 fn copy(s: u16, library: &str, owner: &str, rk: &str, res: &str) -> AltCopy {
@@ -405,23 +405,23 @@ fn the_headless_stand_in_shows_the_case_the_ordering_rule_turns_on() {
 /// the assertion below that a REFRESH with no mount and no phase at all still rebuilds.
 #[test]
 fn a_re_described_source_restamps_the_credit_on_an_open_page() {
-    struct Fresh(#[allow(dead_code)] plx_base::testlock::Serial);
+    struct Fresh(#[allow(dead_code)] nj_base::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             test_store().run(crate::stores::metadata::MetadataCmd::Clear);
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
-    let _g = Fresh(plx_base::testlock::serial());
-    crate::plex::reset_servers_for_test();
-    let house = crate::plex::register_for_test("alt-house", "127.0.0.1", 1, "t", "cid");
-    let friend = crate::plex::register_for_test("alt-friend", "127.0.0.1", 2, "t", "cid");
+    let _g = Fresh(nj_base::testlock::serial());
+    crate::catalog::reset_servers_for_test();
+    let house = crate::catalog::register_for_test("alt-house", "127.0.0.1", 1, "t", "cid");
+    let friend = crate::catalog::register_for_test("alt-friend", "127.0.0.1", 2, "t", "cid");
     assert_eq!((house, friend), (sid(0), sid(1)), "slots 0 and 1");
 
     // what a build without the rule published: the household's own server wearing the account
     // holder's handle, and the panel's rows stamped from it
-    crate::plex::describe_server(house, "Mac mini", "admin", house_evidence());
-    crate::plex::describe_server(friend, "nas-home", "friend", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(house, "Mac mini", "admin", house_evidence());
+    crate::catalog::describe_server(friend, "nas-home", "friend", crate::catalog::GrantEvidence::outside());
     alt_install(
         house,
         "4",
@@ -440,7 +440,7 @@ fn a_re_described_source_restamps_the_credit_on_an_open_page() {
     );
 
     // the roster refresh re-grades the household's own server, with NO new resolve
-    crate::plex::describe_server(house, "Mac mini", "", house_evidence());
+    crate::catalog::describe_server(house, "Mac mini", "", house_evidence());
     assert!(alt_restamp_owners(), "the credit moved");
 
     let after = rows(copies(), house, "4");
@@ -461,13 +461,13 @@ fn a_re_described_source_restamps_the_credit_on_an_open_page() {
     // **An OPEN panel is a materialised table, not a view of the store.** Without the rebuild it
     // keeps both its old text and its old ORDER — and the order is not cosmetic, `owner` is the
     // own-before-a-friend's tiebreak — until the user closes and reopens it.
-    crate::plex::describe_server(house, "Mac mini", "admin", house_evidence());
+    crate::catalog::describe_server(house, "Mac mini", "admin", house_evidence());
     alt_restamp_owners();
     let mut p = panel(house, "4");
     // the page's own copy is `(house, "4")`, so its row wears the tick and leads
     assert_eq!(drawn(&p), ["admin", "friend"]);
 
-    crate::plex::describe_server(house, "Mac mini", "", house_evidence());
+    crate::catalog::describe_server(house, "Mac mini", "", house_evidence());
     alt_restamp_owners();
     assert!(p.refresh(test_store().view()), "the correction reached the drawn table");
     assert_eq!(
@@ -505,39 +505,39 @@ fn a_re_described_source_restamps_the_credit_on_an_open_page() {
 /// their evidence at the registry, so the fix has something to read when it is written.
 #[test]
 fn an_unnamed_external_share_is_drawn_like_the_household_and_that_is_the_open_bug() {
-    struct Fresh(#[allow(dead_code)] plx_base::testlock::Serial);
+    struct Fresh(#[allow(dead_code)] nj_base::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             test_store().run(crate::stores::metadata::MetadataCmd::Clear);
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
-    let _g = Fresh(plx_base::testlock::serial());
-    crate::plex::reset_servers_for_test();
-    let house = crate::plex::register_for_test("alt-house", "127.0.0.1", 1, "t", "cid");
-    let named = crate::plex::register_for_test("alt-friend", "127.0.0.1", 2, "t", "cid");
-    let unnamed = crate::plex::register_for_test("alt-stranger", "127.0.0.1", 3, "t", "cid");
+    let _g = Fresh(nj_base::testlock::serial());
+    crate::catalog::reset_servers_for_test();
+    let house = crate::catalog::register_for_test("alt-house", "127.0.0.1", 1, "t", "cid");
+    let named = crate::catalog::register_for_test("alt-friend", "127.0.0.1", 2, "t", "cid");
+    let unnamed = crate::catalog::register_for_test("alt-stranger", "127.0.0.1", 3, "t", "cid");
 
-    crate::plex::describe_server(house, "Mac mini", "", house_evidence());
-    crate::plex::describe_server(named, "nas-home", "friend", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(house, "Mac mini", "", house_evidence());
+    crate::catalog::describe_server(named, "nas-home", "friend", crate::catalog::GrantEvidence::outside());
     // plex.tv granted this account the server and sent no `sourceTitle` with it. Nothing about
     // that says the machine is the household's — the credit is absent, not empty-because-ours.
-    crate::plex::describe_server(unnamed, "box", "", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(unnamed, "box", "", crate::catalog::GrantEvidence::outside());
 
     // the registry CAN tell them apart: same empty credit, different grant evidence
     let evidence = |id| {
-        crate::plex::server_facts(id)
+        crate::catalog::server_facts(id)
             .map(|f| (f.handle.clone(), f.owned, f.home, f.owner_id))
             .expect("a described slot")
     };
     assert_eq!(evidence(house), (String::new(), false, true, ADMIN_ID));
     assert_eq!(evidence(unnamed), (String::new(), false, false, 0));
     assert!(
-        crate::plex::is_household(house_evidence().grant(), &[]),
+        crate::catalog::is_household(house_evidence().grant(), &[]),
         "the house is the household's, on the evidence"
     );
     assert!(
-        !crate::plex::is_household(crate::plex::GrantEvidence::outside().grant(), &[]),
+        !crate::catalog::is_household(crate::catalog::GrantEvidence::outside().grant(), &[]),
         "…and the unnamed share is not, on the same evidence"
     );
 
@@ -571,19 +571,19 @@ fn an_unnamed_external_share_is_drawn_like_the_household_and_that_is_the_open_bu
 /// trusting what the worker carried.
 #[test]
 fn a_resolve_that_landed_after_the_correction_is_regraded_on_the_way_in() {
-    struct Fresh(#[allow(dead_code)] plx_base::testlock::Serial);
+    struct Fresh(#[allow(dead_code)] nj_base::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             test_store().run(crate::stores::metadata::MetadataCmd::Clear);
-            crate::plex::reset_servers_for_test();
+            crate::catalog::reset_servers_for_test();
         }
     }
-    let _g = Fresh(plx_base::testlock::serial());
-    crate::plex::reset_servers_for_test();
-    let house = crate::plex::register_for_test("alt-late-house", "127.0.0.1", 1, "t", "cid");
-    let friend = crate::plex::register_for_test("alt-late-friend", "127.0.0.1", 2, "t", "cid");
-    crate::plex::describe_server(house, "Mac mini", "admin", house_evidence());
-    crate::plex::describe_server(friend, "nas-home", "friend", crate::plex::GrantEvidence::outside());
+    let _g = Fresh(nj_base::testlock::serial());
+    crate::catalog::reset_servers_for_test();
+    let house = crate::catalog::register_for_test("alt-late-house", "127.0.0.1", 1, "t", "cid");
+    let friend = crate::catalog::register_for_test("alt-late-friend", "127.0.0.1", 2, "t", "cid");
+    crate::catalog::describe_server(house, "Mac mini", "admin", house_evidence());
+    crate::catalog::describe_server(friend, "nas-home", "friend", crate::catalog::GrantEvidence::outside());
 
     // the worker's list, stamped while the old credit was still published
     let in_flight = vec![
@@ -592,7 +592,7 @@ fn a_resolve_that_landed_after_the_correction_is_regraded_on_the_way_in() {
     ];
 
     // …then the correction lands, and the epoch that saw it is already spent
-    crate::plex::describe_server(house, "Mac mini", "", house_evidence());
+    crate::catalog::describe_server(house, "Mac mini", "", house_evidence());
     alt_restamp_owners();
 
     // …and only now does the resolve arrive
@@ -622,13 +622,13 @@ fn a_resolve_that_landed_after_the_correction_is_regraded_on_the_way_in() {
 /// be accepted, and the owned `DetailScreen` of phase 7 stopped stamping it — see `AltStore`'s doc.
 #[test]
 fn a_landing_for_another_servers_copy_with_the_same_key_is_refused() {
-    struct Fresh(#[allow(dead_code)] plx_base::testlock::Serial);
+    struct Fresh(#[allow(dead_code)] nj_base::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             test_store().run(crate::stores::metadata::MetadataCmd::Clear);
         }
     }
-    let _g = Fresh(plx_base::testlock::serial());
+    let _g = Fresh(nj_base::testlock::serial());
     test_store().run(crate::stores::metadata::MetadataCmd::Clear);
     let available = |sid: ServerId, rk: &str| test_store().view().alt_available(sid, rk);
     let two_sources = || {
@@ -750,8 +750,8 @@ fn a_reset_hides_the_menu_at_once_while_back_fades_it() {
     use crate::ui::containers::modal::{ModalStack, Phase, Style};
     use crate::ui::containers::Minter;
     use crate::ui::fixture::{tick, FixtureArg, FixtureHost};
-    use plx_machine::machine::PresentHandle;
-    use plx_machine::present::Present;
+    use nj_machine::machine::PresentHandle;
+    use nj_machine::present::Present;
 
     let opened = || {
         let mut ms: ModalStack<FixtureHost> = ModalStack::new();
@@ -809,7 +809,7 @@ fn a_reset_hides_the_menu_at_once_while_back_fades_it() {
 mod focus_and_hit {
     use super::*;
     use crate::screens::registry::{AppFx, AppMsg, PageMemory};
-    use plx_machine::machine::{
+    use nj_machine::machine::{
         Canon, Chrome, Edge, FocusKey, FocusRead, Handled, Host, InputEvent, InputKind,
         InputOwner, Key, LogicalState, Machine, PressRead, ScreenId, Source, Tick,
     };
@@ -848,12 +848,12 @@ mod focus_and_hit {
         type Memory = PageMemory;
     }
     impl crate::screens::registry::MetadataLike for HostFixture {
-        fn metadata<'a>(_cx: &plx_machine::machine::Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
+        fn metadata<'a>(_cx: &nj_machine::machine::Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
             test_store().view()
         }
     }
-    fn fixture_cx(focus: Option<FocusKey<u32>>) -> plx_machine::machine::Cx<'static, HostFixture> {
-        plx_machine::machine::Cx {
+    fn fixture_cx(focus: Option<FocusKey<u32>>) -> nj_machine::machine::Cx<'static, HostFixture> {
+        nj_machine::machine::Cx {
             views: (),
             tick: Tick::default(),
             measure: &crate::ui::fixture::FixtureMeasure,
@@ -968,8 +968,8 @@ mod focus_and_hit {
         let entry = p.entry;
         let cx = fixture_cx(None);
         let mut buf = Vec::new();
-        let mut present = plx_machine::present::Present::default();
-        let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+        let mut present = nj_machine::present::Present::default();
+        let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
         let ev = ScreenEvent::FocusMoved {
             from: None,
             to: FocusKey { entry, elem: 1 },
@@ -989,23 +989,23 @@ mod focus_and_hit {
         let host = p.arg.host;
         let cx = fixture_cx(Some(FocusKey { entry, elem: 1 }));
         let mut buf = Vec::new();
-        let mut present = plx_machine::present::Present::default();
+        let mut present = nj_machine::present::Present::default();
         {
-            let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+            let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
             let ev = ScreenEvent::Activate(1);
             assert_eq!(Machine::step(&mut p, &ev, &cx, &mut fx), Handled::Yes);
         }
         assert!(
             buf.iter().any(|s| matches!(
                 &s.fx,
-                plx_machine::machine::Fx::Nav(plx_machine::machine::NavOp::Dismiss(e)) if *e == entry
+                nj_machine::machine::Fx::Nav(nj_machine::machine::NavOp::Dismiss(e)) if *e == entry
             )),
             "the panel closes on any commit"
         );
         let opened = buf.iter().find_map(|s| match &s.fx {
-            plx_machine::machine::Fx::Deliver(
-                plx_machine::machine::MachineId::Instance(h),
-                plx_machine::machine::Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceOpen(
+            nj_machine::machine::Fx::Deliver(
+                nj_machine::machine::MachineId::Instance(h),
+                nj_machine::machine::Delivery::Screen(ScreenEvent::App(AppMsg::AltSourceOpen(
                     crate::screens::registry::ContentArg::Detail { sid, rk },
                 ))),
             ) if *h == host => Some((*sid, rk.clone())),
@@ -1023,13 +1023,13 @@ mod focus_and_hit {
         let entry = p.entry;
         let cx = fixture_cx(Some(FocusKey { entry, elem: 0 }));
         let mut buf = Vec::new();
-        let mut present = plx_machine::present::Present::default();
-        let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+        let mut present = nj_machine::present::Present::default();
+        let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
         let ev = ScreenEvent::Activate(0);
         assert_eq!(Machine::step(&mut p, &ev, &cx, &mut fx), Handled::Yes);
         assert!(buf.iter().all(|s| !matches!(
             &s.fx,
-            plx_machine::machine::Fx::Deliver(.., plx_machine::machine::Delivery::Screen(ScreenEvent::App(_)))
+            nj_machine::machine::Fx::Deliver(.., nj_machine::machine::Delivery::Screen(ScreenEvent::App(_)))
         )));
     }
 
@@ -1039,13 +1039,13 @@ mod focus_and_hit {
         let entry = p.entry;
         let cx = fixture_cx(None);
         let mut buf = Vec::new();
-        let mut present = plx_machine::present::Present::default();
-        let mut fx = plx_machine::machine::Effects::new(&mut buf, plx_machine::machine::MachineId::Input, &mut present);
+        let mut present = nj_machine::present::Present::default();
+        let mut fx = nj_machine::machine::Effects::new(&mut buf, nj_machine::machine::MachineId::Input, &mut present);
         let ev = key_event(Key::Back, Edge::Down);
         assert_eq!(Machine::step(&mut p, &ev, &cx, &mut fx), Handled::Yes);
         assert!(matches!(
             buf.last().map(|s| &s.fx),
-            Some(plx_machine::machine::Fx::Nav(plx_machine::machine::NavOp::Dismiss(e))) if *e == entry
+            Some(nj_machine::machine::Fx::Nav(nj_machine::machine::NavOp::Dismiss(e))) if *e == entry
         ));
     }
 }
@@ -1056,7 +1056,7 @@ mod focus_and_hit {
 /// judged is the "This account" sub-line and the runtime read-out, at the shared [`MENU_MAX_W`] cap.
 #[test]
 fn every_app_owned_run_fits_the_panel_in_every_language() {
-    use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+    use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
     let mut list = Vec::new();
     for (i, dur_ms) in [0_i64, 60_000, 7_020_000, 360_000_000].into_iter().enumerate() {
         let mut own = copy(i as u16, "Movies", "", &format!("{i}"), "4k");
@@ -1082,7 +1082,7 @@ fn every_app_owned_run_fits_the_panel_in_every_language() {
         let mut capped = crate::ui::table::TableView::new();
         capped.compact = false;
         capped.set_sections(vec![section_for(&short_built)], 0, false);
-        out.extend(capped.menu_cap_failure(&plx_base::fontcov::advances::ShippedMeasure, language.tag()));
+        out.extend(capped.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, language.tag()));
         out.extend(table.app_fit_failures(MENU_MAX_W, language.tag()));
         out.extend(table.app_fit_failures_hugged(language.tag()));
     }

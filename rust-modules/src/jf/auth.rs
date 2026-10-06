@@ -9,7 +9,7 @@ use super::api::Jf;
 use super::models::*;
 use super::seat;
 use crate::http::Method;
-use crate::plex::Origin;
+use crate::catalog::Origin;
 use serde_json::json;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +55,7 @@ impl SignedIn {
 
 /// Is `origin` a Jellyfin server, and what does it call itself? Anonymous.
 pub fn probe(origin: &Origin, client_id: &str) -> Result<PublicSystemInfo, AuthError> {
-    let c = crate::plex::unregistered_client(origin.clone(), "", client_id);
+    let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let r = c
         .jf_send("/System/Info/Public", Method::Get, &[crate::http::ACCEPT_JSON], None)
         .ok_or(AuthError::Unreachable)?;
@@ -98,7 +98,7 @@ fn status_error(status: i32) -> AuthError {
 pub fn sign_in_with_password(origin: &Origin, client_id: &str, username: &str, password: &str) -> Result<SignedIn, AuthError> {
     let info = probe(origin, client_id)?;
     let device_user = username.trim().to_lowercase();
-    let c = crate::plex::unregistered_client(origin.clone(), "", client_id);
+    let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, &device_user);
     let body = serde_json::to_vec(&json!({ "Username": username.trim(), "Pw": password })).map_err(|_| AuthError::Malformed)?;
     let auth = j.auth_header();
@@ -124,7 +124,7 @@ pub struct QuickConnect {
 /// `GET /QuickConnect/Enabled` then `POST /QuickConnect/Initiate`.
 pub fn quick_connect_start(origin: &Origin, client_id: &str) -> Result<QuickConnect, AuthError> {
     let info = probe(origin, client_id)?;
-    let c = crate::plex::unregistered_client(origin.clone(), "", client_id);
+    let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, "");
     let auth = j.auth_header();
     let headers = [crate::http::ACCEPT_JSON, auth.as_str()];
@@ -145,7 +145,7 @@ pub fn quick_connect_start(origin: &Origin, client_id: &str) -> Result<QuickConn
 
 /// One poll: `Ok(None)` while the code is not yet approved, `Ok(Some)` once it is.
 pub fn quick_connect_poll(origin: &Origin, client_id: &str, qc: &QuickConnect) -> Result<Option<SignedIn>, AuthError> {
-    let c = crate::plex::unregistered_client(origin.clone(), "", client_id);
+    let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, "");
     let auth = j.auth_header();
     let path = super::api::Q::new("/QuickConnect/Connect").s("secret", &qc.secret).build();
@@ -196,14 +196,14 @@ pub fn probe_first(candidates: &[Origin], client_id: &str) -> Result<(Origin, Pu
 /// [`sign_out`] for a token no registered client holds any more — a sign-out revokes the registry
 /// before this worker gets to send. `device_user` is the basis the token was minted under.
 pub fn sign_out_detached(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> bool {
-    let c = crate::plex::unregistered_client(origin.clone(), token, client_id);
+    let c = crate::catalog::unregistered_client(origin.clone(), token, client_id);
     Jf::for_sign_in(&c, device_user)
         .status("/Sessions/Logout", Method::Post, None)
         .is_some_and(|s| (200..300).contains(&s))
 }
 
 /// `POST /Sessions/Logout` — revoke this device's token on the server. Best effort.
-pub fn sign_out(c: &crate::plex::Client) -> bool {
+pub fn sign_out(c: &crate::catalog::Client) -> bool {
     match c.jf() {
         Some(j) => j.status("/Sessions/Logout", Method::Post, None).is_some_and(|s| (200..300).contains(&s)),
         None => false,

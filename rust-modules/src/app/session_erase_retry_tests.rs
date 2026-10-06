@@ -3,7 +3,7 @@
 //! `plex::session`'s; the adapter that drives the erase sits above that layer, so the grading lives
 //! here (it was one of `plex::session`'s persistence tests).
 
-use crate::plex::session::{cache_revoked, redirect_for_test, save, Session};
+use crate::catalog::session::{cache_revoked, redirect_for_test, save, Session};
 
 /// The session file redirected into a directory of this test's own, handed back on drop. The same
 /// scratch `plex::session`'s persistence tests use; theirs is private to that module.
@@ -14,7 +14,7 @@ struct ScratchSession {
 impl ScratchSession {
     fn new(tag: &str) -> Self {
         let dir = std::env::temp_dir()
-            .join(format!("plxnative-session-{}-{tag}", std::process::id()));
+            .join(format!("nativejelly-session-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir); // a previous run that died mid-test
         std::fs::create_dir_all(&dir).expect("a writable temp dir");
         redirect_for_test(Some(dir.join("auth.json")));
@@ -64,17 +64,17 @@ impl Drop for RestorePermissions {
 
 #[test]
 fn p1_adapter_does_not_complete_an_erase_with_an_incomplete_sweep() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let file = ScratchSession::new("p1-adapter-erase");
     save(&signed_in());
     let _permissions = RestorePermissions::set(&[
         (file.file().parent().unwrap(), 0o500), (file.file().as_path(), 0o400),
     ]);
-    let mt = unsafe { plx_base::task::MainThread::assume() };
+    let mt = unsafe { nj_base::task::MainThread::assume() };
     let mut adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt, false);
     let mut meta = crate::stores::metadata::MetadataStore::default();
     assert!(adapter.begin_erase(1, false, &mut meta).is_none());
-    plx_base::storage_worker::drain_for_test();
+    nj_base::storage_worker::drain_for_test();
     assert!(adapter.take_erased(&mut meta).is_none(), "incomplete erase must remain retryable");
     assert!(cache_revoked());
     drop(_permissions);
@@ -83,7 +83,7 @@ fn p1_adapter_does_not_complete_an_erase_with_an_incomplete_sweep() {
     let _clock = ResetClock;
     crate::app::clock::set_replay(crate::app::clock::now().wrapping_add(1_000));
     let completed = adapter.take_erased(&mut meta);
-    plx_base::storage_worker::drain_for_test();
+    nj_base::storage_worker::drain_for_test();
     let completed = completed.or_else(|| adapter.take_erased(&mut meta));
     assert!(matches!(completed, Some(crate::auth::owner::SessionEvent::Erased { epoch: 1, .. })),
         "the same pending erase completes only after a successful retry");

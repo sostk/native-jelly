@@ -7,7 +7,7 @@
 //! simulator instances launched together drift apart within seconds, and a comparison assembled by
 //! matching log lines can silently pair two different pictures. All three bit this work.
 //!
-//! So the ground becomes an input. `plxnative-testpat=<spec>` at boot, or the `pat:<spec>` remote
+//! So the ground becomes an input. `nativejelly-testpat=<spec>` at boot, or the `pat:<spec>` remote
 //! token live, replaces the page's picture with a pattern we choose:
 //!
 //! | spec | what it is | what it answers |
@@ -168,7 +168,7 @@ pub(crate) fn set(spec: &str) -> bool {
     let p = match spec {
         "off" | "" => {
             unsafe { *addr_of_mut!(CURRENT) = None };
-            plx_machine::idle::invalidate();
+            nj_machine::idle::invalidate();
             return true;
         }
         "ramp" => Pattern::Ramp,
@@ -208,20 +208,20 @@ pub(crate) fn set(spec: &str) -> bool {
     unsafe { *addr_of_mut!(CURRENT) = Some(p) };
     // A pattern change is discrete damage: nothing is moving, so without this the present gate
     // would hold the old ground on screen until something else asked for a frame.
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
     true
 }
 
-/// Armed at boot from `/tmp/plxnative-testpat`. Called once, from the same place every other
+/// Armed at boot from `/tmp/nativejelly-testpat`. Called once, from the same place every other
 /// boot trigger is read.
 pub(crate) fn boot() {
-    if let Some(v) = plx_base::devtrig::read("testpat") {
+    if let Some(v) = nj_base::devtrig::read("testpat") {
         if !set(&v) {
-            plx_base::eventlog::log(&format!("testpat: unrecognised spec {v:?} — ignored"));
+            nj_base::eventlog::log(&format!("testpat: unrecognised spec {v:?} — ignored"));
         }
     }
     if let Some(p) = unsafe { *addr_of!(CURRENT) } {
-        plx_base::eventlog::log(&format!("testpat: armed — {}", describe(p)));
+        nj_base::eventlog::log(&format!("testpat: armed — {}", describe(p)));
     }
 }
 

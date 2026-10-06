@@ -30,7 +30,7 @@ impl Scripted {
         let (seen_t, stop_t) = (seen.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
             while !stop_t.load(Ordering::Acquire) {
-                let mut s = match plx_base::testnet::accept(&srv) {
+                let mut s = match nj_base::testnet::accept(&srv) {
                     Ok((s, _)) => s,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -110,7 +110,7 @@ fn request_line(head: &str) -> &str {
 
 fn hls_resource(port: u16) -> crate::hls::Resource {
     crate::hls::Resource {
-        origin: crate::plex::Origin::http("127.0.0.1", port as i32),
+        origin: crate::catalog::Origin::http("127.0.0.1", port as i32),
         path: "/unused".into(),
     }
 }
@@ -119,7 +119,7 @@ fn hls_open_plain(
     port: u16,
     request_path: &str,
 ) -> (Result<(String, i64), String>, Box<HttpStream>) {
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
     let mut net = HlsNet {
         hs: &mut *hs,
@@ -131,7 +131,7 @@ fn hls_open_plain(
         &mut *aq,
         &mut net,
         None,
-        &mut plx_base::checkpoint::NoCheckpoint,
+        &mut nj_base::checkpoint::NoCheckpoint,
     );
     let outcome = match opened {
         Ok((Src::Socket { path, .. }, size, _)) => {
@@ -141,16 +141,16 @@ fn hls_open_plain(
         Ok((Src::Idle, _, _)) => Err("idle".into()),
         Err(e) => Err(format!("{e:?}")),
     };
-    plx_net::stream::http_close(&mut *hs);
+    nj_net::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     (outcome, hs)
 }
 
 /// A progressive open through the production helper, reduced to where it landed.
 fn progressive_open(port: u16, path: &str) -> Result<(String, i64), String> {
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
-    let origin = crate::plex::Origin::http("127.0.0.1", port as i32);
+    let origin = crate::catalog::Origin::http("127.0.0.1", port as i32);
     let opened = open_plain_progressive(&mut *hs, &origin, path, &mut *aq);
     let outcome = match opened {
         Ok((Src::Socket { path, .. }, size)) => Ok((path.to_string_lossy().into_owned(), size)),
@@ -158,14 +158,14 @@ fn progressive_open(port: u16, path: &str) -> Result<(String, i64), String> {
         Ok((Src::Idle, _)) => Err("idle".into()),
         Err(e) => Err(format!("{e:?}")),
     };
-    plx_net::stream::http_close(&mut *hs);
+    nj_net::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     outcome
 }
 
 #[test]
 fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let pms = Scripted::start(|head, port| {
         if request_line(head).starts_with("GET /start") {
             redirect(302, &format!("http://127.0.0.1:{port}/final/seg.ts"))
@@ -192,7 +192,7 @@ fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
 
 #[test]
 fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let pms = Scripted::start(|head, _port| {
         let line = request_line(head);
         if line.starts_with("GET /dir/a.mp4 ") {
@@ -203,7 +203,7 @@ fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
             not_found()
         }
     });
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
     let mut state = AvioState {
         src: Src::Socket {
@@ -230,7 +230,7 @@ fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
         Src::Socket { path, .. } => path.to_string_lossy().into_owned(),
         _ => "<not a socket>".into(),
     };
-    plx_net::stream::http_close(&mut *hs);
+    nj_net::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     assert_eq!(
         at, 2,
@@ -251,7 +251,7 @@ fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
 
 #[test]
 fn a_cross_origin_hop_does_not_forward_the_token() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let cdn = Scripted::start(|_head, _port| ok_body("ABCD"));
     let cdn_port = cdn.port;
     let pms = Scripted::start(move |_head, _port| {
@@ -278,20 +278,20 @@ fn a_cross_origin_hop_does_not_forward_the_token() {
 
 #[test]
 fn a_redirect_loop_is_bounded_and_fails() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let pms = Scripted::start(|_head, _port| redirect(302, "/loop"));
     let (outcome, _hs) = hls_open_plain(pms.port, "/start");
     assert!(outcome.is_err(), "a loop must fail: {outcome:?}");
     assert_eq!(
         pms.requests().len(),
-        1 + plx_net::stream::redirect::MAX_HOPS as usize,
+        1 + nj_net::stream::redirect::MAX_HOPS as usize,
         "the first request plus exactly MAX_HOPS followed hops"
     );
 }
 
 #[test]
 fn a_progressive_open_follows_a_302() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let pms = Scripted::start(|head, _port| {
         if request_line(head).starts_with("GET /library/parts/1/file.mp4") {
             redirect(302, "/services/iva/assets/1/video.mp4")
@@ -299,9 +299,9 @@ fn a_progressive_open_follows_a_302() {
             ok_body("ABCDEFGH")
         }
     });
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
-    let origin = crate::plex::Origin::http("127.0.0.1", pms.port as i32);
+    let origin = crate::catalog::Origin::http("127.0.0.1", pms.port as i32);
     let opened = open_plain_progressive(
         &mut *hs,
         &origin,
@@ -312,7 +312,7 @@ fn a_progressive_open_follows_a_302() {
         Ok((Src::Socket { path, .. }, size)) => Some((path.to_string_lossy().into_owned(), size)),
         _ => None,
     };
-    plx_net::stream::http_close(&mut *hs);
+    nj_net::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     assert_eq!(
         outcome,
@@ -359,7 +359,7 @@ fn an_https_hop_from_the_socket_path_is_routed_to_curl() {
 /// for `/old/variant.m3u8`. Children resolve against where the playlist actually came from.
 #[test]
 fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_target() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let pms = Scripted::start(|head, _port| {
         if request_line(head).starts_with("GET /old/master.m3u8") {
             redirect(302, "/new/master.m3u8")
@@ -369,13 +369,13 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
             not_found()
         }
     });
-    let mut hs = plx_net::stream::http_stream_boxed();
+    let mut hs = nj_net::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
     let mut net = HlsNet {
         hs: &mut *hs,
         curl: None,
     };
-    let origin = crate::plex::Origin::http("127.0.0.1", pms.port as i32);
+    let origin = crate::catalog::Origin::http("127.0.0.1", pms.port as i32);
     let cursor = hls_cursor_open(
         &origin,
         "/old/master.m3u8?X-Plex-Token=tok",
@@ -388,7 +388,7 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
         .as_ref()
         .map(|c| c.media.path.clone())
         .map_err(|e| format!("{e:?}"));
-    plx_net::stream::http_close(&mut *hs);
+    nj_net::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     assert_eq!(media, Ok("/new/variant.m3u8".to_string()));
 }
@@ -398,7 +398,7 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
 /// anything is dialled there.
 #[test]
 fn an_hls_redirect_off_the_pms_origin_is_refused_before_it_is_dialled() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let cdn = Scripted::start(|_head, _port| ok_body("ABCD"));
     let cdn_port = cdn.port;
     let pms = Scripted::start(move |_head, _port| {

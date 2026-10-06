@@ -36,7 +36,7 @@ trap 'rm -f "$OBJ"' EXIT
 # table: macOS `nm` reports every Mach-O size as zero ("sizes with --print-size for Mach-O files
 # are always zero"), so the cross trick reads back nothing at all and does so silently.
 if [ -n "${HOST:-}" ]; then
-  "$CC" -I "$INC" -std=c11 -DPLX_FFABI_MAIN "$ROOT/ci/ffabi-dump.c" -o "$OBJ"
+  "$CC" -I "$INC" -std=c11 -DNJ_FFABI_MAIN "$ROOT/ci/ffabi-dump.c" -o "$OBJ"
   "$OBJ"
   exit 0
 fi

@@ -69,7 +69,7 @@
  * is gone. Two frames plus the registers plus the faulting module is a FAULT EVENT, not a
  * backtrace, and the honest name is used in the docs for the same reason it is used here.
  *
- * No load-bias arithmetic either: `pkg/plxnative` is `ET_EXEC` (`readelf -h`, `Type: EXEC`), so
+ * No load-bias arithmetic either: `pkg/nativejelly` is `ET_EXEC` (`readelf -h`, `Type: EXEC`), so
  * the PC already IS the link-time address and `crash-report.sh` subtracts the mapping base only
  * to sanity-check that the address falls inside our own text. `dl_iterate_phdr` would answer a
  * question this binary does not ask.
@@ -93,8 +93,8 @@ static const char *signame(int sig) {
  *
  * `sig_atomic_t` because they are read from signal context; -1 means "not open", and every write
  * below checks. */
-static volatile sig_atomic_t crash_fd = -1;   /* plxnative-crash.log — append-only, survives a relaunch */
-static volatile sig_atomic_t event_fd = -1;   /* plxnative-events.log — this session only */
+static volatile sig_atomic_t crash_fd = -1;   /* nativejelly-crash.log — append-only, survives a relaunch */
+static volatile sig_atomic_t event_fd = -1;   /* nativejelly-events.log — this session only */
 
 /* write(2) until it is all out, or until it stops making progress. Partial writes are real on a
  * file that hit a full filesystem, which is a state a television reaches. */
@@ -126,13 +126,13 @@ static char rec_buf[1024];
 static void emit_map_line(const char *line, size_t n, unsigned long pc, unsigned long lr) {
     int kind = plx_map_line_kind(line, n, pc, lr);
     struct plx_sbuf b = { rec_buf, 0, sizeof rec_buf };
-    if (kind & PLX_MAP_AT) {
+    if (kind & NJ_MAP_AT) {
         plx_s_str(&b, "at: ");
         for (size_t i = 0; i < n; i++) plx_s_ch(&b, line[i]);
         emit(&b);
         b.n = 0;
     }
-    if (kind & PLX_MAP_BIN) {
+    if (kind & NJ_MAP_BIN) {
         plx_s_str(&b, "bin: ");
         for (size_t i = 0; i < n; i++) plx_s_ch(&b, line[i]);
         emit(&b);
@@ -152,7 +152,7 @@ static void emit_map_line(const char *line, size_t n, unsigned long pc, unsigned
  * (the app peaks at 31 threads, each with a stack mapping), it has no size to `stat`, and a static
  * buffer big enough for the worst case is memory this process holds for its whole life to use once
  * at death. A 4 KiB window with a carried partial line costs the same syscalls and is bounded. */
-void plx_crash_scan_maps_file(const char *path, unsigned long pc, unsigned long lr) {
+void nj_crash_scan_maps_file(const char *path, unsigned long pc, unsigned long lr) {
     int m = open(path, O_RDONLY);
     if (m < 0) return;
     size_t held = 0;
@@ -232,7 +232,7 @@ static void crash_handler(int sig, siginfo_t *si, void *uc) {
 #if defined(__arm__)
     emit_regs(&c->uc_mcontext);
 #endif
-    plx_crash_scan_maps_file("/proc/self/maps", pc, lr);
+    nj_crash_scan_maps_file("/proc/self/maps", pc, lr);
 
     /* Re-raise with the DEFAULT disposition so the signal actually kills us, and the parent (SAM)
      * sees a real signal crash — `exit_status: 11` for a SIGSEGV, device-verified 2026-08-29 —
@@ -286,7 +286,7 @@ static void crash_handler(int sig, siginfo_t *si, void *uc) {
     _exit(128 + sig);   /* genuinely unreachable now — see above for when it was not */
 }
 
-void plx_crash_install(int ev_fd, int cr_fd) {
+void nj_crash_install(int ev_fd, int cr_fd) {
     struct sigaction sa;
     /* The sinks first, THEN `sigaction`. Ordering, not style: after the last line of this function
      * a signal can arrive at any instant, and the handler must find descriptors it can write to
@@ -306,7 +306,7 @@ void plx_crash_install(int ev_fd, int cr_fd) {
     sigaction(SIGTRAP, &sa, NULL);
 
     /* Ignore SIGPIPE for the whole process. A Rust program gets this from std::rt::init, but
-       our main() is C and calls plex_run() directly, so that never runs — leaving the DEFAULT
+       our main() is C and calls nj_run() directly, so that never runs — leaving the DEFAULT
        disposition (terminate). stream.rs sends the PMS request with flags 0, so a server that
        closes between connect and write (PMS restart, transcoder session reaped, keep-alive
        race) would kill the app outright, with no crash-log line: the tracer above handles only
@@ -314,7 +314,7 @@ void plx_crash_install(int ev_fd, int cr_fd) {
        ("SIGPIPE would kill the app", capture.rs); this covers every other socket in one line. */
     signal(SIGPIPE, SIG_IGN);
 
-#ifndef PLX_DEBUG
+#ifndef NJ_DEBUG
     /* No core dumps in a shipping build — this is the other half of the re-raise above, and
        without it that design is actively hostile to the user's TV. The jail sets RLIMIT_CORE
        to INFINITY and /proc/sys/kernel/core_pattern is the bare string "core", i.e. relative

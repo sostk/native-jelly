@@ -1,8 +1,8 @@
 //! Physically owned Collection model and its worker adapter.
 
 use crate::collection::{CollectionAdapter, CollectionState, CollectionTarget, CollectionView};
-use crate::plex::ServerId;
-use plx_machine::machine::{Cx, Effects, Handled, Host, Machine};
+use crate::catalog::ServerId;
+use nj_machine::machine::{Cx, Effects, Handled, Host, Machine};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -47,7 +47,7 @@ impl CollectionStore {
         if changed { self.bump(); }
         changed
     }
-    pub(crate) fn pump(&mut self, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump(&mut self, gate: &nj_machine::landgate::Gate) -> bool {
         let changed = self.state.pump_with_gate(&self.adapter, gate);
         if changed { self.bump(); }
         changed
@@ -58,7 +58,7 @@ impl CollectionStore {
     #[cfg(test)]
     pub(crate) fn adapter_for_test(&self) -> Arc<CollectionAdapter> { Arc::clone(&self.adapter) }
     #[cfg(test)]
-    pub(crate) fn install_for_test(&mut self, items: Vec<crate::pms::PmsMovie>, status: crate::collection::CollectionStatus) {
+    pub(crate) fn install_for_test(&mut self, items: Vec<crate::catalog_fetch::PmsMovie>, status: crate::collection::CollectionStatus) {
         self.state.install_for_test(items, status);
         self.bump();
     }
@@ -80,7 +80,7 @@ impl<H: Host> Machine<H> for CollectionStore {
     fn step(&mut self, ev: &Self::Ev, _cx: &Cx<'_, H>, _fx: &mut Effects<'_, H>) -> Handled {
         match ev {
             StoreEv::Cmd(cmd) => { self.run(cmd.clone()); }
-            StoreEv::Pump { .. } => { self.pump(&plx_machine::landgate::Gate::default()); }
+            StoreEv::Pump { .. } => { self.pump(&nj_machine::landgate::Gate::default()); }
         }
         Handled::Yes
     }

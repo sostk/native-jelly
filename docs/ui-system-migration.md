@@ -360,7 +360,7 @@ Option<Home>` (`home.rs:398`). Finish the contract:
   `update/draw/move_focus` onto methods. Make the existing pub fns `open/open_rk/
   open_rk_season/close/update/draw/move_focus/on_ok/last_resume_ns/selected_ptr` **thin
   wrappers** forwarding to methods — so `app.rs` routing, `route.rs`, and the dev-triggers
-  (`plxnative-detail*`, `app.rs:886-1053`) compile **unchanged**. *Checkpoint:* `make`.
+  (`nativejelly-detail*`, `app.rs:886-1053`) compile **unchanged**. *Checkpoint:* `make`.
 - **6b** section rows (episodes/related/cast) become child sub-views composed by
   `DetailView::draw` under the translated `ps = p.translate(0,-scroll)` painter. Unify the two
   horizontal-scroll models: adopt the sprung `ep_hscroll` glide for Related/Cast too (kill the
@@ -459,7 +459,7 @@ about a specific contract, NOT about "it's only a throwaway" — that is never t
    rest of the backlog is closed.** `route`/`fnlen`/`testmod` were the three gates left red, all
    three for one reason — `enum Route` still existed — and D1 deleted it along with `app/nav.rs`
    and `ui/trail.rs`. `check-deps.sh` is green across every gate: no `Route::` in `app/`, no
-   `enum Route` in the tree, `app/run.rs::run` at 104 lines against a 200 budget, `plex_run` at 10,
+   `enum Route` in the tree, `app/run.rs::run` at 104 lines against a 200 budget, `nj_run` at 10,
    and 0 `#[cfg(test)] mod` blocks in `app/mod.rs`. `draw_clock` and subtitles are still bespoke
    and not `Label`-expressible, and remain immediate-mode by the same original reasoning.
 
@@ -535,7 +535,7 @@ tests/manifest.json
 |---|---|
 | `screens/<name>.rs` | the screen: its `Screen`/`Machine`/`Focusable`/`LogicalState` impls, its `SHAPE`, its own tests (§15.1 `a_new_screen_is_unit_tested_with_no_sdl` — a host of its own, three lines of it, never a sibling's) |
 | `screens/registry.rs` | the `AppArg` variant, its `ScreenId`, its canon tag, `ARG_SHAPE`, the one `mount` arm, `every_surface_arg`, `SCREEN_SHAPES` + the pin, and — for a page-owned panel — the `ContentPanel` variant and its `surface()` arm |
-| `dev/scenarios.rs` | the headless trigger that reaches it (`/tmp/plxnative-<name>`), which is what makes a capture and an fps scene possible at all |
+| `dev/scenarios.rs` | the headless trigger that reaches it (`/tmp/nativejelly-<name>`), which is what makes a capture and an fps scene possible at all |
 | `tests/manifest.json` | the fps scene, keyed on the `overlay=` word the screen's own `Screen::name` prints |
 
 ### The four the criterion does not, and why each is honest
@@ -596,7 +596,7 @@ The criterion is only worth as much as the boundary underneath it.
    interactive press uses, and gate it on the host page's own predicate so the trigger cannot open
    what a press would refuse.
 5. Add the fps scene to `tests/manifest.json`.
-6. Re-record the replay fixtures (`tools/plxnative-rec rerecord`), because the pin moved.
+6. Re-record the replay fixtures (`tools/nativejelly-rec rerecord`), because the pin moved.
 
 ---
 

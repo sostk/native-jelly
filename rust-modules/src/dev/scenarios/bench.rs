@@ -1,12 +1,12 @@
 //! The stress-bench oscillators' own state — counted, deterministic twins of `navosc`/`modalosc`
-//! (`/tmp/plxnative-pushbench[=<n>[,<ratingKey>]]`, `/tmp/plxnative-modalbench[=<n>]`). Where
+//! (`/tmp/nativejelly-pushbench[=<n>[,<ratingKey>]]`, `/tmp/nativejelly-modalbench[=<n>]`). Where
 //! those two bounce forever so a device FPS scene can sample a settled ramp, a bench runs a FIXED
 //! `n` (default 100) push→settle→pop or present→settle→dismiss cycles through the real bridge
 //! entry points, rotating a target list, logging one `bench:` event-log line per cycle
 //! (`super::bench_frame_tick`'s doc has the wire format), and then stopping — the harness grades
 //! the whole run, not a sampled window of an unbounded one.
 //!
-//! A third bench, [`DeepBench`] (`/tmp/plxnative-deepbench[=<depth>[,<ratingKey>]]`), does not
+//! A third bench, [`DeepBench`] (`/tmp/nativejelly-deepbench[=<depth>[,<ratingKey>]]`), does not
 //! round-trip: it pushes `depth` pages with no pop in between, then pops all the way back to the
 //! root one page at a time, so the harness can grade whether a page transition's cost or a
 //! session's memory holds flat as the real nav stack goes ninety-plus entries deep rather than
@@ -300,7 +300,7 @@ pub(crate) fn bench_target_index(targets_len: usize, cycle: u32) -> usize {
 }
 
 // =================================================================================================
-// push bench (`/tmp/plxnative-pushbench`)
+// push bench (`/tmp/nativejelly-pushbench`)
 // =================================================================================================
 
 /// The push bench's rotation, in the order it cycles. `Detail`/`Person` are only ever in the
@@ -331,7 +331,7 @@ pub(crate) struct PushBench {
     /// The Person target's data, opportunistically refreshed from whichever Detail item is
     /// current (`dev::scenarios::push_bench_refresh_person`) — Person has no ratingKey-shaped
     /// trigger of its own, so this is the only door onto it.
-    pub(crate) person: Option<(crate::plex::ServerId, String, String, String, String)>,
+    pub(crate) person: Option<(crate::catalog::ServerId, String, String, String, String)>,
     /// Which target the MOST RECENT `Start` actually opened — may differ from the rotation's
     /// nominal pick at that cycle when `Person` was chosen but no cast data has landed yet (falls
     /// back to `Library` for that one cycle). `Settle` reads this rather than recomputing the
@@ -344,7 +344,7 @@ pub(crate) struct PushBench {
 impl PushBench {
     pub(crate) fn new(n: u32, rk: String) -> Self {
         let targets = if rk.is_empty() {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "bench: pushbench has no ratingKey (pushbench=<n>,<rk> or navosc=<rk>) — \
                  rotating Library only, Detail/Person skipped",
             );
@@ -364,7 +364,7 @@ impl PushBench {
 }
 
 // =================================================================================================
-// modal bench (`/tmp/plxnative-modalbench`)
+// modal bench (`/tmp/nativejelly-modalbench`)
 // =================================================================================================
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -388,7 +388,7 @@ impl ModalTarget {
 
 pub(crate) struct ModalBench {
     pub(crate) clock: BenchClock,
-    /// The item menu leg's ratingKey. `plxnative-modalbench=<n>,<rk>` carries it directly; an
+    /// The item menu leg's ratingKey. `nativejelly-modalbench=<n>,<rk>` carries it directly; an
     /// empty value falls back to `navosc`'s own ratingKey exactly as the push bench's Detail leg
     /// does, via `app::boot::boot` — see `modalbench_value`'s doc for why a scene that wants the
     /// item menu without navosc's own competing bounce should prefer the direct form.
@@ -409,14 +409,14 @@ impl ModalBench {
     pub(crate) fn new(n: u32, rk: String) -> Self {
         let mut targets = vec![ModalTarget::Settings, ModalTarget::AccountMenu, ModalTarget::About];
         if rk.is_empty() {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "bench: modalbench has no ratingKey (modalbench=<n>,<rk> or reuse navosc=<rk>) \
                  — item menu skipped from rotation",
             );
         } else {
             targets.insert(2, ModalTarget::ItemMenu);
         }
-        plx_base::eventlog::log(
+        nj_base::eventlog::log(
             "bench: modalbench skips library menu (needs a live, mounted Library page instance) \
              and filmography (needs a live Person page, itself gated on Detail cast data) — both \
              are push-navigation dependencies a modal-only bench should not carry, see ModalBench::new's doc",
@@ -426,7 +426,7 @@ impl ModalBench {
 }
 
 // =================================================================================================
-// deep bench (`/tmp/plxnative-deepbench`)
+// deep bench (`/tmp/nativejelly-deepbench`)
 // =================================================================================================
 
 /// One step's direction in [`DeepBench`]'s single walk down and back up the stack.
@@ -481,7 +481,7 @@ pub(crate) struct DeepBench {
     /// 1 every cycle regardless of which leg ran; a bench whose whole point is NOT popping in
     /// between cannot.
     pub(crate) targets: Vec<PushTarget>,
-    pub(crate) person: Option<(crate::plex::ServerId, String, String, String, String)>,
+    pub(crate) person: Option<(crate::catalog::ServerId, String, String, String, String)>,
     /// Logged once, the first time a `Person` step falls back to re-pushing `Detail` for want of
     /// cast data (mirrors `PushBench::person_fallback_logged`; the fallback target differs because
     /// `Library` is not a safe fallback here — see `targets`' doc).
@@ -501,7 +501,7 @@ impl DeepBench {
         let empty_rk = rk.is_empty();
         let depth = if empty_rk { 0 } else { depth };
         if empty_rk {
-            plx_base::eventlog::log(
+            nj_base::eventlog::log(
                 "bench: deepbench has no ratingKey (deepbench=<depth>,<rk> or reuse navosc=<rk>) \
                  — Library cannot deepen the stack (its entry point is a peer swap, \
                  NavOp::SelectTab, not a push — see DeepBench::targets's doc), so there is \

@@ -8,7 +8,7 @@ use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::frame::Budget;
 use crate::ui::geom::IndexElem;
 use crate::ui::icons::Icon;
-use plx_machine::machine::{Cx, EntryId, FocusKey, GroupId, Host};
+use nj_machine::machine::{Cx, EntryId, FocusKey, GroupId, Host};
 use crate::ui::screen::{
     Activate, At, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, Focusable, GroupKind, GroupSpec,
     Hover, Part, Placed, Seat, Step, Stop,
@@ -119,7 +119,7 @@ impl InfoPanelState {
         &mut self,
         ps: &crate::route::PlaybackSession,
         appear: f32,
-        measure: &dyn plx_machine::machine::Measure,
+        measure: &dyn nj_machine::machine::Measure,
         meta: metadata::MetadataView<'_>,
     ) {
         let np = meta.now_playing();
@@ -379,13 +379,13 @@ impl InfoPanelState {
                 push(tag, ChipKind::Badge);
             }
             if !subs.is_empty() {
-                push(plx_platform::i18n::msg::widgets_badge_cc().to_string(), ChipKind::Badge);
+                push(nj_platform::i18n::msg::widgets_badge_cc().to_string(), ChipKind::Badge);
             }
             if subs.iter().any(|s| s.sdh) {
-                push(plx_platform::i18n::msg::widgets_badge_sdh().to_string(), ChipKind::Badge);
+                push(nj_platform::i18n::msg::widgets_badge_sdh().to_string(), ChipKind::Badge);
             }
             if audio.iter().any(|s| s.ad) {
-                push(plx_platform::i18n::msg::widgets_badge_ad().to_string(), ChipKind::Badge);
+                push(nj_platform::i18n::msg::widgets_badge_ad().to_string(), ChipKind::Badge);
             }
 
             let n = chips_that_fit(chips.iter().map(|c| (c.w, c.gap_before)), tw);
@@ -468,7 +468,7 @@ impl InfoPanelState {
                 match chip.kind {
                     ChipKind::Text { bold, col } => {
                         if let Ok(cs) = CString::new(chip.label.as_str()) {
-                            let y = plx_gfx::text::text_vcenter_y(theme::size::CAPTION, bold, my);
+                            let y = nj_gfx::text::text_vcenter_y(theme::size::CAPTION, bold, my);
                             p.text(cs.as_ptr(), mx, y, theme::size::CAPTION, col, 0, bold);
                         }
                     }
@@ -600,11 +600,11 @@ fn is_episode(meta: metadata::MetadataView<'_>) -> bool {
 /// is drawn ([`InfoPanelState::draw`]).
 fn actions(meta: metadata::MetadataView<'_>) -> [&'static str; 2] {
     [
-        plx_platform::i18n::msg::widgets_info_from_beginning(),
+        nj_platform::i18n::msg::widgets_info_from_beginning(),
         if is_episode(meta) {
-            plx_platform::i18n::msg::widgets_info_go_show()
+            nj_platform::i18n::msg::widgets_info_go_show()
         } else {
-            plx_platform::i18n::msg::widgets_info_go_movie()
+            nj_platform::i18n::msg::widgets_info_go_movie()
         },
     ]
 }
@@ -624,12 +624,12 @@ fn card_geometry() -> (Rect, f32) {
 /// The `i`-th action button's rect, widened for the longest translated action label. The same
 /// measured formula [`InfoPanelPart::place`] answers the focus engine with, so a stop built from it lands
 /// on the pixel the button was drawn at.
-fn button_rect(i: usize, measure: &dyn plx_machine::machine::Measure) -> Rect {
+fn button_rect(i: usize, measure: &dyn nj_machine::machine::Measure) -> Rect {
     let (card, pad) = card_geometry();
     let labels = [
-        plx_platform::i18n::msg::widgets_info_from_beginning_c(),
-        plx_platform::i18n::msg::widgets_info_go_show_c(),
-        plx_platform::i18n::msg::widgets_info_go_movie_c(),
+        nj_platform::i18n::msg::widgets_info_from_beginning_c(),
+        nj_platform::i18n::msg::widgets_info_go_show_c(),
+        nj_platform::i18n::msg::widgets_info_go_movie_c(),
     ];
     let bw = labels.iter().map(|label| {
         crate::ui::widgets::Button::pill_w_measured(label, theme::size::BODY, true, false, measure)
@@ -660,7 +660,7 @@ fn meta_badge(
     x: f32,
     cy: f32,
     text: &str,
-    measure: &dyn plx_machine::machine::Measure,
+    measure: &dyn nj_machine::machine::Measure,
 ) -> f32 {
     badge(
         p,
@@ -735,17 +735,17 @@ pub(crate) fn playback_now(
         return None;
     }
     if !transcoding {
-        return Some(plx_platform::i18n::msg::widgets_playback_direct_play().to_string());
+        return Some(nj_platform::i18n::msg::widgets_playback_direct_play().to_string());
     }
     if remux {
-        return Some(plx_platform::i18n::msg::widgets_playback_direct_stream().to_string());
+        return Some(nj_platform::i18n::msg::widgets_playback_direct_stream().to_string());
     }
     let name = video_codec_name(vcodec);
     // a re-encode whose output codec we somehow do not know still converted — say that much
     Some(if name.is_empty() {
-        plx_platform::i18n::msg::widgets_playback_converting().to_string()
+        nj_platform::i18n::msg::widgets_playback_converting().to_string()
     } else {
-        plx_platform::i18n::msg::widgets_playback_converting_codec(&name)
+        nj_platform::i18n::msg::widgets_playback_converting_codec(&name)
     })
 }
 
@@ -795,7 +795,7 @@ fn chip_gap(prev: Option<ChipKind>, cur: ChipKind) -> f32 {
 }
 
 /// **The chip row's pure fitting maths (issue #26).** Host-testable on purpose: no `Painter`, no
-/// `plx_gfx::text::text_width` — that needs a live SDL2_ttf font the host test binary never loads
+/// `nj_gfx::text::text_width` — that needs a live SDL2_ttf font the host test binary never loads
 /// (see `text.rs::text_width`'s own doc on why measurement is the "impure half"). `draw` measures
 /// every candidate chip FIRST — meta text (genres/year/duration), then the live playback fact,
 /// then the rating/audio/CC/SDH/AD badges, in that fixed priority order (see the call site for why
@@ -1001,7 +1001,7 @@ mod tests {
 #[cfg(test)]
 mod focus_tests {
     use super::*;
-    use plx_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
+    use nj_machine::machine::{FocusRead, InputOwner, PressRead, Tick};
 
     // TEST ONLY: a thread-confined store, so `set_current_for_test`/`apply` and the `view()`
     // this test's `on_ok`/`is_episode` calls read from are the SAME owner, not two disconnected
@@ -1110,7 +1110,7 @@ mod focus_tests {
 
     #[test]
     fn go_to_after_a_trailer_opens_the_loaded_parent() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         test_store().run(crate::stores::metadata::MetadataCmd::SetNowPlaying(None));
         crate::metadata::set_current_for_test(test_store().state_mut(), Some(crate::metadata::Detail {
             rk: "parent-movie".into(),
@@ -1137,7 +1137,7 @@ mod focus_tests {
         assert!(is_episode(test_store().view()), "a show parent labels Go to Show");
 
         crate::metadata::set_current_for_test(test_store().state_mut(), Some(crate::metadata::Detail {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             rk: "parent-show".into(),
             kind: "show".into(),
             is_show: true,
@@ -1151,7 +1151,7 @@ mod focus_tests {
             }],
             ..Default::default()
         }));
-        let trailer = crate::metadata::trailer_now_playing(test_store().state(), crate::plex::ServerId::UNSET, "9");
+        let trailer = crate::metadata::trailer_now_playing(test_store().state(), crate::catalog::ServerId::UNSET, "9");
         test_store().run(crate::stores::metadata::MetadataCmd::SetNowPlaying(trailer));
         let mut playing = InfoPanelState::new();
         playing.set_focus(1);

@@ -20,7 +20,7 @@
 //!
 //! This module is not compiled for the `hostsim` build or for host tests: the simulator's own
 //! `VideoSink` is `player::ffi_host`, so the test binary references no Starfish externs at all.
-use plx_base::task::MainThread;
+use nj_base::task::MainThread;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_long, c_uint};
 
@@ -74,7 +74,7 @@ mod sys {
 /// private `sys` declarations above.
 pub(crate) struct StarfishSink;
 
-impl plx_platform::tv::sink::VideoSink for StarfishSink {
+impl nj_platform::tv::sink::VideoSink for StarfishSink {
     /// **The one verb of this seam that is NOT main-thread, and the missing token is how you can
     /// tell.** `Load` blocks for the pipeline construction and the library owns its own GMainContext
     /// behind it, so it runs on the media worker (`threads::load_thread`) by design — putting it on

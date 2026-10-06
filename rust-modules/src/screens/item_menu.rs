@@ -43,14 +43,14 @@ use std::borrow::Cow;
 use std::convert::Infallible;
 use std::os::raw::c_int;
 
-use crate::pms::PmsMovie;
+use crate::catalog_fetch::PmsMovie;
 use crate::screens::registry::{tile_facts, RepeatGate, PANEL_REPEAT_MS};
 use crate::screens::registry::{AppFx, AppLike, ItemMenuArg, ItemMenuKind, ItemMenuReq};
 use crate::ui::consts::*;
 use crate::ui::form::{Activation, Form, FormId, FormSection, FormTable, RowKey, RowKind};
 use crate::ui::frame::Budget;
 use crate::ui::icons::Icon;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
     LogicalState, Machine, NavOp,
 };
@@ -172,7 +172,7 @@ pub(crate) const SHAPE: &str =
 /// Is `m` an item the menu has anything to offer? A leaf or a show/season — i.e. everything the
 /// home shelves carry. Kept as a predicate so the caller can decline to present an empty panel.
 pub(crate) fn has_actions(m: &PmsMovie) -> bool {
-    m.kind != crate::pms::KIND_COLLECTION && !m.rk.is_empty()
+    m.kind != crate::catalog_fetch::KIND_COLLECTION && !m.rk.is_empty()
 }
 
 /// A menu row's identity: which of the seven rows it is. Hand-assigned keys, never a position —
@@ -245,17 +245,17 @@ fn build_with(m: &PmsMovie, from_deck: bool, trailer: Option<&crate::metadata::E
     let mut nav = Vec::new();
     match m.kind {
         3 => {
-            nav.push(go_item(plx_platform::i18n::msg::browse_menu_go_episode()));
+            nav.push(go_item(nj_platform::i18n::msg::browse_menu_go_episode()));
             if has_show {
-                nav.push(go_show(plx_platform::i18n::msg::browse_menu_go_show(), &m.show_rk, m.season_index));
+                nav.push(go_show(nj_platform::i18n::msg::browse_menu_go_show(), &m.show_rk, m.season_index));
             }
         }
         // a season has no page of its own — it IS the show page with that season selected, so one
         // row covers it; a show's own page is likewise the only navigation it has
-        2 if has_show => nav.push(go_show(plx_platform::i18n::msg::browse_menu_go_season(), &m.show_rk, m.season_index)),
+        2 if has_show => nav.push(go_show(nj_platform::i18n::msg::browse_menu_go_season(), &m.show_rk, m.season_index)),
         2 => {}
-        1 => nav.push(go_show(plx_platform::i18n::msg::browse_menu_go_show(), &m.rk, 0)),
-        _ => nav.push(go_item(plx_platform::i18n::msg::browse_menu_go_movie())),
+        1 => nav.push(go_show(nj_platform::i18n::msg::browse_menu_go_show(), &m.rk, 0)),
+        _ => nav.push(go_item(nj_platform::i18n::msg::browse_menu_go_movie())),
     }
     // the divider the design groups on — only when there IS a group above it
     let had_nav = !nav.is_empty();
@@ -296,7 +296,7 @@ fn build_with(m: &PmsMovie, from_deck: bool, trailer: Option<&crate::metadata::E
         ItemRow::RemoveFromDeck,
         RowKind::Button,
         Action::RemoveFromDeck(m.rk.clone()),
-        Row::new(plx_platform::i18n::msg::browse_menu_remove_deck()).licon(Icon::Close).destructive(true),
+        Row::new(nj_platform::i18n::msg::browse_menu_remove_deck()).licon(Icon::Close).destructive(true),
     );
     Form::new().section(sec)
 }
@@ -457,7 +457,7 @@ pub(crate) struct ItemMenuScreen {
 /// Play Trailer only when the already-loaded Detail is this movie/show and already has a trailer.
 /// The menu never talks to PMS.
 fn cached_trailer(
-    sid: crate::plex::ServerId,
+    sid: crate::catalog::ServerId,
     m: &PmsMovie,
     meta: crate::metadata::MetadataView<'_>,
 ) -> Option<crate::metadata::Extra> {
@@ -465,7 +465,7 @@ fn cached_trailer(
         return None;
     }
     let d = meta.current()?;
-    if !crate::plex::same_item((d.sid, d.rk.as_str()), (sid, m.rk.as_str())) {
+    if !crate::catalog::same_item((d.sid, d.rk.as_str()), (sid, m.rk.as_str())) {
         return None;
     }
     d.trailer().cloned().filter(|e| e.playable())
@@ -510,7 +510,7 @@ impl ItemMenuScreen {
         self.form.opening_key().map_or(0, |k| k.0)
     }
 
-    fn frame(&self, measure: &dyn plx_machine::machine::Measure) -> Rect {
+    fn frame(&self, measure: &dyn nj_machine::machine::Measure) -> Rect {
         let [x, y, w, h] = self.arg.anchor.map(f32::from_bits);
         panel_at(Rect::new(x, y, w, h), self.form.table.measured_width(measure), self.form.table.measured_height())
     }
@@ -565,7 +565,7 @@ impl ItemMenuScreen {
     /// Watching shelf merged across servers, resolving a bare rk against the CURRENT server is the
     /// reported bug itself (hold a friend's episode → Play from Start → our film with the same key
     /// plays, under the friend's title).
-    pub(crate) fn sid(&self) -> crate::plex::ServerId {
+    pub(crate) fn sid(&self) -> crate::catalog::ServerId {
         self.arg.sid
     }
 
@@ -920,7 +920,7 @@ mod tests {
 
     #[test]
     fn a_collection_has_no_item_menu_actions() {
-        let collection = PmsMovie { rk: "42".into(), kind: crate::pms::KIND_COLLECTION,
+        let collection = PmsMovie { rk: "42".into(), kind: crate::catalog_fetch::KIND_COLLECTION,
             ..Default::default() };
         assert!(!has_actions(&collection), "a collection menu must not be openable before its page exists");
     }
@@ -1139,10 +1139,10 @@ mod tests {
     fn a_related_tile_off_the_wire_gets_the_row_set_its_state_earns() {
         let row = |json: &str| {
             let body = format!(r#"{{"MediaContainer":{{"Hub":[{{"Metadata":[{json}]}}]}}}}"#);
-            let mc = serde_json::from_str::<crate::plex::Envelope>(&body)
+            let mc = serde_json::from_str::<crate::catalog::Envelope>(&body)
                 .expect("parses")
                 .media_container;
-            crate::pms::parse_item(&mc.hub[0].metadata[0], crate::plex::ServerId::UNSET)
+            crate::catalog_fetch::parse_item(&mc.hub[0].metadata[0], crate::catalog::ServerId::UNSET)
         };
         let set = |json: &str| labels(&build(&row(json), false));
 
@@ -1323,7 +1323,7 @@ mod tests {
     #[test]
     fn the_menu_carries_the_row_it_was_opened_on_and_the_episode_menu_carries_none() {
         let mut m = item(0, PosterMark::None);
-        m.sid = crate::plex::ServerId::from_raw(3);
+        m.sid = crate::catalog::ServerId::from_raw(3);
         m.part = "/library/parts/42/file.mkv".to_string();
 
         let mut screen = ItemMenuScreen::new(EntryId(7), card_arg(&m, false));
@@ -1332,7 +1332,7 @@ mod tests {
         let req = commit(&mut screen, elem);
         assert_eq!(
             req.sid,
-            crate::plex::ServerId::from_raw(3),
+            crate::catalog::ServerId::from_raw(3),
             "the ROW's server, not the current one"
         );
         let carried = req.item.expect("the row the panel is about");
@@ -1349,7 +1349,7 @@ mod tests {
         let mut strip = ItemMenuScreen::new(
             EntryId(8),
             ItemMenuArg {
-                sid: crate::plex::ServerId::from_raw(3),
+                sid: crate::catalog::ServerId::from_raw(3),
                 rk: "77".into(),
                 kind: ItemMenuKind::Episode {
                     mark: PosterMark::None,
@@ -1376,8 +1376,8 @@ mod tests {
 
     #[test]
     fn translated_action_menus_measure_complete_verbs_and_keep_safe_anchors() {
-        use plx_platform::i18n::{LocaleContext, Preference};
-        use plx_machine::machine::Measure;
+        use nj_platform::i18n::{LocaleContext, Preference};
+        use nj_machine::machine::Measure;
         struct MenuMeasure;
         impl Measure for MenuMeasure {
             fn width(&self, text: &std::ffi::CStr, size: i32, bold: bool) -> f32 {
@@ -1394,11 +1394,11 @@ mod tests {
             form.table.compact = true;
             form.set(Form::new().section(FormSection::new("")
                 .item(ItemRow::MarkWatched, RowKind::Button, Action::MarkWatched("1".into()),
-                    Row::new(plx_platform::i18n::msg::widgets_action_mark_watched_in(&locale)).licon(Icon::CheckCircleFill))
+                    Row::new(nj_platform::i18n::msg::widgets_action_mark_watched_in(&locale)).licon(Icon::CheckCircleFill))
                 .item(ItemRow::MarkUnwatched, RowKind::Button, Action::MarkUnwatched("1".into()),
-                    Row::new(plx_platform::i18n::msg::widgets_action_mark_unwatched_in(&locale)).licon(Icon::MinusCircleFill))
+                    Row::new(nj_platform::i18n::msg::widgets_action_mark_unwatched_in(&locale)).licon(Icon::MinusCircleFill))
                 .item(ItemRow::RemoveFromDeck, RowKind::Button, Action::RemoveFromDeck("1".into()),
-                    Row::new(plx_platform::i18n::msg::browse_menu_remove_deck_in(&locale)).licon(Icon::Close))), None);
+                    Row::new(nj_platform::i18n::msg::browse_menu_remove_deck_in(&locale)).licon(Icon::Close))), None);
             let table = &form.table;
             let width = table.measured_width(&measure);
             if preference == Preference::Be {
@@ -1512,7 +1512,7 @@ mod tests {
 
     use crate::screens::registry::{AppMsg, PageMemory};
     use crate::ui::fixture::FixtureMeasure;
-    use plx_machine::machine::{FocusRead, Host, InputEvent, InputOwner, PressRead, Source, Tick};
+    use nj_machine::machine::{FocusRead, Host, InputEvent, InputOwner, PressRead, Source, Tick};
     use crate::ui::screen::ScreenArg;
 
     #[derive(Clone)]
@@ -1522,11 +1522,11 @@ mod tests {
         fn probe(&self, _: &mut String) {}
     }
     impl ScreenArg for Arg {
-        fn chrome(&self) -> plx_machine::machine::Chrome {
-            plx_machine::machine::Chrome::None
+        fn chrome(&self) -> nj_machine::machine::Chrome {
+            nj_machine::machine::Chrome::None
         }
-        fn id(&self) -> plx_machine::machine::ScreenId {
-            plx_machine::machine::ScreenId(1)
+        fn id(&self) -> nj_machine::machine::ScreenId {
+            nj_machine::machine::ScreenId(1)
         }
         fn title(&self) -> Option<&str> {
             None
@@ -1615,10 +1615,10 @@ mod tests {
     /// Commit a row and return the ONE request it emitted.
     fn commit(s: &mut ItemMenuScreen, elem: u32) -> ItemMenuReq {
         let mut out = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut fx = Effects::new(
             &mut out,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(8)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(8)),
             &mut present,
         );
         s.activate::<HostFixture>(elem, &mut fx);
@@ -1640,10 +1640,10 @@ mod tests {
 
     fn feed(s: &mut ItemMenuScreen, key: Key, edge: Edge, ms: u32) -> Handled {
         let mut out = Vec::new();
-        let mut present = plx_machine::present::Present::new();
+        let mut present = nj_machine::present::Present::new();
         let mut fx = Effects::new(
             &mut out,
-            plx_machine::machine::MachineId::Instance(plx_machine::machine::InstanceId(8)),
+            nj_machine::machine::MachineId::Instance(nj_machine::machine::InstanceId(8)),
             &mut present,
         );
         let ev = ScreenEvent::<HostFixture>::Input(InputEvent {
@@ -1721,27 +1721,27 @@ mod tests {
 
     #[test]
     fn play_trailer_is_cache_only_on_the_loaded_detail() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         crate::metadata::set_current_for_test(test_store().state_mut(), None);
         assert!(
-            cached_trailer(crate::plex::ServerId::UNSET, &item(0, PosterMark::None), test_store().view()).is_none(),
+            cached_trailer(crate::catalog::ServerId::UNSET, &item(0, PosterMark::None), test_store().view()).is_none(),
             "no loaded Detail → no row"
         );
 
         crate::metadata::set_current_for_test(test_store().state_mut(), Some(crate::metadata::Detail {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::catalog::ServerId::UNSET,
             rk: "42".into(),
             kind: "movie".into(),
             extras: vec![extra()],
             ..Default::default()
         }));
-        let hit = cached_trailer(crate::plex::ServerId::UNSET, &item(0, PosterMark::None), test_store().view()).unwrap();
+        let hit = cached_trailer(crate::catalog::ServerId::UNSET, &item(0, PosterMark::None), test_store().view()).unwrap();
         assert_eq!(hit.rk, "99");
 
         let mut other = item(0, PosterMark::None);
         other.rk = "other".into();
         assert!(
-            cached_trailer(crate::plex::ServerId::UNSET, &other, test_store().view()).is_none(),
+            cached_trailer(crate::catalog::ServerId::UNSET, &other, test_store().view()).is_none(),
             "a related tile of a different item must not steal the loaded trailer"
         );
         crate::metadata::set_current_for_test(test_store().state_mut(), None);
@@ -1792,11 +1792,11 @@ mod tests {
     /// whole-pixel advances. No row carries server text; the parent title only rides an action.
     #[test]
     fn every_action_row_fits_the_widest_panel_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
         // The panel hugs its content, so it always fits itself; the widest it may ever grow to
         // ([`MENU_MAX_W`], the shared cap) is the width a verb can actually be held to.
         let widest = MENU_MAX_W;
-        let measure = plx_base::fontcov::advances::ShippedMeasure;
+        let measure = nj_base::fontcov::advances::ShippedMeasure;
         let marks = [PosterMark::None, PosterMark::InProgress, PosterMark::Watched];
         let trailer = crate::metadata::Extra { rk: "9".into(), part: "/p".into(), ..Default::default() };
         // A row captures its text when it is BUILT, so the menus are rebuilt inside each language.

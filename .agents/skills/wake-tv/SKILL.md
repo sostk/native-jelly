@@ -44,7 +44,7 @@ no `wakeonlan` binary on a stock Mac) and working SSH auth to the TV.
 
 - **A deploy can die mid-scp** when the TV sleeps under it. After any interrupted
   `make deploy`, md5-compare before trusting the binary:
-  `md5 -q pkg/plxnative` vs `ssh root@TV "md5sum $(make -s print-appdir FLAVOR=<f>)/plxnative"`.
+  `md5 -q pkg/nativejelly` vs `ssh root@TV "md5sum $(make -s print-appdir FLAVOR=<f>)/nativejelly"`.
   Spell the app directory that way rather than eliding it: there are two installs on this
   television — `com.sostk.nativejelly` and `com.sostk.nativejelly.debug`, the latter being what an
   unflavoured `make deploy` targets — and a hand-typed path compares the wrong one without
@@ -61,11 +61,11 @@ no `wakeonlan` binary on a stock Mac) and working SSH auth to the TV.
   either way, and it matters more since the runtime root moved: a flavoured install keeps its
   whole root there (`/tmp/<app id>`: triggers, FIFO, logs), and the stable install keeps its
   triggers and all three logs directly in `/tmp`. A wipe would also contradict what three places
-  promise about `plxnative-crash.log` being append-only and surviving a relaunch (`docs/agent-reference.md`,
+  promise about `nativejelly-crash.log` being append-only and surviving a relaunch (`docs/agent-reference.md`,
   `crash-triage`, `docs/two-installs.md` §3.1) — though "survives the relaunch" and "survives a
   power cycle" are different claims, and only the first has ever been exercised.
-  *Settled by:* before going to standby, note `md5sum` and size of `<rundir>/plxnative-crash.log`
-  and `touch <rundir>/plxnative-standbyprobe`; wake, then `ls -la <rundir>`. The crash log
+  *Settled by:* before going to standby, note `md5sum` and size of `<rundir>/nativejelly-crash.log`
+  and `touch <rundir>/nativejelly-standbyprobe`; wake, then `ls -la <rundir>`. The crash log
   unchanged and the probe file still present settles it as "not wiped"; either one gone settles
   the opposite. One session, no playback needed.
   Either way you do not need to re-install — the app directory is on flash, not `/tmp` — and

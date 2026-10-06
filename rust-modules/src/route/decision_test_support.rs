@@ -89,8 +89,8 @@ pub(super) fn test_original_candidate(subtitle_ordinal: Option<i32>) -> AutoOrig
 /// names a slot the next test is about to re-fill with a different server, and `machine_id` is
 /// a cache keyed on exactly that id — which `the_machine_id_cache_is_scoped_to_the_server_that_taught_it`
 /// then reads. `reset_session` is the whole-session write, and this is what it is for.
-pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> plx_base::testlock::Serial {
-    let g = plx_base::testlock::serial();
+pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> nj_base::testlock::Serial {
+    let g = nj_base::testlock::serial();
     // These are process-global route transactions, not Session fields. A host test has no
     // Engine pump to spend them, so leaving either behind makes a later loopback server see a
     // stop for an encoder from a completely different case.
@@ -109,9 +109,9 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> plx_base::testlock::Se
     restore_direct_play_mode(DirectPlayMode::Auto);
     // Issue #266: `ResolveEnv::snapshot` reads the enhancement preference from a global, so a
     // test that set it must not leak an enhanced resolve into the next one.
-    crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+    crate::player::restore_audio_enhancements(crate::catalog::AudioEnhancements::NONE);
     crate::player::reset_route_requests_for_test(ps);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
     crate::player::clear_original_failure();
     g
 }
@@ -119,9 +119,9 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> plx_base::testlock::Se
 /// A `ServerId` naming a slot nothing is registered in — so `client_for` answers `None` and
 /// `build_stream` takes its no-client exit without opening a socket.
 pub(super) fn unregistered_sid() -> ServerId {
-    let id = ServerId::from_raw((crate::plex::MAX_SERVERS - 1) as u16);
+    let id = ServerId::from_raw((crate::catalog::MAX_SERVERS - 1) as u16);
     assert!(
-        crate::plex::client_for(id).is_none(),
+        crate::catalog::client_for(id).is_none(),
         "the test needs an EMPTY slot"
     );
     id
@@ -261,7 +261,7 @@ pub(super) fn plan_pms_inner(
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         let mut requests = Vec::new();
         while requests.len() < n && std::time::Instant::now() < deadline {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let first = drain_http(&mut socket);
                     if start_bytes.is_some() && first.contains("/library/parts/") {
@@ -321,7 +321,7 @@ pub(super) fn selection_probe_pms(
         let mut selection = (1, 9);
         let mut requests = Vec::new();
         loop {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let line = drain_http(&mut socket);
                     if line.starts_with("PUT /library/parts/") {
@@ -528,7 +528,7 @@ pub(super) fn enhancement_pms_parts(
     let handle = std::thread::spawn(move || {
         let mut requests = Vec::new();
         loop {
-            match plx_base::testnet::accept(&listener) {
+            match nj_base::testnet::accept(&listener) {
                 Ok((mut socket, _)) => {
                     let line = drain_http(&mut socket);
                     let enhanced = query_param(&line, "boostDialog") == Some("1")

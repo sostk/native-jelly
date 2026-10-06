@@ -58,7 +58,7 @@ learn_mac() {
 # Through tools/tv-ssh: the key first, `sshpass` only if the set refuses it, a fast failure while
 # the set is still asleep (which is the answer `up` wants), and no address on any line it prints.
 TVSSH="$REPO/tools/tv-ssh"
-export PLX_TV_ADDR="$TV_HOST" PLX_TV_SSH_TIMEOUT=5
+export NJ_TV_ADDR="$TV_HOST" NJ_TV_SSH_TIMEOUT=5
 up() { "$TVSSH" ssh "${TV_USER}@${TV_HOST}" true 2>/dev/null; }
 
 send_wol() {

@@ -17,7 +17,7 @@ use std::ffi::CStr;
 use crate::stores::browse::{BrowseCmd, DirectoryView, SecFetch, SrcRow};
 use crate::stores::{StoreCmd, StoreId, StoreWork};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, Fx, GroupId, Handled, InputEvent, InputKind, Key, LogicalState, Machine, NavOp,
 };
 use crate::ui::route_screen::RouteLayout;
@@ -42,9 +42,9 @@ enum ActionKind {
 impl ActionKind {
     fn label(self) -> &'static CStr {
         match self {
-            ActionKind::Retry => plx_platform::i18n::msg::settings_retry_c(),
-            ActionKind::Done => plx_platform::i18n::msg::settings_done_c(),
-            ActionKind::Start => plx_platform::i18n::msg::settings_onboard_start_c(),
+            ActionKind::Retry => nj_platform::i18n::msg::settings_retry_c(),
+            ActionKind::Done => nj_platform::i18n::msg::settings_done_c(),
+            ActionKind::Start => nj_platform::i18n::msg::settings_onboard_start_c(),
         }
     }
 }
@@ -82,7 +82,7 @@ pub(crate) struct OnboardScreen {
     /// The underlying clock for [`phase_ms`](Self::phase_ms) (`motion::Phase`, phase 12 D4):
     /// reports `Motion` from inside its own `advance` rather than the raw `+= dt` this used to be,
     /// with `fx.note(Motion)` a separate line further down `step`.
-    phase_clock: plx_machine::motion::Phase,
+    phase_clock: nj_machine::motion::Phase,
     pop: CtlPop<1>,
     ground: RouteGround,
     state: OnboardState,
@@ -150,7 +150,7 @@ fn snapshot_pins(directory: DirectoryView<'_>) -> Vec<(usize, bool)> {
 
 impl OnboardScreen {
     /// First run's page.
-    pub(crate) fn first_run(entry: EntryId, directory: DirectoryView<'_>, hubs: crate::pms::HubsView<'_>) -> Self {
+    pub(crate) fn first_run(entry: EntryId, directory: DirectoryView<'_>, hubs: crate::catalog_fetch::HubsView<'_>) -> Self {
         Self::new(entry, false, directory, super::family::pre_home_ground(hubs))
     }
     /// The Settings editor.
@@ -170,7 +170,7 @@ impl OnboardScreen {
             draft: base,
             touched: Vec::new(),
             phase_ms: 0.0,
-            phase_clock: plx_machine::motion::Phase::default(),
+            phase_clock: nj_machine::motion::Phase::default(),
             pop: CtlPop::new(),
             ground,
             state: OnboardState {
@@ -363,7 +363,7 @@ impl OnboardScreen {
     /// The one action pill, pressed: retry discovery (nothing found yet) or write the draft down
     /// for real. **Both leave through `fx` as an `AppFx::Store`**; calling an owner directly from
     /// here would let an owned screen reach around the one exit the restructure gives it
-    /// (`plx_machine::machine::Machine`'s doc: purity is enforced by `Effects` being the only exit).
+    /// (`nj_machine::machine::Machine`'s doc: purity is enforced by `Effects` being the only exit).
     /// `Bridge::app_fx` (`app/bridge.rs`) turns
     /// `AppFx::Store(id, cmd)` into `Fx::Deliver(MachineId::Store(id.ord()), …)` in the SAME
     /// drain the push happens in, so from outside this screen the command still lands before the
@@ -371,7 +371,7 @@ impl OnboardScreen {
     fn commit<H: DirectoryLike>(&mut self, directory: DirectoryView<'_>, fx: &mut Effects<'_, H>) {
         if directory.section_count() == 0 {
             fx.push(Fx::App(AppFx::Store(StoreId::Browse, StoreCmd::Browse(BrowseCmd::RetryDiscovery))));
-            plx_base::eventlog::log("onboard: no discovered libraries yet — retry queued");
+            nj_base::eventlog::log("onboard: no discovered libraries yet — retry queued");
             return;
         }
         // The count logged below is read off `self.draft`, not back from the Browse owner —
@@ -389,7 +389,7 @@ impl OnboardScreen {
             StoreId::Browse,
             StoreCmd::Browse(BrowseCmd::ApplyPins(self.answered())),
         )));
-        plx_base::eventlog::log(&format!("onboard: Home selection recorded — {on} of {total} libraries on"));
+        nj_base::eventlog::log(&format!("onboard: Home selection recorded — {on} of {total} libraries on"));
         self.leave(fx);
     }
 
@@ -421,8 +421,8 @@ impl OnboardScreen {
 
 fn body_copy_for(who: &[String]) -> String {
     match join_names(who) {
-        None => plx_platform::i18n::msg::settings_onboard_copy().to_string(),
-        Some(names) => plx_platform::i18n::msg::settings_onboard_shared(who.len() as i64, &names),
+        None => nj_platform::i18n::msg::settings_onboard_copy().to_string(),
+        Some(names) => nj_platform::i18n::msg::settings_onboard_shared(who.len() as i64, &names),
     }
 }
 
@@ -430,7 +430,7 @@ fn join_names(who: &[String]) -> Option<String> {
     match who {
         [] => None,
         [a] => Some(a.clone()),
-        [rest @ .., last] => Some(plx_platform::i18n::msg::settings_onboard_names(last, &rest.join(", "))),
+        [rest @ .., last] => Some(nj_platform::i18n::msg::settings_onboard_names(last, &rest.join(", "))),
     }
 }
 
@@ -466,16 +466,16 @@ impl<H: DirectoryLike> crate::ui::screen::Focusable<H> for OnboardView<'_> {
     fn group_of(&self, key: &u32, cx: &Cx<'_, H>) -> Option<GroupId> {
         crate::ui::screen::Focusable::<H>::group_of(&self.screen(), key, cx)
     }
-    fn neighbour(&self, key: plx_machine::machine::FocusKey<u32>, dir: crate::ui::screen::Dir, cx: &Cx<'_, H>) -> crate::ui::screen::Step<u32> {
+    fn neighbour(&self, key: nj_machine::machine::FocusKey<u32>, dir: crate::ui::screen::Dir, cx: &Cx<'_, H>) -> crate::ui::screen::Step<u32> {
         crate::ui::screen::Focusable::<H>::neighbour(&self.screen(), key, dir, cx)
     }
     fn place(&self, key: &u32, cx: &Cx<'_, H>, at: crate::ui::screen::At) -> Option<crate::ui::screen::Placed> {
         crate::ui::screen::Focusable::<H>::place(&self.screen(), key, cx, at)
     }
-    fn reconcile(&self, want: plx_machine::machine::FocusKey<u32>, cx: &Cx<'_, H>) -> plx_machine::machine::FocusKey<u32> {
+    fn reconcile(&self, want: nj_machine::machine::FocusKey<u32>, cx: &Cx<'_, H>) -> nj_machine::machine::FocusKey<u32> {
         crate::ui::screen::Focusable::<H>::reconcile(&self.screen(), want, cx)
     }
-    fn seat(&self, g: GroupId, from: crate::ui::screen::Placed, cx: &Cx<'_, H>) -> plx_machine::machine::FocusKey<u32> {
+    fn seat(&self, g: GroupId, from: crate::ui::screen::Placed, cx: &Cx<'_, H>) -> nj_machine::machine::FocusKey<u32> {
         crate::ui::screen::Focusable::<H>::seat(&self.screen(), g, from, cx)
     }
 }
@@ -487,16 +487,16 @@ impl<H: DirectoryLike> crate::ui::screen::Focusable<H> for OnboardScreen {
     fn group_of(&self, key: &u32, cx: &Cx<'_, H>) -> Option<GroupId> {
         crate::ui::screen::Focusable::<H>::group_of(&self.view(H::directory(cx)), key, cx)
     }
-    fn neighbour(&self, key: plx_machine::machine::FocusKey<u32>, dir: crate::ui::screen::Dir, cx: &Cx<'_, H>) -> crate::ui::screen::Step<u32> {
+    fn neighbour(&self, key: nj_machine::machine::FocusKey<u32>, dir: crate::ui::screen::Dir, cx: &Cx<'_, H>) -> crate::ui::screen::Step<u32> {
         crate::ui::screen::Focusable::<H>::neighbour(&self.view(H::directory(cx)), key, dir, cx)
     }
     fn place(&self, key: &u32, cx: &Cx<'_, H>, at: crate::ui::screen::At) -> Option<crate::ui::screen::Placed> {
         crate::ui::screen::Focusable::<H>::place(&self.view(H::directory(cx)), key, cx, at)
     }
-    fn reconcile(&self, want: plx_machine::machine::FocusKey<u32>, cx: &Cx<'_, H>) -> plx_machine::machine::FocusKey<u32> {
+    fn reconcile(&self, want: nj_machine::machine::FocusKey<u32>, cx: &Cx<'_, H>) -> nj_machine::machine::FocusKey<u32> {
         crate::ui::screen::Focusable::<H>::reconcile(&self.view(H::directory(cx)), want, cx)
     }
-    fn seat(&self, g: GroupId, from: crate::ui::screen::Placed, cx: &Cx<'_, H>) -> plx_machine::machine::FocusKey<u32> {
+    fn seat(&self, g: GroupId, from: crate::ui::screen::Placed, cx: &Cx<'_, H>) -> nj_machine::machine::FocusKey<u32> {
         crate::ui::screen::Focusable::<H>::seat(&self.view(H::directory(cx)), g, from, cx)
     }
 }
@@ -507,14 +507,14 @@ impl<H: DirectoryLike> Machine<H> for OnboardScreen {
         match ev {
             ScreenEvent::Tick(t) => {
                 if self.ground.refresh() {
-                    fx.invalidate(plx_machine::present::Provenance::Landing(plx_machine::machine::MachineId::Session));
+                    fx.invalidate(nj_machine::present::Provenance::Landing(nj_machine::machine::MachineId::Session));
                 }
                 let dt = t.dt();
                 fx.push(Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
                 let directory = H::directory(cx);
                 if self.table_gen != directory.source_list_gen() {
                     self.rebuild(true, directory);
-                    fx.invalidate(plx_machine::present::Provenance::Landing(fx.from()));
+                    fx.invalidate(nj_machine::present::Provenance::Landing(fx.from()));
                 }
                 let band = cx.focus.current.and_then(|k| band_index(k.elem));
                 self.pop.step(band, dt);
@@ -541,7 +541,7 @@ impl<H: DirectoryLike> Machine<H> for OnboardScreen {
                     if let Some(target) = target {
                         self.toggle_row(target, H::directory(cx));
                     }
-                    fx.invalidate(plx_machine::present::Provenance::Input);
+                    fx.invalidate(nj_machine::present::Provenance::Input);
                 }
                 Handled::Yes
             }
@@ -555,7 +555,7 @@ impl<H: DirectoryLike> Machine<H> for OnboardScreen {
                         Some(k) if k == self.action_kind(H::directory(cx)) => {
                             self.commit(H::directory(cx), fx)
                         }
-                        Some(_) => plx_base::eventlog::log(
+                        Some(_) => nj_base::eventlog::log(
                             "onboard: the action changed under an armed press — refusing to commit it",
                         ),
                         // `PressCommit` reached us with no recorded arm at all — should not
@@ -706,7 +706,7 @@ impl<H: DirectoryLike> Screen<H> for OnboardScreen {
         &self.state
     }
     fn crumb(&self, _cx: &Cx<'_, H>) -> Option<Cow<'_, str>> {
-        Some(Cow::Borrowed(if self.settings { plx_platform::i18n::msg::settings_title() } else { plx_platform::i18n::msg::settings_profiles_title() }))
+        Some(Cow::Borrowed(if self.settings { nj_platform::i18n::msg::settings_title() } else { nj_platform::i18n::msg::settings_profiles_title() }))
     }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, H>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
@@ -720,8 +720,8 @@ impl<H: DirectoryLike> Screen<H> for OnboardScreen {
         let body = self.body_copy(directory);
         Header::new(
             layout,
-            Some(if self.settings { plx_platform::i18n::msg::settings_title() } else { plx_platform::i18n::msg::settings_profiles_title() }),
-            if self.settings { plx_platform::i18n::msg::settings_libraries_title() } else { plx_platform::i18n::msg::settings_onboard_title() },
+            Some(if self.settings { nj_platform::i18n::msg::settings_title() } else { nj_platform::i18n::msg::settings_profiles_title() }),
+            if self.settings { nj_platform::i18n::msg::settings_libraries_title() } else { nj_platform::i18n::msg::settings_onboard_title() },
             &body,
         )
         .paint(p, f.measure);
@@ -742,8 +742,8 @@ impl<H: DirectoryLike> Screen<H> for OnboardScreen {
         if self.form.table.n_rows() == 0 {
             let env = Env::inert();
             if directory.discovery() == SecFetch::Failed {
-                StatusOverlay::new(lf, plx_platform::i18n::msg::settings_onboard_failed_c(), StatusKind::Failed)
-                    .reason(plx_platform::i18n::msg::settings_onboard_failed_reason_c())
+                StatusOverlay::new(lf, nj_platform::i18n::msg::settings_onboard_failed_c(), StatusKind::Failed)
+                    .reason(nj_platform::i18n::msg::settings_onboard_failed_reason_c())
                     .draw(&env, p);
             } else {
                 Spinner::new(lf.x + lf.w * 0.5, lf.y + StatusOverlay::CTRL_H, 22.0)
@@ -786,7 +786,7 @@ mod tests {
     fn the_home_sources_editor_names_one_word_in_both_mountings() {
         use crate::ui::screen::Screen;
         let directory = crate::stores::browse::DirectoryView::empty_for_test();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let first = OnboardScreen::first_run(EntryId(0), directory, hubs_snap.view());
         let inside = OnboardScreen::settings(EntryId(0), directory);
         assert_eq!(Screen::<InnerHost>::name(&first), super::word::ONBOARD);
@@ -796,8 +796,8 @@ mod tests {
 
     use super::*;
     use crate::ui::form::FormId;
-    use plx_machine::machine::{FocusKey, FocusRead, InputOwner, InstanceId, MachineId, PressId, PressRead, Source, Stamped};
-    use plx_machine::present::Present;
+    use nj_machine::machine::{FocusKey, FocusRead, InputOwner, InstanceId, MachineId, PressId, PressRead, Source, Stamped};
+    use nj_machine::present::Present;
 
     use super::super::family::InnerHost;
     use super::super::registry::band_elem;
@@ -805,11 +805,11 @@ mod tests {
     /// This screen's session guard. Browse state belongs to each test's [`BrowseFixture`] and
     /// therefore needs no process-global teardown.
     struct TempSession {
-        _inner: crate::plex::session::TempSession,
+        _inner: crate::catalog::session::TempSession,
     }
     impl TempSession {
         fn new(tag: &str) -> TempSession {
-            let inner = crate::plex::session::TempSession::new(tag);
+            let inner = crate::catalog::session::TempSession::new(tag);
             inner.watching("u-test");
             TempSession { _inner: inner }
         }
@@ -870,7 +870,7 @@ mod tests {
     ) -> Cx<'a, InnerHost> {
         Cx {
             views: directory,
-            tick: plx_machine::machine::Tick::default(),
+            tick: nj_machine::machine::Tick::default(),
             measure: m,
             press: PressRead::default(),
             focus: FocusRead {
@@ -904,13 +904,13 @@ mod tests {
 
     #[test]
     fn endpoint_outcomes_leave_onboard_in_the_same_tick_as_discovery() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("endpoint-onboard");
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
         let mut browse = BrowseFixture::new();
-        let sid = crate::plex::register_for_test("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
-        let client = crate::plex::client_for(sid).unwrap();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let sid = crate::catalog::register_for_test("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
+        let client = crate::catalog::client_for(sid).unwrap();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         browse.stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), false);
@@ -920,19 +920,19 @@ mod tests {
         let source_list_gen = directory.source_list_gen();
         let (_, effects) = step_ev(
             &mut s,
-            &ScreenEvent::Tick(plx_machine::machine::Tick { ms: 16, dt_us: 16_000 }),
+            &ScreenEvent::Tick(nj_machine::machine::Tick { ms: 16, dt_us: 16_000 }),
             None,
             directory,
         );
         assert!(effects.iter().any(|effect| matches!(effect.fx,
             Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)))));
         assert_eq!(s.table_gen, source_list_gen, "rebuild was not deferred");
-        crate::plex::reset_servers_for_test();
+        crate::catalog::reset_servers_for_test();
     }
 
     fn key_ok_down() -> ScreenEvent<InnerHost> {
         ScreenEvent::Input(InputEvent {
-            at: plx_machine::machine::Tick::default(),
+            at: nj_machine::machine::Tick::default(),
             source: Source::Script,
             kind: InputKind::Key { key: Key::Ok, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
         })
@@ -940,7 +940,7 @@ mod tests {
 
     fn key_back_down() -> ScreenEvent<InnerHost> {
         ScreenEvent::Input(InputEvent {
-            at: plx_machine::machine::Tick::default(),
+            at: nj_machine::machine::Tick::default(),
             source: Source::Script,
             kind: InputKind::Key { key: Key::Back, sym: 0, wcode: 0, edge: Edge::Down, at_edge: false },
         })
@@ -1001,9 +1001,9 @@ mod tests {
     /// though nothing has been touched.
     #[test]
     fn the_band_expresses_forward_back_and_commit_as_distinct_states() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         assert!(
             OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view()).has_band(),
             "first run always offers its commit"
@@ -1038,11 +1038,11 @@ mod tests {
     /// `app/bridge.rs`'s own tests to carry, not this file's.
     #[test]
     fn toggling_never_touches_the_live_pin_or_the_recorded_answer_until_commit() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("draft");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
 
         s.toggle_row(SrcTarget::Library(0), browse.capture());
@@ -1055,8 +1055,8 @@ mod tests {
             "…but the LIVE pin has not moved: nothing is written until commit"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and nothing has been recorded either — BACK has nothing to undo"
         );
@@ -1066,7 +1066,7 @@ mod tests {
         // rather than dropping the fresh instance and continuing with the stale one, so the toggle
         // below starts from a draft that matches the live table again rather than from the first
         // draft's already-toggled-off state (which would net the two toggles to a no-op).
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert!(browse.pinned(0), "a discarded draft leaves the live pin exactly where BACK found it");
 
@@ -1088,8 +1088,8 @@ mod tests {
              once the queued command is actually drained, not this screen's"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…nor has anything been recorded — recording is also a consequence of the command \
              actually running"
@@ -1101,7 +1101,7 @@ mod tests {
     /// is the same draft either way.
     #[test]
     fn settings_mode_dirty_and_persistence_track_the_draft_not_the_live_table() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("settings-draft");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1144,7 +1144,7 @@ mod tests {
     /// (`touched`).
     #[test]
     fn an_untouched_rows_live_drift_is_absorbed_into_entry_not_read_as_an_edit() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("entry-drift");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1181,7 +1181,7 @@ mod tests {
     /// so Done still disappears when an edit is undone.
     #[test]
     fn a_row_toggled_back_after_its_default_drifted_is_still_an_answer() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("drift-under-a-dirty-row");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1222,7 +1222,7 @@ mod tests {
     /// `rebuild` fails the assertions below.
     #[test]
     fn a_table_reset_mid_edit_discards_the_stale_draft_instead_of_misapplying_it() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("epoch-reset");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1260,7 +1260,7 @@ mod tests {
     /// this screen opened.
     #[test]
     fn a_freshly_landed_row_can_independently_make_settings_dirty() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("late-row");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true]);
@@ -1286,10 +1286,10 @@ mod tests {
     /// passing there — but the task this phase carries names it explicitly, so it gets one here.
     #[test]
     fn the_last_pinned_library_cannot_be_turned_off() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, false]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert!(s.draft_rows(browse.capture())[0].pinned, "section 0 starts as the only pinned library");
 
@@ -1311,12 +1311,12 @@ mod tests {
     /// restore and the live pin and the recorded answer must both be exactly where they started.
     #[test]
     fn back_through_the_real_step_path_touches_neither_the_live_pin_nor_the_record() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("real-back");
 
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         s.toggle_row(SrcTarget::Library(0), browse.capture());
         let (handled, effs) = step_ev(&mut s, &key_back_down(), None, browse.capture());
@@ -1326,8 +1326,8 @@ mod tests {
             .any(|st| matches!(st.fx, Fx::App(AppFx::Loop(LoopReq::OnboardBack)))));
         assert!(browse.pinned(0), "first-run BACK left the live pin exactly as it was");
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and recorded nothing"
         );
@@ -1340,8 +1340,8 @@ mod tests {
         assert!(effs.is_empty(), "…and this screen asks for nothing on the way out");
         assert!(browse.pinned(0), "Settings-mode BACK left the live pin exactly as it was");
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and recorded nothing — there was nothing to restore"
         );
@@ -1355,7 +1355,7 @@ mod tests {
     /// verb — and an unchanged verb must still commit normally.
     #[test]
     fn an_action_that_changes_verb_under_an_armed_press_refuses_to_commit() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         // **The scratch session is load-bearing here, not boilerplate.** This test asserts that a
         // refused commit RECORDED NOTHING, and `pins_for` reads whatever `auth.json` the session
         // layer resolves — which off a developer's own machine is that household's real one. It
@@ -1366,7 +1366,7 @@ mod tests {
         // doc is the full account of why the guard exists.
         let _t = TempSession::new("armed-verb");
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.action_kind(browse.capture()), ActionKind::Retry, "nothing discovered yet");
 
@@ -1393,8 +1393,8 @@ mod tests {
             "the deferred commit must refuse rather than answer the first-run question"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and must record nothing — nothing here is an answer the user gave"
         );
@@ -1445,9 +1445,9 @@ mod tests {
                 ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::FirstInGroup(TABLE_GROUP) }),
             ),
         ] {
-            let _g = plx_base::testlock::serial();
+            let _g = nj_base::testlock::serial();
             let mut browse = BrowseFixture::new();
-            let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+            let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
             let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
             let (handled, effs) = step_ev(&mut s, &default_seat, None, browse.capture());
             assert_eq!(handled, Handled::Yes, "default seat shape: {label}");
@@ -1520,10 +1520,10 @@ mod tests {
     /// this drives it through the real `Machine::step` `Tick` path.
     #[test]
     fn the_empty_roster_spinner_reports_motion_on_every_tick() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("no-library-yet-spinner");
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.form.table.n_rows(), 0, "a reset browse store starts with no rows");
         let m = crate::ui::fixture::FixtureMeasure;
@@ -1533,7 +1533,7 @@ mod tests {
         let mut buf: Vec<Stamped<InnerHost>> = Vec::new();
         for ms in [16, 32, 48] {
             let mut fx = Effects::new(&mut buf, MachineId::Instance(InstanceId(0)), &mut present);
-            let ev = ScreenEvent::Tick(plx_machine::machine::Tick { ms, dt_us: 16_667 });
+            let ev = ScreenEvent::Tick(nj_machine::machine::Tick { ms, dt_us: 16_667 });
             Machine::<InnerHost>::step(&mut s, &ev, &cxv, &mut fx);
             assert!(
                 present.take(ms),
@@ -1544,7 +1544,7 @@ mod tests {
 
     #[test]
     fn commit_and_back_both_refuse_to_answer_before_a_real_library_lands() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("no-library-yet");
         let mut browse = BrowseFixture::new(); // no discovered libraries at all, in either flavour
 
@@ -1552,7 +1552,7 @@ mod tests {
         // shape — "the skip is honest precisely because it records what the screen was showing
         // rather than deferring the question to a prompt that never comes" — and that skip is
         // BACK's alone; the pill itself must never treat an empty roster as an answered question.
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         let effs = commit_now(&mut s, browse.capture());
         assert!(
@@ -1573,8 +1573,8 @@ mod tests {
             "BACK navigates without recording an empty answer"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and BACK recorded nothing"
         );
@@ -1582,7 +1582,7 @@ mod tests {
         // The Settings-hosted twin asks the same question of `commit` alone: its BACK/Cancel is
         // already proven to touch neither the live pin nor the record
         // (`back_through_the_real_step_path_touches_neither_the_live_pin_nor_the_record`), which is
-        // a claim about LEAVING; this is the claim about the one plx_platform::i18n::msg::settings_onboard_start_c() a pristine, empty editor
+        // a claim about LEAVING; this is the claim about the one nj_platform::i18n::msg::settings_onboard_start_c() a pristine, empty editor
         // still offers — Done must refuse to treat "nothing was ever discovered" as "the answer is
         // to keep nothing pinned".
         let mut s = OnboardScreen::settings(EntryId(0), browse.capture());
@@ -1622,7 +1622,7 @@ mod tests {
     /// which a restore loop would misfire.
     #[test]
     fn a_toggled_rows_independent_drift_is_never_restored_or_recorded_by_cancel() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("toggle-and-drift-race");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1645,8 +1645,8 @@ mod tests {
              restore the pre-toggle baseline (true)"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::catalog::session::peek()
+                .pins_for(&crate::catalog::session::current_profile_key())
                 .is_none(),
             "…and must record nothing — nothing here is an answer the user gave"
         );
@@ -1665,7 +1665,7 @@ mod tests {
     /// now sends it.
     #[test]
     fn a_commit_carries_a_toggled_row_the_live_pin_has_caught_up_with() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let _t = TempSession::new("commit-after-drift");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
@@ -1709,9 +1709,9 @@ mod tests {
     /// is worth recording exactly why that road was abandoned rather than silently dropped: a real
     /// dispatcher delivers a real `ScreenEvent::Tick` every frame, and `OnboardScreen`'s own Tick
     /// arm schedules the owned discovery pass, whose `sync_roster` half retires any
-    /// source not present in `crate::plex::server_ids()`'s LIVE roster (`browse::mod.rs`'s own
+    /// source not present in `crate::catalog::server_ids()`'s LIVE roster (`browse::mod.rs`'s own
     /// words: "Roster removal is an identity boundary, not a failed fetch"). `seed_pins_for_test`
-    /// stamps its fabricated source with `crate::plex::current_server()` — a real-looking id
+    /// stamps its fabricated source with `crate::catalog::current_server()` — a real-looking id
     /// nothing has actually registered — so the very first real Tick wiped the seeded roster back
     /// to zero rows, which read as "there is nowhere left to focus" and not as a focus-engine
     /// question at all. Registering a fake-but-live server to satisfy `sync_roster` shifted the
@@ -1723,10 +1723,10 @@ mod tests {
     /// a live Tick pump in the loop to fight with a fixture never built to survive one.
     #[test]
     fn down_off_the_last_row_reaches_the_bottom_action() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         let m = crate::ui::fixture::FixtureMeasure;
         let cx = test_cx(&m, None, browse.capture());
@@ -1802,10 +1802,10 @@ mod tests {
     /// about the band at all.
     #[test]
     fn a_press_abandoned_for_the_list_does_not_swallow_the_row_s_own_ok() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_two_sources();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.action_kind(browse.capture()), ActionKind::Start, "two sources are seeded");
         s.armed_kind = Some(ActionKind::Start); // stands in for the pill's still-bouncing arm
@@ -1841,15 +1841,15 @@ mod tests {
     /// width). Server and library names are marked `server_*` by that builder and exempt.
     #[test]
     fn every_favourites_row_fits_its_column_in_every_language() {
-        use plx_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
-        let _g = plx_base::testlock::serial();
+        use nj_platform::i18n::{language_on_this_thread_for_test, SHIPPED};
+        let _g = nj_base::testlock::serial();
         let frame_w = RouteLayout::screen().sectioned_table().w;
         let mut out = Vec::new();
         for language in SHIPPED {
             let _guard = language_on_this_thread_for_test(language);
             let mut browse = BrowseFixture::new();
             browse.seed_two_sources();
-            let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+            let hubs_snap = crate::catalog_fetch::HubsSnapshot::empty_for_test();
             let first = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
             let inside = OnboardScreen::settings(EntryId(0), browse.capture());
             for (mounting, screen) in [("first run", &first), ("settings", &inside)] {

@@ -16,9 +16,9 @@ use crate::auth::owner::{
 /// own late `ProfileRoster` re-committed the already-seated profile as another `Switch`.
 #[test]
 fn a_late_profile_roster_for_the_seated_profile_keeps_resident_art() {
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
     let (sid, plan) = late_roster_of_the_seated_profile();
     let kept = crate::app::adapters::poster::resident_art_survives_for_test(sid, || {
         for p in &plan.registry {
@@ -29,8 +29,8 @@ fn a_late_profile_roster_for_the_seated_profile_keeps_resident_art() {
     assert!(matches!(&plan.registry[0],
         RegistryPlan::Install { commit: RosterCommit::Refresh { same_identity: true }, .. }),
         "the seated profile's own roster is a same-identity refresh, not a second switch");
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// **Blink B** (owner trace, 2026-09-30, ~11.6 s into an ordinary stored-session launch):
@@ -43,9 +43,9 @@ fn a_late_profile_roster_for_the_seated_profile_keeps_resident_art() {
 #[test]
 fn an_admin_boot_refresh_of_the_seated_profile_keeps_resident_art() {
     const ROTATED_GRANT: &str = "plex-tv-grant-for-the-same-owner";
-    let _g = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    let _g = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
     let (sid, plan) = admin_boot_refresh_of_the_seated_profile(ROTATED_GRANT);
 
     let kept = crate::app::adapters::poster::resident_art_survives_for_test(sid, || {
@@ -54,11 +54,11 @@ fn an_admin_boot_refresh_of_the_seated_profile_keeps_resident_art() {
         }
     });
     assert!(kept, "a same-profile roster refresh revoked the stored server's art");
-    let c = crate::plex::client_for(sid).unwrap();
+    let c = crate::catalog::client_for(sid).unwrap();
     assert!(c.image_transcode_path("/t", 2, 2, false).ends_with(&format!("X-Plex-Token={ROTATED_GRANT}")),
         "the refresh must still install plex.tv's current grant");
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// Review finding on the Refresh commit: `admin` is not "the account holder". The terminal
@@ -67,7 +67,7 @@ fn an_admin_boot_refresh_of_the_seated_profile_keeps_resident_art() {
 /// must not survive into the member-token session.
 #[test]
 fn a_refresh_under_another_accounts_token_does_not_keep_the_seated_profiles_art() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let (sid, plan) = refresh_under_another_accounts_token();
     let kept = crate::app::adapters::poster::resident_art_survives_for_test(sid, || {
         for p in &plan.registry {
@@ -75,15 +75,15 @@ fn a_refresh_under_another_accounts_token_does_not_keep_the_seated_profiles_art(
         }
     });
     assert!(!kept, "another account's grants were installed as a same-identity refresh");
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 /// The same gap one observation earlier: the roster worker's `Activate` progress for the
 /// admin's server, carrying the member's grant, re-tokens the admin's live slot in place.
 #[test]
 fn an_activation_under_another_accounts_token_does_not_keep_the_seated_profiles_art() {
-    let _g = plx_base::testlock::serial();
+    let _g = nj_base::testlock::serial();
     let (sid, plan) = activation_under_another_accounts_token();
     let kept = crate::app::adapters::poster::resident_art_survives_for_test(sid, || {
         for p in &plan.registry {
@@ -91,6 +91,6 @@ fn an_activation_under_another_accounts_token_does_not_keep_the_seated_profiles_
         }
     });
     assert!(!kept, "another account's grant was activated as a same-identity retoken");
-    crate::plex::grant::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::catalog::grant::reset_for_test();
+    crate::catalog::reset_servers_for_test();
 }

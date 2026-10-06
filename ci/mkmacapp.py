@@ -72,7 +72,7 @@ def version() -> str:
 
     **The same rule, spelled twice, because this script cannot ask cargo what it emitted.** It has
     to match, and the way it can go wrong is worth stating: the cargo subprocess below inherits
-    this process's environment, so it reads the same `PLX_RELEASE` — absent under `make macapp`,
+    this process's environment, so it reads the same `NJ_RELEASE` — absent under `make macapp`,
     `1` under `make RELEASE=1 macapp`. Reading `Cargo.toml` alone (which
     this did) put `0.5.0` in the Finder metadata and the zip filename of a bundle whose diagnostics
     panel says `0.6.0-dev`: the very ambiguity the suffix exists to remove, recreated on the one
@@ -82,7 +82,7 @@ def version() -> str:
     `package_version()` below instead — see `write_plist`.
     """
     pkg = package_version()
-    if os.environ.get("PLX_RELEASE"):
+    if os.environ.get("NJ_RELEASE"):
         return pkg
     major, minor, _patch = (int(p) for p in pkg.split("."))
     return f"{major}.{minor + 1}.0-dev"
@@ -119,16 +119,16 @@ def build_binary(tdir: Path) -> Path:
     """Cargo, release, with BOTH dev features off.
 
     `--no-default-features` drops `devtools` (the on-screen counter) and `devtriggers` (the whole
-    `/tmp/plxnative-*` surface, the remote FIFO and the capture listener). A binary somebody was
+    `/tmp/nativejelly-*` surface, the remote FIFO and the capture listener). A binary somebody was
     sent must not take instructions from a world-writable directory — and with the feature off
     there is nothing to take: `devtrig::flag` is `false` and `devtrig::read` is `None` at COMPILE time.
     """
-    print("==> building plxnative-sim (release, no dev features)")
+    print("==> building nativejelly-sim (release, no dev features)")
     run("cargo", "build", "--manifest-path", REPO / "rust-modules/Cargo.toml",
         "--target-dir", tdir, "--release", "--no-default-features",
-        "--features", "hostsim", "--bin", "plxnative-sim",
+        "--features", "hostsim", "--bin", "nativejelly-sim",
         env=dict(os.environ, CARGO_INCREMENTAL="0"))
-    return tdir / "release/plxnative-sim"
+    return tdir / "release/nativejelly-sim"
 
 
 def write_icon(res: Path):

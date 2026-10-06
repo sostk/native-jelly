@@ -1,8 +1,8 @@
 use super::*;
 use crate::ui::dispatch::{CxParts, Dispatcher, NoTap, Rig, Split};
 use crate::ui::fixture::{tick, FixtureMeasure};
-use plx_machine::machine::{Chrome, Host, InputOwner, InstanceId, MachineId, NavOp, ScreenId, TimerId};
-use plx_machine::present::Present;
+use nj_machine::machine::{Chrome, Host, InputOwner, InstanceId, MachineId, NavOp, ScreenId, TimerId};
+use nj_machine::present::Present;
 use crate::ui::screen::{Mounter, ReturnState, ScreenArg};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -85,7 +85,7 @@ fn body(entry: EntryId, rk: &str) -> DetailScreen {
         ctl_pop: CtlPop::new(), disc_unfurl: [Spring::at(0.0); 3],
         season_metrics: season::Metrics::new(), about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP), selected: None, spin_ms: 0.0,
-        spin_phase: plx_machine::motion::Phase::default(),
+        spin_phase: nj_machine::motion::Phase::default(),
         layout: std::cell::Cell::new(None),
         layout_pinned: std::cell::Cell::new(false),
         spot_facts: SpotFacts::default(),
@@ -130,7 +130,7 @@ fn item(rk: &str, reverse: bool) -> Detail {
             title: format!("Season {i}"), leaf_count: 2, viewed_leaf_count: 0 });
         d.episodes.push(crate::metadata::Episode { rk: format!("e{i}"), index: i,
             season: 1, title: format!("Episode {i}"), ..Default::default() });
-        d.related.push(crate::pms::PmsMovie { sid: ServerId::UNSET, rk: format!("r{i}"), ..Default::default() });
+        d.related.push(crate::catalog_fetch::PmsMovie { sid: ServerId::UNSET, rk: format!("r{i}"), ..Default::default() });
         d.cast.push(crate::metadata::Cast { id: i, tag: format!("Person {i}"),
             role: "Actor".into(), tag_key: format!("plex://person/{i}"), thumb: String::new() });
     }
@@ -175,7 +175,7 @@ fn land(d: &mut Dispatcher<TestHost>, rig: &mut TestRig, data: Detail, ms: u32) 
 
 #[test]
 fn repeated_detail_keys_follow_items_through_all_four_group_reorders() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for group in [season::SEASON_GROUP, episodes::EPISODES_GROUP, related::RELATED_GROUP, cast::CAST_GROUP] {
         let (mut d, mut rig) = boot();
         let key = first(&d, group);
@@ -191,7 +191,7 @@ fn repeated_detail_keys_follow_items_through_all_four_group_reorders() {
 
 #[test]
 fn a_removed_detail_item_is_not_reinterpreted_as_its_slot_replacement() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let key = first(&d, related::RELATED_GROUP);
     d.set_focus_in(Some(key), Some(related::RELATED_GROUP));
@@ -204,7 +204,7 @@ fn a_removed_detail_item_is_not_reinterpreted_as_its_slot_replacement() {
 
 #[test]
 fn retained_detail_back_keeps_the_engine_key_until_its_own_landing() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let key = first(&d, related::RELATED_GROUP);
     let instance = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
@@ -237,7 +237,7 @@ fn retained_detail_back_keeps_the_engine_key_until_its_own_landing() {
 
 #[test]
 fn an_evicted_detail_reuses_its_item_registry_after_a_reordered_landing() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let key = first(&d, related::RELATED_GROUP);
     let old_instance = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
@@ -264,7 +264,7 @@ fn an_evicted_detail_reuses_its_item_registry_after_a_reordered_landing() {
 
 #[test]
 fn retained_detail_back_hydrates_saved_season_before_episode_focus() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let mut second = item("a", false);
     second.cur_season = 1;
@@ -296,7 +296,7 @@ fn retained_detail_back_hydrates_saved_season_before_episode_focus() {
 
 #[test]
 fn reordered_detail_keys_activate_the_same_related_cast_and_episode_text_targets() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     for (located, expected) in [
         (Located::Related(0), ContentArg::Detail { sid: ServerId::UNSET, rk: "r1".into() }),
         (Located::Cast(0), ContentArg::Person { sid: ServerId::UNSET, key: "1".into(),
@@ -308,7 +308,7 @@ fn reordered_detail_keys_activate_the_same_related_cast_and_episode_text_targets
         land(&mut d, &mut rig, item("a", true), 32);
         let id = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
         d.emit(MachineId::Nav, Fx::Deliver(MachineId::Instance(id),
-            plx_machine::machine::Delivery::Screen(ScreenEvent::Activate(key))));
+            nj_machine::machine::Delivery::Screen(ScreenEvent::Activate(key))));
         frame(&mut d, &mut rig, 48);
         assert_eq!(rig.opened.len(), 1);
         assert!(rig.opened[0] == expected, "activation follows identity, never the stale local slot");
@@ -318,7 +318,7 @@ fn reordered_detail_keys_activate_the_same_related_cast_and_episode_text_targets
 
 #[test]
 fn a_failed_addressed_return_retires_the_intent_and_falls_back() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let key = first(&d, related::RELATED_GROUP);
     d.set_focus_in(Some(key), Some(related::RELATED_GROUP));
@@ -343,17 +343,17 @@ fn a_failed_addressed_return_retires_the_intent_and_falls_back() {
 
 #[test]
 fn a_live_return_does_not_rewind_ids_minted_after_its_request_snapshot() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let saved = d.return_state().memory;
     let mut newer = item("a", false);
-    newer.related.push(crate::pms::PmsMovie { sid: ServerId::UNSET, rk: "r3".into(), ..Default::default() });
+    newer.related.push(crate::catalog_fetch::PmsMovie { sid: ServerId::UNSET, rk: "r3".into(), ..Default::default() });
     land(&mut d, &mut rig, newer, 32);
     let third_key = screen(&d).key_of(Located::Related(2)).unwrap();
     let counter = screen(&d).next_elem;
     let id = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
     d.emit(MachineId::Nav, Fx::Deliver(MachineId::Instance(id),
-        plx_machine::machine::Delivery::Screen(ScreenEvent::RestoreMemory(saved))));
+        nj_machine::machine::Delivery::Screen(ScreenEvent::RestoreMemory(saved))));
     frame(&mut d, &mut rig, 48);
     assert_eq!(screen(&d).next_elem, counter);
     assert_eq!(screen(&d).key_of(Located::Related(2)), Some(third_key));
@@ -362,7 +362,7 @@ fn a_live_return_does_not_rewind_ids_minted_after_its_request_snapshot() {
 
 #[test]
 fn cold_entry_argument_and_return_memory_both_change_the_tree_hash() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let (mut d, mut rig) = boot();
     let key = first(&d, related::RELATED_GROUP);
     d.set_focus_in(Some(key), Some(related::RELATED_GROUP));
@@ -396,9 +396,9 @@ fn cold_entry_argument_and_return_memory_both_change_the_tree_hash() {
 /// drawn page itself.
 fn stray_runs(detail: Detail, server_values: &[&str]) -> Vec<String> {
     use crate::ui::screen::DrawFrame;
-    let _pseudo = plx_platform::i18n::pseudo_on_this_thread_for_test();
+    let _pseudo = nj_platform::i18n::pseudo_on_this_thread_for_test();
     let (mut d, _rig) = boot_with(detail);
-    let runs = plx_gfx::text::capture_text_runs_for_test(|| {
+    let runs = nj_gfx::text::capture_text_runs_for_test(|| {
         let entry = d.nav.tabs.stack.top_mut().expect("detail page");
         let owner = InputOwner::Entry(entry.id);
         let inst = entry.inst.as_mut().expect("mounted detail");
@@ -406,7 +406,7 @@ fn stray_runs(detail: Detail, server_values: &[&str]) -> Vec<String> {
         let cx = Cx::<TestHost> { views: (), tick: tick(32), measure: &measure,
             press: Default::default(), focus: Default::default(), owner };
         let mut f = DrawFrame::new(&cx, crate::ui::Painter::recording());
-        plx_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
+        nj_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
     });
     assert!(runs.iter().any(|run| run.contains("[!!")), "the page drew catalog text: {runs:?}");
     // A wrapped catalog paragraph draws its later lines without the brackets, but still in the
@@ -427,7 +427,7 @@ fn stray_runs(detail: Detail, server_values: &[&str]) -> Vec<String> {
 
 #[test]
 fn every_app_owned_run_on_a_show_page_comes_from_the_catalog() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let stray = stray_runs(item("a", false),
         &["Season", "Episode", "Person", "Actor"]);
     assert!(stray.is_empty(), "text drawn without the catalog: {stray:?}");
@@ -435,7 +435,7 @@ fn every_app_owned_run_on_a_show_page_comes_from_the_catalog() {
 
 #[test]
 fn every_app_owned_run_on_a_film_page_comes_from_the_catalog() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let stream = |codec: &str| crate::metadata::Stream {
         lang: "Deutsch".into(), lang_code: "deu".into(), codec: codec.into(), channels: 6,
         ..Default::default()
@@ -475,7 +475,7 @@ fn census(detail: Detail) -> std::collections::BTreeMap<(u64, bool), usize> {
         let cx = Cx::<TestHost> { views: (), tick: tick(32), measure: &measure,
             press: Default::default(), focus: Default::default(), owner };
         let mut f = DrawFrame::new(&cx, crate::ui::Painter::recording());
-        plx_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
+        nj_gfx::gfx::without_frame_clear(|| inst.screen.draw(&mut f));
     });
     let mut out = std::collections::BTreeMap::new();
     for (tag, r) in log {
@@ -493,7 +493,7 @@ fn census(detail: Detail) -> std::collections::BTreeMap<(u64, bool), usize> {
 /// primitives per frame, 40 = 44 (the row filling up), the same page as a film = 16.
 #[test]
 fn a_show_pages_draw_does_not_grow_with_seasons_off_the_row() {
-    let _guard = plx_base::testlock::serial();
+    let _guard = nj_base::testlock::serial();
     let full = census(show(16));
     assert_eq!(census(show(64)), full, "draw census grew with off-screen seasons");
     assert!(full.get(&(100, false)).copied().unwrap_or(0) > 0, "the page drew text: {full:?}");

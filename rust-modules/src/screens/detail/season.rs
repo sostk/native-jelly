@@ -3,7 +3,7 @@
 use std::hash::{Hash, Hasher};
 
 use crate::metadata::Detail;
-use plx_machine::machine::{GroupId, Measure};
+use nj_machine::machine::{GroupId, Measure};
 use crate::ui::widgets::{self, SelMark, StripLay, TabGround, TabStrip};
 use crate::ui::{theme, Painter, Rect};
 
@@ -114,7 +114,7 @@ impl Metrics {
         self.lays = widgets::strip_layout_measured(
             d.seasons.iter().map(|season| {
                 if season.title.is_empty() {
-                    plx_platform::i18n::msg::browse_detail_season_number(season.index as i64)
+                    nj_platform::i18n::msg::browse_detail_season_number(season.index as i64)
                 } else {
                     season.title.clone()
                 }

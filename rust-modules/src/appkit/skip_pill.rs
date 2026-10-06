@@ -43,8 +43,8 @@ impl Prompt {
     /// The button's copy — presentation, derived from the kind at the point of drawing.
     pub(crate) fn label(&self) -> &'static str {
         match self.kind {
-            MarkerKind::Intro => plx_platform::i18n::msg::widgets_skip_intro(),
-            MarkerKind::Credits => plx_platform::i18n::msg::widgets_skip_credits(),
+            MarkerKind::Intro => nj_platform::i18n::msg::widgets_skip_intro(),
+            MarkerKind::Credits => nj_platform::i18n::msg::widgets_skip_credits(),
         }
     }
 }
@@ -75,12 +75,12 @@ pub(crate) fn prompt_for(m: metadata::Marker) -> Prompt {
 /// `row` is the player instance's own [`crate::appkit::player_hud::TransportRow`] (restructure phase
 /// 9): it carries both the label-width memo this measurement is cached in and the control row's
 /// focus springs. It was a module `static mut` on the other side of `ctrl_slot` until then.
-pub(crate) fn rect(row: &mut crate::appkit::player_hud::TransportRow, pr: Prompt, measure: &dyn plx_machine::machine::Measure) -> Rect {
+pub(crate) fn rect(row: &mut crate::appkit::player_hud::TransportRow, pr: Prompt, measure: &dyn nj_machine::machine::Measure) -> Rect {
     crate::appkit::player_hud::ctrl_slot(row, pr.label(), measure)
 }
 
 /// Draw the button in the control row. Called by `player_hud` INSTEAD of the two discs.
-pub(crate) fn draw(row: &mut crate::appkit::player_hud::TransportRow, p: Painter, pr: Prompt, focused: bool, measure: &dyn plx_machine::machine::Measure) {
+pub(crate) fn draw(row: &mut crate::appkit::player_hud::TransportRow, p: Painter, pr: Prompt, focused: bool, measure: &dyn nj_machine::machine::Measure) {
     let Ok(label) = CString::new(pr.label()) else {
         return;
     };

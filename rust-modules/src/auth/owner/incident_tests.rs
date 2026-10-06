@@ -8,8 +8,8 @@ use crate::auth::LoginProgress;
 use crate::telemetry::incident::{IncidentContext, IncidentKind, InternalClass, LinkClass};
 
 struct OwnerHost;
-impl plx_machine::machine::Host for OwnerHost {
-    type Arg = plx_machine::machine::BareArg;
+impl nj_machine::machine::Host for OwnerHost {
+    type Arg = nj_machine::machine::BareArg;
     type Fx = SessionFx;
     type Msg = SessionEvent;
     type Elem = u32;
@@ -24,17 +24,17 @@ impl SessionHost for OwnerHost {
 }
 
 fn step(owner: &mut SessionMachine, event: SessionEvent) -> Vec<SessionFx> {
-    use plx_machine::machine::{Cx, Effects, EntryId, Fx, InputOwner, Machine, Tick};
+    use nj_machine::machine::{Cx, Effects, EntryId, Fx, InputOwner, Machine, Tick};
     let publication = owner.publication();
     let cx = Cx::<OwnerHost> {
         views: publication.read(),
         tick: Tick::default(),
-        measure: &plx_machine::machine::BareMeasure,
+        measure: &nj_machine::machine::BareMeasure,
         press: Default::default(),
         focus: Default::default(),
         owner: InputOwner::Entry(EntryId(0)),
     };
-    let mut present = plx_machine::present::Present::new();
+    let mut present = nj_machine::present::Present::new();
     let mut effects = Vec::new();
     owner.step(&event, &cx, &mut Effects::new(&mut effects, MachineId::Session, &mut present));
     effects
@@ -56,7 +56,7 @@ fn observe(owner: &mut SessionMachine, progress: LoginProgress, terminal: bool) 
     let pending = &owner.state.pending[&req];
     let arrival = pending.last_arrival.map_or(1, |a| a + 1);
     let envelope = SessionEnvelope {
-        addr: Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(req) },
+        addr: Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(req) },
         key: pending.key,
         admission: AdmissionId(req),
         arrival,
@@ -67,9 +67,9 @@ fn observe(owner: &mut SessionMachine, progress: LoginProgress, terminal: bool) 
     step(owner, SessionEvent::Result(envelope))
 }
 
-fn dns() -> plx_net::net::RequestFailure {
-    plx_net::net::RequestFailure {
-        cause: plx_net::net::RequestError::Transport,
+fn dns() -> nj_net::net::RequestFailure {
+    nj_net::net::RequestFailure {
+        cause: nj_net::net::RequestError::Transport,
         status: None,
         body_limit: None,
         curl_rc: Some(6),
@@ -155,9 +155,9 @@ fn legacy_no_servers_context_keeps_the_parent_canonical_digest() {
                     resources, trigger,
                 })
         };
-        let mut old = plx_machine::machine::Canon::new();
+        let mut old = nj_machine::machine::Canon::new();
         write_context(&mut old, &restored);
-        let mut current = plx_machine::machine::Canon::new();
+        let mut current = nj_machine::machine::Canon::new();
         write_context(&mut current, &expected);
         assert_eq!(old.finish(), current.finish(),
             "NoServers must not acquire the new discovery canonical suffix");
@@ -445,7 +445,7 @@ fn arrive(owner: &mut SessionMachine, outcome: SessionArrival) -> Vec<SessionFx>
     let req = signin_request(owner);
     let pending = &owner.state.pending[&req];
     let envelope = SessionEnvelope {
-        addr: Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(req) },
+        addr: Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(req) },
         key: pending.key,
         admission: AdmissionId(req),
         arrival: pending.last_arrival.map_or(1, |a| a + 1),
@@ -494,7 +494,7 @@ fn a_refused_worker_and_a_refused_admission_offer_their_own_failure() {
     let req = signin_request(&owner);
     let key = owner.state.pending[&req].key;
     step(&mut owner, SessionEvent::Admission(AdmissionReply {
-        addr: Addr { to: MachineId::Session, req: plx_machine::machine::RequestId(req) },
+        addr: Addr { to: MachineId::Session, req: nj_machine::machine::RequestId(req) },
         key,
         correlation: AdmissionId(req),
         accepted: false,
@@ -524,7 +524,7 @@ fn a_sign_in_whose_commit_is_refused_offers_its_own_failure() {
         arrival,
         admission: CommitAdmission::Rejected {
             revision: None,
-            rejection: crate::plex::session::async_persistence::RejectionKind::Capacity,
+            rejection: crate::catalog::session::async_persistence::RejectionKind::Capacity,
         },
     }));
     assert_eq!(owner.read().0.phase, Phase::Error);
@@ -832,7 +832,7 @@ fn fail_naming(owner: &mut SessionMachine, message: &str, account: Option<&str>)
 /// another reason, not after a later failure that has none.
 #[test]
 fn the_account_name_reaches_the_publication_only_for_the_no_servers_read_out() {
-    let no_servers = plx_platform::i18n::msg::browse_auth_no_servers();
+    let no_servers = nj_platform::i18n::msg::browse_auth_no_servers();
     let mut owner = signing_in();
     fail_naming(&mut owner, no_servers, Some("Zebediah Quux"));
     assert_eq!(owner.read().0.account.as_deref(), Some("Zebediah Quux"));
@@ -854,7 +854,7 @@ fn the_account_name_reaches_the_publication_only_for_the_no_servers_read_out() {
 fn the_account_name_is_absent_from_every_report_effect_and_digest() {
     const NAME: &str = "Zebediah-Quux-7741";
     let mut owner = signing_in();
-    let effects = fail_naming(&mut owner, plx_platform::i18n::msg::browse_auth_no_servers(), Some(NAME));
+    let effects = fail_naming(&mut owner, nj_platform::i18n::msg::browse_auth_no_servers(), Some(NAME));
     assert_eq!(owner.read().0.account.as_deref(), Some(NAME), "the screen does get it");
 
     let offer = offer(&owner).expect("the failure is held as an incident");
@@ -876,9 +876,9 @@ fn the_account_name_is_absent_from_every_report_effect_and_digest() {
 
     // The observation digest (what a recording hashes) is the same with and without the name.
     let digest = |account: Option<&str>| {
-        let mut canon = plx_machine::machine::Canon::new();
+        let mut canon = nj_machine::machine::Canon::new();
         crate::auth::observation::Observation::Login(LoginProgress::Failed {
-            epoch: 1, message: plx_platform::i18n::msg::browse_auth_no_servers().into(),
+            epoch: 1, message: nj_platform::i18n::msg::browse_auth_no_servers().into(),
             incident: no_servers_incident(), plaintext: None, account: account.map(str::to_owned),
         }).write(&mut canon);
         canon.finish()

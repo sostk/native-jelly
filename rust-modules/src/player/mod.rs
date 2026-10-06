@@ -7,7 +7,7 @@
 //! docs/engine-port-design.md.
 //!
 //! "Runs on the SDL main thread" is a **compile error to violate** for the two things where it
-//! matters — the ACB/Starfish seam and the native session slot. `plex_run` mints ONE
+//! matters — the ACB/Starfish seam and the native session slot. `nj_run` mints ONE
 //! [`MainThread`] token; `boot` moves it into [`adapter::PlayerAdapter`], which owns the session
 //! that was `engine::ENGINE`. The seam still takes `&MainThread` (reached through the adapter),
 //! the slot takes `&mut PlayerAdapter`, and the token is `!Send`, so a closure that captured
@@ -22,7 +22,7 @@ pub(crate) mod ass_source; // bounded embedded scripts and subtitle presentation
 pub(crate) mod engine;
 pub(crate) mod lifecycle;
 pub(crate) mod machine;
-pub(crate) mod playurl; // the `plxnative-playurl` dev trigger: a stream and its Load declaration, parsed beside the engine that acts on it
+pub(crate) mod playurl; // the `nativejelly-playurl` dev trigger: a stream and its Load declaration, parsed beside the engine that acts on it
 pub(crate) mod preview;
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 pub(crate) mod ffi;
@@ -39,7 +39,7 @@ pub(crate) mod sim_audio; // the simulator's sound, through a system ffmpeg (see
 pub(crate) mod threads;
 pub(crate) mod video_geometry;
 
-use plx_base::task::MainThread;
+use nj_base::task::MainThread;
 pub(crate) use shared::HlsAutomaticTransition;
 pub(crate) use shared::HlsClockFenceError;
 /// one rect of an image-subtitle display set — the demuxer builds them, the HUD draws them
@@ -56,18 +56,18 @@ use shared::{
 /// hostsim test binary reads the host sink directly, so it needs no port. Everything in `player/`
 /// reaches the seam as `sink().<verb>(mt, ..)`, and nothing branches on which platform it is.
 #[cfg(not(all(test, feature = "hostsim")))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
-    plx_platform::tv::sink::installed()
+fn sink() -> &'static dyn nj_platform::tv::sink::VideoSink {
+    nj_platform::tv::sink::installed()
 }
 #[cfg(all(test, feature = "hostsim"))]
-fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
+fn sink() -> &'static dyn nj_platform::tv::sink::VideoSink {
     &ffi_host::HostSink
 }
 
-/// `/tmp/plxnative-tracknames[=<audio>;<subs>]` — **stand in for the container's own track names**,
+/// `/tmp/nativejelly-tracknames[=<audio>;<subs>]` — **stand in for the container's own track names**,
 /// which nothing off-device can read.
 ///
-/// It exists for the same reason `/tmp/plxnative-personbio` does, and the shape of the problem is
+/// It exists for the same reason `/tmp/nativejelly-personbio` does, and the shape of the problem is
 /// identical: the data comes from a source no automated or host run can reach, so without a seed
 /// every headless look at the screen shows the degenerate state. Here the source is the DEMUXER —
 /// `ff::track_names` publishes these when it opens a part — and the desktop simulator has no
@@ -88,7 +88,7 @@ fn sink() -> &'static dyn plx_platform::tv::sink::VideoSink {
 /// a compile-time `None`), so a shipped binary cannot be made to show a name that is not the
 /// file's.
 pub(crate) fn seed_dev_track_names() {
-    let Some(spec) = plx_base::devtrig::read("tracknames") else {
+    let Some(spec) = nj_base::devtrig::read("tracknames") else {
         return;
     };
     // The real subtitle names of a nine-track MP4 whose PMS record carries none — the file this
@@ -114,8 +114,8 @@ pub(crate) fn seed_dev_track_names() {
     let (a, sub) = spec.split_once(';').unwrap_or(("", spec));
     let (audio, subs) = (list(a), list(sub));
     #[cfg(feature = "devtriggers")]
-    plx_base::eventlog::log(&format!(
-        "player: DEV track names seeded (a={} s={}) — /tmp/plxnative-tracknames",
+    nj_base::eventlog::log(&format!(
+        "player: DEV track names seeded (a={} s={}) — /tmp/nativejelly-tracknames",
         audio.len(),
         subs.len()
     ));
@@ -593,19 +593,19 @@ pub(crate) fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState
 /// name a file.
 pub(crate) fn support_line(kind: FailureKind) -> String {
     support_line_of(
-        plx_platform::tv::device::info(),
-        plx_platform::tv::device::device(),
+        nj_platform::tv::device::info(),
+        nj_platform::tv::device::device(),
         kind,
     )
 }
-fn support_line_of(i: &plx_platform::tv::device::Info, hw: &plx_platform::tv::device::Hardware, kind: FailureKind) -> String {
+fn support_line_of(i: &nj_platform::tv::device::Info, hw: &nj_platform::tv::device::Hardware, kind: FailureKind) -> String {
     let set = hw.set_line();
-    let set: &str = if set.is_empty() { plx_platform::i18n::msg::settings_login_unknown_device() } else { &set };
+    let set: &str = if set.is_empty() { nj_platform::i18n::msg::settings_login_unknown_device() } else { &set };
     format!(
         "{} {} · {} · {} · {}",
-        crate::plex::identity::PRODUCT,
-        crate::plex::identity::VERSION,
-        plx_platform::i18n::webos_release_line(i),
+        crate::catalog::identity::PRODUCT,
+        crate::catalog::identity::VERSION,
+        nj_platform::i18n::webos_release_line(i),
         set,
         kind.code()
     )
@@ -670,7 +670,7 @@ pub(crate) enum FailureKind {
     TvPipeline,
     /// This device's jail is missing `/dev/rtkmem` on a SoC where that is a known cause of
     /// native A/V crashes — the Load was never attempted. Community-tier finding: see
-    /// [`plx_platform::tv::sandbox::blocks_native_video`]'s doc.
+    /// [`nj_platform::tv::sandbox::blocks_native_video`]'s doc.
     JailMissingRtkmem,
     /// Issue #74 D.1.4's `NATIVE_LOAD_BUDGET` fired — either the native `Load` call never
     /// returned, or it returned but `loadCompleted` never arrived. Distinct from
@@ -803,7 +803,7 @@ pub(crate) fn failure_context(ps: &crate::route::PlaybackSession) -> FailureCont
     FailureContext {
         forced: crate::route::forced_direct_play(ps) || failtest_forced(),
         can_retry: crate::route::can_retry_current_play(ps),
-        repair_idle: ps.repair_status == plx_platform::tv::sandbox::State::Idle,
+        repair_idle: ps.repair_status == nj_platform::tv::sandbox::State::Idle,
     }
 }
 
@@ -890,7 +890,7 @@ fn runtime_failure(
 /// [`error_shape`], because it precedes route resolution entirely: it names a device finding, not
 /// a decision the server or the runtime made. Phrased as a FINDING throughout — "found... known
 /// to..." — never as a certain diagnosis, matching the community-tier evidence it is built on
-/// (see [`plx_platform::tv::sandbox::blocks_native_video`]'s doc). Caption and readout are kept short for
+/// (see [`nj_platform::tv::sandbox::blocks_native_video`]'s doc). Caption and readout are kept short for
 /// legibility from a phone photograph, same bar as every other arm here; the remedy's detail goes
 /// in `detail`. `Player.repair` (see `tv::sandbox`) can actually attempt the Homebrew
 /// Channel service call that patches the jail profile, so the remedy text points at that confirmed
@@ -898,11 +898,11 @@ fn runtime_failure(
 fn jail_error_shape() -> ErrorShape {
     ErrorShape {
         kind: FailureKind::JailMissingRtkmem,
-        caption: plx_platform::i18n::msg::widgets_failure_jail_c(),
-        panel: plx_platform::i18n::msg::widgets_panel_jail(),
-        readout: plx_platform::i18n::msg::widgets_reason_jail(),
+        caption: nj_platform::i18n::msg::widgets_failure_jail_c(),
+        panel: nj_platform::i18n::msg::widgets_panel_jail(),
+        readout: nj_platform::i18n::msg::widgets_reason_jail(),
         detail: std::borrow::Cow::Borrowed(
-            plx_platform::i18n::msg::widgets_reason_jail_help(),
+            nj_platform::i18n::msg::widgets_reason_jail_help(),
         ),
         no_pass: false,
     }
@@ -911,11 +911,11 @@ fn jail_error_shape() -> ErrorShape {
 fn error_shape(
     no_video: bool,
     transcoding: bool,
-    sub: crate::plex::serverinfo::Subscription,
+    sub: crate::catalog::serverinfo::Subscription,
     verdict: Option<&str>,
     runtime: RuntimeFailure,
 ) -> ErrorShape {
-    let no_pass = sub == crate::plex::serverinfo::Subscription::No;
+    let no_pass = sub == crate::catalog::serverinfo::Subscription::No;
     // FIRST, because it is the earliest thing that can fail and the most certain thing we can say:
     // the server adjudicated the request at `/decision` and refused BOTH lanes before any of the
     // signals below could exist (no engine ran, so `no_video` is simply false here). The two lines
@@ -930,11 +930,11 @@ fn error_shape(
     if let Some(v) = verdict {
         return ErrorShape {
             kind: FailureKind::DecisionRefused,
-            caption: plx_platform::i18n::msg::widgets_failure_refused_c(),
+            caption: nj_platform::i18n::msg::widgets_failure_refused_c(),
             // The panel's line is ours and static; the server's sentence rides on `detail`, whose
             // surface (the full-screen read-out) is the one that can hold a whole sentence.
-            panel: plx_platform::i18n::msg::widgets_panel_refused(),
-            readout: plx_platform::i18n::msg::widgets_reason_refused(),
+            panel: nj_platform::i18n::msg::widgets_panel_refused(),
+            readout: nj_platform::i18n::msg::widgets_reason_refused(),
             // OWNED since phase 9: the verdict is borrowed from the caller's session publication
             // rather than from a `static mut`, so it cannot be lent for `'static`. One allocation,
             // on the path where a playback has already failed.
@@ -945,13 +945,13 @@ fn error_shape(
     if no_video && transcoding {
         return ErrorShape {
             kind: FailureKind::NoVideoTranscodeTarget,
-            caption: plx_platform::i18n::msg::widgets_failure_audio_only_c(),
+            caption: nj_platform::i18n::msg::widgets_failure_audio_only_c(),
             panel: if no_pass {
-                plx_platform::i18n::msg::widgets_panel_audio_only_no_pass()
+                nj_platform::i18n::msg::widgets_panel_audio_only_no_pass()
             } else {
-                plx_platform::i18n::msg::widgets_panel_audio_only()
+                nj_platform::i18n::msg::widgets_panel_audio_only()
             },
-            readout: plx_platform::i18n::msg::widgets_reason_audio_only(),
+            readout: nj_platform::i18n::msg::widgets_reason_audio_only(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass,
         };
@@ -959,9 +959,9 @@ fn error_shape(
     if no_video {
         return ErrorShape {
             kind: FailureKind::NoVideoTrack,
-            caption: plx_platform::i18n::msg::widgets_failure_no_video_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_no_video(),
-            readout: plx_platform::i18n::msg::widgets_reason_no_video(),
+            caption: nj_platform::i18n::msg::widgets_failure_no_video_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_no_video(),
+            readout: nj_platform::i18n::msg::widgets_reason_no_video(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         };
@@ -969,25 +969,25 @@ fn error_shape(
     match runtime {
         RuntimeFailure::MediaSource => ErrorShape {
             kind: FailureKind::MediaSource,
-            caption: plx_platform::i18n::msg::widgets_failure_open_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_open(),
-            readout: plx_platform::i18n::msg::widgets_reason_open(),
+            caption: nj_platform::i18n::msg::widgets_failure_open_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_open(),
+            readout: nj_platform::i18n::msg::widgets_reason_open(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         },
         RuntimeFailure::PlaybackInterrupted => ErrorShape {
             kind: FailureKind::PlaybackInterrupted,
-            caption: plx_platform::i18n::msg::widgets_failure_stopped_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_stopped(),
-            readout: plx_platform::i18n::msg::widgets_reason_stopped(),
+            caption: nj_platform::i18n::msg::widgets_failure_stopped_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_stopped(),
+            readout: nj_platform::i18n::msg::widgets_reason_stopped(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         },
         RuntimeFailure::TvPipeline => ErrorShape {
             kind: FailureKind::TvPipeline,
-            caption: plx_platform::i18n::msg::widgets_failure_tv_rejected_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_tv_rejected(),
-            readout: plx_platform::i18n::msg::widgets_reason_tv_rejected(),
+            caption: nj_platform::i18n::msg::widgets_failure_tv_rejected_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_tv_rejected(),
+            readout: nj_platform::i18n::msg::widgets_reason_tv_rejected(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         },
@@ -997,17 +997,17 @@ fn error_shape(
         // that was never given.
         RuntimeFailure::LoadTimeout => ErrorShape {
             kind: FailureKind::LoadTimeout,
-            caption: plx_platform::i18n::msg::widgets_failure_load_timeout_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_load_timeout(),
-            readout: plx_platform::i18n::msg::widgets_reason_load_timeout(),
+            caption: nj_platform::i18n::msg::widgets_failure_load_timeout_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_load_timeout(),
+            readout: nj_platform::i18n::msg::widgets_reason_load_timeout(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         },
         RuntimeFailure::Unknown => ErrorShape {
             kind: FailureKind::Unspecified,
-            caption: plx_platform::i18n::msg::widgets_status_failed_c(),
-            panel: plx_platform::i18n::msg::widgets_panel_unknown(),
-            readout: plx_platform::i18n::msg::widgets_reason_unknown(),
+            caption: nj_platform::i18n::msg::widgets_status_failed_c(),
+            panel: nj_platform::i18n::msg::widgets_panel_unknown(),
+            readout: nj_platform::i18n::msg::widgets_reason_unknown(),
             detail: std::borrow::Cow::Borrowed(""),
             no_pass: false,
         },
@@ -1028,8 +1028,8 @@ fn error_shape(
 /// `Error` (the plan's own refusal and the engine it would otherwise have started).
 ///
 /// MAIN THREAD, like every other reader of `route`'s playback state.
-fn playing_subscription(ps: &crate::route::PlaybackSession) -> crate::plex::serverinfo::Subscription {
-    crate::plex::serverinfo::subscription_of(crate::route::cur_sid(ps))
+fn playing_subscription(ps: &crate::route::PlaybackSession) -> crate::catalog::serverinfo::Subscription {
+    crate::catalog::serverinfo::subscription_of(crate::route::cur_sid(ps))
 }
 
 /// Keep the runtime diagnosis while making the active override and its recovery path visible.
@@ -1040,13 +1040,13 @@ fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorSha
     if !forced { return shape; }
     if shape.kind == FailureKind::DecisionRefused {
         shape.kind = FailureKind::PlaybackPolicy;
-        shape.caption = plx_platform::i18n::msg::widgets_failure_forced_playback_c();
-        shape.panel = plx_platform::i18n::msg::widgets_panel_forced_playback();
-        shape.readout = plx_platform::i18n::msg::widgets_reason_forced_playback();
+        shape.caption = nj_platform::i18n::msg::widgets_failure_forced_playback_c();
+        shape.panel = nj_platform::i18n::msg::widgets_panel_forced_playback();
+        shape.readout = nj_platform::i18n::msg::widgets_reason_forced_playback();
         // The policy verdict already names the specific limitation and the return-to-Auto step.
     } else {
         shape.detail = std::borrow::Cow::Borrowed(
-            plx_platform::i18n::msg::widgets_reason_forced_playback_help(),
+            nj_platform::i18n::msg::widgets_reason_forced_playback_help(),
         );
     }
     shape.no_pass = false;
@@ -1091,7 +1091,7 @@ pub(crate) fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
 const FAILTEST_VERDICT: &str =
     "Cannot convert this item. Implementation for video encoder 'hevc' not found.";
 
-/// dev: `/tmp/plxnative-failtest=<arm>` — force one variant of the failure read-out.
+/// dev: `/tmp/nativejelly-failtest=<arm>` — force one variant of the failure read-out.
 ///
 /// The read-out is the one screen in the app that **cannot be reached on purpose**: it needs a
 /// server that refuses, which is exactly the state a working setup does not have. It is also the
@@ -1100,7 +1100,7 @@ const FAILTEST_VERDICT: &str =
 /// audience. So the arms are selectable, and there is no other way to grade them on a panel.
 ///
 /// Arms: `verdict` (the pre-flight refusal, with the server's own sentence quoted), `audio` (the
-/// audio-only transcode — pair with `/tmp/plxnative-nopass` for the PLEX PASS capsule), `novideo`
+/// audio-only transcode — pair with `/tmp/nativejelly-nopass` for the PLEX PASS capsule), `novideo`
 /// (an audio-only file that direct-played), `stream` (no usable media), `connection` (an interrupted
 /// transfer), `tv` (the native pipeline refused Load), `jail` (this device's jail is missing
 /// `/dev/rtkmem` — forces [`jail_error_shape`] regardless of the real device probe, since most
@@ -1110,12 +1110,12 @@ const FAILTEST_VERDICT: &str =
 /// `player_hud::busy` has the other half — the state itself — for the same reason.
 ///
 /// The subscription comes from [`playing_subscription`], the same reader the real path uses, so the
-/// arm being photographed is the real resolver on real state. `/tmp/plxnative-nopass` is what makes
+/// arm being photographed is the real resolver on real state. `/tmp/nativejelly-nopass` is what makes
 /// the capsule reachable and it applies to EVERY server, so the pairing `docs/agent-reference.md`
 /// documents is unaffected — but note the arm still has to be looked at from the player route,
 /// i.e. after a play, which is when `route::cur_sid` names a server at all.
 fn failtest_arm(ps: &crate::route::PlaybackSession) -> Option<ErrorShape> {
-    let arm = plx_base::devtrig::read("failtest")?;
+    let arm = nj_base::devtrig::read("failtest")?;
     let sub = playing_subscription(&ps);
     Some(match arm.trim() {
         "audio" => error_shape(true, true, sub, None, RuntimeFailure::Unknown),
@@ -1143,18 +1143,18 @@ fn failtest_arm(ps: &crate::route::PlaybackSession) -> Option<ErrorShape> {
         ),
     })
 }
-/// dev: the `policy` arm of `/tmp/plxnative-failtest` stands for a Force Direct Play session, so
+/// dev: the `policy` arm of `/tmp/nativejelly-failtest` stands for a Force Direct Play session, so
 /// the action table sees the Force the arm's shape claims.
 fn failtest_forced() -> bool {
-    plx_base::devtrig::read("failtest").is_some_and(|a| a.trim() == "policy")
+    nj_base::devtrig::read("failtest").is_some_and(|a| a.trim() == "policy")
 }
 
 /// Publish the jail read-out fixture on the same session fact the owned confirmation reads.
 /// Only ordinary development scenarios call this; controlled replay never reads this trigger.
-/// It lives beside [`failtest_arm`], the other reader of `/tmp/plxnative-failtest`, because it
+/// It lives beside [`failtest_arm`], the other reader of `/tmp/nativejelly-failtest`, because it
 /// only reads that trigger and writes a `PlaybackSession` field — nothing of the app's.
 pub(crate) fn failure_fixture(session: &mut crate::route::PlaybackSession) {
-    if plx_base::devtrig::read("failtest").is_some_and(|arm| arm.trim() == "jail") {
+    if nj_base::devtrig::read("failtest").is_some_and(|arm| arm.trim() == "jail") {
         session.jail_load_blocked = true;
     }
 }
@@ -1172,7 +1172,7 @@ pub(crate) fn error_reason(ps: &crate::route::PlaybackSession) -> &'static str {
 /// `pb_state` is the pump's field and `shared` is a private module, so a host test that needs the
 /// app in a given state — `app.rs`'s HUD-visibility pair, which pins the bug that made the `…` disc
 /// unreachable while stalled — sets it through here rather than widening the module for a test.
-/// Callers must hold `plx_base::testlock::serial()`: this is a crate global.
+/// Callers must hold `nj_base::testlock::serial()`: this is a crate global.
 #[cfg(test)]
 pub(crate) fn swap_state_for_test(s: shared::PlaybackState) -> u8 {
     let prev = SHARED.pb_state.load(Relaxed);
@@ -1197,7 +1197,7 @@ pub(crate) use engine::aq_caps;
 /// value, deliberately, so the plant grading the controller is not the controller agreeing with
 /// itself.
 pub(crate) use engine::feed_leads_ms;
-pub(crate) use plx_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
+pub(crate) use nj_platform::tv::sink::{VP_ACB, VP_EXPORTED, VP_NONE};
 #[cfg(feature = "hostsim")]
 /// The simulator's clock-sink stop; the television's pipeline has no such control.
 pub(crate) use ffi_host::stop_clock_at as stop_sim_clock_at;
@@ -1594,8 +1594,8 @@ static SUBTITLE_TONE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8:
 
 /// The selected tone. Read once a frame by the two subtitle draws (`appkit::player_hud`) and by the
 /// track menu for its checkmark.
-pub(crate) fn subtitle_tone() -> crate::plex::session::SubtitleTone {
-    crate::plex::session::SubtitleTone::from_index(SUBTITLE_TONE.load(Relaxed))
+pub(crate) fn subtitle_tone() -> crate::catalog::session::SubtitleTone {
+    crate::catalog::session::SubtitleTone::from_index(SUBTITLE_TONE.load(Relaxed))
 }
 
 /// The viewer's subtitle timing offset in MILLISECONDS — positive draws every client-rendered cue
@@ -1708,9 +1708,9 @@ const ENH_BOOST_DIALOG: u8 = 1;
 const ENH_NORMALIZE_LOUDNESS: u8 = 2;
 
 /// The current preference (see [`AUDIO_ENHANCEMENTS`]).
-pub(crate) fn audio_enhancements() -> crate::plex::AudioEnhancements {
+pub(crate) fn audio_enhancements() -> crate::catalog::AudioEnhancements {
     let bits = AUDIO_ENHANCEMENTS.load(Relaxed);
-    crate::plex::AudioEnhancements {
+    crate::catalog::AudioEnhancements {
         boost_dialog: bits & ENH_BOOST_DIALOG != 0,
         normalize_loudness: bits & ENH_NORMALIZE_LOUDNESS != 0,
     }
@@ -1718,7 +1718,7 @@ pub(crate) fn audio_enhancements() -> crate::plex::AudioEnhancements {
 
 /// Restore the persisted preference without writing it back — boot and the credentials handoff,
 /// the same two places [`restore_subtitle_tone`] is called from.
-pub(crate) fn restore_audio_enhancements(a: crate::plex::AudioEnhancements) {
+pub(crate) fn restore_audio_enhancements(a: crate::catalog::AudioEnhancements) {
     let bits = if a.boost_dialog { ENH_BOOST_DIALOG } else { 0 }
         | if a.normalize_loudness { ENH_NORMALIZE_LOUDNESS } else { 0 };
     AUDIO_ENHANCEMENTS.store(bits, Relaxed);
@@ -1726,7 +1726,7 @@ pub(crate) fn restore_audio_enhancements(a: crate::plex::AudioEnhancements) {
 
 /// Select a preference on the main thread and retain its persistence for the shared storage
 /// worker, exactly as [`set_subtitle_tone`] does.
-pub(crate) fn set_audio_enhancements(a: crate::plex::AudioEnhancements) {
+pub(crate) fn set_audio_enhancements(a: crate::catalog::AudioEnhancements) {
     restore_audio_enhancements(a);
     persist_audio_enhancements(a);
 }
@@ -1734,31 +1734,31 @@ pub(crate) fn set_audio_enhancements(a: crate::plex::AudioEnhancements) {
 /// **The Audio tab's toggle rows land here** (issue #266): persist the preference, then bring the
 /// playing route in line with it. The reconcile itself defers behind a pending Original trial, so
 /// a toggle during one applies to whichever route that trial settles on.
-pub(crate) fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, a: crate::plex::AudioEnhancements) {
+pub(crate) fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, a: crate::catalog::AudioEnhancements) {
     set_audio_enhancements(a);
     crate::route::reconcile_enhancement(ps, false);
     // the rows' checkmarks move on this — see `route::persist_quality_choice`
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
-fn persist_audio_enhancements(a: crate::plex::AudioEnhancements) {
-    let _ = plx_base::storage_worker::submit_retained(move || crate::plex::session::set_audio_enhancements(a));
+fn persist_audio_enhancements(a: crate::catalog::AudioEnhancements) {
+    let _ = nj_base::storage_worker::submit_retained(move || crate::catalog::session::set_audio_enhancements(a));
 }
 
 /// Restore the persisted preference without writing it back (boot, and the credentials handoff
 /// after a fresh sign-in — the two places `route::restore_quality` is called from).
-pub(crate) fn restore_subtitle_tone(tone: crate::plex::session::SubtitleTone) {
+pub(crate) fn restore_subtitle_tone(tone: crate::catalog::session::SubtitleTone) {
     SUBTITLE_TONE.store(tone.index(), Relaxed);
 }
 
 /// Select a tone on the main thread and retain its persistence work for the shared worker.
 /// Takes effect on the next drawn frame —
 /// the draws read the atomic — so there is nothing to reload and no cue store to touch.
-pub(crate) fn set_subtitle_tone(tone: crate::plex::session::SubtitleTone) {
+pub(crate) fn set_subtitle_tone(tone: crate::catalog::session::SubtitleTone) {
     SUBTITLE_TONE.store(tone.index(), Relaxed);
-    let _ = plx_base::storage_worker::submit_retained(move || crate::plex::session::set_subtitle_tone(tone));
+    let _ = nj_base::storage_worker::submit_retained(move || crate::catalog::session::set_subtitle_tone(tone));
     // the picker's checkmark moves on this — see `route::persist_quality_choice`
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// Set the timing offset (ms) on the main thread, clamped to the range; like the tone it takes
@@ -1766,7 +1766,7 @@ pub(crate) fn set_subtitle_tone(tone: crate::plex::session::SubtitleTone) {
 /// [`SUBTITLE_OFFSET_MS`].
 pub(crate) fn set_subtitle_offset(offset_ms: i64) {
     SUBTITLE_OFFSET_MS.store(clamp_subtitle_offset_ms(offset_ms), Relaxed);
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// Carry a retry's offset through [`reset_subtitle`] (`route::reset_track_selection`). The
@@ -2044,7 +2044,7 @@ fn sub_text(payload: &[u8]) -> String {
     out.trim().to_string()
 }
 
-pub(crate) use plx_base::eventlog::log; // event-log sink (crate-wide single copy in lib.rs)
+pub(crate) use nj_base::eventlog::log; // event-log sink (crate-wide single copy in lib.rs)
 
 fn find(h: &[u8], n: &[u8]) -> bool {
     !n.is_empty() && h.windows(n.len()).any(|w| w == n)
@@ -2097,7 +2097,7 @@ fn vclock_ms() -> u32 {
 
 /// **The pipeline's `FRAMEREADY` cadence since the last call**: ticks received, and the worst gap
 /// between two consecutive ones in milliseconds. Draining, like
-/// [`plx_machine::idle::take_presents`] — the heartbeat is the one caller, once a second.
+/// [`nj_machine::idle::take_presents`] — the heartbeat is the one caller, once a second.
 ///
 /// **This is a liveness signal, not a frame rate.** See [`sf_on_event`]: the healthy reading on
 /// every codec, resolution and container measured so far is `5` and `201`, because the tick is
@@ -2199,7 +2199,7 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // callback numbering shifts by two between webOS 4 and 5+ (`docs/webos5-port.md` §5):
         // 46/47 on this set are 48/49 on a webOS 5+ set. The harness reads THIS line, never
         // the raw type.
-        match sink_counter_kind(ty, plx_platform::tv::device::info().major) {
+        match sink_counter_kind(ty, nj_platform::tv::device::info().major) {
             Some(SinkCounter::Displayed) => log(&format!("sink: displayed={num} (type={ty})")),
             Some(SinkCounter::Dropped) => log(&format!("sink: dropped={num} (type={ty})")),
             None => {}
@@ -2242,7 +2242,7 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
         // through the fault it exists to catch is worse than no instrument, because it is quoted.
         //
         // The real per-frame cadence is only observable from LG's own tracing — `GST_DEBUG=
-        // dualsequencer:6` via `/tmp/plxnative-gstlog`, whose `push_dual` and `lxvideosink`
+        // dualsequencer:6` via `/tmp/nativejelly-gstlog`, whose `push_dual` and `lxvideosink`
         // timestamps give one line per frame. That was long avoided as perturbing; it is not, at
         // level 6: the same scene measured 123 LUT misses uninstrumented and 122 with the trace
         // running. Level 9 IS perturbing and is what that reputation came from.
@@ -2332,7 +2332,7 @@ pub extern "C" fn acb_on_event(ev: c_long, reply: *const c_char) {
 #[cfg(test)]
 pub(crate) fn failtest_policy_shape_for_test(verdict: &str) -> ErrorShape {
     with_forced_playback_context(
-        error_shape(false, false, crate::plex::serverinfo::Subscription::Yes, Some(verdict), RuntimeFailure::Unknown),
+        error_shape(false, false, crate::catalog::serverinfo::Subscription::Yes, Some(verdict), RuntimeFailure::Unknown),
         true,
     )
 }
@@ -2371,7 +2371,7 @@ mod tests {
 
     #[test]
     fn forced_runtime_failures_keep_the_cause_and_explain_how_to_leave_force() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         for runtime in [RuntimeFailure::Unknown, RuntimeFailure::MediaSource,
             RuntimeFailure::PlaybackInterrupted, RuntimeFailure::TvPipeline, RuntimeFailure::LoadTimeout] {
             let normal = error_shape(false, false, Sub::No, None, runtime);
@@ -2390,7 +2390,7 @@ mod tests {
 
     #[test]
     fn forced_policy_refusal_does_not_claim_the_server_cannot_convert() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         let reason = "Force Direct Play is on, and this audio format can’t play without conversion.";
         let forced = with_forced_playback_context(
             error_shape(false, false, Sub::No, Some(reason), RuntimeFailure::Unknown), true);
@@ -2540,7 +2540,7 @@ mod tests {
 
     #[test]
     fn callback_after_native_session_retirement_cannot_mutate_the_idle_session() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
 
         sf_on_event(1, 0, 7_000_000_000, std::ptr::null());
@@ -2562,7 +2562,7 @@ mod tests {
     /// never `seen_frame` (the trap player/CLAUDE.md names).
     #[test]
     fn a_type_18_before_any_picture_publishes_load_failed_and_after_one_does_not() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let refusal = c"Resource Allocation Error".as_ptr();
         let refuse = |epoch: u32| sf_on_event(epoch, 18, 601, refusal);
         let failed = || SHARED.load_failed.load(std::sync::atomic::Ordering::Acquire);
@@ -2612,12 +2612,12 @@ mod tests {
 
     #[test]
     fn the_support_line_names_version_firmware_set_and_code_and_nothing_free_text() {
-        let i = plx_platform::tv::device::Info {
+        let i = nj_platform::tv::device::Info {
             release: "4.10.2".into(),
             major: 4,
             ..Default::default()
         };
-        let hw = plx_platform::tv::device::Hardware {
+        let hw = nj_platform::tv::device::Hardware {
             model: "43LM6300PVB".into(),
             board: "m3r".into(),
             hw_revision: String::new(),
@@ -2627,18 +2627,18 @@ mod tests {
             line,
             format!(
                 "Native Jelly {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
-                crate::plex::identity::VERSION
+                crate::catalog::identity::VERSION
             )
         );
         let bare = support_line_of(
-            &plx_platform::tv::device::Info::default(),
-            &plx_platform::tv::device::Hardware::default(),
+            &nj_platform::tv::device::Info::default(),
+            &nj_platform::tv::device::Hardware::default(),
             FailureKind::Unspecified,
         );
         assert!(bare.contains(&format!(
             "{} · {} · unspecified",
-            plx_platform::i18n::msg::browse_diagnostics_unknown_os(),
-            plx_platform::i18n::msg::settings_login_unknown_device(),
+            nj_platform::i18n::msg::browse_diagnostics_unknown_os(),
+            nj_platform::i18n::msg::settings_login_unknown_device(),
         )), "{bare}");
     }
 
@@ -2657,7 +2657,7 @@ mod tests {
 
     #[test]
     fn late_native_callback_cannot_cross_into_the_next_session() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
         let retired = SHARED.begin_native_session().expect("session A");
         assert!(SHARED.retire_native_session(retired));
@@ -2680,7 +2680,7 @@ mod tests {
 
     #[test]
     fn native_epoch_retirement_drains_a_callback_already_inside_the_reducer() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
         let epoch = SHARED.begin_native_session().expect("native session");
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
@@ -2718,7 +2718,7 @@ mod tests {
 
     #[test]
     fn unload_completed_is_an_explicit_terminal_native_session_transition() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
         let epoch = SHARED.begin_native_session().expect("native session");
 
@@ -2745,7 +2745,7 @@ mod tests {
 
     #[test]
     fn pre_seek_presentation_cannot_certify_the_post_seek_timeline() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
         let epoch = SHARED.begin_native_session().expect("native session");
         assert!(SHARED.begin_native_media_discontinuity(epoch));
@@ -2775,7 +2775,7 @@ mod tests {
 
     #[test]
     fn post_seek_feed_commits_or_discards_callbacks_that_race_its_reply() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         SHARED.reset_session();
         let epoch = SHARED.begin_native_session().expect("native session");
         assert!(SHARED.begin_native_media_discontinuity(epoch));
@@ -2815,7 +2815,7 @@ mod tests {
     #[cfg(feature = "hostsim")]
     #[test]
     fn user_resume_cannot_bypass_an_internal_hls_rebuffer_hold() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let old_paused = TX.paused.load(std::sync::atomic::Ordering::Acquire);
         SHARED.reset_hls_clock_for_test();
         let pause = SHARED
@@ -2839,7 +2839,7 @@ mod tests {
         }
         let _restore = Restore(old_paused);
         let before = ffi_host::play_calls_for_test();
-        let mut pa = adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
+        let mut pa = adapter::PlayerAdapter::new(unsafe { nj_base::task::MainThread::assume() });
 
         assert!(resume(&mut pa));
 
@@ -2856,7 +2856,7 @@ mod tests {
 
     #[test]
     fn an_abandoned_paused_seek_keeps_user_pause_and_closes_only_its_feed_override() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         TX.reset();
         TX.commit_paused(true);
         TX.resume_pend
@@ -2892,7 +2892,7 @@ mod tests {
     /// read the playback state.
     #[test]
     fn an_abandoned_seek_disarms_the_spinner_and_the_frozen_playhead() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let was_seeking = SHARED.seeking.load(Relaxed);
         let was_display = SHARED.seek_display_ns.load(Relaxed);
 
@@ -2931,7 +2931,7 @@ mod tests {
     /// (default-false) flags.
     #[test]
     fn an_audio_only_stream_is_blamed_on_whoever_sent_it() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         // transcode on a known-free server: the Pass appears as a parenthetical fact on the
         // panel, as the capsule flag for the read-out…
         let e = error_shape(true, true, Sub::No, None, RuntimeFailure::Unknown);
@@ -3024,7 +3024,7 @@ mod tests {
     /// back into the unhelpful bare "Playback failed" screen.
     #[test]
     fn runtime_failures_fill_the_existing_readout_reason_slot() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         let cases = [
             (
                 (true, false, false, false),
@@ -3110,7 +3110,7 @@ mod tests {
     /// answered), not the refusal's "rejected".
     #[test]
     fn load_timeout_has_its_own_wording_distinct_from_an_ordinary_tv_refusal() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         let refused = error_shape(false, false, Sub::Unknown, None, RuntimeFailure::TvPipeline);
         let timed_out = error_shape(false, false, Sub::Unknown, None, RuntimeFailure::LoadTimeout);
         assert_ne!(
@@ -3147,7 +3147,7 @@ mod tests {
     /// `no_video` from a previous session must not re-word a refusal.
     #[test]
     fn a_refused_decision_quotes_the_server_and_never_names_a_subscription() {
-        use crate::plex::serverinfo::Subscription as Sub;
+        use crate::catalog::serverinfo::Subscription as Sub;
         const VP9: &str =
             "Cannot convert this item. Implementation for video encoder 'vp9' not found.";
         for sub in [Sub::Unknown, Sub::No, Sub::Yes] {
@@ -3226,22 +3226,22 @@ mod tests {
     #[test]
     fn the_failure_read_out_states_the_playing_items_server_not_the_current_one() {
         let mut ps = crate::route::PlaybackSession::IDLE;
-        use crate::plex::serverinfo::{store_for_test, Subscription as Sub};
+        use crate::catalog::serverinfo::{store_for_test, Subscription as Sub};
         struct Fresh {
-            _g: plx_base::testlock::Serial,
+            _g: nj_base::testlock::Serial,
         }
         impl Drop for Fresh {
             fn drop(&mut self) {
-                crate::plex::reset_servers_for_test();
+                crate::catalog::reset_servers_for_test();
             }
         }
-        let g = plx_base::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        let g = nj_base::testlock::serial();
+        crate::catalog::reset_servers_for_test();
         let _fresh = Fresh { _g: g };
-        crate::route::swap_cur_sid_for_test(&mut ps, crate::plex::ServerId::UNSET);
+        crate::route::swap_cur_sid_for_test(&mut ps, crate::catalog::ServerId::UNSET);
 
         let reg =
-            |m: &str, host: &str| crate::plex::register_for_test(m, host, 32400, "tok", "cid");
+            |m: &str, host: &str| crate::catalog::register_for_test(m, host, 32400, "tok", "cid");
         let (ours, theirs) = (reg("mach-A", "10.0.0.1"), reg("mach-B", "10.0.0.2"));
         // the slot arrays outlive `reset_servers_for_test` — start from the boot state explicitly
         store_for_test(ours, Sub::Unknown, "");
@@ -3250,7 +3250,7 @@ mod tests {
         store_for_test(ours, Sub::Yes, "1.43.3.10861-cd85035e7");
         store_for_test(theirs, Sub::No, "1.32.0.6918-free");
         // …and browsing a share does NOT re-point `current`, which is the whole trap
-        assert!(crate::plex::set_current(ours));
+        assert!(crate::catalog::set_current(ours));
 
         crate::route::swap_cur_sid_for_test(&mut ps, theirs);
         assert_eq!(
@@ -3273,7 +3273,7 @@ mod tests {
         );
 
         // the inverse polarity: playing from OUR Pass'd server while `current` sits on the share
-        assert!(crate::plex::set_current(theirs));
+        assert!(crate::catalog::set_current(theirs));
         crate::route::swap_cur_sid_for_test(&mut ps, ours);
         assert_eq!(
             playing_subscription(&ps),
@@ -3294,7 +3294,7 @@ mod tests {
 
         // before the first play there is no playing server, and "we have not heard" is the honest
         // answer — never slot 0's, and never a blamed subscription
-        crate::route::swap_cur_sid_for_test(&mut ps, crate::plex::ServerId::UNSET);
+        crate::route::swap_cur_sid_for_test(&mut ps, crate::catalog::ServerId::UNSET);
         assert_eq!(playing_subscription(&ps), Sub::Unknown);
         assert!(
             !error_shape(
@@ -3335,7 +3335,7 @@ mod tests {
     /// A positive offset draws a cue later, a negative one earlier, by exactly the offset.
     #[test]
     fn subtitle_offset_shifts_text_lookup_in_both_directions() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_cues.lock().unwrap().clear();
         SHARED.playpos_ns.store(0, Relaxed);
         SHARED.desired_sub_idx.store(0, Relaxed);
@@ -3368,7 +3368,7 @@ mod tests {
     /// thrown away when the next cue arrived.
     #[test]
     fn a_delayed_cue_survives_the_prune_until_the_offset_has_shown_it() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_cues.lock().unwrap().clear();
         SHARED.sub_bitmaps.lock().unwrap().clear();
         SHARED.desired_sub_idx.store(0, Relaxed);
@@ -3401,7 +3401,7 @@ mod tests {
     /// current offset kept 2 s of history at 0 and blanked every raised delay.
     #[test]
     fn raising_the_delay_mid_playback_finds_the_cues_already_read() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_cues.lock().unwrap().clear();
         SHARED.sub_bitmaps.lock().unwrap().clear();
         SHARED.desired_sub_idx.store(0, Relaxed);
@@ -3436,7 +3436,7 @@ mod tests {
     /// must not shift the next film's captions.
     #[test]
     fn a_new_item_starts_with_no_subtitle_offset() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         set_subtitle_offset(2_000);
         assert_eq!(subtitle_offset_ms(), 2_000);
         reset_subtitle();
@@ -3450,7 +3450,7 @@ mod tests {
     /// clamp follows whichever kind is selected, including a negative offset left from a sidecar.
     #[test]
     fn an_embedded_track_takes_no_advance_and_a_sidecar_takes_sixty_seconds() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         sidecar::reset();
         set_subtitle_offset(-1_000);
         assert_eq!(subtitle_offset_ms(), 0, "an embedded track (or Off) takes no advance");
@@ -3478,7 +3478,7 @@ mod tests {
     /// setter clamps to the Timing rows' range.
     #[test]
     fn the_subtitle_clock_saturates_and_the_offset_clamps() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         sidecar::select_without_fetch_for_test(42);
         set_subtitle_offset(60_000);
         assert_eq!(subtitle_clock_ns(i64::MIN), i64::MIN);
@@ -3495,7 +3495,7 @@ mod tests {
     /// Evicting "the far end" dropped exactly those.
     #[test]
     fn a_delayed_selected_set_outlives_every_other_tracks_set() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_bitmaps.lock().unwrap().clear();
         SHARED.desired_sub_idx.store(0, Relaxed);
         set_subtitle_offset(30_000);
@@ -3544,7 +3544,7 @@ mod tests {
     /// 3840x2160 canvas.
     #[test]
     fn a_delayed_window_of_4k_canvas_sets_fits_the_budget() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_bitmaps.lock().unwrap().clear();
         SHARED.desired_sub_idx.store(0, Relaxed);
         set_subtitle_offset(SUBTITLE_OFFSET_LATEST_MS);
@@ -3569,7 +3569,7 @@ mod tests {
     /// Takes the crate-wide `testlock` — `SHARED` is a process-global the whole player shares.
     #[test]
     fn an_image_display_set_round_trips_whole_and_is_superseded_as_a_unit() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         SHARED.sub_bitmaps.lock().unwrap().clear();
         SHARED.playpos_ns.store(0, Relaxed);
         SHARED.desired_sub_idx.store(0, Relaxed);
@@ -3658,17 +3658,17 @@ mod native_failure_regressions {
     use super::*;
     struct JailGuard;
     impl Drop for JailGuard {
-        fn drop(&mut self) { plx_platform::tv::sandbox::FORCE_BLOCKED.store(false, Relaxed); }
+        fn drop(&mut self) { nj_platform::tv::sandbox::FORCE_BLOCKED.store(false, Relaxed); }
     }
     #[test]
     fn jail_refusal_enters_error_without_engine_and_retires_on_exit() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let _guard = JailGuard;
         let mut ps = crate::route::PlaybackSession::IDLE;
         crate::route::reset_player_control_for_test(&ps);
         SHARED.reset_session();
-        let mut pa = adapter::PlayerAdapter::new(unsafe { plx_base::task::MainThread::assume() });
-        plx_platform::tv::sandbox::FORCE_BLOCKED.store(true, Relaxed);
+        let mut pa = adapter::PlayerAdapter::new(unsafe { nj_base::task::MainThread::assume() });
+        nj_platform::tv::sandbox::FORCE_BLOCKED.store(true, Relaxed);
         assert!(start_bufferfeed(&mut ps, &mut pa));
         assert!(!pa.is_live());
         assert_eq!(state(&ps), PlaybackState::Error);
@@ -3683,7 +3683,7 @@ mod native_failure_regressions {
     }
     #[test]
     fn timeout_is_distinct_from_pipeline_refusal_and_resets_per_session() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         assert_eq!(runtime_failure(true, true, true, true), RuntimeFailure::LoadTimeout);
         assert_eq!(runtime_failure(false, false, true, false), RuntimeFailure::TvPipeline);
         SHARED.load_timed_out.store(true, Relaxed);
@@ -3705,7 +3705,7 @@ mod seek_hud_regressions {
     /// `reset_session` and the first assertion reads 0.
     #[test]
     fn a_reload_keeps_the_files_duration_and_a_stop_does_not() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         SHARED.reset_session();
         SHARED.duration_ns.store(5_400_000_000_000, Relaxed);
         SHARED.playpos_ns.store(1_200_000_000_000, Relaxed);
@@ -3722,7 +3722,7 @@ mod seek_hud_regressions {
     /// one frame of the pre-seek position before freezing on the target.
     #[test]
     fn a_requested_seek_reads_as_seeking_before_the_pump_republishes() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let ps = crate::route::PlaybackSession::IDLE;
         crate::route::reset_player_control_for_test(&ps);
         SHARED.reset_session();

@@ -6,7 +6,7 @@ use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use plx_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
+use nj_base::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
 use crate::overdraw::{gate, masked, note_px, set_clip, Class};
 
 // What `gfx` and `text` draw WITH, defined here so this layer names nothing of `ui` beyond the
@@ -116,7 +116,7 @@ macro_rules! glsl_dithered {
     };
 }
 
-/// The VERTEX half of a [`glsl_dithered`] program: the same vertex source with `PLX_DITHER_NC`
+/// The VERTEX half of a [`glsl_dithered`] program: the same vertex source with `NJ_DITHER_NC`
 /// defined, which makes it emit `v_dither_nc` — the noise tile's coordinate, target px /
 /// [`NOISE_DIM`] — so `shaders/dither.glsl` fetches straight from a varying and does no arithmetic
 /// on `gl_FragCoord` (its cost rule 4, measured 2026-09-19). Every `glsl_dithered!` fragment source
@@ -127,7 +127,7 @@ macro_rules! glsl_vs_dithered {
         // SAFETY: as `glsl!` — GLSL sources contain no interior NUL.
         unsafe {
             ::std::ffi::CStr::from_bytes_with_nul_unchecked(
-                concat!("#define PLX_DITHER_NC\n", include_str!($file), "\0").as_bytes(),
+                concat!("#define NJ_DITHER_NC\n", include_str!($file), "\0").as_bytes(),
             )
         }
     };
@@ -143,14 +143,14 @@ const VS_IMG: &CStr = glsl!("shaders/vs_img.vert");
 /// The wash's vertex shader: the dithered twin, and the only one carrying the INK RAMP
 /// ([`draw_ambient_inked`]) — the plain twin behind `draw_grad4` has real corner alpha and no ramp.
 const VS_AMBIENT_DITHERED: &CStr =
-    glsl!("shaders/vs_ambient.vert", "#define PLX_DITHER_NC\n#define PLX_WASH_INK\n");
+    glsl!("shaders/vs_ambient.vert", "#define NJ_DITHER_NC\n#define NJ_WASH_INK\n");
 const VS_IMG_DITHERED: &CStr = glsl_vs_dithered!("shaders/vs_img.vert");
 const VS_SRC_DITHERED: &CStr = glsl_vs_dithered!("shaders/vs_src.vert");
 const FS_IMG: &CStr = glsl!("shaders/fs_img.frag");
 const FS_FIELD: &CStr = glsl_dithered!("shaders/fs_field.frag");
 const FS_FIELD_PANEL: &CStr = glsl_dithered!("shaders/fs_field_panel.frag");
-const VS_STILL: &CStr = glsl!("shaders/vs_img.vert", "#define PLX_STILL_GROUND\n");
-const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_STILL_GROUND\n");
+const VS_STILL: &CStr = glsl!("shaders/vs_img.vert", "#define NJ_STILL_GROUND\n");
+const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define NJ_STILL_GROUND\n");
 /// The FOCUSED-tile specialization: the lit-glass edge + risen shadow, in their own program rather
 /// than a branch every plain IPROG draw (resting cards, glyphs, blur reductions, `field_kick`,
 /// `FrameCache`) pays for. A TV A/B measured real backpressure from the bigger program running on
@@ -159,8 +159,8 @@ const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_STILL_GROUND\n
 /// regardless of `u_focus.x`. [`draw_tex_impl`] only ever reaches for this when a draw is actually
 /// focused or risen (`focus > 0.0 || dy > 0.0` — at most one card on screen), falling back to
 /// [`IPROG`] with the plain look if it fails to link, same as [`STILL_IMAGE`]'s own fallback.
-const VS_FOCUS: &CStr = glsl!("shaders/vs_img.vert", "#define PLX_FOCUS\n");
-const FS_FOCUS: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_FOCUS\n");
+const VS_FOCUS: &CStr = glsl!("shaders/vs_img.vert", "#define NJ_FOCUS\n");
+const FS_FOCUS: &CStr = glsl!("shaders/fs_img.frag", "#define NJ_FOCUS\n");
 const FS_HERO: &CStr = glsl!("shaders/fs_hero.frag");
 /// The wash with its photograph dissolved into it (`draw_art_wash`): dithered, because the wash it
 /// carries always dithers, over `vs_ambient.vert`'s field mesh so its colour is the wash's own
@@ -168,7 +168,7 @@ const FS_HERO: &CStr = glsl!("shaders/fs_hero.frag");
 const FS_ART_WASH: &CStr = glsl_dithered!("shaders/fs_art_wash.frag");
 const VS_ART_WASH: &CStr = glsl!(
     "shaders/vs_ambient.vert",
-    "#define PLX_DITHER_NC\n#define PLX_WASH_INK\n#define PLX_ART_WASH\n"
+    "#define NJ_DITHER_NC\n#define NJ_WASH_INK\n#define NJ_ART_WASH\n"
 );
 const FS_BLUR: &CStr = glsl!("shaders/fs_blur.frag");
 const FS_GLASS: &CStr = glsl_dithered!("shaders/fs_glass.frag");
@@ -360,8 +360,8 @@ pub fn clip_set(x: f32, y: f32, w: f32, h: f32) {
     let (vx, vy, s) = match unsafe { CLIP_TARGET } {
         Some((tx, ty, ts, _, _)) => (tx, ty, ts),
         None => {
-            let (vx, vy, _, _) = plx_base::surface::viewport();
-            (vx, vy, plx_base::surface::scale())
+            let (vx, vy, _, _) = nj_base::surface::viewport();
+            (vx, vy, nj_base::surface::scale())
         }
     };
     // **Round each EDGE in physical space; derive the extent as the difference of the two rounded
@@ -463,7 +463,7 @@ fn frame_clear_alpha(r: f32, g: f32, b: f32, a: f32) {
     if !frame_clear_allowed() {
         return;
     }
-    plx_base::diag::spans::span("clear", || unsafe {
+    nj_base::diag::spans::span("clear", || unsafe {
         glClearColor(r, g, b, a);
         glClear(GL_COLOR_BUFFER_BIT);
     });
@@ -773,7 +773,7 @@ fn glsl_preamble(ty: c_uint) -> &'static CStr {
 /// the source untouched — at scale 1, so the default simulator compiles what the television does.
 #[cfg(feature = "hostsim")]
 unsafe fn supersample_aa(src: *const c_char) -> Option<std::ffi::CString> {
-    let n = plx_base::surface::render_scale();
+    let n = nj_base::surface::render_scale();
     if n <= 1 {
         return None;
     }
@@ -818,13 +818,13 @@ fn try_compile(ty: c_uint, src: *const c_char) -> Option<c_uint> {
                 .to_string_lossy()
                 .into_owned();
             // The EVENT log is the only surface anyone reads over ssh, and neither of the two lines
-            // below reaches it: `eprintln!` goes to /tmp/plxnative-stderr.log (main.c replaces
+            // below reaches it: `eprintln!` goes to /tmp/nativejelly-stderr.log (main.c replaces
             // stderr), and `process::exit` is a CLEAN exit, so the crash tracer never fires and
-            // /tmp/plxnative-crash.log stays empty. Without this the window flashes, the app is back
+            // /tmp/nativejelly-crash.log stays empty. Without this the window flashes, the app is back
             // at the launcher, the event log simply stops mid-boot, and triage correctly reports
             // "not a crash" with nothing pointing at the shader. `eprintln!` stays because it costs
             // nothing, NOT because it is the durable copy: `main.c` truncates both sinks at every
-            // launch, so neither survives the relaunch that `plxnative-crash.log` is append-only for.
+            // launch, so neither survives the relaunch that `nativejelly-crash.log` is append-only for.
             log(&format!("shader compile FAILED: {msg}"));
             eprintln!("shader error: {msg}");
             return None;
@@ -890,7 +890,7 @@ const FIELD_VERTS: usize = FIELD_N * FIELD_N * 6;
 /// half an 8-bit code at 16 for the largest twist a colour can have; the test
 /// `the_field_mesh_is_the_bilinear_field_within_half_a_code` walks this very list.
 ///
-/// Measured on the set (2026-09-19, `plxnative-hwcnt`, `docs/backdrop-blur-profiling.md`): the
+/// Measured on the set (2026-09-19, `nativejelly-hwcnt`, `docs/backdrop-blur-profiling.md`): the
 /// full-screen wash drawn this way cost ~0.4M fewer GPU cycles a frame on Home's fold and grid —
 /// four varyings down to two — for 1536 vertices the vertex stage does not notice.
 fn field_mesh() -> Vec<f32> {
@@ -1051,7 +1051,7 @@ pub fn init_gl() {
         // The underlay field. `vs_src.vert` because a field is drawn 1:1 over its rect, so the
         // unit quad IS the texture coordinate and there is nothing for a `u_uvrect` to express.
         // DITHERED: `fs_field.frag` is built with `glsl_dithered!`, so its paired vertex source
-        // must be the `PLX_DITHER_NC` variant that supplies `v_dither_nc` (cost rule 4).
+        // must be the `NJ_DITHER_NC` variant that supplies `v_dither_nc` (cost rule 4).
         UPROG = link_program(VS_SRC_DITHERED.as_ptr(), FS_FIELD.as_ptr()).unwrap_or_else(|| {
             log("field prog link failed — an underlay field draws nothing");
             0
@@ -1067,7 +1067,7 @@ pub fn init_gl() {
 
         // The same field as a popover's material — `draw_field_panel`. DITHERED, same contract as
         // `UPROG` above: `fs_field_panel.frag` is built with `glsl_dithered!`, so it must link
-        // against the `PLX_DITHER_NC` vertex variant.
+        // against the `NJ_DITHER_NC` vertex variant.
         PPROG = link_program(VS_SRC_DITHERED.as_ptr(), FS_FIELD_PANEL.as_ptr()).unwrap_or_else(|| {
             log("field-panel prog link failed — popover panels fall back to the flat sheet");
             0
@@ -1307,7 +1307,7 @@ pub fn draw_rect(
             return;
         }
         // A flat two-stop gradient STAYS on this program, and that was measured rather than assumed
-        // (`plxnative-hwcnt`, 2026-09-02): routed through the ambient program instead, the hero's
+        // (`nativejelly-hwcnt`, 2026-09-02): routed through the ambient program instead, the hero's
         // two full-width ramp quads made the frame 0.6M GPU cycles DEARER, because `fs_src`'s
         // early-out below is one `mix` where a four-corner field is three. What this program pays
         // for on a flat quad is its size — Midgard sizes the register file for the whole shader,
@@ -1703,14 +1703,14 @@ pub fn draw_shadow(
 pub fn spring(pos: *mut f32, vel: *mut f32, target: f32, k: f32, dt: f32) {
     unsafe {
         let w = k.sqrt(); // natural frequency; critical damping is c = 2ω
-        let e = plx_machine::motion::exp(-w * dt); // this crate's exp: what a recording can replay
+        let e = nj_machine::motion::exp(-w * dt); // this crate's exp: what a recording can replay
         let x = *pos - target; // offset from target
         let b = *vel + w * x;
         *pos = target + (x + b * dt) * e;
         *vel = (*vel - w * b * dt) * e;
         // Every animation in the app lands here or in `spring_zeta`, which is what lets
-        // `plx_machine::idle` know EXACTLY whether the screen is still moving without any screen opting in.
-        plx_machine::idle::note_spring(*pos, target, *vel);
+        // `nj_machine::idle` know EXACTLY whether the screen is still moving without any screen opting in.
+        nj_machine::idle::note_spring(*pos, target, *vel);
     }
 }
 
@@ -1730,13 +1730,13 @@ pub fn spring_zeta(pos: *mut f32, vel: *mut f32, target: f32, k: f32, zeta: f32,
         let wd = w * (1.0 - z * z).sqrt(); // damped natural frequency
         let x0 = *pos - target; // offset from target
         let v0 = *vel;
-        let e = plx_machine::motion::exp(-z * w * dt);
-        let (s, c) = plx_machine::motion::sin_cos(wd * dt);
+        let e = nj_machine::motion::exp(-z * w * dt);
+        let (s, c) = nj_machine::motion::sin_cos(wd * dt);
         let a = x0;
         let b = (v0 + z * w * x0) / wd;
         *pos = target + e * (a * c + b * s);
         *vel = e * ((b * wd - z * w * a) * c - (a * wd + z * w * b) * s);
-        plx_machine::idle::note_spring(*pos, target, *vel); // see the note in `spring`
+        nj_machine::idle::note_spring(*pos, target, *vel); // see the note in `spring`
     }
 }
 
@@ -2014,9 +2014,9 @@ pub fn art_wash_ok() -> bool {
 ///
 /// **Measured, dev television, 2026-09-28.** Home's snap dive draws the opaque wash and then the
 /// hero photograph fading by `1 - snap` over most of the panel, and the poster dive ran every frame
-/// of its curve at 17–24 ms (`plxnative-framedrop`, `snap=` 0.04–0.91, GPU-bound in `clear`) —
+/// of its curve at 17–24 ms (`nativejelly-framedrop`, `snap=` 0.04–0.91, GPU-bound in `clear`) —
 /// 56.9 moving fps against a 55 floor, and 54.9 on a bad run. Masking the wash
-/// (`plxnative-drawmask=ambient`) took it to 59.6; drawing the wash only where the art is NOT took
+/// (`nativejelly-drawmask=ambient`) took it to 59.6; drawing the wash only where the art is NOT took
 /// it to 59.9 with no frame over 18 ms. The frame is arithmetic-bound
 /// (`docs/perf-damage-tracking-verdict.md`), so the second pass over those pixels is what has to
 /// go, and here the wash is evaluated where the art already is. Folding the SCRIMS in too was
@@ -2075,7 +2075,7 @@ pub fn draw_art_wash(
 pub fn snap(v: f32) -> f32 {
     #[cfg(feature = "hostsim")]
     {
-        let n = plx_base::surface::render_scale();
+        let n = nj_base::surface::render_scale();
         if n > 1 {
             return (v * n as f32).round() / n as f32;
         }
@@ -2231,7 +2231,7 @@ pub fn snapshot_pending() -> bool {
 ///
 /// On this driver `glTexImage2D` returns after the copy and defers the rest — the allocation and
 /// the tile/layout conversion the GPU actually samples from — to the FIRST DRAW that binds the
-/// texture. Measured on the television (2026-09-02, `plxnative-framedrop`): a 1280x720 backdrop
+/// texture. Measured on the television (2026-09-02, `nativejelly-framedrop`): a 1280x720 backdrop
 /// landing cost 6 ms in the pump and then 116 ms in the NEXT frame's draw, billed to the frame's
 /// first framebuffer command (`hm.clear`) where this driver parks its GPU wait — while `dt.cast`,
 /// the row that was actually scrolling, took under 1 ms. That is the hitch a headshot shelf shows
@@ -2565,7 +2565,7 @@ impl FrameCache {
     /// Rendering needs an initialized image shader and a usable FBO backend. Host logic tests
     /// construct dispatchers without a GL context; they must take the live fallback.
     pub fn render_available(&self) -> bool {
-        let (x, y, w, h) = plx_base::surface::viewport();
+        let (x, y, w, h) = nj_base::surface::viewport();
         unsafe { IPROG != 0 && !self.off && !self.fbo_off && x == 0 && y == 0 && w > 0 && h > 0 }
     }
 
@@ -2588,14 +2588,14 @@ impl FrameCache {
         if video_plane_refuses("FrameCache::capture") {
             return false;
         }
-        let (vx, vy, vw, vh) = plx_base::surface::viewport();
+        let (vx, vy, vw, vh) = nj_base::surface::viewport();
         if vw <= 0 || vh <= 0 {
             return false;
         }
         unsafe {
             self.ensure_tex(vw, vh);
             glBindTexture(GL_TEXTURE_2D, self.tex);
-            plx_base::diag::spans::span("cap", || glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, vx, vy, vw, vh));
+            nj_base::diag::spans::span("cap", || glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, vx, vy, vw, vh));
             if !self.checked {
                 self.checked = true;
                 let e = glGetError();
@@ -2630,7 +2630,7 @@ impl FrameCache {
     }
 
     /// **Draw the page INTO the cache rather than copying it out afterwards.** Binds an FBO over
-    /// the cache's texture as the page's target ([`plx_base::surface::PageTarget`]) and returns the
+    /// the cache's texture as the page's target ([`nj_base::surface::PageTarget`]) and returns the
     /// guard; the page is then drawn exactly as it would be to the frame, and
     /// [`rendered`](Self::rendered) closes it and puts it on the frame as one quad.
     ///
@@ -2643,14 +2643,14 @@ impl FrameCache {
     /// `None` — the caller copies instead — inside a blur source pass, on a video-plane frame, on
     /// a letterboxed drawable (the texture is the viewport's size and would not line up with a
     /// viewport that does not start at the origin), and once the FBO has proved incomplete.
-    pub fn render_into(&mut self) -> Option<plx_base::surface::PageTarget> {
+    pub fn render_into(&mut self) -> Option<nj_base::surface::PageTarget> {
         if self.off || self.fbo_off || blur_source_pass() {
             return None;
         }
         if video_plane_refuses("FrameCache::render_into") {
             return None;
         }
-        let (vx, vy, vw, vh) = plx_base::surface::viewport();
+        let (vx, vy, vw, vh) = nj_base::surface::viewport();
         if vw <= 0 || vh <= 0 || vx != 0 || vy != 0 {
             return None;
         }
@@ -2662,7 +2662,7 @@ impl FrameCache {
                 glBindFramebuffer(GL_FRAMEBUFFER, f);
                 glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self.tex, 0);
                 let st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-                glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+                glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
                 if st != GL_FRAMEBUFFER_COMPLETE {
                     log(&format!(
                         "frame cache: FBO {vw}x{vh} incomplete (status=0x{st:x}) — copying instead"
@@ -2674,7 +2674,7 @@ impl FrameCache {
                 self.fbo = f;
             }
             self.valid = false;
-            let target = plx_base::surface::PageTarget::enter(self.fbo);
+            let target = nj_base::surface::PageTarget::enter(self.fbo);
             // A fresh pass over the texture: a clear is what tells a tiler it need not load the
             // previous capture's tiles first. The page's own `frame_clear` lays its ground next.
             glClearColor(0.0, 0.0, 0.0, 0.0);
@@ -2685,14 +2685,14 @@ impl FrameCache {
 
     /// Close a [`render_into`](Self::render_into): the frame's framebuffer is bound again, the
     /// texture holds the page, and the page goes onto the frame from it as one quad.
-    pub fn rendered(&mut self, target: plx_base::surface::PageTarget) {
+    pub fn rendered(&mut self, target: nj_base::surface::PageTarget) {
         self.finish_render(target);
         self.draw();
     }
 
     /// Finish a capture without compositing it yet. Page transitions clear the app ground and
     /// apply their alpha only to this texture, never to the page rendered into it.
-    pub fn finish_render(&mut self, target: plx_base::surface::PageTarget) {
+    pub fn finish_render(&mut self, target: nj_base::surface::PageTarget) {
         drop(target);
         self.valid = true;
         SNAPSHOT_THIS_FRAME.store(true, Ordering::Relaxed);
@@ -2861,7 +2861,7 @@ pub fn draw_tex_carded_still(
     band: f32, scrim: [f32; 4], f: f32, dy: f32,
 ) -> bool {
     let image = unsafe { STILL_IMAGE };
-    // `STILL_IMAGE` (`VS_STILL`/`FS_STILL`) never carries `PLX_FOCUS` — only `PLX_STILL_GROUND` —
+    // `STILL_IMAGE` (`VS_STILL`/`FS_STILL`) never carries `NJ_FOCUS` — only `NJ_STILL_GROUND` —
     // so it has no lit-glass/risen-shadow code at all, on purpose: a THIRD program crossing focus
     // with still-fusion was rejected in favour of two passes for the (at most one) card that is
     // both. `f > 0.0` therefore returns false here so the caller keeps its ordinary card path
@@ -2886,7 +2886,7 @@ pub fn draw_tex_carded_still(
     true
 }
 
-use plx_base::eventlog::log;
+use nj_base::eventlog::log;
 
 // ============================== backdrop blur ================================
 // The frosted ground under a popover panel: a blurred snapshot of what the frame had drawn BEHIND
@@ -3007,12 +3007,12 @@ const _: () = assert!(
 ///
 /// 0.22/0.5 is the floor rather than the target: there the hero's individual hairs and the star
 /// field behind it come through, and the bar stops reading as a frosted material and becomes
-/// tinted glass. `/tmp/plxnative-blurtaps` walks the ladder without a rebuild. Note the offsets are no longer half-texel
+/// tinted glass. `/tmp/nativejelly-blurtaps` walks the ladder without a rebuild. Note the offsets are no longer half-texel
 /// aligned, which the previous version of this note called for so GL_LINEAR would resolve each tap
 /// as an exact 2x2 box — a real property, and a smaller one than what it costs: the alignment buys
 /// a marginally cleaner kernel, and structure at the scale of a letterform is the entire effect.
 const BLUR_TAPS: [f32; 2] = [0.35, 0.75];
-/// `/tmp/plxnative-blurtaps=<a>,<b>` — those offsets, swept.
+/// `/tmp/nativejelly-blurtaps=<a>,<b>` — those offsets, swept.
 ///
 /// The taps are now the WHOLE of "how much structure survives" that anyone gets to tune — the
 /// source scale is pinned to the direct path's, see [`BLUR_REDUCTIONS`] — and until this existed
@@ -3026,17 +3026,17 @@ const BLUR_TAPS: [f32; 2] = [0.35, 0.75];
 fn blur_taps() -> [f32; 2] {
     static SEEN: std::sync::OnceLock<[f32; 2]> = std::sync::OnceLock::new();
     *SEEN.get_or_init(|| {
-        let Some(v) = plx_base::devtrig::read("blurtaps") else {
+        let Some(v) = nj_base::devtrig::read("blurtaps") else {
             return BLUR_TAPS;
         };
         let mut it = v.split(',').map(|t| t.trim().parse::<f32>());
         match (it.next(), it.next()) {
             (Some(Ok(a)), Some(Ok(b))) if a > 0.0 && b > a => {
-                plx_base::eventlog::log(&format!("glass: blur taps swept to {a},{b}"));
+                nj_base::eventlog::log(&format!("glass: blur taps swept to {a},{b}"));
                 [a, b]
             }
             _ => {
-                plx_base::eventlog::log("glass: blurtaps ignored (want <a>,<b> with 0 < a < b)");
+                nj_base::eventlog::log("glass: blurtaps ignored (want <a>,<b> with 0 < a < b)");
                 BLUR_TAPS
             }
         }
@@ -3214,7 +3214,7 @@ pub fn retain_backdrop(z: backdrop::Z) -> bool {
         glBindFramebuffer(GL_FRAMEBUFFER, c.mid_fbo);
         glBindTexture(GL_TEXTURE_2D, texture.0);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h);
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
         if glGetError() != GL_NO_ERROR { return false; }
         let mut chain = c.clone();
         chain.out=texture.0; chain.mid=texture.0; chain.mw=w; chain.mh=h;
@@ -3278,7 +3278,7 @@ const STANDING_LENS: f32 = 24.0;
 /// **It is 0, and the whole second source is therefore dormant** — the copy that feeds it is
 /// skipped, the texture unit is left alone, and the shader takes its single-source path. It is kept
 /// rather than deleted because it costs exactly nothing while off and because the judgement it
-/// encodes belongs to whoever is looking at the television: `/tmp/plxnative-tracksharp` brings it
+/// encodes belongs to whoever is looking at the television: `/tmp/nativejelly-tracksharp` brings it
 /// back at any weight without a rebuild.
 ///
 /// The source existed for one stated reason — "a quarter-res blur has nothing left to compress, so
@@ -3301,13 +3301,13 @@ const STANDING_SHARP: f32 = 0.0;
 /// fill. Shedding it at the edge costs the interior nothing — the ramp is zero where the bevel
 /// meets the flat middle, so the density the labels were solved against is untouched.
 const STANDING_RIMCLEAR: f32 = 0.6;
-/// `/tmp/plxnative-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
+/// `/tmp/nativejelly-rimclear=<w>` — that shed, swept. `0` is the uniform scrim.
 #[cfg(feature = "devtriggers")]
 fn rimclear_sweep() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("rimclear")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim scrim shed swept to {v}"));
+        let v = nj_base::devtrig::read("rimclear")?.trim().parse::<f32>().ok()?;
+        nj_base::eventlog::log(&format!("glass: rim scrim shed swept to {v}"));
         Some(v.clamp(0.0, 1.0))
     })
 }
@@ -3315,13 +3315,13 @@ fn rimclear_sweep() -> Option<f32> {
 fn rimclear_sweep() -> Option<f32> {
     None
 }
-/// `/tmp/plxnative-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
+/// `/tmp/nativejelly-tracksharp=<w>` — that weight, swept. `0` is the single-source material.
 #[cfg(feature = "devtriggers")]
 fn sharp_sweep() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracksharp")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: rim sharp source swept to {v}"));
+        let v = nj_base::devtrig::read("tracksharp")?.trim().parse::<f32>().ok()?;
+        nj_base::eventlog::log(&format!("glass: rim sharp source swept to {v}"));
         Some(v.clamp(0.0, 1.0))
     })
 }
@@ -3329,14 +3329,14 @@ fn sharp_sweep() -> Option<f32> {
 fn sharp_sweep() -> Option<f32> {
     None
 }
-/// `/tmp/plxnative-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
+/// `/tmp/nativejelly-paneldeep=<px>` — the panel's extra sample radius, swept. `0` is the bar's own
 /// single-fetch material.
 #[cfg(feature = "devtriggers")]
 fn deep_sweep() -> Option<f32> {
     static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
     *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("paneldeep")?.trim().parse::<f32>().ok()?;
-        plx_base::eventlog::log(&format!("glass: panel deep-sample radius swept to {v}"));
+        let v = nj_base::devtrig::read("paneldeep")?.trim().parse::<f32>().ok()?;
+        nj_base::eventlog::log(&format!("glass: panel deep-sample radius swept to {v}"));
         Some(v.max(0.0))
     })
 }
@@ -3436,7 +3436,7 @@ pub enum GlassRim {
     /// bar can read as a slab with thickness. Held against the reference (iOS 26's tab bar and its
     /// search button, filmed over moving content), what a container does at its edge is BEND the
     /// page around the arc; a drawn line bends nothing, and no weight of line ever will. So the
-    /// geometry was swept — `plxnative-tracklens`, against synthetic grounds — and 12/24 chosen by
+    /// geometry was swept — `nativejelly-tracklens`, against synthetic grounds — and 12/24 chosen by
     /// looking at the ladder.
     ///
     /// **The ramp is SHORT and the pull is LONG, and that ordering is the whole result.** Nine
@@ -3516,7 +3516,7 @@ impl GlassRim {
     }
 }
 
-/// **`/tmp/plxnative-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
+/// **`/tmp/nativejelly-tracklens=<bevel>,<lens>,<spec>[,<edge_a>,<shade>]` — the container, swept.**
 ///
 /// [`GlassRim::Standing`] was for a while the one material parameter in this app decided by an
 /// argument rather than by looking at a ladder: a 38px lens in a 2px band is a smear, so the lens
@@ -3537,7 +3537,7 @@ fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
     static SEEN: std::sync::OnceLock<Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)>> =
         std::sync::OnceLock::new();
     *SEEN.get_or_init(|| {
-        let v = plx_base::devtrig::read("tracklens")?;
+        let v = nj_base::devtrig::read("tracklens")?;
         let mut it = v.split(',').map(|t| t.trim().parse::<f32>().ok());
         let (b, l, w) = (it.next()??, it.next()??, it.next()??);
         // The chamfer's two weights are OPTIONAL: three fields is the geometry alone, five adds the
@@ -3553,7 +3553,7 @@ fn swept() -> Option<(f32, f32, [f32; 4], Option<f32>, Option<f32>)> {
             edge_a.map(|v| v.clamp(0.0, 1.0)),
             shade.map(|v| v.clamp(0.0, 1.0)),
         );
-        plx_base::eventlog::log(&format!(
+        nj_base::eventlog::log(&format!(
             "glass: track swept to bevel={} lens={} spec={} edge={:?} shade={:?}",
             out.0, out.1, w, out.3, out.4
         ));
@@ -3949,7 +3949,7 @@ fn blur_lazy_init() -> bool {
         // says what goes wrong if it is left behind.
         use_prog(PROG);
 
-        let (gx, gy, gw, gh) = plx_base::surface::viewport();
+        let (gx, gy, gw, gh) = nj_base::surface::viewport();
         let ((mw, mh), (sw, sh)) = blur_dims(gw, gh);
         let build = || -> Option<BlurChain> {
             let grab = cap_tex(gw, gh);
@@ -4233,7 +4233,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
                 note_px(Class::Blur, (tw as f64) * (th as f64));
                 // Supersampled, the chain's texels are `1/n` the authored size they are on a
                 // television; widening the offsets by `n` keeps the frosting's authored radius.
-                let tap = tap * plx_base::surface::render_scale() as f32;
+                let tap = tap * nj_base::surface::render_scale() as f32;
                 glUniform2f(BL_TEXEL, tap / c.sw as f32, tap / c.sh as f32);
                 glBindTexture(GL_TEXTURE_2D, src);
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -4255,7 +4255,7 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             use_prog(BPROG);
             glUniform4f(BL_UVRECT, 0.0, 0.0, tap_uv.0, tap_uv.1);
             note_px(Class::Blur, (r2w as f64) * (r2h as f64));
-            let up = BLUR_UP_TAP * plx_base::surface::render_scale() as f32;
+            let up = BLUR_UP_TAP * nj_base::surface::render_scale() as f32;
             glUniform2f(BL_TEXEL, up / c.mw as f32, up / c.mh as f32);
             // The Settings kernel adds an even pair of extra passes, so both the ordinary and
             // modal chains finish in `a`. The assertion at entry keeps that property structural.
@@ -4263,8 +4263,8 @@ fn blur_snapshot_with_taps(reg: [f32; 4], taps: &[f32]) {
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
 
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
-        let (vx, vy, vw, vh) = plx_base::surface::viewport();
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
+        let (vx, vy, vw, vh) = nj_base::surface::viewport();
         glViewport(vx, vy, vw, vh);
         glEnable(GL_BLEND);
         // Publish what was actually grabbed, not what was asked for — see [`blur_publish`].
@@ -4551,10 +4551,10 @@ impl<const N: usize> GroundProbe<N> {
         }
         let (w, h) = (self.px * N as c_int, self.px);
         let mut buf = vec![0u8; (w * h * 4) as usize];
-        plx_base::diag::spans::span("gndread", || {
+        nj_base::diag::spans::span("gndread", || {
             glBindFramebuffer(GL_FRAMEBUFFER, fbo);
             glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf.as_mut_ptr() as *mut c_void);
-            glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+            glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
         });
         self.fence = None;
         self.ready = Some(buf);
@@ -4582,7 +4582,7 @@ impl<const N: usize> GroundProbe<N> {
                 }
                 let (tex, _) = self.target?;
                 let px = self.px;
-                plx_base::diag::spans::span("gndkick", || {
+                nj_base::diag::spans::span("gndkick", || {
                     glBindTexture(GL_TEXTURE_2D, tex);
                     for (i, &(x, y)) in origins.iter().enumerate() {
                         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, i as c_int * px, 0, x, y, px, px);
@@ -4640,7 +4640,7 @@ pub fn sample_ground(r: [f32; 4], may_read: bool) -> Option<[f32; 3]> {
             return *std::ptr::addr_of!(GROUND_RGB);
         }
         let have = (*std::ptr::addr_of!(GROUND_RGB)).is_some();
-        let (gx, gy, gw, gh) = plx_base::surface::viewport();
+        let (gx, gy, gw, gh) = nj_base::surface::viewport();
         let (sx, sy) = (gw as f32 / SCR_W, gh as f32 / SCR_H);
         let cy = gy + gh - 1 - ((r[1] + r[3] * 0.5) * sy) as c_int; // GL origin is bottom-left
         let origins: [(c_int, c_int); GROUND_TAPS] = std::array::from_fn(|i| {
@@ -4856,7 +4856,7 @@ pub fn sample_control_ground(r: [f32; 4], may_read: bool) -> Option<[f32; 3]> {
             return *std::ptr::addr_of!(CONTROL_GROUND_RGB);
         }
         let have = (*std::ptr::addr_of!(CONTROL_GROUND_RGB)).is_some();
-        let (gx, gy, gw, gh) = plx_base::surface::viewport();
+        let (gx, gy, gw, gh) = nj_base::surface::viewport();
         let (sx, sy) = (gw as f32 / SCR_W, gh as f32 / SCR_H);
         let cy = gy + gh - 1 - ((r[1] + r[3] * 0.5) * sy) as c_int;
         let origins: [(c_int, c_int); CONTROL_GROUND_TAPS] = std::array::from_fn(|i| {
@@ -4871,7 +4871,7 @@ pub fn sample_control_ground(r: [f32; 4], may_read: bool) -> Option<[f32; 3]> {
         let Some(buf) = probe.step(have, &origins, "control ground") else {
             return *std::ptr::addr_of!(CONTROL_GROUND_RGB);
         };
-        let taps: [[f32; 3]; CONTROL_GROUND_TAPS] = plx_base::diag::spans::span("gndmean", || {
+        let taps: [[f32; 3]; CONTROL_GROUND_TAPS] = nj_base::diag::spans::span("gndmean", || {
             std::array::from_fn(|i| {
                 diffuse_ground_mean_u8(probe_tap(&buf, i, CONTROL_GROUND_TAP_PX, CONTROL_GROUND_TAPS))
             })
@@ -4982,10 +4982,10 @@ unsafe fn dither_uniforms(prog: c_uint) -> c_int {
 static mut CULL_RECT: Option<[f32; 4]> = None;
 
 // **Is the host page being served from [`FrameCache`] rather than rasterized?** The flag, its doc
-// and its two accessors live in `plx_machine::idle`, the machine layer: `idle::invalidate` has to read it,
+// and its two accessors live in `nj_machine::idle`, the machine layer: `idle::invalidate` has to read it,
 // and this module may name that layer but not the reverse. Every primitive below consults it
 // through these two names exactly as it did when the flag was declared here.
-pub use plx_machine::idle::{page_frozen, set_page_frozen};
+pub use nj_machine::idle::{page_frozen, set_page_frozen};
 
 thread_local! {
     /// **This frame's picture is a hardware VIDEO PLANE** (restructure spec §9), armed for the
@@ -5042,7 +5042,7 @@ pub fn video_plane_refuses(what: &str) -> bool {
     #[allow(unreachable_code)]
     {
         if !VIDEO_PLANE_TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "videoplane: refused {what} — the plane is not in our framebuffer to sample"
             ));
         }
@@ -5099,8 +5099,8 @@ impl Drop for DirectPass {
             CLIP_TARGET = None;
             CULL_RECT = None;
             glDisable(GL_SCISSOR_TEST);
-            glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
-            let (vx, vy, vw, vh) = plx_base::surface::viewport();
+            glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
+            let (vx, vy, vw, vh) = nj_base::surface::viewport();
             glViewport(vx, vy, vw, vh);
             glEnable(GL_BLEND);
         }
@@ -5109,7 +5109,7 @@ impl Drop for DirectPass {
 
 /// The axis divisor the direct source pass renders at — 1/4, and the only value.
 ///
-/// This used to answer `None` unless `/tmp/plxnative-blurdirect` was armed, and `None` meant "use
+/// This used to answer `None` unless `/tmp/nativejelly-blurdirect` was armed, and `None` meant "use
 /// the capture path instead". The A/B it existed for is over: the direct pass is 4.5x cheaper gross
 /// and 5.8x cheaper net than the `glCopyTexSubImage2D` plus two reductions it replaces, -3.3% of
 /// the whole frame, and it is what takes a refresh frame from 111% of a vsync slot to 99.5% — i.e.
@@ -5130,7 +5130,7 @@ pub fn blur_direct_scale() -> Option<u32> {
     // Supersampled, the drawable is `n`x the canvas, so the divisor grows by `n` to render the
     // source at the same AUTHORED resolution a television does — the same material, not a finer one.
     (!unsafe { BLUR_DIRECT_OFF })
-        .then_some(BLUR_DIRECT_SCALE * plx_base::surface::render_scale() as u32)
+        .then_some(BLUR_DIRECT_SCALE * nj_base::surface::render_scale() as u32)
 }
 
 /// The backdrop source, rendered by DRAWING THE SCENE AGAIN at 1/`scale` per axis, instead of
@@ -5257,7 +5257,7 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
         // texels, and a texel covers `scale` authored pixels, so the offsets that give the shipped
         // look at quarter resolution have to shrink in proportion at any finer divisor. Without
         // this a scale sweep changes two variables at once and measures neither.
-        let tap_k = 4.0 * plx_base::surface::render_scale() as f32 / scale as f32;
+        let tap_k = 4.0 * nj_base::surface::render_scale() as f32 / scale as f32;
         for (i, taps) in blur_taps().iter().enumerate() {
             let name = if i == 0 { "blur.tap1" } else { "blur.tap2" };
             phase(name, || {
@@ -5300,8 +5300,8 @@ pub fn blur_snapshot_direct(reg: [f32; 4], draw_scene: &mut dyn FnMut()) -> bool
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
         });
 
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
-        let (vx, vy, vw, vh) = plx_base::surface::viewport();
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
+        let (vx, vy, vw, vh) = nj_base::surface::viewport();
         glViewport(vx, vy, vw, vh);
         glEnable(GL_BLEND);
         let e = glGetError();
@@ -5503,7 +5503,7 @@ pub fn draw_blur_backdrop(
             // **The BAND, not the region.** The sample never travels further than `lens` outside
             // the container, so the sharp source only has to hold the panel plus that margin —
             // 595x124 against the blur region's 728x200 on the dev set, which is where half of
-            // this feature's cost went. Measured whole-frame on the T820 with `plxnative-hwcnt`:
+            // this feature's cost went. Measured whole-frame on the T820 with `nativejelly-hwcnt`:
             // the region copy put GPU_ACTIVE up 5.1%, the band 2.7%.
             let m = rim.params().1.ceil() + 2.0;
             let sc = c.gw as f32 / SCR_W;
@@ -5702,7 +5702,7 @@ fn fbo_target(w: c_int, h: c_int, who: &str) -> Option<(c_uint, c_uint)> {
         glBindFramebuffer(GL_FRAMEBUFFER, f);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t, 0);
         let st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
         if st != GL_FRAMEBUFFER_COMPLETE {
             log(&format!(
                 "{who}: FBO {w}x{h} incomplete (status=0x{st:x}) — {who} off"
@@ -5845,7 +5845,7 @@ pub fn cap_cycle(want_960: bool, buf: &mut Vec<u8>) -> Option<(c_int, c_int, boo
         //    FBO = frozen screen), full viewport, blend back on (func untouched). Program binding
         //    needs no restore — every draw fn binds its own lazily (use_prog); texture unit 0
         //    stays active; vertex state untouched.
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
         glViewport(0, 0, CAP_W, CAP_H);
         glEnable(GL_BLEND);
 
@@ -5912,7 +5912,7 @@ fn field_passes(gw: c_int) -> Option<u32> {
 
 fn field_lazy_init() -> bool {
     unsafe {
-        let view = plx_base::surface::viewport();
+        let view = nj_base::surface::viewport();
         if let Some(c) = (*std::ptr::addr_of!(FIELDST)).as_ref() {
             if c.view == view {
                 return true;
@@ -6084,7 +6084,7 @@ pub fn field_kick(src: Option<c_uint>) -> Option<FieldTicket> {
             Some(tex) if tex != 0 => tex,
             _ => {
                 glBindTexture(GL_TEXTURE_2D, c.grab);
-                plx_base::diag::spans::span("fieldcopy", || {
+                nj_base::diag::spans::span("fieldcopy", || {
                     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, gx, gy, gw, gh)
                 });
                 c.grab
@@ -6128,7 +6128,7 @@ pub fn field_kick(src: Option<c_uint>) -> Option<FieldTicket> {
         }
 
         // Restore the world exactly — see `cap_cycle`'s step D for what "exactly" has to mean.
-        glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+        glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
         glViewport(gx, gy, gw, gh);
         glEnable(GL_BLEND);
 
@@ -6219,7 +6219,7 @@ unsafe fn field_readback(c: &FieldChain) -> Option<[[f32; 3]; FIELD_CELLS]> {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     let mut buf = [0u8; FIELD_CELLS * 4];
     glPixelStorei(GL_PACK_ALIGNMENT, 1); // 15 RGBA texels is 60 bytes — 4-aligned anyway
-    plx_base::diag::spans::span("fieldread", || {
+    nj_base::diag::spans::span("fieldread", || {
         glReadPixels(
             0,
             0,
@@ -6230,7 +6230,7 @@ unsafe fn field_readback(c: &FieldChain) -> Option<[[f32; 3]; FIELD_CELLS]> {
             buf.as_mut_ptr() as *mut c_void,
         )
     });
-    glBindFramebuffer(GL_FRAMEBUFFER, plx_base::surface::default_fb());
+    glBindFramebuffer(GL_FRAMEBUFFER, nj_base::surface::default_fb());
     glViewport(gx, gy, gw, gh);
 
     // ORIENTATION, DERIVED rather than asserted. `glCopyTexSubImage2D` leaves `grab` (and the page
@@ -6581,7 +6581,7 @@ mod tests {
                 "{name} must hand the tile coordinate at 1/NOISE_DIM ({NOISE_DIM}) of the target px"
             );
             assert!(
-                code.contains("#define PLX_DITHER_NC"),
+                code.contains("#define NJ_DITHER_NC"),
                 "{name}: the dithered twin defines it"
             );
         }
@@ -6591,7 +6591,7 @@ mod tests {
             ("vs_src.vert", VS_SRC),
         ] {
             assert!(
-                !shader_code(vs).contains("#define PLX_DITHER_NC"),
+                !shader_code(vs).contains("#define NJ_DITHER_NC"),
                 "{name}: the plain vertex shader (every image program, the undithered twin) \
                  carries no noise varying"
             );
@@ -6649,10 +6649,10 @@ mod tests {
     #[test]
     fn the_art_wash_is_the_wash_program_with_the_art_between_it_and_the_ink() {
         let wash = shader_code(VS_AMBIENT_DITHERED);
-        assert!(wash.contains("#define PLX_WASH_INK") && !wash.contains("#define PLX_ART_WASH"));
-        assert!(!shader_code(VS_AMBIENT).contains("#define PLX_WASH_INK"), "plain twin: no ramp");
+        assert!(wash.contains("#define NJ_WASH_INK") && !wash.contains("#define NJ_ART_WASH"));
+        assert!(!shader_code(VS_AMBIENT).contains("#define NJ_WASH_INK"), "plain twin: no ramp");
         let vs = shader_code(VS_ART_WASH);
-        for d in ["#define PLX_DITHER_NC", "#define PLX_WASH_INK", "#define PLX_ART_WASH"] {
+        for d in ["#define NJ_DITHER_NC", "#define NJ_WASH_INK", "#define NJ_ART_WASH"] {
             assert!(vs.contains(d), "VS_ART_WASH must define {d}");
         }
         let fs = shader_code(FS_ART_WASH);
@@ -6838,7 +6838,7 @@ mod tests {
             CARD_GLOW_TOP_A, CARD_GLOW_TOP_PX,
         };
         // `shader_code` returns the raw, un-preprocessed file text (it strips comment-only lines,
-        // nothing else), so the text inside a `#ifdef PLX_FOCUS` block is present whichever of
+        // nothing else), so the text inside a `#ifdef NJ_FOCUS` block is present whichever of
         // `FS_IMG`/`FS_FOCUS` (same file, different prepended `#define`) is read here — reading the
         // `FS_FOCUS`/`VS_FOCUS` constants just documents which program actually compiles this code.
         // `an_unfocused_program_carries_none_of_the_focus_code` below is the test that checks what
@@ -6946,8 +6946,8 @@ mod tests {
     /// The whole reason [`FOCUS_IMAGE`] exists: a resting card, a glyph, a blur reduction, a
     /// `field_kick`, a `FrameCache` quad — every draw through the PLAIN program — must compile and
     /// run EXACTLY what main shipped before the lit-glass/risen-shadow feature, with no trace of
-    /// `u_focus`/`v_gloss` left in by a stray `#ifdef PLX_FOCUS` that didn't close where intended.
-    /// Preprocessing with `PLX_FOCUS` absent (mirroring what the GL driver does for `FS_IMG`/
+    /// `u_focus`/`v_gloss` left in by a stray `#ifdef NJ_FOCUS` that didn't close where intended.
+    /// Preprocessing with `NJ_FOCUS` absent (mirroring what the GL driver does for `FS_IMG`/
     /// `VS_IMG`, `FS_STILL`/`VS_STILL`) and grepping the result is what actually answers that,
     /// unlike a raw-text search against `shader_code`.
     #[test]
@@ -6955,17 +6955,17 @@ mod tests {
         let fs = preprocess(FS_IMG.to_str().unwrap(), &[]);
         let vs = preprocess(VS_IMG.to_str().unwrap(), &[]);
         for hay in [&fs, &vs] {
-            for needle in ["u_focus", "v_gloss", "PLX_FOCUS"] {
+            for needle in ["u_focus", "v_gloss", "NJ_FOCUS"] {
                 assert!(!hay.contains(needle), "plain program must not reference `{needle}`:\n{hay}");
             }
         }
-        // Also true with PLX_STILL_GROUND defined alongside (FS_STILL/VS_STILL) — the two macros
+        // Also true with NJ_STILL_GROUND defined alongside (FS_STILL/VS_STILL) — the two macros
         // are independent, and the still specialization has no focus code of its own either
         // (`draw_tex_carded_still` refuses `f > 0.0` rather than ever reaching for it).
-        let fs_still = preprocess(FS_IMG.to_str().unwrap(), &["PLX_STILL_GROUND"]);
-        let vs_still = preprocess(VS_IMG.to_str().unwrap(), &["PLX_STILL_GROUND"]);
+        let fs_still = preprocess(FS_IMG.to_str().unwrap(), &["NJ_STILL_GROUND"]);
+        let vs_still = preprocess(VS_IMG.to_str().unwrap(), &["NJ_STILL_GROUND"]);
         for hay in [&fs_still, &vs_still] {
-            for needle in ["u_focus", "v_gloss", "PLX_FOCUS"] {
+            for needle in ["u_focus", "v_gloss", "NJ_FOCUS"] {
                 assert!(!hay.contains(needle), "still program must not reference `{needle}`:\n{hay}");
             }
         }
@@ -7087,7 +7087,7 @@ mod tests {
     /// lifting hands the cadence back where it was.
     #[test]
     fn a_frozen_page_answers_its_ground_from_the_last_reading() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let last = Some([0.25f32, 0.5, 0.75]);
         let (g0, c0) = unsafe {
             GROUND_RGB = last;
@@ -7118,7 +7118,7 @@ mod tests {
 
     #[test]
     fn discovery_does_not_advance_a_cached_control_ground_probe() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         use crate::gfx::backdrop::{self, Sources};
         use std::{cell::RefCell, rc::Rc};
 
@@ -7219,7 +7219,7 @@ mod tests {
 
     #[test]
     fn the_dither_policy_refuses_small_fields() {
-        plx_machine::idle::frame_begin(1.0 / 60.0);
+        nj_machine::idle::frame_begin(1.0 / 60.0);
         let broad = 700.0;
         assert_eq!(
             dither_for_field(40.0, broad),
@@ -7452,7 +7452,7 @@ mod tests {
     /// Both halves are graded here, as the sequence the renderer actually runs.
     #[test]
     fn i_two_glass_surfaces_share_one_grab_and_give_it_back() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         let bar = (500.0f32, 40.0, 900.0, 76.0);
         let btn = (520.0f32, 150.0, 200.0, 60.0);
         let take = |prev: [f32; 4], r: (f32, f32, f32, f32)| {
@@ -7705,7 +7705,7 @@ mod tests {
 mod recording_clear_tests {
     #[test]
     fn text_prewarm_cannot_clear_the_visible_frame() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let old = super::set_page_frozen(false);
         assert!(super::frame_clear_allowed());
         super::without_frame_clear(|| {
@@ -7717,7 +7717,7 @@ mod recording_clear_tests {
 
     #[test]
     fn recording_clear_scope_restores_after_nesting_and_unwind() {
-        let _guard = plx_base::testlock::serial();
+        let _guard = nj_base::testlock::serial();
         let old = super::set_page_frozen(false);
         super::without_frame_clear(|| {
             let _ = std::panic::catch_unwind(|| super::without_frame_clear(|| panic!("screen")));

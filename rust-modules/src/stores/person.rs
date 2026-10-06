@@ -1,8 +1,8 @@
 //! The physically owned Person model and fetch transport (`docs/stores-as-machines.md`). Each
 //! production `Bridge` owns one [`PersonStore`]; no free selector can connect two Bridges.
 
-use crate::plex::ServerId;
-use plx_machine::machine::{Cx, Effects, Handled, Host, Machine};
+use crate::catalog::ServerId;
+use nj_machine::machine::{Cx, Effects, Handled, Host, Machine};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -76,7 +76,7 @@ impl PersonStore {
     }
 
     /// Route-unconditional landing/spawn pass for this owner's adapter.
-    pub(crate) fn pump(&mut self, gate: &plx_machine::landgate::Gate) -> bool {
+    pub(crate) fn pump(&mut self, gate: &nj_machine::landgate::Gate) -> bool {
         let changed = self.state.pump_with_gate(&self.adapter, gate);
         if changed {
             self.bump();
@@ -87,8 +87,8 @@ impl PersonStore {
     #[cfg(test)]
     pub(crate) fn install_for_test(
         &mut self,
-        movies: Vec<crate::pms::PmsMovie>,
-        shows: Vec<crate::pms::PmsMovie>,
+        movies: Vec<crate::catalog_fetch::PmsMovie>,
+        shows: Vec<crate::catalog_fetch::PmsMovie>,
     ) {
         self.state.install_for_test(movies, shows);
         self.bump();
@@ -98,8 +98,8 @@ impl PersonStore {
     pub(crate) fn install_source_for_test(
         &mut self,
         sid: ServerId,
-        movies: Vec<crate::pms::PmsMovie>,
-        shows: Vec<crate::pms::PmsMovie>,
+        movies: Vec<crate::catalog_fetch::PmsMovie>,
+        shows: Vec<crate::catalog_fetch::PmsMovie>,
     ) {
         self.state.install_source_for_test(sid, movies, shows);
         self.bump();
@@ -141,7 +141,7 @@ impl<H: Host> Machine<H> for PersonStore {
                 self.run(command.clone());
             }
             StoreEv::Pump { .. } => {
-                self.pump(&plx_machine::landgate::Gate::default());
+                self.pump(&nj_machine::landgate::Gate::default());
             }
         }
         Handled::Yes

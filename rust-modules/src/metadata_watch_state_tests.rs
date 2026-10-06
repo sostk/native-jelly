@@ -23,13 +23,13 @@ use super::test_support::*;
 /// mounted page" half, and it fails against a stored field on the first assertion.
 #[test]
 fn a_mounted_detail_page_follows_a_corrected_credit() {
-    let _serial = plx_base::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let house = crate::plex::register_for_test("md-house", "127.0.0.1", 1, "t", "cid");
+    let _serial = nj_base::testlock::serial();
+    crate::catalog::reset_servers_for_test();
+    let house = crate::catalog::register_for_test("md-house", "127.0.0.1", 1, "t", "cid");
 
     // what a build without the rule published: the household's own server wearing the account
     // holder's handle
-    crate::plex::describe_server(house, "Mac mini", "admin", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(house, "Mac mini", "admin", crate::catalog::GrantEvidence::outside());
     set_current_for_test(test_state(), Some(Detail {
         sid: house,
         rk: "42".into(),
@@ -38,7 +38,7 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     assert_eq!(current(test_state()).unwrap().source(), "admin");
 
     // the roster refresh re-grades it, with nothing touching the mounted page
-    crate::plex::describe_server(house, "Mac mini", "", crate::plex::GrantEvidence::outside());
+    crate::catalog::describe_server(house, "Mac mini", "", crate::catalog::GrantEvidence::outside());
     assert_eq!(
         current(test_state()).unwrap().source(),
         "",
@@ -46,8 +46,8 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     );
 
     // and a share is still credited, so this is not a blanket clear
-    let friend = crate::plex::register_for_test("md-friend", "127.0.0.1", 2, "t", "cid");
-    crate::plex::describe_server(friend, "nas-home", "friend", crate::plex::GrantEvidence::outside());
+    let friend = crate::catalog::register_for_test("md-friend", "127.0.0.1", 2, "t", "cid");
+    crate::catalog::describe_server(friend, "nas-home", "friend", crate::catalog::GrantEvidence::outside());
     set_current_for_test(test_state(), Some(Detail {
         sid: friend,
         rk: "318".into(),
@@ -56,12 +56,12 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     assert_eq!(current(test_state()).unwrap().source(), "friend");
 
     set_current_for_test(test_state(), None);
-    crate::plex::reset_servers_for_test();
+    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
 fn an_optimistic_watch_flip_reaches_the_item_its_episodes_and_the_season_tabs_count() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
 
     // the loaded item itself — the hero's own toggle
     set_current_for_test(test_state(), Some(Detail {
@@ -192,7 +192,7 @@ fn an_optimistic_watch_flip_reaches_the_item_its_episodes_and_the_season_tabs_co
 ///   about that item" having just edited a tile.
 #[test]
 fn an_optimistic_watch_flip_reaches_the_related_shelf_the_menu_was_opened_on() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let rel = |sid, rk: &str| Related {
         sid,
         rk: rk.into(),
@@ -257,7 +257,7 @@ fn an_optimistic_watch_flip_reaches_the_related_shelf_the_menu_was_opened_on() {
 /// one of them — a flip reaches the member tile, and the loaded item moves with it.
 #[test]
 fn an_optimistic_watch_flip_reaches_the_collection_shelf() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let member = |rk: &str| Related { sid: SRV_A, rk: rk.into(), unwatched: true, ..Default::default() };
     set_current_for_test(test_state(), Some(Detail {
         sid: SRV_A,
@@ -289,7 +289,7 @@ fn an_optimistic_watch_flip_reaches_the_collection_shelf() {
 /// the loaded page's item rather than the one about to play, with nothing on screen to say so.
 #[test]
 fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
-    let _serial = plx_base::testlock::serial();
+    let _serial = nj_base::testlock::serial();
     let audio = vec![Stream {
         id: 7,
         ..Default::default()
@@ -317,7 +317,7 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
     );
     assert!(cached_playing(test_state(), SRV_A, "43").is_none());
     assert!(
-        cached_playing(test_state(), crate::plex::ServerId::UNSET, "42").is_none(),
+        cached_playing(test_state(), crate::catalog::ServerId::UNSET, "42").is_none(),
         "unscoped names neither"
     );
 

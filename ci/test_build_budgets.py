@@ -82,7 +82,7 @@ class Fixture:
         self.budgets.write_text(json.dumps(doc or budgets_doc()))
         self.trees = d / "trees.json"
         self.trees.write_text(json.dumps(trees or listings()))
-        self.binary = d / "plxnative"
+        self.binary = d / "nativejelly"
         self.binary.write_bytes(b"\x7fELF" + b"\0" * (binary_size - 4))
         self.src = d / "src"
         (self.src / "sub").mkdir(parents=True)
@@ -122,7 +122,7 @@ class GraphMetrics(unittest.TestCase):
 class FeatureResolution(unittest.TestCase):
     """The tool measures what a build compiles, not what `cargo metadata` unifies.
 
-    The layer crates carry a `test-support` feature with optional dependencies (plx_net: rcgen,
+    The layer crates carry a `test-support` feature with optional dependencies (nj_net: rcgen,
     rustls, serde_json) that the app crate enables from its `[dev-dependencies]` only. Metadata
     resolves features across dependency kinds, so it counted those crates as shipped (108 packages
     against a limit of 72) although no build of the app compiles them.

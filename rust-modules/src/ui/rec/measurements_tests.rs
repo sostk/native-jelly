@@ -3,8 +3,8 @@
 //! recorder's measurement capability, which `text` (the `gfx` layer) may not name, so it moved here
 //! with the type it tests (module-layers step L5). It builds its stand-in from `text`'s two memos.
 use super::Measurements;
-use plx_gfx::text::{FittedLines, MeasuredBounds};
-use plx_machine::machine::Measure;
+use nj_gfx::text::{FittedLines, MeasuredBounds};
+use nj_machine::machine::Measure;
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::ffi::CStr;

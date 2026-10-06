@@ -5,7 +5,7 @@
 //! whole URL. So a missing scheme or port becomes a short list instead of one guess: Jellyfin's own
 //! ports (8096 plaintext, 8920 TLS) and the reverse-proxy ones (80, 443), the likely one first — a
 //! LAN address is usually the bare server, a domain name usually sits behind https.
-use crate::plex::{Origin, Scheme};
+use crate::catalog::{Origin, Scheme};
 
 /// The origins `input` may name, best guess first. Empty when it cannot be an address at all.
 pub fn candidates(input: &str) -> Vec<Origin> {

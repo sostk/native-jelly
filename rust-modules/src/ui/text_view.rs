@@ -72,10 +72,10 @@ fn wrap_memo(key: u64, compute: impl FnOnce() -> Wrapped) -> Rc<Wrapped> {
 /// choice, so every screen reads this accessor rather than spelling its own literal. An earlier
 /// commit (`fc63c0c1`) drew the person page's mark as sentence-case `"More"`; that was wrong and is
 /// the reason this exists as one definition instead of two that can drift apart.
-pub(crate) fn more_mark() -> &'static std::ffi::CStr { plx_platform::i18n::msg::browse_action_more_c() }
+pub(crate) fn more_mark() -> &'static std::ffi::CStr { nj_platform::i18n::msg::browse_action_more_c() }
 
 pub struct TextView<'a> {
-    measure: Option<&'a dyn plx_machine::machine::Measure>,
+    measure: Option<&'a dyn nj_machine::machine::Measure>,
     measured_wrap: std::cell::RefCell<Option<(u64, Rc<Wrapped>)>>,
     text: &'a str,
     sz: c_int,
@@ -146,7 +146,7 @@ impl<'a> TextView<'a> {
     /// Borrow the frame's measurement capability for wrapping and inline-run placement.
     /// Capability-backed wraps never consult the process-wide live-font memo: its entries
     /// belong to a different measurement source and could hide a missing replay metric.
-    pub fn with_measure(mut self, measure: &'a dyn plx_machine::machine::Measure) -> Self {
+    pub fn with_measure(mut self, measure: &'a dyn nj_machine::machine::Measure) -> Self {
         self.measure = Some(measure);
         *self.measured_wrap.get_mut() = None;
         self
@@ -158,18 +158,18 @@ impl<'a> TextView<'a> {
             None => {
                 #[cfg(test)]
                 assert!(!FORBID_LIVE.with(std::cell::Cell::get), "live TextView measurement forbidden");
-                plx_gfx::text::text_width(text.as_ptr(), self.sz, i32::from(bold))
+                nj_gfx::text::text_width(text.as_ptr(), self.sz, i32::from(bold))
             }
         }
     }
 
     fn elide(&self, text: &str, width: f32) -> String {
         if self.measure.is_some() {
-            plx_gfx::text::elide_by(text, width, true, |s| self.measure(s))
+            nj_gfx::text::elide_by(text, width, true, |s| self.measure(s))
         } else {
             #[cfg(test)]
             assert!(!FORBID_LIVE.with(std::cell::Cell::get), "live TextView elision forbidden");
-            plx_gfx::text::elide(text, width, self.sz, self.bold, true)
+            nj_gfx::text::elide(text, width, self.sz, self.bold, true)
         }
     }
     /// line pitch (cap-top to cap-top). Defaults to `sz * 1.32`.
@@ -630,7 +630,7 @@ impl<'a> TextView<'a> {
                  pick one on this TextView"
             );
             if last_line_dissolves {
-                let (ct, _) = plx_gfx::text::text_cap_band(self.sz, self.bold);
+                let (ct, _) = nj_gfx::text::text_cap_band(self.sz, self.bold);
                 // cap band at row.y, like Label's VAlign::CapTop
                 p.text_fade(
                     tc.as_ptr(),
@@ -645,7 +645,7 @@ impl<'a> TextView<'a> {
                 continue;
             }
             if vtop.is_some() || vbot.is_some() {
-                let (ct, _) = plx_gfx::text::text_cap_band(self.sz, self.bold);
+                let (ct, _) = nj_gfx::text::text_cap_band(self.sz, self.bold);
                 p.text_fade_v(
                     tc.as_ptr(),
                     row.x,
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn long_word_wrapping_preserves_utf8_and_respects_line_limits() {
         struct Measure;
-        impl plx_machine::machine::Measure for Measure {
+        impl nj_machine::machine::Measure for Measure {
             fn width(&self, s: &std::ffi::CStr, _: i32, _: bool) -> f32 {
                 s.to_string_lossy().chars().count() as f32 * 10.0
             }
@@ -724,9 +724,9 @@ mod tests {
     /// silently drifting one screen away from every other.
     #[test]
     fn the_more_mark_is_uppercase_in_supported_locales() {
-        for preference in [plx_platform::i18n::Preference::En, plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be] {
-        let locale = plx_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
-        let s = plx_platform::i18n::msg::browse_action_more_in(&locale);
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
+        let s = nj_platform::i18n::msg::browse_action_more_in(&locale);
         assert_eq!(
             s,
             s.to_uppercase(),
@@ -739,8 +739,8 @@ mod tests {
 
     #[test]
     fn measured_wrapping_keeps_live_semantics_and_cannot_reuse_another_owner() {
-        use plx_machine::machine::Measure;
-        let _serial = plx_base::testlock::serial();
+        use nj_machine::machine::Measure;
+        let _serial = nj_base::testlock::serial();
         // The host's uninitialized font path has a defined fallback. Supply that same source
         // explicitly to compare the wrap algorithm, including lead, ellipsis and long tokens.
         struct Fallback;
@@ -768,7 +768,7 @@ mod tests {
             let _ = measured.with_measure(&missing).wrap(180.0);
             assert!(missing.take_miss().is_some(), "changing capability must invalidate this view's memo too");
         }
-        plx_gfx::text::take_measure_fault();
+        nj_gfx::text::take_measure_fault();
     }
 
     /// **A live-font capability wraps a paragraph ONCE, not once per frame.** Every frame builds
@@ -778,9 +778,9 @@ mod tests {
     /// IS the live font shares the process memo; the test above still proves a table does not.
     #[test]
     fn a_live_font_capability_wraps_once_across_frames() {
-        use plx_machine::machine::Measure;
+        use nj_machine::machine::Measure;
         use std::cell::Cell;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct CountingLive(Cell<u32>);
         impl Measure for CountingLive {
             fn width(&self, s: &std::ffi::CStr, sz: i32, _: bool) -> f32 {
@@ -806,14 +806,14 @@ mod tests {
         let second = frame();
         assert_eq!(font.0.get(), after_first, "the next frame's fresh view re-measured the paragraph");
         assert_eq!(first.lines, second.lines);
-        plx_gfx::text::take_measure_fault();
+        nj_gfx::text::take_measure_fault();
     }
 
     #[test]
     fn cached_wrap_reuses_line_widths_across_queries_and_frames() {
-        use plx_machine::machine::Measure;
+        use nj_machine::machine::Measure;
         use std::cell::Cell;
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         struct Counting(Cell<u32>, bool);
         impl Measure for Counting {
             fn width(&self, s: &std::ffi::CStr, sz: i32, bold: bool) -> f32 {
@@ -844,12 +844,12 @@ mod tests {
 
     #[test]
     fn a_forbidden_live_wrap_traps_even_a_warm_global_memo() {
-        let _serial = plx_base::testlock::serial();
+        let _serial = nj_base::testlock::serial();
         let view = || TextView::new("warm live wrap", theme::size::BODY, theme::TEXT_PRIMARY);
         view().measure_h(200.0);
         let _forbid = ForbidLive::enter();
         assert!(std::panic::catch_unwind(|| view().measure_h(200.0)).is_err());
-        plx_gfx::text::take_measure_fault();
+        nj_gfx::text::take_measure_fault();
     }
 
     /// **Item 8's grey-band regression, as a pure decision.** `edge_feather` used to paint an

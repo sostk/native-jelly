@@ -35,11 +35,11 @@ use crate::ui::containers::transition::Immediate;
 use crate::ui::containers::{Life, Minter};
 use crate::ui::form::{Form, FormId, FormSection, FormTable, RowKey, RowKind};
 use crate::ui::frame::Budget;
-use plx_machine::machine::{
+use nj_machine::machine::{
     Canon, Cx, Delivery, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InstanceId, Key,
     LogicalState, Machine, MachineId, NavOp, PresentHandle, Stamped, Tick,
 };
-use plx_machine::present::Provenance;
+use nj_machine::present::Provenance;
 use crate::ui::route_screen::{RouteLayout, RoutePush};
 use super::family::SessionGround as RouteGround;
 use crate::ui::screen::{
@@ -136,7 +136,7 @@ impl RouteSurface {
         id: InstanceId,
         kind: Family,
         root: SettingsPage,
-        hubs: crate::pms::HubsView<'_>,
+        hubs: crate::catalog_fetch::HubsView<'_>,
     ) -> Self {
         let mut s = Self {
             entry,
@@ -345,7 +345,7 @@ impl RouteSurface {
     /// Settings arm (Privacy & data → Done) and `onboard::leave`'s settings arm (Favorite
     /// libraries → Done/Cancel). Both are correct at the depth the ROOT surface puts them at —
     /// pushed over the Settings root, so the pop reveals it — and both empty the stack when the
-    /// surface was booted ROOTED at that page, which `/tmp/plxnative-settings=privacy|home` does
+    /// surface was booted ROOTED at that page, which `/tmp/nativejelly-settings=privacy|home` does
     /// (`app/run.rs`'s boot-target match). A `RELEASE` build compiles `devtrig::read` out and always
     /// roots at `SettingsPage::Root`, so this was never a shipping bug — but a Pop with nothing
     /// under it is a statement the page means ("close me"), not an accident to be guarded against
@@ -605,7 +605,7 @@ impl<H: DirectoryLike> Machine<H> for RouteSurface {
             }
             ScreenEvent::Tick(t) => {
                 if self.ground.refresh() {
-                    fx.invalidate(plx_machine::present::Provenance::Landing(MachineId::Session));
+                    fx.invalidate(nj_machine::present::Provenance::Landing(MachineId::Session));
                 }
                 self.tick(*t, cx, fx);
                 Handled::Yes
@@ -653,9 +653,9 @@ impl<H: DirectoryLike> Machine<H> for RouteSurface {
                 // two ends of that.
                 let back = matches!(
                     iev.kind,
-                    plx_machine::machine::InputKind::Key {
+                    nj_machine::machine::InputKind::Key {
                         key: Key::Back,
-                        edge: plx_machine::machine::Edge::Down,
+                        edge: nj_machine::machine::Edge::Down,
                         ..
                     }
                 );
@@ -1000,11 +1000,11 @@ pub(crate) struct RootPage {
     entry: EntryId,
     form: FormTable<RootId, Action, SettingsPage>,
     state: RootState,
-    session_watch: crate::plex::session::VisibleSessionWatch,
-    session_snapshot: std::sync::Arc<crate::plex::session::Session>,
-    pending_auto: Option<(bool, plx_base::storage_worker::TypedTicket<bool>)>,
-    pending_trailer: Option<(bool, plx_base::storage_worker::TypedTicket<bool>)>,
-    /// The servers the signed-in account answered plx_platform::i18n::msg::settings_plaintext_question() for, then the
+    session_watch: crate::catalog::session::VisibleSessionWatch,
+    session_snapshot: std::sync::Arc<crate::catalog::session::Session>,
+    pending_auto: Option<(bool, nj_base::storage_worker::TypedTicket<bool>)>,
+    pending_trailer: Option<(bool, nj_base::storage_worker::TypedTicket<bool>)>,
+    /// The servers the signed-in account answered nj_platform::i18n::msg::settings_plaintext_question() for, then the
     /// ones discovery offers it for and nobody has answered, by row — the `(machine_id, allowed)`
     /// each switch shows.
     plaintext_rows: Vec<(String, bool)>,
@@ -1022,7 +1022,7 @@ struct RootState {
     sel: RowKey,
     auto_sign_in: bool,
     trailer_autoplay: bool,
-    language: plx_platform::i18n::Preference,
+    language: nj_platform::i18n::Preference,
     /// Each unencrypted-connection switch, in row order. Written to the canon only when there is
     /// one, so every other root's digest is unchanged.
     plaintext: Vec<bool>,
@@ -1064,7 +1064,7 @@ struct PlaintextRowInput {
 }
 
 /// Every argument [`root_form`] builds the Settings root's rows from — what [`RootPage::
-/// rebuild`] gathers (mostly from `crate::plex::session::peek_settled()` and its own pending-write
+/// rebuild`] gathers (mostly from `crate::catalog::session::peek_settled()` and its own pending-write
 /// state) before calling the pure builder, so the builder itself never reads a global and a test
 /// can drive it directly with a synthesized combination no real session may currently be in.
 struct RootInputs {
@@ -1075,7 +1075,7 @@ struct RootInputs {
     library_count: i64,
     auto_sign_in: bool,
     trailer_autoplay: bool,
-    language: plx_platform::i18n::Preference,
+    language: nj_platform::i18n::Preference,
     /// Unencrypted-connection switches, in row order — empty when signed out or when nobody has
     /// an answered/offered plaintext question.
     plaintext: Vec<PlaintextRowInput>,
@@ -1092,24 +1092,24 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
     //
     // The Libraries section is Libraries and the row is Favorite libraries: the switch governs
     // the whole app — Home's shelves, the top tab strip and the Library's Sources picker.
-    let libraries = FormSection::new(plx_platform::i18n::msg::settings_libraries_section())
+    let libraries = FormSection::new(nj_platform::i18n::msg::settings_libraries_section())
         .visible(signed_in)
         .item(
             RootId::Favourites,
             RowKind::Nav(SettingsPage::Favourites),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_libraries_title())
-                .detail(plx_platform::i18n::msg::settings_libraries_detail())
-                .value(plx_platform::i18n::msg::settings_libraries_count(inputs.library_count))
+            Row::new(nj_platform::i18n::msg::settings_libraries_title())
+                .detail(nj_platform::i18n::msg::settings_libraries_detail())
+                .value(nj_platform::i18n::msg::settings_libraries_count(inputs.library_count))
                 .chevron(true),
         );
-    let playback = FormSection::new(plx_platform::i18n::msg::settings_playback_section())
+    let playback = FormSection::new(nj_platform::i18n::msg::settings_playback_section())
         .item(
             RootId::Playback,
             RowKind::Nav(SettingsPage::Playback),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_playback_title())
-                .detail(plx_platform::i18n::msg::settings_playback_detail())
+            Row::new(nj_platform::i18n::msg::settings_playback_title())
+                .detail(nj_platform::i18n::msg::settings_playback_detail())
                 .chevron(true),
         )
         .item_if(
@@ -1117,17 +1117,17 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             RootId::AudioSubtitles,
             RowKind::Nav(SettingsPage::AudioSubtitles),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_audio_title())
-                .detail(plx_platform::i18n::msg::settings_audio_detail())
+            Row::new(nj_platform::i18n::msg::settings_audio_title())
+                .detail(nj_platform::i18n::msg::settings_audio_detail())
                 .chevron(true),
         );
-    let system = FormSection::new(plx_platform::i18n::msg::settings_system_section())
+    let system = FormSection::new(nj_platform::i18n::msg::settings_system_section())
         .item(
             RootId::Language,
             RowKind::Nav(SettingsPage::Language),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_language_title())
-                .detail(plx_platform::i18n::msg::settings_language_detail())
+            Row::new(nj_platform::i18n::msg::settings_language_title())
+                .detail(nj_platform::i18n::msg::settings_language_detail())
                 .value(preference_name(inputs.language))
                 .chevron(true),
         )
@@ -1136,8 +1136,8 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             RootId::AutoSignIn,
             RowKind::Toggle,
             Action::AutoSignIn,
-            Row::new(plx_platform::i18n::msg::settings_auto_sign_in_title())
-                .detail(plx_platform::i18n::msg::settings_auto_sign_in_detail())
+            Row::new(nj_platform::i18n::msg::settings_auto_sign_in_title())
+                .detail(nj_platform::i18n::msg::settings_auto_sign_in_detail())
                 .toggle(inputs.auto_sign_in),
         )
         .item_if(
@@ -1145,12 +1145,12 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             RootId::TrailerAutoplay,
             RowKind::Toggle,
             Action::TrailerAutoplay,
-            Row::new(plx_platform::i18n::msg::settings_trailers_title())
-                .detail(plx_platform::i18n::msg::settings_trailers_detail())
+            Row::new(nj_platform::i18n::msg::settings_trailers_title())
+                .detail(nj_platform::i18n::msg::settings_trailers_detail())
                 .toggle(inputs.trailer_autoplay),
         );
     let has_plaintext = signed_in && !inputs.plaintext.is_empty();
-    let mut plaintext = FormSection::new(plx_platform::i18n::msg::settings_plaintext_section()).visible(has_plaintext);
+    let mut plaintext = FormSection::new(nj_platform::i18n::msg::settings_plaintext_section()).visible(has_plaintext);
     if has_plaintext {
         for (i, row) in inputs.plaintext.iter().enumerate() {
             let label = Row::new(&row.name);
@@ -1166,29 +1166,29 @@ fn root_form(inputs: &RootInputs) -> Form<RootId, Action, SettingsPage> {
             );
         }
     }
-    let privacy = FormSection::new(plx_platform::i18n::msg::settings_privacy_section())
+    let privacy = FormSection::new(nj_platform::i18n::msg::settings_privacy_section())
         .item(
             RootId::Privacy,
             RowKind::Nav(SettingsPage::Privacy),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_privacy_title())
-                .detail(plx_platform::i18n::msg::settings_privacy_detail())
+            Row::new(nj_platform::i18n::msg::settings_privacy_title())
+                .detail(nj_platform::i18n::msg::settings_privacy_detail())
                 .chevron(true),
         )
         .item(
             RootId::Legal,
             RowKind::Nav(SettingsPage::Legal),
             Action::Door,
-            Row::new(plx_platform::i18n::msg::settings_legal_title())
-                .detail(plx_platform::i18n::msg::settings_legal_detail())
+            Row::new(nj_platform::i18n::msg::settings_legal_title())
+                .detail(nj_platform::i18n::msg::settings_legal_detail())
                 .chevron(true),
         );
-    let about = FormSection::new(plx_platform::i18n::msg::settings_about_section()).item(
+    let about = FormSection::new(nj_platform::i18n::msg::settings_about_section()).item(
         RootId::About,
         RowKind::Nav(SettingsPage::About),
         Action::Door,
-        Row::new(plx_platform::i18n::msg::settings_about_title())
-            .detail(plx_platform::i18n::msg::settings_about_detail())
+        Row::new(nj_platform::i18n::msg::settings_about_title())
+            .detail(nj_platform::i18n::msg::settings_about_detail())
             .chevron(true),
     );
     Form::new()
@@ -1211,12 +1211,12 @@ impl RootPage {
             plaintext_rows: Vec::new(),
             pending_plaintext: None,
             alert: PlaintextAlert::new(ALERT_GROUP, super::registry::ALERT, super::registry::ALERT + 1),
-            grant_seen: crate::plex::grant::revision(),
+            grant_seen: crate::catalog::grant::revision(),
             state: RootState {
                 sel: RowKey(0),
                 auto_sign_in: false,
                 trailer_autoplay: true,
-                language: plx_platform::i18n::Preference::System,
+                language: nj_platform::i18n::Preference::System,
                 plaintext: Vec::new(),
             },
         };
@@ -1227,17 +1227,17 @@ impl RootPage {
     /// Re-derive the rows from the session, keeping focus on the row it is on BY IDENTITY (a
     /// vanished row falls to its next, else previous, neighbour — `FormTable::set`).
     fn rebuild(&mut self, directory: crate::stores::browse::DirectoryView<'_>) {
-        if let Some(snapshot) = crate::plex::session::peek_settled() {
+        if let Some(snapshot) = crate::catalog::session::peek_settled() {
             self.session_snapshot = snapshot;
         }
         let sess = &self.session_snapshot;
-        let signed_in = sess.account(crate::plex::session::current().as_ref()).signed_in;
+        let signed_in = sess.account(crate::catalog::session::current().as_ref()).signed_in;
         let auto_sign_in = self.pending_auto.as_ref().map_or_else(|| sess.auto_sign_in(), |(value, _)| *value);
         let trailer_autoplay = self.pending_trailer.as_ref().map_or_else(|| sess.trailer_autoplay(), |(value, _)| *value);
         let multi_user = sess.home_users.len() > 1;
         self.state.auto_sign_in = auto_sign_in;
         self.state.trailer_autoplay = trailer_autoplay;
-        self.state.language = plx_platform::i18n::saved_preference();
+        self.state.language = nj_platform::i18n::saved_preference();
         let plaintext = if signed_in { self.plaintext_inputs() } else { Vec::new() };
         let form = root_form(&RootInputs {
             signed_in, multi_user, library_count: directory.pinned_count() as i64,
@@ -1254,7 +1254,7 @@ impl RootPage {
     }
 
     /// **Unencrypted connections**: one input per server the signed-in account answered
-    /// plx_platform::i18n::msg::settings_plaintext_question() for (`grant::choices` — this session's answers over the
+    /// nj_platform::i18n::msg::settings_plaintext_question() for (`grant::choices` — this session's answers over the
     /// session file's, for THIS account only), so an allowed one is here to turn off again — and,
     /// switched off, one per server discovery offers the question for that nobody has answered
     /// (`grant::offers`), so a signed-in person whose server went plaintext-only has a place to
@@ -1264,15 +1264,15 @@ impl RootPage {
     /// what it returns is the plain [`PlaintextRowInput`]s [`root_form`] (a pure builder) turns
     /// into rows and [`Action::Plaintext`] entries.
     fn plaintext_inputs(&mut self) -> Vec<PlaintextRowInput> {
-        use crate::plex::session::PlaintextChoice;
+        use crate::catalog::session::PlaintextChoice;
         let sess = &self.session_snapshot;
-        let answered = crate::plex::grant::choices(&sess.plaintext_consent, &sess.account_token);
+        let answered = crate::catalog::grant::choices(&sess.plaintext_consent, &sess.account_token);
         let mut rows: Vec<(String, bool)> = answered
             .iter()
             .filter(|(_, choice)| *choice != PlaintextChoice::Undecided)
             .map(|(machine, choice)| (machine.clone(), choice.allows()))
             .collect();
-        for offer in crate::plex::grant::offers() {
+        for offer in crate::catalog::grant::offers() {
             if plaintext_question::asks(Some(&offer)) && !rows.iter().any(|(m, _)| *m == offer.machine_id) {
                 rows.push((offer.machine_id, false));
             }
@@ -1287,7 +1287,7 @@ impl RootPage {
         }
         self.plaintext_rows = rows.clone();
         self.state.plaintext = rows.iter().map(|(_, on)| *on).collect();
-        let offers = crate::plex::grant::offers();
+        let offers = crate::catalog::grant::offers();
         rows.into_iter()
             .map(|(machine, on)| {
                 // An offered server was never reached, so the session file does not know it yet:
@@ -1300,8 +1300,8 @@ impl RootPage {
                         .find(|s| s.machine_id == machine && !s.name.is_empty())
                         .map(|s| s.name.clone()));
                 let named = real_name.is_some();
-                let name = real_name.unwrap_or_else(|| plx_platform::i18n::msg::settings_plaintext_server().to_string());
-                let connected = on && crate::plex::grant::granted_origin(&machine).is_some();
+                let name = real_name.unwrap_or_else(|| nj_platform::i18n::msg::settings_plaintext_server().to_string());
+                let connected = on && crate::catalog::grant::granted_origin(&machine).is_some();
                 PlaintextRowInput { machine: ServerMachineId(machine), name, named, on, connected }
             })
             .collect()
@@ -1312,8 +1312,8 @@ impl RootPage {
             Header::new(
                 RouteLayout::screen(),
                 None,
-                plx_platform::i18n::msg::settings_title(),
-                plx_platform::i18n::msg::settings_root_copy(),
+                nj_platform::i18n::msg::settings_title(),
+                nj_platform::i18n::msg::settings_root_copy(),
             ),
             &self.form.table,
             GroupId(0),
@@ -1332,7 +1332,7 @@ impl RootPage {
             Action::Door => {}
             Action::AutoSignIn => {
                 let on = !self.state.auto_sign_in;
-                if let Ok(ticket) = crate::plex::session::queue_update_ticket(move |current|
+                if let Ok(ticket) = crate::catalog::session::queue_update_ticket(move |current|
                     (current.auto_sign_in() != on).then(|| current.with_auto_sign_in(on))) {
                     self.pending_auto = Some((on, ticket));
                 }
@@ -1340,29 +1340,29 @@ impl RootPage {
             }
             Action::TrailerAutoplay => {
                 let on = !self.state.trailer_autoplay;
-                if let Ok(ticket) = crate::plex::session::queue_update_ticket(move |current|
+                if let Ok(ticket) = crate::catalog::session::queue_update_ticket(move |current|
                     (current.trailer_autoplay() != on).then(|| current.with_trailer_autoplay(on))) {
                     self.pending_trailer = Some((on, ticket));
                 }
                 self.rebuild(directory);
             }
             Action::Plaintext(ServerMachineId(machine)) => {
-                use crate::plex::session::PlaintextChoice;
+                use crate::catalog::session::PlaintextChoice;
                 let Some(on) = self.plaintext_rows.iter().find(|(m, _)| *m == machine).map(|(_, on)| *on) else {
                     return;
                 };
                 if !on {
                     // ON asks first — the same question the sign-in and the failure read-outs
                     // put, seated on *Not now*; only its *Connect* allows (`alert_answer`).
-                    let sid = crate::plex::id_of_machine(&machine);
+                    let sid = crate::catalog::id_of_machine(&machine);
                     self.alert.open(&machine, sid, MachineId::Instance(InstanceId(0)), fx);
                     return;
                 }
                 // OFF is immediate: `grant::record` withdraws the grant NOW, before the
                 // preferences write lands, and records the revocation for this account.
-                plx_base::eventlog::log("settings: unencrypted connections turned off for one server");
-                let account = crate::plex::grant::account_key(&self.session_snapshot.account_token);
-                if crate::plex::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
+                nj_base::eventlog::log("settings: unencrypted connections turned off for one server");
+                let account = crate::catalog::grant::account_key(&self.session_snapshot.account_token);
+                if crate::catalog::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
                     self.pending_plaintext = Some((machine, false));
                 }
                 self.rebuild(directory);
@@ -1420,7 +1420,7 @@ impl Machine<InnerHost> for RootPage {
                         // Read AFTER the receipt: the worker may have installed Locked/Blocked
                         // while this Tick was polling. Retain a consumed receipt's local value
                         // until authority settles; subsequent polls see Disconnected.
-                        if let Some(snapshot) = crate::plex::session::peek_settled() {
+                        if let Some(snapshot) = crate::catalog::session::peek_settled() {
                             self.session_snapshot = snapshot;
                             *pending = None;
                             landed = true;
@@ -1428,7 +1428,7 @@ impl Machine<InnerHost> for RootPage {
                     }
                 }
                 // An offer or an answer landed (`grant::revision`): the switches re-read.
-                let revision = crate::plex::grant::revision();
+                let revision = crate::catalog::grant::revision();
                 if revision != self.grant_seen {
                     self.grant_seen = revision;
                     landed = true;
@@ -1439,7 +1439,7 @@ impl Machine<InnerHost> for RootPage {
                     self.alert.withdraw();
                 }
                 self.alert.update(t.dt());
-                if landed { self.rebuild(cx.views); fx.invalidate(plx_machine::present::Provenance::Landing(MachineId::Session)); }
+                if landed { self.rebuild(cx.views); fx.invalidate(nj_machine::present::Provenance::Landing(MachineId::Session)); }
 
                 self.form.table
                     .update(t.dt(), RouteLayout::screen().sectioned_table().h);
@@ -1456,9 +1456,9 @@ impl Machine<InnerHost> for RootPage {
                 self.activate(*e, cx.views, fx);
                 Handled::Yes
             }
-            ScreenEvent::Input(plx_machine::machine::InputEvent {
+            ScreenEvent::Input(nj_machine::machine::InputEvent {
                 kind:
-                    plx_machine::machine::InputKind::Key {
+                    nj_machine::machine::InputKind::Key {
                         key: Key::Right,
                         at_edge: true,
                         ..
@@ -1576,29 +1576,29 @@ mod nav_structure_tests;
 
 // The picker persists an installation preference, while the immutable LocaleContext continues
 // to render the current session. Choosing a language never remounts a screen or resets playback.
-fn preference_name(preference: plx_platform::i18n::Preference) -> &'static str {
-    if preference == plx_platform::i18n::Preference::System {
-        plx_platform::i18n::msg::settings_language_system()
+fn preference_name(preference: nj_platform::i18n::Preference) -> &'static str {
+    if preference == nj_platform::i18n::Preference::System {
+        nj_platform::i18n::msg::settings_language_system()
     } else {
         preference.native_name()
     }
 }
 
-const LANGUAGES: [plx_platform::i18n::Preference; 4] = [
-    plx_platform::i18n::Preference::System, plx_platform::i18n::Preference::En,
-    plx_platform::i18n::Preference::Es, plx_platform::i18n::Preference::Be,
+const LANGUAGES: [nj_platform::i18n::Preference; 4] = [
+    nj_platform::i18n::Preference::System, nj_platform::i18n::Preference::En,
+    nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be,
 ];
 
 /// A Language row's identity: the preference a `Choice` row saves, or the contribution guide.
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum LangId {
-    Choice(plx_platform::i18n::Preference),
+    Choice(nj_platform::i18n::Preference),
     Contribute,
 }
 
 impl FormId for LangId {
     fn key(&self) -> RowKey {
-        use plx_platform::i18n::Preference as P;
+        use nj_platform::i18n::Preference as P;
         RowKey(match self {
             LangId::Choice(P::System) => 0,
             LangId::Choice(P::En) => 1,
@@ -1612,7 +1612,7 @@ impl FormId for LangId {
 #[derive(Clone, PartialEq, Eq, Debug)]
 enum LangAction {
     /// Save this preference (a `Choice` row).
-    Pick(plx_platform::i18n::Preference),
+    Pick(nj_platform::i18n::Preference),
     /// The contribution row's slot: opening its page is [`RowKind::Nav`]'s job, so nothing
     /// dispatches this.
     Open,
@@ -1620,7 +1620,7 @@ enum LangAction {
 
 /// The Language page's rows from plain inputs: one checked `Choice` per language, then the
 /// contribution guide as a `Nav` row in its own section.
-fn language_form(selected: plx_platform::i18n::Preference, busy: bool) -> Form<LangId, LangAction, SettingsPage> {
+fn language_form(selected: nj_platform::i18n::Preference, busy: bool) -> Form<LangId, LangAction, SettingsPage> {
     let mut choices = FormSection::new("");
     for language in LANGUAGES {
         choices = choices.item(
@@ -1634,8 +1634,8 @@ fn language_form(selected: plx_platform::i18n::Preference, busy: bool) -> Form<L
         LangId::Contribute,
         RowKind::Nav(SettingsPage::Contribute),
         LangAction::Open,
-        Row::new(plx_platform::i18n::msg::settings_language_contribute())
-            .detail(plx_platform::i18n::msg::settings_language_help())
+        Row::new(nj_platform::i18n::msg::settings_language_contribute())
+            .detail(nj_platform::i18n::msg::settings_language_help())
             .chevron(true),
     );
     Form::new().section(choices).section(contribution)
@@ -1645,11 +1645,11 @@ struct LanguagePage {
     entry: EntryId,
     form: FormTable<LangId, LangAction, SettingsPage>,
     state: LanguageState,
-    save: Option<(plx_platform::i18n::Preference, std::sync::mpsc::Receiver<bool>)>,
+    save: Option<(nj_platform::i18n::Preference, std::sync::mpsc::Receiver<bool>)>,
 }
 
 struct LanguageState {
-    selected: plx_platform::i18n::Preference,
+    selected: nj_platform::i18n::Preference,
     /// The focused row's key — an identity, not a position.
     sel: RowKey,
     failed: bool,
@@ -1667,7 +1667,7 @@ impl LogicalState for LanguageState {
 
 impl LanguagePage {
     fn new(entry: EntryId) -> Self {
-        let selected = plx_platform::i18n::saved_preference();
+        let selected = nj_platform::i18n::saved_preference();
         let sel = LangId::Choice(selected).key();
         let mut page = Self { entry, form: FormTable::new(super::registry::BAND), state: LanguageState { selected, sel, failed: false, busy: false }, save: None };
         page.rebuild();
@@ -1675,7 +1675,7 @@ impl LanguagePage {
     }
 
     fn pending(&self) -> bool {
-        self.state.selected != plx_platform::i18n::current().preference()
+        self.state.selected != nj_platform::i18n::current().preference()
     }
 
     /// Re-derive the rows, keeping the cursor on its row by identity (the saved language on the
@@ -1689,16 +1689,16 @@ impl LanguagePage {
 
     fn view(&self) -> TableScreen<'_> {
         let copy = if self.state.busy {
-            plx_platform::i18n::msg::settings_language_saving()
+            nj_platform::i18n::msg::settings_language_saving()
         } else if self.state.failed {
-            plx_platform::i18n::msg::settings_language_save_failed()
+            nj_platform::i18n::msg::settings_language_save_failed()
         } else if self.pending() {
-            plx_platform::i18n::msg::settings_language_pending()
+            nj_platform::i18n::msg::settings_language_pending()
         } else {
-            plx_platform::i18n::msg::settings_language_copy()
+            nj_platform::i18n::msg::settings_language_copy()
         };
-        TableScreen::new(Header::new(RouteLayout::screen(), Some(plx_platform::i18n::msg::settings_title()),
-            plx_platform::i18n::msg::settings_language_title(), copy), &self.form.table, GroupId(0), self.entry).keyed(&self.form)
+        TableScreen::new(Header::new(RouteLayout::screen(), Some(nj_platform::i18n::msg::settings_title()),
+            nj_platform::i18n::msg::settings_language_title(), copy), &self.form.table, GroupId(0), self.entry).keyed(&self.form)
     }
 
     fn activate(&mut self, key: u32, fx: &mut Effects<'_, InnerHost>) {
@@ -1752,7 +1752,7 @@ impl Machine<InnerHost> for LanguagePage {
                 Handled::Yes
             }
             ScreenEvent::Tick(t) => {
-                if self.poll_save() { fx.invalidate(plx_machine::present::Provenance::Input); }
+                if self.poll_save() { fx.invalidate(nj_machine::present::Provenance::Input); }
                 self.form.table.update(t.dt(), RouteLayout::screen().sectioned_table().h);
                 Handled::Yes
             }
@@ -1762,7 +1762,7 @@ impl Machine<InnerHost> for LanguagePage {
                 Handled::Yes
             }
             ScreenEvent::Activate(key) => { self.activate(*key, fx); Handled::Yes }
-            ScreenEvent::Input(plx_machine::machine::InputEvent { kind: plx_machine::machine::InputKind::Key {
+            ScreenEvent::Input(nj_machine::machine::InputEvent { kind: nj_machine::machine::InputKind::Key {
                 key: Key::Right, at_edge: true, .. }, .. }) => {
                 if let Some(key) = cx.focus.current.and_then(|k| form_right_target(&self.form, k.elem)) {
                     self.activate(key, fx);
@@ -1779,7 +1779,7 @@ crate::focusable_via_view!(LanguagePage, InnerHost, view);
 impl Screen<InnerHost> for LanguagePage {
     fn name(&self) -> &'static str { "language" }
     fn state(&self) -> &dyn LogicalState { &self.state }
-    fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> { Some(Cow::Borrowed(plx_platform::i18n::msg::settings_title())) }
+    fn crumb(&self, _cx: &Cx<'_, InnerHost>) -> Option<Cow<'_, str>> { Some(Cow::Borrowed(nj_platform::i18n::msg::settings_title())) }
     fn prepare(&mut self, _b: &mut Budget, _cx: &Cx<'_, InnerHost>) {}
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         crate::ui::screen::Part::<InnerHost>::draw(&mut self.view(), f, Rect::FULL);

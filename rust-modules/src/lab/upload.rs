@@ -20,7 +20,7 @@
 //! nothing appears to be happening, so the realistic input is four presses in two seconds; a queue
 //! would answer that by sending four near-identical documents over a link that was already the
 //! reason nothing appeared to happen.
-use plx_platform::labcfg::config;
+use nj_platform::labcfg::config;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering::Relaxed};
 use std::sync::Mutex;
 
@@ -66,7 +66,7 @@ pub(crate) fn showing() -> bool {
     match phase() {
         PHASE_IDLE => false,
         PHASE_SENDING => true,
-        _ => plx_base::eventlog::ring::t_ms() < UNTIL_MS.load(Relaxed),
+        _ => nj_base::eventlog::ring::t_ms() < UNTIL_MS.load(Relaxed),
     }
 }
 
@@ -83,28 +83,28 @@ fn set_phase(p: u8, detail: String) {
     *DETAIL.lock().unwrap_or_else(|e| e.into_inner()) = detail;
     UNTIL_MS.store(
         match p {
-            PHASE_OK | PHASE_FAIL => plx_base::eventlog::ring::t_ms().saturating_add(TOAST_MS),
+            PHASE_OK | PHASE_FAIL => nj_base::eventlog::ring::t_ms().saturating_add(TOAST_MS),
             _ => 0,
         },
         Relaxed,
     );
-    // A toast is a clock-driven overlay, not a spring — `plx_machine::idle::note_spring` cannot see it, and
+    // A toast is a clock-driven overlay, not a spring — `nj_machine::idle::note_spring` cannot see it, and
     // an uninvalidated one appears only on the next keypress (the failure mode `Xfade` and
     // `Spinner` both shipped with; see `docs/agent-reference.md`'s note on the present gate).
-    plx_machine::idle::invalidate();
+    nj_machine::idle::invalidate();
 }
 
 /// **Main thread.** Sample everything, then hand it to a worker.
 pub(crate) fn request(reason: &str, ps: &crate::route::PlaybackSession) {
     let Some(cfg) = config::get() else { return };
     if INFLIGHT.swap(true, Relaxed) {
-        plx_base::eventlog::log("lab: upload already in flight — press ignored");
+        nj_base::eventlog::log("lab: upload already in flight — press ignored");
         return;
     }
     let seq = SEQ.fetch_add(1, Relaxed) + 1;
     let route = *ROUTE.lock().unwrap_or_else(|e| e.into_inner());
     // Before the snapshot, so the document contains the line that says why it exists.
-    plx_base::eventlog::log(&format!(
+    nj_base::eventlog::log(&format!(
         "lab: snapshot seq={seq} reason={reason} route={route}"
     ));
     let doc = crate::lab::snapshot::build(seq, reason, &cfg.session, route, ps);
@@ -113,7 +113,7 @@ pub(crate) fn request(reason: &str, ps: &crate::route::PlaybackSession) {
     let secret = cfg.secret.clone();
     let session = cfg.session.clone();
     let pin = cfg.pin.clone();
-    let spawned = plx_base::task::spawn_small("labup", move || {
+    let spawned = nj_base::task::spawn_small("labup", move || {
         let (phase, detail) = send(&url, &secret, &session, &pin, seq, doc);
         set_phase(phase, detail);
         INFLIGHT.store(false, Relaxed);
@@ -128,7 +128,7 @@ pub(crate) fn request(reason: &str, ps: &crate::route::PlaybackSession) {
 fn send(url: &str, secret: &str, session: &str, pin: &str, seq: u32, doc: String) -> (u8, String) {
     let raw = doc.into_bytes();
     let raw_len = raw.len();
-    let (body, encoding) = match plx_base::diag::zlib::gzip(&raw) {
+    let (body, encoding) = match nj_base::diag::zlib::gzip(&raw) {
         Some(gz) => (gz, "gzip"),
         None => (raw, "identity"),
     };
@@ -143,30 +143,30 @@ fn send(url: &str, secret: &str, session: &str, pin: &str, seq: u32, doc: String
         "Expect:".to_string(),
     ];
     let sent = body.len();
-    let t = plx_net::net::Timeouts {
+    let t = nj_net::net::Timeouts {
         connect_s: 8,
         total_s: 60,
         total_ms: 0,
         low_speed_bps: 0,
         low_speed_s: 0,
     };
-    match plx_net::net::post_pinned(url, &headers, &body, pin, t) {
+    match nj_net::net::post_pinned(url, &headers, &body, pin, t) {
         Some(r) if r.ok() => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "lab: uploaded seq={seq} {raw_len}B -> {sent}B ({encoding}) status={}",
                 r.status
             ));
             (PHASE_OK, format!("{} KB sent", (sent + 512) / 1024))
         }
         Some(r) => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "lab: upload seq={seq} REFUSED status={}",
                 r.status
             ));
             (PHASE_FAIL, format!("receiver said {}", r.status))
         }
         None => {
-            plx_base::eventlog::log(&format!(
+            nj_base::eventlog::log(&format!(
                 "lab: upload seq={seq} did not complete (transport)"
             ));
             (PHASE_FAIL, "no answer from receiver".into())
@@ -182,7 +182,7 @@ mod tests {
     /// nothing, so the first upload still owns the flag.
     #[test]
     fn the_flight_flag_admits_exactly_one() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         INFLIGHT.store(false, Relaxed);
         assert!(!INFLIGHT.swap(true, Relaxed), "first press takes it");
         assert!(INFLIGHT.swap(true, Relaxed), "second press finds it taken");
@@ -193,7 +193,7 @@ mod tests {
     /// keeps asking for frames after it is gone.
     #[test]
     fn a_finished_toast_expires_back_to_idle() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         set_phase(PHASE_OK, "12 KB sent".into());
         assert!(showing());
         UNTIL_MS.store(0, Relaxed); // as if TOAST_MS had elapsed
@@ -207,7 +207,7 @@ mod tests {
     /// not have its "Uploading…" line time out from under it.
     #[test]
     fn the_sending_toast_does_not_expire() {
-        let _g = plx_base::testlock::serial();
+        let _g = nj_base::testlock::serial();
         set_phase(PHASE_SENDING, String::new());
         UNTIL_MS.store(0, Relaxed);
         assert!(showing());

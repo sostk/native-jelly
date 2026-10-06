@@ -194,7 +194,7 @@ explicitly claims to be "all verified in code."
 | `stream.rs` has "**no chunked decoding**" | `CLAUDE.md:121` | Fully implemented and it is the live-transcode path: `chunked`/`chunk_left` fields (`stream.rs:17-18`), `hs_next_chunk` (`:55-86`), header sniff (`:202-203`), read branch (`:224-257`). A negative capability claim is the most dangerous kind — someone debugging a stalled transcode will rule out the framing path on the doc's authority. |
 | "The focus ring/glow is shader-baked … callers drive it through a `focus: f32` scalar" | `ui/CLAUDE.md:65` | Completely dead. All **34** `Painter::rect` call sites pass `0.0`; the only other `gfx::draw_rect` caller (`gfx.rs:499`) passes `0.0`. So `glUniform1f(LOC_FOCUS, …)` (`gfx.rs:325`) uploads a provably-zero uniform per rect and `shaders/fs_src.frag:50-55` compiles an unreachable branch. The real knob (the folded shadow ramp in `tex_carded`) is undocumented. |
 | `Painter::clip` has "**its one user**" and must not be used in the scroll flow | `ui/CLAUDE.md:84` | Two users. `card_row::resume_bar` (`card_row.rs:288-302`) sets and clears scissor per Continue-Watching tile, every frame, inside the shelves. `clip_clear()` is a hard reset, not a pop — an unguarded nesting hazard the doc doesn't warn about. |
-| "except the logs" in the picker-suppression rule | `CLAUDE.md:229` | The code exempts three *named* logs, not "the logs" (`app.rs:339`, `DIAG: [&str; 7]`). `ui/anim.rs:107` writes a fourth — `/tmp/plxnative-anim.log` — which is not on the list, so arming the anim overlay once marks **every subsequent boot as automated forever** and the who's-watching picker never appears again. |
+| "except the logs" in the picker-suppression rule | `CLAUDE.md:229` | The code exempts three *named* logs, not "the logs" (`app.rs:339`, `DIAG: [&str; 7]`). `ui/anim.rs:107` writes a fourth — `/tmp/nativejelly-anim.log` — which is not on the list, so arming the anim overlay once marks **every subsequent boot as automated forever** and the who's-watching picker never appears again. |
 
 ---
 
@@ -262,7 +262,7 @@ item because there is no host runtime today — except where the item *creates* 
 
 Do this first: every later wave's on-device verification is worthless until the build is honest.
 
-1. Add `Makefile` to the prerequisites of `src/%.o`, `$(RUST_LIB)`, `$(STUBS)`, `pkg/plxnative`.
+1. Add `Makefile` to the prerequisites of `src/%.o`, `$(RUST_LIB)`, `$(STUBS)`, `pkg/nativejelly`.
    Replace the hand-listed source glob at `Makefile:88` with `$(shell find rust-modules/src assets -type f)` + `Cargo.lock`.
 2. Create `rust-modules/.cargo/config.toml` with the target `rustflags` and `build-std`; drop them
    from the recipe. Fix the `cr7, cr10` grep in `tools/crash-report.sh:72`.
@@ -278,7 +278,7 @@ Do this first: every later wave's on-device verification is worthless until the 
 
 5. `SHARED.fault: Mutex<Option<Fault>>`, set at all eight `ff.rs` breaks, cleared by
    `reset_session()`, surfaced by `pump`. Add the missing load watchdog: no `Stage::Streaming`
-   within ~8 s of `start_bufferfeed` → synthesize a fault. *Verify:* point `/tmp/plxnative-url` at
+   within ~8 s of `start_bufferfeed` → synthesize a fault. *Verify:* point `/tmp/nativejelly-url` at
    a 404 and assert the app leaves the player instead of sitting black.
 6. `http_get`/`http_post`/`http_put` return the status they already parse; add ~5 `log()` calls at
    the `client.rs` choke points (path prefix only — never the query, `with_token` bakes the token
@@ -374,7 +374,7 @@ so they are recorded with the reason.
 - [ ] `_Atomic int g_smp_ready` + release/acquire + a guard on `sf_feed` (`src/starfish.c:74`).
 - [ ] `checked_add` in both `packet_to_annexb` passes (`ff.rs:1149`, `:1176`).
 - [ ] `gfx::delete_tex` before zeroing `qr_tex` (`ui/login.rs:38`) and in `init()`.
-- [ ] Add `"plxnative-anim.log"` to `DIAG` — or exempt any `.log` suffix (`app.rs:339`).
+- [ ] Add `"nativejelly-anim.log"` to `DIAG` — or exempt any `.log` suffix (`app.rs:339`).
 - [ ] `crate::log` instead of `eprintln!` at the six shader/font fatal sites.
 - [ ] `rust-modules/.cargo/config.toml` with the target rustflags; fix `cr7, cr10` in `crash-report.sh:72`.
 - [ ] `APP_FILES` shared by `deploy` and `ipk` so the ipk ships fonts.
@@ -484,7 +484,7 @@ onto `Overlay` — any non-`None` overlay dismisses via the existing `close_play
 → **Wave 2**
 
 **A5 — the player HUD's focus survives across playback sessions.** `hud_focus`/`hud_btn`/`hud_tab`
-are `plex_run` locals (`app.rs:482-484`) with no owning module. `start_playback`
+are `nj_run` locals (`app.rs:482-484`) with no owning module. `start_playback`
 (`app.rs:579-596`) resets none of them, and the only general reset (`app.rs:1829-1833`) is gated on
 `route == Player && !hud_shown(…)` — false for the whole `HUD_LINGER_MS` window that
 `start_playback`'s own `set_hud` opens. `app.rs:1727` zeroes `hud_focus` on the EOS path only, so
@@ -512,13 +512,13 @@ with one delta:
 
 **A6 — the boot picker is suppressed by files the app itself writes, and by three diagnostics the
 allow-list forgot.** `app.rs:339`'s `DIAG` is seven *exact names*. `ui/anim.rs:109` creates
-`/tmp/plxnative-anim.log` — not on the list — so arming the DIAG-exempt anim overlay once marks
+`/tmp/nativejelly-anim.log` — not on the list — so arming the DIAG-exempt anim overlay once marks
 every later boot automated. Both sanctioned clear paths spare `*.log` (`tools/tv-session.sh:79`,
 `tests/run.py:188`) and `tv-session.sh:233`'s `status` filters `*.log` out of its listing, so the
 file is unclearable by the tools and invisible to the tool that exists to show it. §2.7 has this
-much. Wider than the report states: `plxnative-novsync` (`app.rs:285`), `plxnative-framedrop`
-(`app.rs:450`) and `plxnative-ffprobe` (`ff.rs:840`) are also pure diagnostics and also absent from
-`DIAG`. *Fix:* one line — `.starts_with("plxnative-") && !n.ends_with(".log") && !NAMED.contains(…)`
+much. Wider than the report states: `nativejelly-novsync` (`app.rs:285`), `nativejelly-framedrop`
+(`app.rs:450`) and `nativejelly-ffprobe` (`ff.rs:840`) are also pure diagnostics and also absent from
+`DIAG`. *Fix:* one line — `.starts_with("nativejelly-") && !n.ends_with(".log") && !NAMED.contains(…)`
 — which makes the app agree with the rule `tv-session.sh` and `run.py` already implement in three
 places. The `triggers.rs` catalog stays the Wave-3 version. → **Wave 0**
 
@@ -577,7 +577,7 @@ key sticks on release). → **Wave 3**, item 20
 **A11 — `remote.rs:66` panics on a multi-byte whitespace character.** `self.buf.rfind(char::is_whitespace)`
 returns the *start* byte of the match, so `buf[..=i]` / `buf[i+1..]` (`:68-69`) slice inside any
 non-ASCII whitespace. The FIFO is drained every frame on every boot (`app.rs:755-771`), the panic
-crosses the `extern "C"` `plex_run` boundary and aborts. Exposure is dev-only: `tools/stream-screen.py`
+crosses the `extern "C"` `nj_run` boundary and aborts. Exposure is dev-only: `tools/stream-screen.py`
 allowlists every token and both shipped writers use `printf '%s\n'`, and the trailing newline makes
 the last whitespace ASCII — so only a hand-typed `printf 'ok\xc2\xa0'` with no newline trips it.
 *Fix:* `rfind(|c: char| c.is_ascii_whitespace())`. Every token is ASCII, so nothing is lost.
@@ -667,7 +667,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 - **`make clean` must also wipe `rust-modules/target`.** 3.5 GB and `-Z build-std` means the next
   build recompiles std; `cargo clean` already exists and is what the in-repo setup skill prescribes.
   Residual: add `stub/*.so` to `clean`. (`rm -f src/*.d` is dead — no depfiles are generated.)
-- **`PMS_HOST` compiled into the binary is an exposure.** `pkg/plxnative` and `pkg/*.ipk` are
+- **`PMS_HOST` compiled into the binary is an exposure.** `pkg/nativejelly` and `pkg/*.ipk` are
   gitignored and never distributed, and the tracked `Makefile:23-25` already commits the TV's LAN
   IP and root password as a documented choice.
 - **`pms.rs:284`'s unlabelled `break` silently drops shelves.** Mechanism real (the inner `break`
@@ -684,7 +684,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 - **Injecting a measurer into `elide_compute`/`wrap_uncached` unlocks host tests.** It does not:
   `wrap_uncached` calls the memoised global `text::elide`, which drags TTF+GL back in. The
   historical defects in that code were performance, invisible to a stub measurer.
-- **`plex_run`'s 1,830-line `unsafe` block makes input untestable.** Per-screen input rules are
+- **`nj_run`'s 1,830-line `unsafe` block makes input untestable.** Per-screen input rules are
   already named `pub(crate)` functions outside it, and neither cited regression originated there
   (`211b834` was a device-latency threshold in `pump.rs:60`; `125a828` was `ui/home.rs:194`).
 - **The 172 `static mut` gate testability.** They do not; the crate's host-buildability and its FFI
@@ -728,7 +728,7 @@ Only critic-raised gaps I re-verified myself by reading code. Speculative items 
 `stream.rs:151` is `libc::send(fd, …, 0)` — the only place the app writes a PMS request. A
 tree-wide grep for `SIGPIPE`/`SIG_IGN`/`MSG_NOSIGNAL` returns the sibling that got it right
 (`capture.rs:396`, whose doc at `:390` says outright "SIGPIPE would kill the app") and nothing else.
-The usual net does not exist: `main` is C (`src/main.c:92`) calling `plex_run` as a plain
+The usual net does not exist: `main` is C (`src/main.c:92`) calling `nj_run` as a plain
 `extern "C"` (`app.rs:248`), so Rust's `std::rt::init` — which installs `SIG_IGN` for SIGPIPE —
 never runs, and `install_crash_tracer` (`src/main.c:80-90`) registers SEGV/ABRT/BUS/ILL/TRAP only.
 A peer that closes between `connect` and the request write therefore terminates the process with

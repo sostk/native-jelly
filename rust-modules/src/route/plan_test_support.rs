@@ -16,13 +16,13 @@ pub(super) const UNMEASURED: (i64, i64, i64) = (0, 0, 0); // PMS said nothing (a
 
 /// What `build_stream` computes, spelled once.
 pub(super) fn allowed(
-    link: Option<crate::plex::probe::Location>,
+    link: Option<crate::catalog::probe::Location>,
     q: Quality,
     src: (i64, i64, i64),
-) -> crate::plex::LinkPolicy {
-    let auto_original = q == Quality::Auto && link == Some(crate::plex::probe::Location::Local);
+) -> crate::catalog::LinkPolicy {
+    let auto_original = q == Quality::Auto && link == Some(crate::catalog::probe::Location::Local);
     flavors_allowed(
-        crate::plex::link_policy(link),
+        crate::catalog::link_policy(link),
         quality_policy(q, auto_original, src.0, src.1, src.2),
     )
 }
@@ -68,7 +68,7 @@ pub(super) fn sub(id: i64, index: i64, lang: &str, external: bool) -> crate::met
 pub(super) use crate::metadata::{Dovi, DvPresentation};
 
 
-/// The two inputs of the boot-latched `/tmp/plxnative-nodv` diagnostic, named so assertions state
+/// The two inputs of the boot-latched `/tmp/nativejelly-nodv` diagnostic, named so assertions state
 /// which signal they exercise. Capability and codec are passed separately; `DECLARED` alone does
 /// not authorize a node on an unsupported/unknown set.
 pub(super) const DECLARED: bool = true;
