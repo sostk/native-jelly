@@ -128,7 +128,7 @@ fn a_claimed_retranscode_negotiates_on_a_worker_and_lands_the_new_stream() {
     assert!(ps.url.contains("PlaySessionId=ps-loopback"), "{}", ps.url);
     assert_ne!(ps.tsession, "claim-encoder-1", "the rebuild runs under a fresh encoder session");
     assert_eq!((ps.stream_vcodec.as_str(), ps.stream_acodec.as_str()), ("h264", "aac"));
-    assert_eq!(phase(), ControlPhase::Stable);
+    assert!(matches!(phase(), ControlPhase::Prepared(_)), "the reload onto the new stream is next");
 
     let requests = lb.finish();
     let body = playback_info_body(&requests);

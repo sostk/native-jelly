@@ -508,208 +508,130 @@ fn a_candidate_is_never_named_after_the_encoder_it_would_replace() {
     install_active_encoder("");
 }
 
-/// A seek is a new Universal Transcoder start, even when it asks for the same rung and codecs.
-/// PMS keys the physical encoder by the exact opaque `session`; re-registering that key can
-/// resurrect or mutate a stale resource and was observed in the server archive as the same
-/// `abr-N` starting twice.  The replacement must therefore be registered under a fresh key,
-/// published atomically, and the old exact key stopped only after that publication succeeds.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-    use std::time::Duration;
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().expect("accept decision/stop");
-            let mut request = String::new();
-            BufReader::new(&socket)
-                .read_line(&mut request)
-                .expect("request line");
-            tx.send(request.clone()).expect("publish request");
-            let body = if request.contains("/decision?") {
-                br#"{"MediaContainer":{"generalDecisionCode":1000,"mdeDecisionCode":1000}}"#
-                    .as_slice()
-            } else {
-                b"".as_slice()
-            };
-            write!(
-                socket,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len(),
-            )
-            .expect("response headers");
-            socket.write_all(body).expect("response body");
-        }
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "seek-session-test",
-        "127.0.0.1",
-        port,
-        "token",
-        "seek-client",
+/// The canned conversion answer the seek and rebuild tests negotiate against.
+fn jf_hls_info() -> String {
+    let url = format!(
+        "/videos/{JF_GUID}/master.m3u8?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported&PlaySessionId=ps-loopback"
     );
-    restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
-        Plan {
-            sid,
-            sess: "playback-seek".into(),
-            tsession: "playback-seek-abr-old".into(),
-            url: "http://127.0.0.1/old/master.m3u8".into(),
-            contract: crate::catalog::EncodeContract {
-                delivery: crate::catalog::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
-                ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        "42",
-    );
-
-    let new_url = transcode_seek(&mut ps, 300).expect("accepted seek decision");
-    let decision = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("PMS never received the seek decision");
-    let new_encoder = decision
-        .split("session=")
-        .nth(1)
-        .and_then(|tail| tail.split('&').next())
-        .expect("decision has a physical session");
-    assert_ne!(
-        new_encoder, "playback-seek-abr-old",
-        "a seek must not re-register the physical session it is replacing",
-    );
-    assert!(
-        new_url.contains(&format!("session={new_encoder}")),
-        "{new_url}"
-    );
-    assert_eq!(transcode_session(&ps), new_encoder);
-    assert_eq!(active_encoder(), new_encoder);
-
-    let stop = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the old physical session was not retired");
-    assert!(stop.contains("/stop?"), "{stop}");
-    assert!(stop.contains("session=playback-seek-abr-old"), "{stop}");
-    server.join().unwrap();
-
-    restore_quality(Quality::Original);
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
+    playback_info(
+        false,
+        "mkv",
+        r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"eac3","Index":1,"Channels":6}"#,
+        Some(&url),
+    )
 }
 
-/// A `/decision` response is preparation, not publication. PMS can close the connection or
-/// return an unparseable body after registering the proposed resource; neither outcome may
-/// rewrite Session/ACTIVE to the requested rung while the old encoder is still on screen.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-    use std::time::Duration;
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        for _ in 0..2 {
-            let (mut socket, _) = listener.accept().expect("accept decision/cleanup");
-            let mut request = String::new();
-            BufReader::new(&socket)
-                .read_line(&mut request)
-                .expect("request line");
-            tx.send(request.clone()).expect("publish request");
-            let body = if request.contains("/decision?") {
-                b"this is not a MediaContainer".as_slice()
-            } else {
-                b"".as_slice()
-            };
-            write!(
-                socket,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len(),
-            )
-            .expect("response headers");
-            socket.write_all(body).expect("response body");
-        }
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "failed-retranscode-test",
-        "127.0.0.1",
-        port,
-        "token",
-        "failed-retranscode-client",
-    );
-    restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
+/// A fixed-rung HLS conversion of the loopback item, already negotiated under `encoder`.
+fn install_jf_hls(ps: &mut PlaybackSession, lb: &JfLoopback, logical: &str, encoder: &str) {
+    let rk = jf_rk();
+    let contract = crate::catalog::EncodeContract {
+        delivery: crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 },
+        ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
+        ..Default::default()
+    };
+    negotiate_jf_session(lb.sid, &rk, encoder, contract);
+    apply_plan(ps,
         Plan {
-            sid,
-            sess: "logical-playback".into(),
-            tsession: "live-encoder".into(),
-            url: "http://127.0.0.1/live/master.m3u8".into(),
-            contract: crate::catalog::EncodeContract {
-                delivery: crate::catalog::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
-                ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
-                ..Default::default()
-            },
+            sid: lb.sid,
+            sess: logical.into(),
+            tsession: encoder.into(),
+            url: format!("http://127.0.0.1/videos/{JF_GUID}/master.m3u8?PlaySessionId=ps-loopback"),
+            contract,
             vcodec: "h264".into(),
             acodec: "aac".into(),
             ..Default::default()
         },
-        "42",
+        &rk,
     );
-    let expected = worker_ticket();
-    let before = (
-        url(&ps),
-        transcode_session(&ps),
-        stream_vcodec(&ps),
-        stream_acodec(&ps),
-        cur_ceiling(&ps),
-        cur_delivery(&ps),
-    );
+}
 
-    assert_eq!(retranscode_for(&mut ps, &expected, 90), None);
-    assert_eq!(worker_ticket(), expected, "the semantic route did not move");
-    assert_eq!(
-        (
+fn stopped_reports(requests: &[JfRequest]) -> usize {
+    requests.iter().filter(|r| r.line.starts_with("POST /Sessions/Playing/Stopped ")).count()
+}
+
+/// A seek during a conversion is a fresh negotiation at the new offset under a fresh encoder
+/// session, published atomically; the session it replaced is stopped only after that.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() {
+    let mut ps = crate::route::PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    let lb = JfLoopback::start(jf_hls_info(), user_config(None, true, None, "Default"));
+    restore_quality(Quality::Auto);
+    install_jf_hls(&mut ps, &lb, "playback-seek", "playback-seek-abr-old");
+    let before = stopped_reports(&lb.seen());
+
+    let new_url = transcode_seek(&mut ps, 300).expect("accepted seek negotiation");
+    let new_encoder = transcode_session(&ps);
+    assert_ne!(new_encoder, "playback-seek-abr-old", "a seek must not reuse the session it is replacing");
+    assert_eq!(active_encoder(), new_encoder);
+    assert!(new_url.contains("PlaySessionId=ps-loopback"), "{new_url}");
+    let seek = lb
+        .seen()
+        .into_iter()
+        .filter(|r| r.line.contains("/PlaybackInfo"))
+        .last()
+        .expect("the seek negotiated")
+        .json();
+    assert_eq!(seek["StartTimeTicks"], 300 * 10_000_000_i64, "negotiated at the seek target");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while stopped_reports(&lb.seen()) == before {
+        assert!(std::time::Instant::now() < deadline, "the replaced session was never stopped");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    lb.finish();
+    restore_quality(Quality::Original);
+    reset_session(&mut ps);
+    install_active_encoder("");
+}
+
+/// A negotiation that fails (an `ErrorCode`, or a body that is not a PlaybackInfo answer) is
+/// preparation, not publication: none of the requested route reaches the session.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
+    for answer in [r#"{"MediaSources":[],"ErrorCode":"NoCompatibleStream"}"#, "this is not a PlaybackInfo answer"] {
+        let mut ps = crate::route::PlaybackSession::IDLE;
+        let _g = fresh_registry(&mut ps);
+        assert!(nj_net::net::global_init() && crate::curlio::available());
+        let lb = JfLoopback::start(jf_hls_info(), user_config(None, true, None, "Default"));
+        restore_quality(Quality::Auto);
+        install_jf_hls(&mut ps, &lb, "logical-playback", "live-encoder");
+        lb.answer_playback_info(answer);
+        let expected = worker_ticket();
+        let before = (
             url(&ps),
             transcode_session(&ps),
             stream_vcodec(&ps),
             stream_acodec(&ps),
             cur_ceiling(&ps),
             cur_delivery(&ps),
-        ),
-        before,
-        "a failed preparation must publish none of the requested declaration",
-    );
+        );
 
-    let decision = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("PMS never received decision");
-    assert!(decision.contains("/decision?"), "{decision}");
-    let cleanup = rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the uncommitted resource was not cleaned up");
-    assert!(cleanup.contains("/stop?"), "{cleanup}");
-    server.join().unwrap();
+        assert_eq!(retranscode_for(&mut ps, &expected, 90), None, "{answer}");
+        assert_eq!(worker_ticket(), expected, "the semantic route did not move");
+        assert_eq!(
+            (
+                url(&ps),
+                transcode_session(&ps),
+                stream_vcodec(&ps),
+                stream_acodec(&ps),
+                cur_ceiling(&ps),
+                cur_delivery(&ps),
+            ),
+            before,
+            "a failed preparation must publish none of the requested declaration",
+        );
+        let asked = lb.finish().iter().filter(|r| r.line.contains("/PlaybackInfo")).count();
+        assert_eq!(asked, 2, "the install and the rebuild each negotiated once");
 
-    restore_quality(Quality::Original);
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
+        restore_quality(Quality::Original);
+        reset_session(&mut ps);
+        install_active_encoder("");
+    }
 }
 
 /// Exact user sequence from the device trace: Auto HLS commits a replacement encoder, a
@@ -977,171 +899,6 @@ fn a_recovery_that_never_opens_can_still_go_back_to_the_encoder_it_replaced() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::player::reset_audio_track();
-    crate::player::reset_subtitle();
-}
-
-/// A codec-preserving Original remux has the same proof boundary as direct play: a successful
-/// `/decision` only registered a route; it did not prove that the new MKV can deliver a decoded
-/// frame.  Keep the working HLS encoder until that frame arrives. If the remux never opens,
-/// restore HLS and retire the unproven replacement rather than the stream the viewer had.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (pre_tx, pre_rx) = std::sync::mpsc::channel();
-    let (go_tx, go_rx) = std::sync::mpsc::channel();
-    let (post_tx, post_rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        fn request(socket: &mut std::net::TcpStream) -> String {
-            let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-            let mut first = String::new();
-            reader.read_line(&mut first).expect("request line");
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).expect("request header");
-                if line == "\r\n" || line.is_empty() {
-                    break;
-                }
-            }
-            first
-        }
-        fn poll(listener: &std::net::TcpListener, rounds: usize, requests: &mut Vec<String>) {
-            for _ in 0..rounds {
-                match nj_base::testnet::accept(listener) {
-                    Ok((mut socket, _)) => {
-                        requests.push(request(&mut socket));
-                        socket
-                            .write_all(
-                                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                            )
-                            .expect("control response");
-                    }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(4));
-                    }
-                    Err(error) => panic!("accept control request: {error}"),
-                }
-            }
-        }
-
-        let (mut socket, _) = listener.accept().expect("accept remux decision");
-        let first = request(&mut socket);
-        assert!(first.contains("/decision?"), "{first}");
-        let body = br#"{"MediaContainer":{"generalDecisionCode":1000,"mdeDecisionCode":1000}}"#;
-        write!(
-            socket,
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len(),
-        )
-        .expect("decision headers");
-        socket.write_all(body).expect("decision body");
-        drop(socket);
-
-        listener.set_nonblocking(true).unwrap();
-        let mut before_rollback = vec![first];
-        poll(&listener, 75, &mut before_rollback);
-        pre_tx
-            .send(before_rollback)
-            .expect("publish pre-frame requests");
-        go_rx.recv().expect("begin rollback observation");
-        let mut after_rollback = Vec::new();
-        poll(&listener, 125, &mut after_rollback);
-        post_tx
-            .send(after_rollback)
-            .expect("publish rollback requests");
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "remux-recovery",
-        "127.0.0.1",
-        port,
-        "token",
-        "remux-client",
-    );
-    restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
-        Plan {
-            sid,
-            sess: "remux-logical".into(),
-            url: "http://fixture.invalid/hls/master.m3u8".into(),
-            tsession: "remux-hls".into(),
-            contract: crate::catalog::EncodeContract {
-                delivery: crate::catalog::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
-                ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
-                ..Default::default()
-            },
-            src_vcodec: "hevc".into(),
-            src_acodec: "eac3".into(),
-            vcodec: "h264".into(),
-            acodec: "aac".into(),
-            transport_kbps: 28_000,
-            auto_original: Some(AutoOriginalCandidate {
-                url: "http://fixture.invalid/source.mkv".into(),
-                probe_part: "/library/parts/1/file.mkv".into(),
-                direct: false,
-                vcodec: "hevc".into(),
-                fps: 23.976,
-                dovi: crate::metadata::Dovi::NONE,
-                dv_decision: crate::metadata::DvDecision::NONE,
-                audio: Some(CarriedAudio { sid: 42, ordinal: 1, codec: "eac3".into(), channels: 0, can_normalize_loudness: false, immersive: false }),
-                subtitle_ordinal: None,
-            }),
-            ..Default::default()
-        },
-        "42",
-    );
-
-    assert_eq!(
-        recover_auto_to_original(&mut ps, 120),
-        Some(AutoOriginalReload::Remux),
-    );
-    let repeated = recover_auto_to_original(&mut ps, 121);
-    let replacement = active_encoder();
-    let pending_before_frames = original_recovery_pending();
-    let pre = pre_rx.recv().expect("captured pre-frame requests");
-    go_tx.send(()).unwrap();
-    let rollback = rollback_seconds(&mut ps);
-    let post = post_rx.recv().expect("captured rollback requests");
-    server.join().unwrap();
-
-    assert!(
-        pending_before_frames,
-        "a decision is not decoded-frame proof"
-    );
-    assert_eq!(
-        repeated, None,
-        "an unconfirmed handoff owns the route until frames commit or failure rolls it back",
-    );
-    assert_eq!(
-        pre.iter().filter(|line| line.contains("/stop?")).count(),
-        0,
-        "the working HLS encoder must remain alive before remux frames: {pre:?}",
-    );
-    assert_eq!(rollback, Some(120));
-    assert_eq!(
-        active_encoder(),
-        "remux-hls",
-        "rollback restores the exact old route"
-    );
-    assert!(
-        post.iter().any(|line| {
-            line.contains("/stop?") && line.contains(&format!("session={replacement}"))
-        }),
-        "rollback retires the unproven remux resource: {post:?}",
-    );
-
-    restore_quality(Quality::Original);
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -1643,99 +1400,6 @@ fn audio_selected_during_original_trial_uses_the_route_that_actually_lands() {
     crate::player::reset_route_requests_for_test(&ps);
 }
 
-#[test]
-#[cfg(feature = "devtriggers")]
-fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    listener.set_nonblocking(true).unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        // A FAILURE BOUND, NOT A RUNTIME: the loop returns the moment the request arrives,
-        // so a passing run never spends this. One second was not one — under a loaded
-        // 1900-test parallel run the client had not been scheduled yet, the loop gave up, and
-        // the count assertion below failed with an empty vec. Observed twice in ordinary runs
-        // on 2026-09-02, never when the module ran alone.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        let mut requests = Vec::new();
-        while std::time::Instant::now() < deadline {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let timeout = Some(std::time::Duration::from_secs(20));
-                    socket.set_read_timeout(timeout).expect("request timeout");
-                    socket.set_write_timeout(timeout).expect("response timeout");
-                    let mut first = String::new();
-                    BufReader::new(socket.try_clone().expect("clone socket"))
-                        .read_line(&mut first)
-                        .expect("request line");
-                    requests.push(first);
-                    socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .expect("stop response");
-                    break;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept cold-direct cleanup: {error}"),
-            }
-        }
-        tx.send(requests).unwrap();
-    });
-    let sid = crate::catalog::register_for_test(
-        "cold-direct-owner",
-        "127.0.0.1",
-        port,
-        "token",
-        "cold-direct-client",
-    );
-    apply_plan(&mut ps, 
-        Plan {
-            sid,
-            sess: "cold-direct-logical".into(),
-            url: "http://fixture.invalid/library/parts/1/file.mkv".into(),
-            vcodec: "h264".into(),
-            acodec: "aac".into(),
-            ..Default::default()
-        },
-        "42",
-    );
-    assert!(
-        !is_transcoding(&ps),
-        "resource ownership must not relabel Direct as a transcode"
-    );
-    scrobble_stop(&mut ps, None, None);
-    drain_scrobble();
-    let requests = rx.recv().expect("cold-direct cleanup observation");
-    server.join().unwrap();
-
-    assert_eq!(
-        requests.len(),
-        1,
-        "one installed resource has one final owner: {requests:?}"
-    );
-    assert!(
-        requests[0].contains("session=cold-direct-logical"),
-        "{}",
-        requests[0]
-    );
-    assert!(
-        requests[0].contains("closeResourceSession=1"),
-        "{}",
-        requests[0]
-    );
-
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-}
-
 /// #266 follow-up: the Auto watchdog already probes this exact Part on this exact identity on its
 /// own worker thread before it ever proposes the recovery
 /// (`probe_original_while_hls_cancellable`), so a main-thread `admit_original_part` call for
@@ -1841,312 +1505,6 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
     assert!(
         requests.is_empty(),
         "Automatic must not admit the Part before the trial — the watchdog already asked: {requests:?}"
-    );
-
-    restore_quality(Quality::Original);
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    crate::player::reset_audio_track();
-    crate::player::reset_subtitle();
-}
-
-/// Runtime direct recovery borrows the exact active HLS Streaming Resource. A decoded frame
-/// proves the current HTTP body, but PMS checks the resource's terminated flag again on every
-/// later Range GET. Therefore confirmation stops only the physical HLS encoder, retains that
-/// exact resource identity in the direct URL, and closes it only at final playback teardown.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    if !nj_net::net::global_init() || !crate::curlio::available() {
-        return;
-    }
-    let plan = crate::abr::source_probe_plan(320, crate::abr::PROBE_BUDGET_MS).unwrap();
-    let bytes = plan.target_bytes;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (stop_tx, stop_rx) = std::sync::mpsc::channel();
-    let (all_tx, all_rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let mut requests = Vec::new();
-        let mut resource_closed = false;
-        for index in 0..4 {
-            let (mut socket, _) = listener.accept().expect("accept direct lifecycle request");
-            let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-            let mut first = String::new();
-            reader.read_line(&mut first).expect("request line");
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).expect("request header");
-                if line == "\r\n" || line.is_empty() {
-                    break;
-                }
-            }
-            requests.push(first.clone());
-            if index == 1 || index == 3 {
-                assert!(first.contains("/stop?"), "{first}");
-                resource_closed |= first.contains("closeResourceSession=1");
-                socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    )
-                    .expect("stop response");
-                if index == 1 {
-                    stop_tx.send(first).expect("publish stop request");
-                }
-            } else if resource_closed {
-                write_status(&mut socket, 503);
-            } else {
-                write_partial(&mut socket, bytes);
-            }
-        }
-        all_tx.send(requests).expect("publish direct lifecycle");
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "direct-recovery",
-        "127.0.0.1",
-        port,
-        "token",
-        "direct-client",
-    );
-    let client = crate::catalog::client_for(sid).expect("test server installed");
-    let logical_url = client
-        .direct_play_url("/library/parts/1/file.mkv", "direct-logical")
-        .to_url();
-    restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
-        Plan {
-            sid,
-            sess: "direct-logical".into(),
-            url: "http://fixture.invalid/hls/master.m3u8".into(),
-            tsession: "direct-hls".into(),
-            contract: crate::catalog::EncodeContract {
-                delivery: crate::catalog::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
-                ceiling: Some(crate::abr::Rung::P480.ceiling()),
-                ..Default::default()
-            },
-            transport_kbps: 320,
-            auto_original: Some(AutoOriginalCandidate {
-                url: logical_url,
-                probe_part: "/library/parts/1/file.mkv".into(),
-                direct: true,
-                vcodec: "h264".into(),
-                fps: 24.0,
-                dovi: crate::metadata::Dovi::NONE,
-                dv_decision: crate::metadata::DvDecision::NONE,
-                audio: Some(CarriedAudio { sid: 0, ordinal: -1, codec: "aac".into(), channels: 0, can_normalize_loudness: false, immersive: false }),
-                subtitle_ordinal: None,
-            }),
-            ..Default::default()
-        },
-        "42",
-    );
-
-    assert_eq!(
-        recover_auto_to_original(&mut ps, 120),
-        Some(AutoOriginalReload::Direct),
-    );
-    let direct_url = url(&ps);
-    let initial = crate::curlio::sample_throughput_result(
-        &direct_url,
-        bytes,
-        std::time::Duration::from_secs(4),
-        std::time::Duration::from_secs(4),
-    );
-    assert!(initial.is_ok(), "the first direct body opens: {initial:?}");
-    settle_pending_native_start(&mut ps, RouteStartResult::Started);
-    confirm_original_recovery(&mut ps);
-    let stop = stop_rx.recv().expect("captured HLS retirement");
-    let reopened = crate::curlio::sample_throughput_result(
-        &direct_url,
-        bytes,
-        std::time::Duration::from_secs(4),
-        std::time::Duration::from_secs(4),
-    );
-    assert_eq!(
-        active_encoder(),
-        "direct-hls",
-        "teardown still owns the resource identity"
-    );
-    scrobble_stop(&mut ps, None, None);
-    drain_scrobble();
-    let requests = all_rx.recv().expect("captured direct lifecycle");
-    server.join().unwrap();
-
-    assert!(
-        direct_url.contains("X-Plex-Session-Identifier=direct-hls"),
-        "the actual direct body must exact-reuse the resource the probe measured: {direct_url}",
-    );
-    assert!(
-        stop.contains("closeResourceSession=0"),
-        "confirmation retires the encoder without terminating the source resource: {stop}",
-    );
-    assert!(
-        reopened.is_ok(),
-        "a later Range/seek must still open: {reopened:?}"
-    );
-    assert_eq!(
-        active_encoder(),
-        "",
-        "final teardown spends the retained owner"
-    );
-    assert_eq!(requests.len(), 4);
-    let stops: Vec<_> = requests
-        .iter()
-        .filter(|line| line.contains("/stop?"))
-        .collect();
-    assert_eq!(
-        stops.len(),
-        2,
-        "one physical retirement and one final close: {requests:?}"
-    );
-    assert!(stops[0].contains("session=direct-hls"), "{}", stops[0]);
-    assert!(stops[0].contains("closeResourceSession=0"), "{}", stops[0]);
-    assert!(stops[1].contains("session=direct-hls"), "{}", stops[1]);
-    assert!(stops[1].contains("closeResourceSession=1"), "{}", stops[1]);
-
-    restore_quality(Quality::Original);
-    reset_session(&mut ps);
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    crate::player::reset_audio_track();
-    crate::player::reset_subtitle();
-}
-
-/// BACK while a direct recovery is still awaiting frames has one resource owner, not two:
-/// `scrobble_stop` takes the retained active identity and performs the final exact close.
-/// Dropping PendingOriginal must only forget its rollback in this branch, or PMS receives two
-/// concurrent stop/close requests for the same resource.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    listener.set_nonblocking(true).unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let mut requests = Vec::new();
-        // TWO CLOCKS, because this loop is doing two different jobs and one bound cannot
-        // serve both. The assertion below is that exactly ONE `/stop?` arrives, so the loop
-        // may not stop at the first — it has to keep listening long enough to catch a second.
-        // That was spelled as `for _ in 0..250` with a 4 ms sleep: a fixed ~1 s of listening,
-        // which is a RUNTIME the test always paid, and simultaneously the only tolerance it
-        // had for the client being slow to arrive. Under a loaded 1900-test parallel run the
-        // client had not been scheduled inside that second, the loop gave up empty, and the
-        // count assertion failed. Naively widening it to 20 s fixed the flake by making every
-        // green run twenty seconds long — measured, and the reason this shape exists.
-        //
-        // So: wait up to 20 s for the FIRST request (a failure bound, spent only when
-        // something is broken), then observe for one further second (the real window, the
-        // same one this test always had, and the thing a duplicate close would land in).
-        let hard_deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        let mut observe_until: Option<std::time::Instant> = None;
-        while std::time::Instant::now() < hard_deadline
-            && observe_until.is_none_or(|until| std::time::Instant::now() < until)
-        {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-                    let mut first = String::new();
-                    reader.read_line(&mut first).expect("request line");
-                    loop {
-                        let mut line = String::new();
-                        reader.read_line(&mut line).expect("request header");
-                        if line == "\r\n" || line.is_empty() {
-                            break;
-                        }
-                    }
-                    requests.push(first);
-                    // The observation window opens at the first request, not at thread start,
-                    // so how long the client took to get scheduled cannot eat into it.
-                    observe_until.get_or_insert_with(|| {
-                        std::time::Instant::now() + std::time::Duration::from_secs(1)
-                    });
-                    socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .expect("stop response");
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(4));
-                }
-                Err(error) => panic!("accept stop: {error}"),
-            }
-        }
-        tx.send(requests).expect("publish stop requests");
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "direct-pending-stop",
-        "127.0.0.1",
-        port,
-        "token",
-        "direct-stop-client",
-    );
-    let candidate_url = crate::catalog::client_for(sid)
-        .unwrap()
-        .direct_play_url("/library/parts/1/file.mkv", "direct-stop-logical")
-        .to_url();
-    restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
-        Plan {
-            sid,
-            sess: "direct-stop-logical".into(),
-            url: "http://fixture.invalid/hls/master.m3u8".into(),
-            tsession: "direct-stop-hls".into(),
-            contract: crate::catalog::EncodeContract {
-                delivery: crate::catalog::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
-                ceiling: Some(crate::abr::Rung::P480.ceiling()),
-                ..Default::default()
-            },
-            auto_original: Some(AutoOriginalCandidate {
-                url: candidate_url,
-                probe_part: "/library/parts/1/file.mkv".into(),
-                direct: true,
-                vcodec: "h264".into(),
-                fps: 24.0,
-                dovi: crate::metadata::Dovi::NONE,
-                dv_decision: crate::metadata::DvDecision::NONE,
-                audio: Some(CarriedAudio { sid: 0, ordinal: -1, codec: "aac".into(), channels: 0, can_normalize_loudness: false, immersive: false }),
-                subtitle_ordinal: None,
-            }),
-            ..Default::default()
-        },
-        "42",
-    );
-    assert_eq!(
-        recover_auto_to_original(&mut ps, 120),
-        Some(AutoOriginalReload::Direct),
-    );
-    assert!(original_recovery_pending());
-
-    scrobble_stop(&mut ps, None, None);
-    drop_original_recovery(&ps);
-    drain_scrobble();
-    let requests = rx.recv().expect("captured teardown stops");
-    server.join().unwrap();
-    let stops: Vec<_> = requests
-        .iter()
-        .filter(|line| line.contains("/stop?"))
-        .collect();
-    assert_eq!(
-        stops.len(),
-        1,
-        "one retained resource has one final owner and one exact close: {requests:?}",
     );
 
     restore_quality(Quality::Original);

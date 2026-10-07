@@ -48,109 +48,92 @@ fn the_machine_id_cache_is_scoped_to_the_server_that_taught_it() {
     assert_eq!(ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), b, "rk-b").machine_id, "");
 }
 
-/// **The one that had to ship in the same commit as `cur_sid`.** The `/:/timeline` report runs
-/// on a worker every ten seconds and used to read the current server fresh on each tick — the
-/// only place in the playback path with no capture at all. Split from the rest, the app
-/// resolves correctly, plays correctly, and quietly writes the resume point of a friend's film
-/// onto your own server for as long as it plays.
+/// The Jellyfin item every report below is about, on whichever loopback it plays from.
+const OTHER_GUID: &str = "fedcba9876543210fedcba9876543210";
+
+fn jf_loopback() -> JfLoopback {
+    JfLoopback::start(String::new(), user_config(None, true, None, "Default"))
+}
+
+/// The reports `requests` holds: `(path, ItemId)` for every `/Sessions/Playing*` POST.
+fn reports(requests: &[JfRequest]) -> Vec<(String, String)> {
+    requests
+        .iter()
+        .filter(|r| r.line.starts_with("POST /Sessions/Playing"))
+        .map(|r| {
+            let path = r.line.split_whitespace().nth(1).unwrap_or("").to_string();
+            let item = r.json()["ItemId"].as_str().unwrap_or("").to_string();
+            (path, item)
+        })
+        .collect()
+}
+
+/// **The one that had to ship in the same commit as `cur_sid`.** The progress report runs on a
+/// worker every ten seconds and used to read the current server fresh on each tick — the only
+/// place in the playback path with no capture at all. Split from the rest, the app resolves
+/// correctly, plays correctly, and quietly writes the resume point of a friend's film onto your
+/// own server for as long as it plays.
 ///
-/// Two servers on loopback, the item playing from B, the user browsing A: the POST must land on
-/// B. The closing report to A is the control — it proves the two stubs are distinguishable, so
-/// "A heard nothing" is a fact about the routing and not about a listener that never worked.
+/// Two servers on loopback, the item playing from B, the user browsing A: the report must land
+/// on B. The closing report to A is the control — it proves the two loopbacks are
+/// distinguishable, so "A heard nothing" is a fact about the routing and not about a listener
+/// that never worked.
 #[test]
 #[cfg(feature = "devtriggers")]
 fn the_timeline_reaches_the_server_the_item_came_from_not_the_current_one() {
     let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::time::Duration;
     let _g = fresh_registry(&mut ps);
-    let (pa, rx_a, ha) = stub_pms();
-    let (pb, rx_b, hb) = stub_pms();
-    // `register_for_test`, not the public `register`: the latter resolves the device id through
-    // `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
-    let a = crate::catalog::register_for_test(
-        "route-test-A",
-        "127.0.0.1",
-        pa,
-        "tok-a",
-        "cid-route-test",
-    );
-    let b = crate::catalog::register_for_test(
-        "route-test-B",
-        "127.0.0.1",
-        pb,
-        "tok-b",
-        "cid-route-test",
-    );
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    let server_a = jf_loopback();
+    let server_b = jf_loopback();
+    let (a, b) = (server_a.sid, server_b.sid);
     assert_ne!(a, b, "two servers, two slots");
+    let rk_a = crate::jf::ids::rating_key(OTHER_GUID);
+    let rk_b = jf_rk();
 
     // an item from B starts playing, then the user walks back to their OWN server's Home
-    apply_plan(&mut ps, 
+    apply_plan(&mut ps,
         Plan {
             sid: b,
             url: "https://example.invalid/b.mkv".into(),
             sess: "timeline-session-b".into(),
             ..Default::default()
         },
-        "rk-b",
+        &rk_b,
     );
     assert!(crate::catalog::set_current(a));
-    assert_eq!(
-        cur_sid(&ps),
-        b,
-        "what is PLAYING does not move when the browsed server does"
-    );
+    assert_eq!(cur_sid(&ps), b, "what is PLAYING does not move when the browsed server does");
 
     let lease_b = begin_timeline_reporting(&ps).expect("B timeline lease");
-    assert!(report_timeline(
-        &lease_b,
-        crate::catalog::TimelineState::Playing,
-        1_000,
-        2_000,
-    ));
-    let got = rx_b
-        .recv_timeout(Duration::from_secs(5))
-        .expect("B never received the report");
-    assert!(
-        got.contains("ratingKey=rk-b"),
-        "B got something else: {got}"
+    assert!(report_timeline(&lease_b, crate::catalog::TimelineState::Playing, 1_000, 2_000));
+    assert_eq!(
+        reports(&server_b.seen()),
+        [("/Sessions/Playing".to_string(), JF_GUID.to_string())],
+        "B hears its own item start"
     );
-    assert!(
-        rx_a.recv_timeout(Duration::from_millis(300)).is_err(),
-        "the current server must not receive another server's progress"
-    );
+    assert!(reports(&server_a.seen()).is_empty(), "the current server must not receive another server's progress");
 
     // control: a complete A projection reaches A, so the assertion above is about routing.
-    apply_plan(&mut ps, 
+    apply_plan(&mut ps,
         Plan {
             sid: a,
             url: "https://example.invalid/a.mkv".into(),
             sess: "timeline-session-a".into(),
             ..Default::default()
         },
-        "rk-a",
+        &rk_a,
     );
     let lease_a = begin_timeline_reporting(&ps).expect("A timeline lease");
-    assert!(report_timeline(
-        &lease_a,
-        crate::catalog::TimelineState::Stopped,
-        0,
-        2_000,
-    ));
-    let got = rx_a
-        .recv_timeout(Duration::from_secs(5))
-        .expect("A never received its own report");
-    assert!(
-        got.contains("ratingKey=rk-a"),
-        "A got something else: {got}"
+    assert!(report_timeline(&lease_a, crate::catalog::TimelineState::Stopped, 0, 2_000));
+    assert_eq!(
+        reports(&server_a.seen()),
+        [("/Sessions/Playing/Stopped".to_string(), OTHER_GUID.to_string())],
+        "A hears its own report"
     );
 
-    ha.join().unwrap();
-    hb.join().unwrap();
-    // Hand the table back empty. Both stubs' ports close as this returns, so anything left
-    // registered is a client that answers nothing — and `CURRENT` still points at one of them.
-    // The session is idled with it for the same reason, one level up: it is still holding `b`
-    // as the playing server, i.e. a `ServerId` into the table being emptied.
-    crate::catalog::reset_servers_for_test();
+    let heard_b = server_b.finish();
+    let _ = server_a.finish();
+    assert_eq!(reports(&heard_b).len(), 1, "B heard nothing of A's item");
     reset_session(&mut ps);
 }
 
@@ -161,36 +144,23 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
     use std::time::Duration;
 
     let _g = fresh_registry(&mut ps);
+    assert!(nj_net::net::global_init() && crate::curlio::available());
     drain_scrobble();
     reset_session(&mut ps);
     reset_player_control_for_test(&ps);
-    let (order_tx, order_rx) = std::sync::mpsc::channel();
-    let (old_port, old_server) = ordered_stub_pms("old", order_tx.clone());
-    let (new_port, new_server) = ordered_stub_pms("new", order_tx);
-    let old_sid = crate::catalog::register_for_test(
-        "timeline-stop-old",
-        "127.0.0.1",
-        old_port,
-        "old-token",
-        "timeline-client",
-    );
-    let new_sid = crate::catalog::register_for_test(
-        "timeline-stop-new",
-        "127.0.0.1",
-        new_port,
-        "new-token",
-        "timeline-client",
-    );
-    apply_plan(&mut ps, 
+    let old_server = jf_loopback();
+    let new_server = jf_loopback();
+    let rk_old = jf_rk();
+    let rk_new = crate::jf::ids::rating_key(OTHER_GUID);
+    apply_plan(&mut ps,
         Plan {
-            sid: old_sid,
+            sid: old_server.sid,
             sess: "logical-old".into(),
             ..Default::default()
         },
-        "rk-old-stop",
+        &rk_old,
     );
-    // The test isolates timeline ordering; avoid adding a second transcode-stop request to the
-    // one-shot old PMS after its stopped report.
+    // The test isolates timeline ordering; keep an encoder stop out of the old server's log.
     install_active_encoder("");
 
     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
@@ -206,19 +176,19 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
     let old_reporter = std::thread::spawn(move || {
         let _ = release_rx.recv();
     });
-    scrobble_stop(&mut ps, 
-        Some(("rk-old-stop".into(), 11_000, 20_000)),
+    scrobble_stop(&mut ps,
+        Some((rk_old.clone(), 11_000, 20_000)),
         Some(old_reporter),
     );
 
-    apply_plan(&mut ps, 
+    apply_plan(&mut ps,
         Plan {
-            sid: new_sid,
+            sid: new_server.sid,
             url: "https://example.invalid/new.mkv".into(),
             sess: "logical-new".into(),
             ..Default::default()
         },
-        "rk-new-playing",
+        &rk_new,
     );
     let lease = begin_timeline_reporting(&ps).expect("replacement reporter lease");
     let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -227,45 +197,34 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
         let _ = done_tx.send(sent);
     });
 
+    std::thread::sleep(Duration::from_millis(250));
     assert!(
-        order_rx.recv_timeout(Duration::from_millis(250)).is_err(),
+        reports(&new_server.seen()).is_empty() && reports(&old_server.seen()).is_empty(),
         "replacement playing escaped before the old reporter/stop boundary",
     );
     release.0.take().unwrap().send(()).unwrap();
-    let (first_label, old) = order_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("old stopped report never reached PMS");
-    assert_eq!(
-        first_label, "old",
-        "replacement report arrived before stopped"
-    );
-    assert!(
-        old.contains("ratingKey=rk-old-stop"),
-        "wrong old report: {old}"
-    );
-    assert!(
-        old.contains("state=stopped"),
-        "old report was not stopped: {old}"
-    );
-    let (second_label, new) = order_rx
-        .recv_timeout(Duration::from_secs(5))
-        .expect("replacement playing report never reached PMS");
-    assert_eq!(second_label, "new", "old server received an extra request");
-    assert!(
-        new.contains("ratingKey=rk-new-playing"),
-        "wrong new report: {new}"
-    );
-    assert!(
-        new.contains("state=playing"),
-        "new report was not playing: {new}"
-    );
-    assert_eq!(done_rx.recv_timeout(Duration::from_secs(1)), Ok(true));
-
+    assert_eq!(done_rx.recv_timeout(Duration::from_secs(5)), Ok(true));
     replacement.join().unwrap();
     drain_scrobble();
-    old_server.join().unwrap();
-    new_server.join().unwrap();
-    crate::catalog::reset_servers_for_test();
+
+    let at = |server: &JfLoopback, path: &str| {
+        server.seen().into_iter().find(|r| r.line.starts_with(&format!("POST {path} "))).map(|r| r.at)
+    };
+    let stopped = at(&old_server, "/Sessions/Playing/Stopped").expect("old stopped report never reached the server");
+    let playing = at(&new_server, "/Sessions/Playing").expect("replacement playing report never reached the server");
+    assert!(stopped <= playing, "replacement report arrived before stopped");
+    assert_eq!(
+        reports(&old_server.seen()),
+        [("/Sessions/Playing/Stopped".to_string(), JF_GUID.to_string())],
+        "the old server hears exactly its stop"
+    );
+    assert_eq!(
+        reports(&new_server.seen()),
+        [("/Sessions/Playing".to_string(), OTHER_GUID.to_string())],
+    );
+
+    let _ = old_server.finish();
+    let _ = new_server.finish();
     reset_session(&mut ps);
     install_active_encoder("");
     reset_player_control_for_test(&ps);

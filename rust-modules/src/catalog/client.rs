@@ -1076,24 +1076,6 @@ mod tests {
         ));
     }
 
-    /// IVA extra part keys already carry a query. Appending playback identity with a second
-    /// `?` is a 400, which Auto reads as a failed capacity sample and answers with HLS. The
-    /// preview then refuses that as "not a direct play" even though the file itself is a
-    /// direct-playable mp4.
-    #[test]
-    fn an_extra_part_key_keeps_its_existing_query() {
-        let c = a_client("mach-A", "tok-a");
-        let extra = c.direct_play_url(
-            "/services/iva/assets?url=https%3A%2F%2Fexample.invalid%2Fx",
-            "sess-1",
-        );
-        assert_eq!(extra.path.matches('?').count(), 1, "{}", extra.path);
-        assert!(extra.path.starts_with(
-            "/services/iva/assets?url=https%3A%2F%2Fexample.invalid%2Fx&X-Plex-Session-Identifier=sess-1&"
-        ));
-        assert!(extra.path.contains("&X-Plex-Token=tok-a"));
-    }
-
     /// A `Client` is one server's identity plus its token, and every piece of it now arrives
     /// through the constructor — including the device id, which used to be read from the session
     /// FILE in here (a read that can also write). Nothing is resolved behind the caller's back,

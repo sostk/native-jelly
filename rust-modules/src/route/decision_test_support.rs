@@ -149,43 +149,13 @@ pub(super) fn write_json(socket: &mut std::net::TcpStream, body: &[u8]) {
     socket.write_all(body).expect("body");
 }
 
-/// A bodyless status line, `Content-Length: 0`, `Connection: close` — the shape every synthetic
-/// server in this file used for a plain refusal/ack before this helper existed.
-pub(super) fn write_status(socket: &mut std::net::TcpStream, code: u16) {
-    use std::io::Write;
-    let reason = match code {
-        200 => "OK",
-        400 => "Bad Request",
-        503 => "Service Unavailable",
-        _ => "",
-    };
-    write!(
-        socket,
-        "HTTP/1.1 {code} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-    )
-    .expect("status line");
-}
-
-/// A `206 Partial Content` answer covering `[0, n)` of a `2n`-byte resource, body filled with
-/// `0x55` — the fixed "prove a Range GET works" shape every probe/admission fixture in this file
-/// used before this helper existed.
-pub(super) fn write_partial(socket: &mut std::net::TcpStream, n: usize) {
-    use std::io::Write;
-    write!(
-        socket,
-        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{}/{}\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n",
-        n.saturating_sub(1),
-        n.saturating_mul(2),
-    )
-    .expect("partial headers");
-    socket.write_all(&vec![0x55; n]).expect("partial body");
-}
-
 /// One request a [`JfLoopback`] saw: the request line and the body it carried.
 #[derive(Clone, Debug)]
 pub(super) struct JfRequest {
     pub line: String,
     pub body: String,
+    /// When the request finished arriving, for ordering across two loopbacks.
+    pub at: std::time::Instant,
 }
 
 impl JfRequest {
@@ -227,7 +197,9 @@ pub(super) fn user_config(audio: Option<&str>, play_default: bool, subtitle: Opt
 pub(super) struct JfLoopback {
     pub sid: ServerId,
     done: std::sync::mpsc::Sender<()>,
-    handle: std::thread::JoinHandle<Vec<JfRequest>>,
+    handle: std::thread::JoinHandle<()>,
+    log: std::sync::Arc<std::sync::Mutex<Vec<JfRequest>>>,
+    info: std::sync::Arc<std::sync::Mutex<String>>,
 }
 
 impl JfLoopback {
@@ -243,8 +215,11 @@ impl JfLoopback {
         let port = listener.local_addr().unwrap().port() as i32;
         listener.set_nonblocking(true).unwrap();
         let (done, stop) = std::sync::mpsc::channel();
+        let log = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let requests = log.clone();
+        let info = std::sync::Arc::new(std::sync::Mutex::new(info));
+        let answer = info.clone();
         let handle = std::thread::spawn(move || {
-            let mut requests = Vec::new();
             loop {
                 match nj_base::testnet::accept(&listener) {
                     Ok((mut socket, _)) => {
@@ -266,11 +241,19 @@ impl JfLoopback {
                         let mut body = vec![0; length];
                         let _ = reader.read_exact(&mut body);
                         let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
+                        // Logged before the answer, so a client that has been answered can rely on
+                        // the log already holding its request.
+                        requests.lock().unwrap_or_else(|e| e.into_inner()).push(JfRequest {
+                            line: line.clone(),
+                            body: String::from_utf8_lossy(&body).into_owned(),
+                            at: std::time::Instant::now(),
+                        });
                         if path.starts_with("/Users/Me") {
                             write_json(&mut socket, me.as_bytes());
                         } else if path.contains("/PlaybackInfo") {
                             std::thread::sleep(delay);
-                            write_json(&mut socket, info.as_bytes());
+                            let body = answer.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            write_json(&mut socket, body.as_bytes());
                         } else if path.starts_with("/Playback/BitrateTest") {
                             let n: usize = query_param(&line, "Size").and_then(|v| v.parse().ok()).unwrap_or(0);
                             let _ = write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n");
@@ -285,7 +268,6 @@ impl JfLoopback {
                         } else {
                             let _ = socket.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                         }
-                        requests.push(JfRequest { line, body: String::from_utf8_lossy(&body).into_owned() });
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                         if stop.try_recv().is_ok() {
@@ -296,24 +278,50 @@ impl JfLoopback {
                     Err(e) => panic!("loopback accept: {e}"),
                 }
             }
-            requests
         });
-        let sid = crate::catalog::register_for_test("jf-loopback", "127.0.0.1", port, "jf-token", "jf-loopback-client");
+        // Named by port: the table files a server under its name, and two loopbacks are two servers.
+        let name = format!("jf-loopback-{port}");
+        let sid = crate::catalog::register_for_test(&name, "127.0.0.1", port, "jf-token", "jf-loopback-client");
         let client = crate::catalog::client_for(sid).expect("loopback registered");
         crate::jf::seat::register_with(client.origin(), crate::jf::seat::Seat {
             user_id: "user-loopback".into(),
             ..Default::default()
         });
         let _ = jf_rk();
-        JfLoopback { sid, done, handle }
+        JfLoopback { sid, done, handle, log, info }
     }
 
+    /// Answer every later `PlaybackInfo` with `info`.
+    pub(super) fn answer_playback_info(&self, info: &str) {
+        *self.info.lock().unwrap_or_else(|e| e.into_inner()) = info.to_string();
+    }
+
+    /// Every request seen so far, while the loopback keeps serving.
+    pub(super) fn seen(&self) -> Vec<JfRequest> {
+        self.log.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Stop serving and yield every request seen. Empties the server table: a test running two
+    /// loopbacks finishes them together.
     pub(super) fn finish(self) -> Vec<JfRequest> {
         let _ = self.done.send(());
-        let requests = self.handle.join().expect("loopback thread");
+        let requests = self.log.clone();
+        self.handle.join().expect("loopback thread");
         crate::catalog::reset_servers_for_test();
-        requests
+        let seen = requests.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        seen
     }
+}
+
+/// Negotiate a conversion of `rk` on `sid` under `session`, so the session table holds the
+/// PlaySessionId a later stop reports.
+pub(super) fn negotiate_jf_session(sid: ServerId, rk: &str, session: &str, contract: crate::catalog::EncodeContract) {
+    let client = crate::catalog::client_for(sid).expect("loopback registered");
+    let spec = transcode_spec(rk, session, session, crate::catalog::TranscodeOffset::from_seconds(0), 0, 0, contract);
+    assert!(
+        matches!(client.transcode(&spec), crate::catalog::Negotiation::Playable(_)),
+        "the loopback negotiates {session}"
+    );
 }
 
 /// The `PlaybackInfo` request body among `requests`.
@@ -375,46 +383,3 @@ pub(super) fn eac3_track() -> crate::metadata::Stream {
 /// The raster every pre-2026-08-28 `auto_network` case had hardcoded into the function.
 pub(super) const HD: (u16, u16) = (1_920, 1_080);
 
-/// A one-shot loopback PMS: accepts ONE connection, hands its request line back down the
-/// channel, and answers 200 so the client's read terminates. Real sockets, like `stream.rs`'s
-/// own tests — which server a POST actually reached is the only thing the timeline routing can
-/// be graded on without a television.
-pub(super) fn stub_pms() -> (
-    i32,
-    std::sync::mpsc::Receiver<String>,
-    std::thread::JoinHandle<()>,
-) {
-    use std::io::{BufRead, BufReader, Write};
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = l.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let h = std::thread::spawn(move || {
-        if let Some(Ok(s)) = l.incoming().next() {
-            let mut line = String::new();
-            let _ = BufReader::new(&s).read_line(&mut line);
-            let mut s = s;
-            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-            let _ = tx.send(line);
-        }
-    });
-    (port, rx, h)
-}
-
-pub(super) fn ordered_stub_pms(
-    label: &'static str,
-    tx: std::sync::mpsc::Sender<(&'static str, String)>,
-) -> (i32, std::thread::JoinHandle<()>) {
-    use std::io::{BufRead, BufReader, Write};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let handle = std::thread::spawn(move || {
-        if let Some(Ok(socket)) = listener.incoming().next() {
-            let mut line = String::new();
-            let _ = BufReader::new(&socket).read_line(&mut line);
-            let _ = tx.send((label, line));
-            let mut socket = socket;
-            let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-        }
-    });
-    (port, handle)
-}

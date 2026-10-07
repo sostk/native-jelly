@@ -2679,27 +2679,8 @@ impl HlsAbrControl {
         !self.original_probe_part.is_empty()
     }
 
-    /// Measure the raw Part with the exact identity of the current HLS Streaming Resource.
-    ///
-    /// PMS resolves a Part request by exact identity, then by token alias, and creates an AdHoc
-    /// resource only after both miss.  Destroying HLS first therefore turns a harmless bounded
-    /// read into a fresh server-admission decision; on the incident server that decision is
-    /// `99_341 > 92_000` kbps and PMS 1.43.4 turns the refusal into HTTP 500.  Reusing the active
-    /// encoder id makes ownership deterministic and needs no client-side stop, close or
-    /// replacement decision. It does not prove that PMS preserves the old HLS cursor: observed PMS
-    /// can rebind the shared resource during the raw Part read, so a successful recovery must leave
-    /// from the same media boundary instead of asking that cursor for one more segment.
-    // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
-    // submodule below (see the comment on the first one).
-    #[cfg(all(test, feature = "devtriggers"))]
-    pub(crate) fn probe_original_while_hls(
-        &self,
-        expected: &WorkerTicket,
-        plan: crate::abr::SourceProbePlan,
-    ) -> OriginalProbeResult {
-        self.probe_original_while_hls_cancellable(expected, plan, || false)
-    }
-
+    /// Measure the raw Part with the exact identity of the current HLS Streaming Resource,
+    /// abandoning the read once `cancelled` answers true.
     pub(crate) fn probe_original_while_hls_cancellable<F>(
         &self,
         expected: &WorkerTicket,

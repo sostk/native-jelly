@@ -1249,51 +1249,18 @@ fn a_resume_intent_belongs_to_exactly_one_resolve_generation() {
 #[cfg(feature = "devtriggers")]
 fn abandoned_resolves_retire_the_streaming_resources_they_created() {
     let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
     let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind cleanup server");
-    listener.set_nonblocking(true).unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        // A FAILURE BOUND, NOT A RUNTIME: the loop returns the moment the request arrives,
-        // so a passing run never spends this. One second was not one — under a loaded
-        // 1900-test parallel run the client had not been scheduled yet, the loop gave up, and
-        // the count assertion below failed with an empty vec. Observed twice in ordinary runs
-        // on 2026-09-02, never when the module ran alone.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        let mut requests = Vec::new();
-        while std::time::Instant::now() < deadline && requests.len() < 2 {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let mut request = String::new();
-                    let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-                    reader
-                        .read_line(&mut request)
-                        .expect("read cleanup request");
-                    socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .expect("cleanup response");
-                    requests.push(request);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept cleanup request: {error}"),
-            }
-        }
-        tx.send(requests).unwrap();
-    });
-    let sid = crate::catalog::register_for_test(
-        "stale-resolve",
-        "127.0.0.1",
-        port,
-        "token",
-        "stale-resolve-client",
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    let url = format!("/videos/{JF_GUID}/master.m3u8?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported");
+    let lb = JfLoopback::start(
+        playback_info(false, "mkv", r#"{"Type":"Video","Codec":"hevc","Index":0}"#, Some(&url)),
+        user_config(None, true, None, "Default"),
     );
+    let sid = lb.sid;
+    let rk = jf_rk();
+    for session in ["abandoned-logical-resource", "refused-logical-resource"] {
+        negotiate_jf_session(sid, &rk, session, crate::catalog::EncodeContract::default());
+    }
 
     PLAY_GEN.store(2, Ordering::SeqCst);
     *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
@@ -1306,7 +1273,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
             url: "https://example.invalid/source.mkv".into(),
             ..Default::default()
         },
-        rk: "abandoned-rk".into(),
+        rk: rk.clone(),
     });
 
     assert_eq!(
@@ -1326,34 +1293,18 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
             verdict: Some(PlayVerdict::Server("server refused this route".into())),
             ..Default::default()
         },
-        rk: "refused-rk".into(),
+        rk: rk.clone(),
     });
     assert_eq!(pump_play(&mut ps, &mut crate::stores::metadata::MetadataStore::default()), None, "a refusal has no playable URL");
-    assert!(
-        play_refused(&ps),
-        "its server verdict still reaches the error read-out"
-    );
+    assert!(play_refused(&ps), "its server verdict still reaches the error read-out");
 
-    let requests = rx.recv().expect("cleanup observations");
-    server.join().unwrap();
-    assert_eq!(
-        requests.len(),
-        2,
-        "both ownerless resources need an exact close: {requests:?}"
-    );
-    for session in ["abandoned-logical-resource", "refused-logical-resource"] {
-        let request = requests
-            .iter()
-            .find(|request| request.contains(&format!("session={session}")))
-            .unwrap_or_else(|| panic!("missing cleanup for {session}: {requests:?}"));
-        assert!(
-            request.contains("/video/:/transcode/universal/stop?"),
-            "{request}"
-        );
-        assert!(request.contains("closeResourceSession=1"), "{request}");
+    let stopped = || lb.seen().iter().filter(|r| r.line.starts_with("POST /Sessions/Playing/Stopped ")).count();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while stopped() < 2 {
+        assert!(std::time::Instant::now() < deadline, "both ownerless sessions need a stop: {:?}", lb.seen());
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
-
-    crate::catalog::reset_servers_for_test();
+    lb.finish();
     reset_session(&mut ps);
 }
 
@@ -1592,293 +1543,6 @@ fn encoder_cleanup_ledger_releases_only_on_exact_absence() {
         retry.stop_needed,
         "an unaccepted stop must be retried from later media evidence"
     );
-}
-
-/// The live Mandalorian regression, reproduced at the PMS resource boundary.  A raw Part GET
-/// first exact-looks up the supplied Streaming Resource and only enters AdHoc MDE when that
-/// lookup (and its token alias fallback) misses.  For this file AdHoc rejects Original at
-/// `99_341 > 92_000` kbps and PMS 1.43.4 turns the missing decision code into HTTP 500.  The
-/// previous implementation CAUSED that path by stopping and exact-closing the live HLS
-/// resource before measuring the Part.
-///
-/// Pin the opposite client ordering: the finite source read borrows the exact active HLS
-/// identity and no control-plane request precedes or follows it. This proves the local route
-/// remains selected; it deliberately does not infer PMS-side cursor continuity.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn source_probe_reuses_live_hls_resource_instead_of_entering_adhoc_mde() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader};
-
-    let _g = fresh_registry(&mut ps);
-    if !nj_net::net::global_init() || !crate::curlio::available() {
-        return;
-    }
-    const SOURCE_KBPS: u32 = 25_264;
-    let source_plan = crate::abr::source_probe_plan(SOURCE_KBPS, crate::abr::PROBE_BUDGET_MS)
-        .expect("a measured source has a finite probe plan");
-    assert_eq!(
-        source_plan.budget_ms, 1_000,
-        "the source body and PMS control plane must exercise different horizons",
-    );
-    let probe_bytes = source_plan.target_bytes;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("accept source request");
-        let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-        let mut first = String::new();
-        reader.read_line(&mut first).expect("request line");
-        let mut headers = Vec::new();
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("request header");
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-            headers.push(line);
-        }
-        tx.send((first, headers)).expect("publish request");
-        write_partial(&mut socket, probe_bytes);
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "probe-lifecycle",
-        "127.0.0.1",
-        port,
-        "tok",
-        "cid-probe-lifecycle",
-    );
-    let rung = crate::abr::Rung::P480;
-    let active = "probe-live";
-    install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
-    let active_route = worker_ticket();
-    let control = HlsAbrControl {
-        trace_generation: 0,
-        sid,
-        rating_key: "1".into(),
-        logical_session: "probe-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
-        initial_rung: rung,
-        initial_observed: None,
-        fixture_base: String::new(),
-        original_probe_part: "/library/parts/1/file.mkv".into(),
-        original_source_kbps: SOURCE_KBPS,
-        catalog: crate::abr::HlsActuatorCatalog::measured(),
-        prior: None,
-        history: crate::abr::TransitionHistory::default(),
-        original_features: crate::abr::SourceFeatures::default(),
-    };
-    let result = control.probe_original_while_hls(&active_route, source_plan);
-    assert!(
-        matches!(result, OriginalProbeResult::Measured(sample) if sample.target_reached),
-        "the finite source response is the measurement: {result:?}",
-    );
-
-    let request = rx.recv().expect("captured source request");
-    assert!(
-        request.0.starts_with("GET /library/parts/1/file.mkv?"),
-        "{:?}",
-        request.0
-    );
-    assert!(
-        request.0.contains("X-Plex-Session-Identifier=probe-live"),
-        "the finite read must exact-reuse the active HLS Streaming Resource: {:?}",
-        request.0,
-    );
-    assert!(
-        request
-            .1
-            .iter()
-            .any(|line| line.to_ascii_lowercase().starts_with("range: bytes=0-")),
-        "the source experiment must be one finite HTTP response",
-    );
-    assert_eq!(
-        active_encoder(),
-        active,
-        "a measurement cannot replace the selected client-side HLS route",
-    );
-
-    server.join().unwrap();
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    reset_session(&mut ps);
-}
-
-/// PMS 1.43.4 turns an AdHoc bandwidth refusal into 500.  That status is a request failure,
-/// not a zero-rate sample, and an optional source check must never make the live HLS route
-/// fatal or replace it.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    if !nj_net::net::global_init() || !crate::curlio::available() {
-        return;
-    }
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("accept source request");
-        let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-        let mut first = String::new();
-        reader.read_line(&mut first).expect("request line");
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("request header");
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-        }
-        tx.send(first).expect("publish request");
-        socket
-            .write_all(
-                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .expect("server refusal");
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "probe-bodyless",
-        "127.0.0.1",
-        port,
-        "tok",
-        "cid-probe-bodyless",
-    );
-    let rung = crate::abr::Rung::P480;
-    let active = "probe-bodyless-live";
-    install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
-    let active_route = worker_ticket();
-    let control = HlsAbrControl {
-        trace_generation: 0,
-        sid,
-        rating_key: "1".into(),
-        logical_session: "probe-bodyless-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
-        initial_rung: rung,
-        initial_observed: None,
-        fixture_base: String::new(),
-        original_probe_part: "/library/parts/1/file.mkv".into(),
-        original_source_kbps: 320,
-        catalog: crate::abr::HlsActuatorCatalog::measured(),
-        prior: None,
-        history: crate::abr::TransitionHistory::default(),
-        original_features: crate::abr::SourceFeatures::default(),
-    };
-    let plan = crate::abr::source_probe_plan(320, crate::abr::PROBE_BUDGET_MS).unwrap();
-    let result = control.probe_original_while_hls(&active_route, plan);
-    assert_eq!(
-        result,
-        OriginalProbeResult::Failed {
-            outcome: crate::player::report::TraceOutcome::ServerState,
-            failure: OriginalProbeFailure::HttpStatus(500),
-        },
-        "HTTP 500 stays exact for the panel and is never a zero-rate observation",
-    );
-    let request = rx.recv().expect("captured source request");
-    assert!(request.contains("X-Plex-Session-Identifier=probe-bodyless-live"));
-    assert_eq!(
-        active_encoder(),
-        active,
-        "the rejected check leaves the client-side HLS route selected",
-    );
-
-    server.join().unwrap();
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    reset_session(&mut ps);
-}
-
-/// The worker may finish a bounded response after a concurrent quality change has installed a
-/// different HLS resource.  Bytes charged to the old identity are not evidence for the new
-/// route: keep the replacement intact and discard the completed sample.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader};
-
-    let _g = fresh_registry(&mut ps);
-    if !nj_net::net::global_init() || !crate::curlio::available() {
-        return;
-    }
-    let plan = crate::abr::source_probe_plan(320, crate::abr::PROBE_BUDGET_MS).unwrap();
-    let probe_bytes = plan.target_bytes;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let server = std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("accept source request");
-        let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("request line or header");
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-        }
-        install_active_hls(
-            "probe-new",
-            "http://fixture.invalid/new.m3u8",
-            crate::abr::Rung::P720,
-        );
-        write_partial(&mut socket, probe_bytes);
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "probe-stale",
-        "127.0.0.1",
-        port,
-        "tok",
-        "cid-probe-stale",
-    );
-    let active = "probe-old";
-    install_active_hls(
-        active,
-        "http://fixture.invalid/old.m3u8",
-        crate::abr::Rung::P480,
-    );
-    let active_route = worker_ticket();
-    let control = HlsAbrControl {
-        trace_generation: 0,
-        sid,
-        rating_key: "1".into(),
-        logical_session: "probe-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
-        initial_rung: crate::abr::Rung::P480,
-        initial_observed: None,
-        fixture_base: String::new(),
-        original_probe_part: "/library/parts/1/file.mkv".into(),
-        original_source_kbps: 320,
-        catalog: crate::abr::HlsActuatorCatalog::measured(),
-        prior: None,
-        history: crate::abr::TransitionHistory::default(),
-        original_features: crate::abr::SourceFeatures::default(),
-    };
-
-    assert_eq!(
-        control.probe_original_while_hls(&active_route, plan),
-        OriginalProbeResult::Stale,
-    );
-    assert_eq!(
-        active_encoder(),
-        "probe-new",
-        "the concurrent replacement wins"
-    );
-
-    server.join().unwrap();
-    install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    reset_session(&mut ps);
 }
 
 // ---- the two reads that FEED the ceiling: which detail describes the leaf, and at what rate

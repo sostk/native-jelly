@@ -803,8 +803,9 @@ mod tests {
     #[test]
     fn the_direct_path_names_the_source_and_its_container() {
         let src = MediaSourceInfo { id: "abc".into(), container: Some("mov,mp4,m4a,3gp,3g2,mj2".into()), ..Default::default() };
-        assert_eq!(direct_path("g1", &src), "/Videos/g1/stream.mp4?static=true&MediaSourceId=abc");
+        let g = "0123456789abcdef0123456789abcdef";
+        assert_eq!(direct_path(g, &src), format!("/Videos/{g}/stream.mp4?static=true&MediaSourceId=abc"));
         let mkv = MediaSourceInfo { id: "d".into(), container: Some("mkv".into()), ..Default::default() };
-        assert_eq!(direct_path("g1", &mkv), "/Videos/g1/stream.mkv?static=true&MediaSourceId=d");
+        assert_eq!(direct_path(g, &mkv), format!("/Videos/{g}/stream.mkv?static=true&MediaSourceId=d"));
     }
 }
