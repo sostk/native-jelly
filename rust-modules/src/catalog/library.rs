@@ -2,7 +2,7 @@
 //! related — plus the two part-level playback ops (stream selection, direct-play target).
 use super::client::{Client, QueryBuilder, StreamUrl};
 use super::models::{MediaContainer, Metadata};
-use super::params::{SectionQuery, StreamSelection};
+use super::params::SectionQuery;
 
 fn sidecar_key_allowed(key: &str) -> bool {
     let Some(tail) = key.strip_prefix("/library/streams/") else { return false; };
@@ -130,41 +130,6 @@ impl Client {
             query = query.int("type", metadata_type);
         }
         self.get_json(&query.build())
-    }
-
-    /// A SHOW's language settings (its Advanced dialog in Plex Web: `audioLanguage`,
-    /// `subtitleLanguage`, `subtitleMode`) — see [`crate::catalog::ShowLangPrefs`]. None when they
-    /// cannot be read.
-    ///
-    /// Try `includePreferences=1` first. This compatibility parameter is NOT in the vendored
-    /// OpenAPI spec, so it is backed by the one read
-    /// the spec DOES document carrying these settings, `/library/metadata/{id}/tree`, whose
-    /// container holds a `Setting[]` — asked only after a successful response without preferences.
-    /// Both requests share a 1500 ms budget: optional settings must not consume the ordinary
-    /// bulk-read timeout on the play path. HTTP, transport and parse errors fall back immediately.
-    pub fn show_language_prefs(&self, show_rk: &str) -> Option<crate::catalog::ShowLangPrefs> {
-        if self.jf().is_some() {
-            return None; // Jellyfin keeps language preferences per user, not per show
-        }
-        if show_rk.is_empty() || !show_rk.bytes().all(|b| b.is_ascii_digit()) {
-            return None; // a key is server data: only ever a plain ratingKey
-        }
-        let path = QueryBuilder::new(format!("/library/metadata/{show_rk}"))
-            .int("includePreferences", 1)
-            .build();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
-        let read = |path: &str| match self.get_json_with_headers_until(path, &[], deadline) {
-            super::client::JsonDeadlineOutcome::Response { parsed, .. } => parsed,
-            _ => None,
-        };
-        let metadata = read(&path)?;
-        if let Some(found) = metadata.metadata.into_iter().next()
-            .and_then(|m| crate::catalog::ShowLangPrefs::from_settings(&m.preferences.setting))
-        {
-            return Some(found);
-        }
-        let tree = read(&format!("/library/metadata/{show_rk}/tree"))?;
-        crate::catalog::ShowLangPrefs::from_settings(&tree.setting)
     }
 
     /// GET /library/metadata/{rating_key} → the single item (`.metadata[0]`), or None.
@@ -304,34 +269,12 @@ impl Client {
         paths.iter().find_map(|path| self.get_sidecar_bytes(path).filter(|b| !b.is_empty()))
     }
 
-    /// PUT /library/parts/{id} — select the part's audio/subtitle streams SERVER-side (the
-    /// transcoder encodes the SELECTED audio and burns the SELECTED subtitle; a query-param
-    /// on the stream URL does NOT change them, only this PUT does). `subtitleStreamID` is
-    /// always sent — 0 keeps subs OFF (suppresses a default-selected burn); `audioStreamID`
-    /// only when the user switched. Returns the HTTP status (route logs it).
-    pub fn select_streams(&self, sel: &StreamSelection) -> i32 {
-        if let Some(j) = self.jf() { return j.select_streams(sel); }
-        let q = QueryBuilder::new(format!("/library/parts/{}", sel.part_id))
-            .int("allParts", 1)
-            .int("subtitleStreamID", sel.subtitle_stream_id)
-            .opt_int("audioStreamID", sel.audio_stream_id);
-        self.put(&q.build())
-    }
-
-    /// The direct-play stream target: the raw part `key` GET, carrying the per-playback
-    /// session id + identity so PMS keys the /status/sessions entry by session (not a
-    /// token= fallback), keeping the timeline correlation consistent.
-    ///
-    /// `part_key` may already contain a query. Library parts do not; IVA extras do
-    /// (`/services/iva/assets?…`). [`QueryBuilder`] joins onto that query instead of
-    /// writing a second `?`.
+    /// The direct-play stream target of a part key, carrying this playback's PlaySessionId (see
+    /// `jf::playback::Jf::direct_play_url`). A server without a Jellyfin seat gets the bare path.
     pub fn direct_play_url(&self, part_key: &str, session: &str) -> StreamUrl {
-        if let Some(j) = self.jf() { return j.direct_play_url(part_key, session); }
-        let q = QueryBuilder::new(part_key).str("X-Plex-Session-Identifier", session);
-        let path = self.playback_identity(q).build();
-        StreamUrl {
-            origin: self.origin.clone(),
-            path: self.with_token(&path),
+        match self.jf() {
+            Some(j) => j.direct_play_url(part_key, session),
+            None => StreamUrl { origin: self.origin.clone(), path: part_key.to_string() },
         }
     }
 }
@@ -408,63 +351,6 @@ mod tests {
             if failed_requests > 0 {
                 assert!(!requests.last().unwrap().contains("encoding="), "retry the original file");
             }
-        }
-    }
-
-    #[test]
-    fn show_preferences_do_not_retry_a_transport_failure() {
-        let client = Client::new(
-            crate::catalog::ServerId::UNSET, "fixture",
-            crate::catalog::Origin::http("127.0.0.1", 9), "", "cid",
-        );
-        client.disable_data_io();
-        assert_eq!(client.show_language_prefs("42"), None);
-        assert_eq!(client.denied_data_requests(), 1, "a failed optional read must not retry");
-    }
-
-    // A failed optional preference read must not spend another ordinary PMS timeout.
-    #[cfg(feature = "devtriggers")]
-    #[test]
-    fn show_preferences_fail_fast_without_retrying_errors() {
-        use std::io::{Read, Write};
-        use std::time::{Duration, Instant};
-        for (status, body, delay) in [
-            ("404 Not Found", "{}", 0),
-            ("200 OK", "not json", 0),
-            ("200 OK", r#"{"MediaContainer":{}}"#, 2200),
-        ] {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port();
-            listener.set_nonblocking(true).unwrap();
-            let server = std::thread::spawn(move || {
-                let end = Instant::now() + Duration::from_millis(2500);
-                let mut requests = 0;
-                while Instant::now() < end {
-                    let Ok((mut socket, _)) = nj_base::testnet::accept(&listener) else {
-                        std::thread::sleep(Duration::from_millis(5));
-                        continue;
-                    };
-                    socket.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-                    let mut request = [0; 4096];
-                    let n = socket.read(&mut request).unwrap();
-                    let request = String::from_utf8_lossy(&request[..n]);
-                    assert!(request.contains("Accept: application/json"));
-                    requests += 1;
-                    if requests == 1 { std::thread::sleep(Duration::from_millis(delay)); }
-                    let _ = write!(socket, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                }
-                requests
-            });
-            let client = Client::new(
-                crate::catalog::ServerId::UNSET, "fixture",
-                crate::catalog::Origin::http("127.0.0.1", port as i32), "", "cid",
-            );
-            let start = Instant::now();
-            assert_eq!(client.show_language_prefs("42"), None);
-            let elapsed = start.elapsed();
-            let requests = server.join().unwrap();
-            assert!(elapsed < Duration::from_millis(1500 + 300), "optional GET delayed play: {elapsed:?}");
-            assert_eq!(requests, 1, "failed preference GET must not fetch the show tree");
         }
     }
 

@@ -231,12 +231,11 @@ pub use timeline::{queue_index_of, QueueRow};
 // DP_AUDIO_CODECS is defined in `devcaps`, which intersects it with the device's own codec
 // table, and re-exported here — normal routing and its profile read the same codec and channel
 // limits.
-// `DP_SUBTITLE_CODECS` / `is_dp_subtitle` are the subtitle twin: the profile's `subtitleCodec=`
-// list and route's MDE `subtitleStreamID` gate, so a selected PGS cannot be advertised in one
-// and omitted from the other.
+// `DP_SUBTITLE_CODECS` / `is_dp_subtitle` are the subtitle twin: the formats the client renders.
 // `is_dp_audio_track` checks normal codec/channel eligibility, while `link_policy` constrains
-// the connection. Forced mode retains software feed limits and uses a separate PMS profile.
+// the connection. The negotiation types are Jellyfin's PlaybackInfo outcome (`jf::playback`).
 #[allow(unused_imports)]
 pub use transcoder::{
-    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LinkPolicy, is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
+    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LanguagePrefs, LinkPolicy, Negotiated, Negotiation, PlayMethod, PlaybackAsk,
+    is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
 };

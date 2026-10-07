@@ -201,12 +201,29 @@ fn resolution_class(w: i64, h: i64) -> String {
 /// own bytes with HTTP Range (measured: 206 on 12.0); the play session and `ApiKey` are added by
 /// `Client::direct_play_url`.
 pub fn part_key(item_guid: &str, source: &MediaSourceInfo) -> String {
-    let ext = source.container.as_deref().unwrap_or("mkv").split(',').next().unwrap_or("mkv");
     format!(
-        "/Videos/{}/stream.{ext}?static=true&MediaSourceId={}",
+        "/Videos/{}/stream.{}?static=true&MediaSourceId={}",
         ids::normalize(item_guid),
+        stream_ext(source.container.as_deref().unwrap_or("")),
         ids::normalize(&source.id)
     )
+}
+
+/// The file extension a static stream is requested under. Jellyfin reports a source's container
+/// as ffprobe's demuxer list — an MP4 is `mov,mp4,m4a,3gp,3g2,mj2` and a Matroska file
+/// `matroska,webm` on some versions — so the first entry is not the file's own extension, and the
+/// app's direct-play gate keys on the extension.
+pub fn stream_ext(container: &str) -> &str {
+    let list = || container.split(',').map(str::trim);
+    if list().any(|c| c.eq_ignore_ascii_case("mkv") || c.eq_ignore_ascii_case("matroska")) {
+        "mkv"
+    } else if list().any(|c| c.eq_ignore_ascii_case("mp4")) {
+        "mp4"
+    } else if list().any(|c| c.eq_ignore_ascii_case("m4v")) {
+        "m4v"
+    } else {
+        list().next().filter(|c| !c.is_empty()).unwrap_or("mkv")
+    }
 }
 
 /// A source's video stream and its default (else first) audio stream.

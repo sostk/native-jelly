@@ -1323,7 +1323,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
         plan: Plan {
             sid,
             sess: "refused-logical-resource".into(),
-            verdict: Some(PlayVerdict::Server("server refused this route".into(), DecisionCodes::default())),
+            verdict: Some(PlayVerdict::Server("server refused this route".into())),
             ..Default::default()
         },
         rk: "refused-rk".into(),
@@ -1481,7 +1481,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 
     apply_plan(&mut ps,
         Plan {
-            verdict: Some(PlayVerdict::Server("temporary refusal".into(), DecisionCodes::default())),
+            verdict: Some(PlayVerdict::Server("temporary refusal".into())),
             ..Default::default()
         },
         "episode-42",
@@ -1877,98 +1877,6 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
 
     server.join().unwrap();
     install_active_encoder("");
-    crate::catalog::reset_servers_for_test();
-    reset_session(&mut ps);
-}
-
-/// Cold Auto measures the Part under the playback's durable logical owner.  The bounded read
-/// must not manufacture a `source-N` identity or exact-close the resource before the selected
-/// Original/HLS route can reuse it.
-#[test]
-#[cfg(feature = "devtriggers")]
-fn cold_source_preflight_uses_the_playback_identity_and_does_not_close_it() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader};
-
-    let _g = fresh_registry(&mut ps);
-    if !nj_net::net::global_init() || !crate::curlio::available() {
-        return;
-    }
-    let plan = crate::abr::source_probe_plan(320, crate::abr::PROBE_BUDGET_MS).unwrap();
-    let probe_bytes = plan.target_bytes;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        let (mut socket, _) = listener.accept().expect("accept cold source request");
-        let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-        let mut requests = Vec::new();
-        let mut first = String::new();
-        reader.read_line(&mut first).expect("request line");
-        requests.push(first);
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("request header");
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-            requests.push(line);
-        }
-        write_partial(&mut socket, probe_bytes);
-        drop(socket);
-
-        listener.set_nonblocking(true).unwrap();
-        for _ in 0..50 {
-            match nj_base::testnet::accept(&listener) {
-                Ok((socket, _)) => {
-                    let mut extra = String::new();
-                    BufReader::new(socket)
-                        .read_line(&mut extra)
-                        .expect("extra request line");
-                    requests.push(extra);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(4));
-                }
-                Err(error) => panic!("accept extra request: {error}"),
-            }
-        }
-        tx.send(requests).expect("publish cold request set");
-    });
-
-    let sid = crate::catalog::register_for_test(
-        "probe-cold",
-        "127.0.0.1",
-        port,
-        "tok",
-        "cid-probe-cold",
-    );
-    let client = crate::catalog::client_for(sid).expect("test server installed");
-    let url = client
-        .direct_play_url("/library/parts/1/file.mkv", "cold-logical")
-        .to_url();
-    let sample = measure_remote_original(&url, 320).expect("completed cold sample");
-    assert!(sample.completed);
-
-    let requests = rx.recv().expect("captured cold requests");
-    assert_eq!(
-        requests
-            .iter()
-            .filter(|line| line.starts_with("GET ") || line.starts_with("POST "))
-            .count(),
-        1,
-        "the preflight is one bounded Part request and no exact-close: {requests:?}",
-    );
-    assert!(requests[0].starts_with("GET /library/parts/1/file.mkv?"));
-    assert!(requests[0].contains("X-Plex-Session-Identifier=cold-logical"));
-    assert!(
-        requests
-            .iter()
-            .any(|line| line.to_ascii_lowercase().starts_with("range: bytes=0-")),
-        "the logical resource is sampled with one finite response",
-    );
-
-    server.join().unwrap();
     crate::catalog::reset_servers_for_test();
     reset_session(&mut ps);
 }

@@ -99,6 +99,7 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> nj_base::testlock::Ser
     // mid-flight leaves both — belongs to nothing this test owns.
     drop(take_claim_landing());
     clear_injected_fault();
+    forget_auto_bitrate();
     crate::player::claim_hold::clear();
     // Establish the idle projection before resetting the reducer: its applied snapshot must
     // describe this test's empty route, not the previous test's final encoder.  Quality is
@@ -125,43 +126,6 @@ pub(super) fn unregistered_sid() -> ServerId {
         "the test needs an EMPTY slot"
     );
     id
-}
-
-pub(super) const MDE_DIRECTPLAY: &[u8] =
-    br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"directplay"}]}]}]}}"#;
-
-pub(super) const MDE_TRANSCODE: &[u8] =
-    br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode"}]}]}]}}"#;
-
-/// Part.decision=transcode, video copied, audio transcoded — the measured TrueHD-only shape.
-pub(super) const MDE_TRANSCODE_COPY: &[u8] = br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"decision":"copy"},{"streamType":2,"decision":"transcode"}]}]}]}]}}"#;
-
-/// Part.decision=transcode AND the video lane itself is transcode (bit depth, …).
-pub(super) const MDE_TRANSCODE_VIDEO: &[u8] = br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"decision":"transcode"}]}]}]}]}}"#;
-
-pub(super) const EMPTY_MC: &[u8] = br#"{"MediaContainer":{}}"#;
-
-pub(super) fn drain_http(socket: &mut std::net::TcpStream) -> String {
-    use std::io::{BufRead, BufReader, Read};
-    let mut reader = BufReader::new(socket.try_clone().expect("clone"));
-    let mut first = String::new();
-    reader.read_line(&mut first).expect("request line");
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line).expect("header");
-        if line == "\r\n" || line.is_empty() {
-            break;
-        }
-        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-            content_length = v.trim().parse().unwrap_or(0);
-        }
-    }
-    if content_length > 0 {
-        let mut body = vec![0; content_length];
-        let _ = reader.read_exact(&mut body);
-    }
-    first
 }
 
 /// Exact `key=value` on a request-line query, so `subtitleStreamID=0` cannot match `88001`.
@@ -217,152 +181,148 @@ pub(super) fn write_partial(socket: &mut std::net::TcpStream, n: usize) {
     socket.write_all(&vec![0x55; n]).expect("partial body");
 }
 
-/// Loopback PMS that answers PlayQueue / PUT / `/decision` long enough for `build_stream`.
-pub(super) fn plan_pms(
-    n: usize,
-    mde_body: &'static [u8],
-) -> (
-    i32,
-    std::sync::mpsc::Receiver<Vec<String>>,
-    std::thread::JoinHandle<()>,
-) {
-    plan_pms_inner(n, mde_body, None)
+/// One request a [`JfLoopback`] saw: the request line and the body it carried.
+#[derive(Clone, Debug)]
+pub(super) struct JfRequest {
+    pub line: String,
+    pub body: String,
 }
 
-/// Same as [`plan_pms`], plus a bounded `start.mkv` body so Remote Auto can probe a remux.
-/// A Part GET is 503 — that is PMS 1.43 after a transcode MDE, and the test grades that we
-/// never ask.
-pub(super) fn plan_pms_with_start_mkv(
-    n: usize,
-    mde_body: &'static [u8],
-    start_bytes: usize,
-) -> (
-    i32,
-    std::sync::mpsc::Receiver<Vec<String>>,
-    std::thread::JoinHandle<()>,
-) {
-    plan_pms_inner(n, mde_body, Some(start_bytes))
+impl JfRequest {
+    /// The JSON body, or `Null` when there was none.
+    pub(super) fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.body).unwrap_or(serde_json::Value::Null)
+    }
 }
 
-pub(super) fn plan_pms_inner(
-    n: usize,
-    mde_body: &'static [u8],
-    start_bytes: Option<usize>,
-) -> (
-    i32,
-    std::sync::mpsc::Receiver<Vec<String>>,
-    std::thread::JoinHandle<()>,
-) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
+/// The GUID every loopback item is filed under, and the ratingKey it interns to.
+pub(super) const JF_GUID: &str = "0123456789abcdef0123456789abcdef";
+
+pub(super) fn jf_rk() -> String {
+    crate::jf::ids::rating_key(JF_GUID)
+}
+
+/// A `PlaybackInfo` answer offering the original for direct play (when `direct`) and a
+/// conversion at `transcoding_url` (when given) — the shape Jellyfin sends.
+pub(super) fn playback_info(direct: bool, container: &str, streams: &str, transcoding_url: Option<&str>) -> String {
+    let url = transcoding_url.map_or_else(|| "null".to_string(), |u| format!("{u:?}"));
+    format!(
+        r#"{{"MediaSources":[{{"Id":"{JF_GUID}","Container":"{container}","Protocol":"File","SupportsDirectPlay":{direct},"SupportsDirectStream":true,"SupportsTranscoding":true,"TranscodingUrl":{url},"MediaStreams":[{streams}]}}],"PlaySessionId":"ps-loopback"}}"#
+    )
+}
+
+/// `/Users/Me` with the given playback preferences.
+pub(super) fn user_config(audio: Option<&str>, play_default: bool, subtitle: Option<&str>, mode: &str) -> String {
+    let q = |v: Option<&str>| v.map_or_else(|| "null".to_string(), |v| format!("{v:?}"));
+    format!(
+        r#"{{"Id":"user-loopback","Name":"loopback","Configuration":{{"AudioLanguagePreference":{},"PlayDefaultAudioTrack":{play_default},"SubtitleLanguagePreference":{},"SubtitleMode":"{mode}"}}}}"#,
+        q(audio),
+        q(subtitle),
+    )
+}
+
+/// A loopback Jellyfin registered in the server table: answers `/Users/Me`, `PlaybackInfo` and
+/// `/Playback/BitrateTest`, 404s the item reads a PlayQueue would make, and 204s every report.
+/// [`JfLoopback::finish`] stops it and yields every request it saw.
+pub(super) struct JfLoopback {
+    pub sid: ServerId,
+    done: std::sync::mpsc::Sender<()>,
+    handle: std::thread::JoinHandle<Vec<JfRequest>>,
+}
+
+impl JfLoopback {
+    pub(super) fn start(info: String, me: String) -> Self {
+        Self::start_slow(info, me, std::time::Duration::ZERO)
+    }
+
+    /// [`JfLoopback::start`], holding every `PlaybackInfo` answer for `delay` — a window in which
+    /// a negotiating worker is known to be in flight.
+    pub(super) fn start_slow(info: String, me: String, delay: std::time::Duration) -> Self {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port() as i32;
         listener.set_nonblocking(true).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
-        let mut requests = Vec::new();
-        while requests.len() < n && std::time::Instant::now() < deadline {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let first = drain_http(&mut socket);
-                    if start_bytes.is_some() && first.contains("/library/parts/") {
-                        write_status(&mut socket, 503);
-                    } else if let Some(bytes) =
-                        start_bytes.filter(|_| first.contains("start.mkv"))
-                    {
-                        if bytes == 0 {
-                            write_status(&mut socket, 200);
-                        } else {
-                            write_partial(&mut socket, bytes);
+        let (done, stop) = std::sync::mpsc::channel();
+        let handle = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            loop {
+                match nj_base::testnet::accept(&listener) {
+                    Ok((mut socket, _)) => {
+                        socket.set_nonblocking(false).unwrap();
+                        let mut reader = BufReader::new(socket.try_clone().expect("clone"));
+                        let mut line = String::new();
+                        reader.read_line(&mut line).expect("request line");
+                        let mut length = 0usize;
+                        loop {
+                            let mut h = String::new();
+                            reader.read_line(&mut h).expect("header");
+                            if h == "\r\n" || h.is_empty() {
+                                break;
+                            }
+                            if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                                length = v.trim().parse().unwrap_or(0);
+                            }
                         }
-                    } else if first.contains("/decision?")
-                        && first.contains("hasMDE=1")
-                        && first.contains("directPlay=1")
-                        && query_param(&first, "subtitles") != Some("none")
-                    {
-                        // PMS 1.43.4: hasMDE+directPlay with a selected subtitle and
-                        // subtitles=auto (the default when omitted) is HTTP 400.
-                        use std::io::Write;
-                        write!(
-                            socket,
-                            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .expect("400");
-                    } else {
-                        let body = if first.contains("/decision?") {
-                            mde_body
+                        let mut body = vec![0; length];
+                        let _ = reader.read_exact(&mut body);
+                        let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
+                        if path.starts_with("/Users/Me") {
+                            write_json(&mut socket, me.as_bytes());
+                        } else if path.contains("/PlaybackInfo") {
+                            std::thread::sleep(delay);
+                            write_json(&mut socket, info.as_bytes());
+                        } else if path.starts_with("/Playback/BitrateTest") {
+                            let n: usize = query_param(&line, "Size").and_then(|v| v.parse().ok()).unwrap_or(0);
+                            let _ = write!(socket, "HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n");
+                            // Paced to roughly 10 Mbit/s: an unpaced loopback measures a link no
+                            // real server has.
+                            for chunk in vec![0x55; n].chunks(50_000) {
+                                let _ = socket.write_all(chunk);
+                                std::thread::sleep(std::time::Duration::from_millis(40));
+                            }
+                        } else if line.starts_with("GET ") {
+                            let _ = socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                         } else {
-                            EMPTY_MC
-                        };
-                        write_json(&mut socket, body);
+                            let _ = socket.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        }
+                        requests.push(JfRequest { line, body: String::from_utf8_lossy(&body).into_owned() });
                     }
-                    requests.push(first);
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stop.try_recv().is_ok() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(e) => panic!("loopback accept: {e}"),
                 }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(4));
-                }
-                Err(error) => panic!("accept plan request: {error}"),
             }
-        }
-        tx.send(requests).expect("publish plan requests");
-    });
-    (port, rx, handle)
+            requests
+        });
+        let sid = crate::catalog::register_for_test("jf-loopback", "127.0.0.1", port, "jf-token", "jf-loopback-client");
+        let client = crate::catalog::client_for(sid).expect("loopback registered");
+        crate::jf::seat::register_with(client.origin(), crate::jf::seat::Seat {
+            user_id: "user-loopback".into(),
+            ..Default::default()
+        });
+        let _ = jf_rk();
+        JfLoopback { sid, done, handle }
+    }
+
+    pub(super) fn finish(self) -> Vec<JfRequest> {
+        let _ = self.done.send(());
+        let requests = self.handle.join().expect("loopback thread");
+        crate::catalog::reset_servers_for_test();
+        requests
+    }
 }
 
-/// Selection is PMS state, not a promise made by a GET's query parameters.
-pub(super) fn selection_probe_pms(
-    refuse: bool,
-    burn: i64,
-) -> (i32, std::sync::mpsc::Sender<()>, std::thread::JoinHandle<Vec<(String, (i64, i64))>>) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    listener.set_nonblocking(true).unwrap();
-    let (done, stop) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
-        let mut selection = (1, 9);
-        let mut requests = Vec::new();
-        loop {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let line = drain_http(&mut socket);
-                    if line.starts_with("PUT /library/parts/") {
-                        selection = (
-                            query_param(&line, "audioStreamID").unwrap().parse().unwrap(),
-                            query_param(&line, "subtitleStreamID").unwrap().parse().unwrap(),
-                        );
-                    }
-                    let ready = selection == (2, burn);
-                    if line.contains("start.mkv") {
-                        // A wrong part selection cannot produce the intended remux sample.
-                        let bytes = if ready && !refuse {
-                            remote_probe_plan(320).unwrap().target_bytes
-                        } else { 0 };
-                        if bytes > 0 {
-                            write_partial(&mut socket, bytes);
-                        } else {
-                            write_status(&mut socket, 200);
-                        }
-                    } else if line.contains("/decision?") {
-                        let body: &[u8] = if !line.contains("hasMDE=1") && (refuse || !ready) {
-                            br#"{"MediaContainer":{"generalDecisionCode":2000,"transcodeDecisionCode":2000,"transcodeDecisionText":"synthetic refusal"}}"#
-                        } else {
-                            MDE_TRANSCODE_COPY
-                        };
-                        write_json(&mut socket, body);
-                    } else {
-                        write_json(&mut socket, EMPTY_MC);
-                    }
-                    requests.push((line, selection));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if stop.try_recv().is_ok() { break; }
-                    std::thread::yield_now();
-                }
-                Err(e) => panic!("fixture accept: {e}"),
-            }
-        }
-        requests
-    });
-    (port, done, handle)
+/// The `PlaybackInfo` request body among `requests`.
+pub(super) fn playback_info_body(requests: &[JfRequest]) -> serde_json::Value {
+    requests
+        .iter()
+        .find(|r| r.line.contains("/PlaybackInfo"))
+        .unwrap_or_else(|| panic!("PlaybackInfo was never asked: {requests:?}"))
+        .json()
 }
 
 pub(super) fn fourk_item(
@@ -380,7 +340,6 @@ pub(super) fn fourk_item_with_subs(
     crate::metadata::PlayingItem {
         sid,
         rk: "rk-4k".into(),
-        show_rk: String::new(),
         audio,
         subs,
         video_fps: 23.976,
@@ -404,17 +363,6 @@ pub(super) fn eac3_track() -> crate::metadata::Stream {
         default: true,
         selected: true,
         profile: "dolby digital plus + dolby atmos".into(),
-        ..Default::default()
-    }
-}
-
-pub(super) fn selected_sub(id: i64, codec: &str) -> crate::metadata::Stream {
-    crate::metadata::Stream {
-        id,
-        index: 0,
-        lang_code: "eng".into(),
-        codec: codec.into(),
-        selected: true,
         ..Default::default()
     }
 }
@@ -469,120 +417,4 @@ pub(super) fn ordered_stub_pms(
         }
     });
     (port, handle)
-}
-
-/// How [`enhancement_pms`] answers a transcode `/decision` that carries `boostDialog=1` or
-/// `normalizeLoudness=1` (issue #266). Shapes are the measured ones (`/tmp/plx266` M1/M2): an
-/// honoured ask is a Part transcode with the video copied and the audio re-encoded.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum EnhMode {
-    /// Audio `transcode`, declared as this output codec.
-    Honor(&'static str),
-    /// Audio `transcode` with no codec on either stream — `decision_codecs` finds nothing.
-    HonorNoCodecs,
-    /// `generalDecisionCode 2000` — the refusal wire `tests/mock_pms.py --refuse-enhancements` sends.
-    Refuse,
-    /// Audio `copy` despite the params — an old or non-conforming PMS.
-    Ignore,
-}
-
-/// Loopback PMS for the audio-enhancement resolve: MDE answers `mde`, a transcode decision answers
-/// per [`EnhMode`] when it carries a param and a plain remux (video+audio copy) when it does not,
-/// and every media GET (Part or `start.mkv`) serves `media_bytes` so a Remote probe can complete.
-/// Runs until the returned sender fires; the join handle yields every request line.
-pub(super) fn enhancement_pms(
-    mde: &'static [u8],
-    mode: EnhMode,
-    media_bytes: usize,
-) -> (i32, std::sync::mpsc::Sender<()>, std::thread::JoinHandle<Vec<String>>) {
-    enhancement_pms_parts(mde, mode, media_bytes, PartAnswer::Serve)
-}
-
-/// How [`enhancement_pms_parts`] answers a raw `/library/parts/` GET.
-#[derive(Clone, Copy)]
-pub(super) enum PartAnswer {
-    /// The same bytes `start.mkv` gets.
-    Serve,
-    /// `503 Service Unavailable` — what the device got for the Original Part on the release of an
-    /// enhanced remux (issue #266 PR 4 device run, PMS 1.43.4: "Denying access due to session
-    /// lacking permission to direct play" is the server's own wording for this status).
-    Refuse,
-    /// Headers with a `Content-Length` the connection then never delivers: a transport failure
-    /// (curl reports `CURLE_PARTIAL_FILE`) mid-body, not a status the server chose. This is the
-    /// shape `ThroughputFailure::BodyRead` classifies, distinct from `Refuse`'s definite status.
-    Reset,
-}
-
-/// [`enhancement_pms`] with the raw Part's answer chosen separately from `start.mkv`'s.
-pub(super) fn enhancement_pms_parts(
-    mde: &'static [u8],
-    mode: EnhMode,
-    media_bytes: usize,
-    parts: PartAnswer,
-) -> (i32, std::sync::mpsc::Sender<()>, std::thread::JoinHandle<Vec<String>>) {
-    use std::io::Write;
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    listener.set_nonblocking(true).unwrap();
-    let (done, stop) = std::sync::mpsc::channel();
-    let handle = std::thread::spawn(move || {
-        let mut requests = Vec::new();
-        loop {
-            match nj_base::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let line = drain_http(&mut socket);
-                    let enhanced = query_param(&line, "boostDialog") == Some("1")
-                        || query_param(&line, "normalizeLoudness") == Some("1");
-                    if line.starts_with("GET /library/parts/") && matches!(parts, PartAnswer::Refuse) {
-                        write_status(&mut socket, 503);
-                    } else if line.starts_with("GET /library/parts/") && matches!(parts, PartAnswer::Reset) {
-                        // A valid 206 answer to the exact Range the admission asked for, then the
-                        // connection dies before any of the promised body arrives: curl reports
-                        // this as a transport failure (`CURLE_PARTIAL_FILE`) on an otherwise
-                        // successful response, not as the server's own answer.
-                        let len = media_bytes.max(1);
-                        let _ = write!(
-                            socket,
-                            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{}/{}\r\nContent-Length: {len}\r\n\r\n",
-                            len - 1,
-                            len * 2,
-                        );
-                        let _ = socket.flush();
-                        // Give curl a chance to parse the headers (and this admission's own open
-                        // to succeed) as a call separate from the one that meets the closed
-                        // connection, so the failure lands in the body-read phase deterministically
-                        // rather than racing the header parse itself.
-                        std::thread::sleep(std::time::Duration::from_millis(30));
-                        drop(socket);
-                    } else if line.contains("start.mkv") || line.starts_with("GET /library/parts/") {
-                        if media_bytes > 0 {
-                            write_partial(&mut socket, media_bytes);
-                        } else {
-                            write_status(&mut socket, 200);
-                        }
-                    } else if line.contains("/decision?") && line.contains("hasMDE=1") {
-                        write_json(&mut socket, mde);
-                    } else if line.contains("/decision?") {
-                        let body: String = match (enhanced, mode) {
-                            (true, EnhMode::Refuse) => r#"{"MediaContainer":{"generalDecisionCode":2000,"transcodeDecisionCode":4020,"transcodeDecisionText":"synthetic enhancement refusal","Metadata":[]}}"#.into(),
-                            (true, EnhMode::HonorNoCodecs) => String::from_utf8(MDE_TRANSCODE_COPY.to_vec()).unwrap(),
-                            (true, EnhMode::Honor(codec)) => format!(r#"{{"MediaContainer":{{"Metadata":[{{"Media":[{{"Part":[{{"decision":"transcode","Stream":[{{"streamType":1,"codec":"hevc","decision":"copy"}},{{"streamType":2,"codec":"{codec}","decision":"transcode"}}]}}]}}]}}]}}}}"#),
-                            (true, EnhMode::Ignore) | (false, _) => r#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"codec":"hevc","decision":"copy"},{"streamType":2,"codec":"ac3","decision":"copy"}]}]}]}]}}"#.into(),
-                        };
-                        write_json(&mut socket, body.as_bytes());
-                    } else {
-                        write_json(&mut socket, EMPTY_MC);
-                    }
-                    requests.push(line);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    if stop.try_recv().is_ok() { break; }
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                }
-                Err(e) => panic!("fixture accept: {e}"),
-            }
-        }
-        requests
-    });
-    (port, done, handle)
 }

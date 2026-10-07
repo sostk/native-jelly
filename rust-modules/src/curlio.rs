@@ -1599,7 +1599,28 @@ pub(crate) fn sample_throughput_result(
 ) -> Result<ThroughputSample, ThroughputFailure> {
     let setup_deadline = sample_setup_deadline(target_bytes, setup_budget, body_budget)?;
     let reservation = OpenReservation::private().ok_or(ThroughputFailure::Open(OpenErr::Local))?;
-    sample_throughput_with_reservation(url, target_bytes, setup_deadline, body_budget, reservation)
+    sample_throughput_with_reservation(url, target_bytes, Span::Ranged, setup_deadline, body_budget, reservation)
+}
+
+/// [`sample_throughput_result`] for a resource that IS the sample — a server's own bitrate-test
+/// payload, sized by its URL. Asks for the whole body: such an endpoint answers a Range with a
+/// 200, which the ranged form must refuse as a server that ignores byte ranges.
+pub(crate) fn sample_whole_throughput_result(
+    url: &str,
+    target_bytes: usize,
+    setup_budget: std::time::Duration,
+    body_budget: std::time::Duration,
+) -> Result<ThroughputSample, ThroughputFailure> {
+    let setup_deadline = sample_setup_deadline(target_bytes, setup_budget, body_budget)?;
+    let reservation = OpenReservation::private().ok_or(ThroughputFailure::Open(OpenErr::Local))?;
+    sample_throughput_with_reservation(url, target_bytes, Span::Whole, setup_deadline, body_budget, reservation)
+}
+
+/// Whether a throughput sample asks for its bytes as a finite Range or as the whole body.
+#[derive(Clone, Copy)]
+enum Span {
+    Ranged,
+    Whole,
 }
 
 /// The same finite measurement while it is the demux worker's current blocking operation.
@@ -1624,7 +1645,7 @@ where
     if cancelled() {
         return Err(ThroughputFailure::Open(OpenErr::Aborted));
     }
-    sample_throughput_with_reservation(url, target_bytes, setup_deadline, body_budget, reservation)
+    sample_throughput_with_reservation(url, target_bytes, Span::Ranged, setup_deadline, body_budget, reservation)
 }
 
 fn sample_setup_deadline(
@@ -1643,16 +1664,24 @@ fn sample_setup_deadline(
 fn sample_throughput_with_reservation(
     url: &str,
     target_bytes: usize,
+    span: Span,
     setup_deadline: std::time::Instant,
     body_budget: std::time::Duration,
     reservation: OpenReservation,
 ) -> Result<ThroughputSample, ThroughputFailure> {
-    let mut src = CurlSource::open_bounded_with_reservation_until(
-        url,
-        target_bytes,
-        reservation,
-        Some(setup_deadline),
-    )
+    let mut src = match span {
+        Span::Ranged => {
+            CurlSource::open_bounded_with_reservation_until(url, target_bytes, reservation, Some(setup_deadline))
+        }
+        Span::Whole => CurlSource::open_with_reservation_range_until(
+            url,
+            0,
+            None,
+            reservation,
+            Some(setup_deadline),
+            &mut NoCheckpoint,
+        ),
+    }
     .map_err(ThroughputFailure::Open)?;
     // `start_range_until` disarms its setup-only total timeout after validating the headers.
     // `read_until` supplies the independently bounded body deadline from this point on.

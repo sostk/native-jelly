@@ -1,41 +1,16 @@
-//! Playback-session protocol ops (impl Client): the `/:/timeline` progress report and the
-//! two calls that make the session a first-class, remote-controllable player — GET /identity
-//! (the server id the PlayQueue uri needs) and POST /playQueues.
-//!
-//! Rebuilt FROM the live `route.rs`/`threads.rs` (task #26): the timeline carries the
-//! per-playback session id, PlayQueue ids, and the SELECTED audio/subtitle stream ids, so
-//! /status/sessions shows the right track and the Direct Play vs Transcode badge
-//! (correlated by the active encoder's coupled `X-Plex-Session-Identifier == session=`).
-use super::client::{Client, QueryBuilder};
+//! Playback-session ops (impl Client): the progress reports Jellyfin keeps the resume point and
+//! the dashboard's session from (`/Sessions/Playing{,/Progress,/Stopped}`), the server identity,
+//! and the queue a play starts (the item, plus a series' following episodes).
+use super::client::Client;
 use super::params::TimelineReport;
 use super::servers::ServerId;
 
 impl Client {
-    /// POST /:/timeline (the spec verb; params ride the query) — the server updates viewOffset
-    /// (the resume point) + watched state. `true` when it took the report.
-    ///
-    /// The outcome used to stop here (`post_void`), which made this the one write in the playback
-    /// protocol that could fail in complete silence: a 401 on a revoked token, a refused connect
-    /// and a 500 were indistinguishable from a committed resume point, and the caller logged the
-    /// same success line for all four. The reporting is [`crate::route::scrobble_stop`]'s; this
-    /// only has to stop throwing the answer away.
+    /// Report playback state for `r.session` — started, progress, or stopped (see
+    /// `jf::playback::Jf::timeline`). `true` when the server took the report; the caller logs the
+    /// outcome, because a lost Stopped report is a resume point that never committed.
     pub fn timeline(&self, r: &TimelineReport) -> bool {
-        if let Some(j) = self.jf() { return j.timeline(r); }
-        let q = QueryBuilder::new("/:/timeline")
-            .str("ratingKey", r.rating_key)
-            .str("key", &format!("/library/metadata/{}", r.rating_key))
-            .str("identifier", "com.plexapp.plugins.library")
-            .str("state", r.state.as_str())
-            .int("time", r.time_ms)
-            .int("duration", r.duration_ms)
-            .str("X-Plex-Session-Identifier", r.session);
-        let q = self
-            .playback_identity(q)
-            .opt_str("playQueueID", r.play_queue_id)
-            .opt_str("playQueueItemID", r.play_queue_item_id)
-            .opt_int("audioStreamID", r.audio_stream_id)
-            .opt_int("subtitleStreamID", r.subtitle_stream_id);
-        self.post_ok(&q.build())
+        self.jf().is_some_and(|j| j.timeline(r))
     }
 
     /// GET /identity → the server's stable machineIdentifier (None on failure/empty).
@@ -49,48 +24,13 @@ impl Client {
         }
     }
 
-    /// POST /playQueues for one item. Best-effort: None on failure — the timeline still works,
-    /// just without the queue ids (and the player without an Up Next).
-    ///
-    /// `continuous=1` is what makes the response carry the show's remaining episodes after the
-    /// one being played, each as a FULL `Metadata` row (thumb, S/E, duration, viewOffset, and
-    /// `Media[0].Part[0].key` + codecs — everything `route::request_play` needs). The Up Next control
-    /// screen is therefore free: it reads [`PlayQueueResult::next`] from the queue this playback
-    /// already had to create, instead of asking the server what plays next.
-    ///
-    /// Trailer extras omit `continuous`: a continuous extras queue can be sibling clips, and EOS
-    /// must not Up-Next into a featurette. `opt_int` drops the param when `continuous` is false.
-    ///
-    /// The WHOLE window is kept, as [`QueueRow`]s — the queue this round trip already paid for is
-    /// the queue a list can draw and jump around in, and throwing it away meant re-asking the
-    /// server for something it had already sent.
-    pub fn create_play_queue(
-        &self,
-        machine_id: &str,
-        rating_key: &str,
-        session: &str,
-        continuous: bool,
-    ) -> Option<PlayQueueResult> {
-        if let Some(j) = self.jf() {
-            let _ = (machine_id, session);
-            return Some(PlayQueueResult::of(j.create_play_queue(rating_key, continuous)?, self.id(), rating_key));
-        }
-        let uri = format!(
-            "server://{machine_id}/com.plexapp.plugins.library/library/metadata/{rating_key}"
-        );
-        let q = QueryBuilder::new("/playQueues")
-            .str("type", "video")
-            .str("uri", &uri)
-            .opt_int("continuous", i64::from(continuous))
-            .int("shuffle", 0)
-            .int("repeat", 0)
-            .str("X-Plex-Session-Identifier", session);
-        let q = self.playback_identity(q);
-        Some(PlayQueueResult::of(
-            self.post_json(&q.build())?,
-            self.id(),
-            rating_key,
-        ))
+    /// The queue a play starts. Best-effort: None on failure — the reports still work, just
+    /// without queue positions (and the player without an Up Next). `continuous` adds a series'
+    /// episodes after the one being played; trailer extras omit it so EOS never Up-Nexts into a
+    /// featurette. The whole window is kept as [`QueueRow`]s for the queue list.
+    pub fn create_play_queue(&self, rating_key: &str, continuous: bool) -> Option<PlayQueueResult> {
+        let j = self.jf()?;
+        Some(PlayQueueResult::of(j.create_play_queue(rating_key, continuous)?, self.id(), rating_key))
     }
 }
 

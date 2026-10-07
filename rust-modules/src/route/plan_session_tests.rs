@@ -1,5 +1,4 @@
-//! Prime-decision and playback-session classification tests: clip queue rows, control-
-//! snapshot expiry, and prime refusal causes.
+//! Playback-session classification tests: clip queue rows.
 
 use super::*;
 #[allow(unused_imports)]
@@ -21,50 +20,3 @@ fn a_clip_queue_row_does_not_arm_up_next() {
     };
     assert!(up_next_of(&movie).is_none());
 }
-
-
-#[test]
-fn a_route_change_wins_over_an_expired_control_snapshot() {
-    assert!(matches!(
-        classify_prime_decision(false, crate::catalog::JsonDeadlineOutcome::Deadline),
-        Err(PrimeRefusal::Session),
-    ));
-}
-
-
-#[test]
-fn prime_refusals_follow_the_issued_cause_not_the_clock_at_return() {
-    let response = |status, body: &[u8]| crate::catalog::JsonDeadlineOutcome::Response {
-        reply: crate::http::Reply {
-            status,
-            body: body.to_vec(),
-            peer_pin: None,
-        },
-        parsed: None,
-    };
-    assert!(matches!(
-        classify_prime_decision(true, response(500, b"nope")),
-        Err(PrimeRefusal::Control),
-    ));
-    assert!(matches!(
-        classify_prime_decision(true, response(200, b"not-json")),
-        Err(PrimeRefusal::Control),
-    ));
-    assert!(matches!(
-        classify_prime_decision(true, crate::catalog::JsonDeadlineOutcome::Transport),
-        Err(PrimeRefusal::Control),
-    ));
-    assert!(matches!(
-        classify_prime_decision(true, crate::catalog::JsonDeadlineOutcome::Deadline),
-        Err(PrimeRefusal::Deadline),
-    ));
-    assert!(matches!(
-        classify_prime_decision(false, response(500, b"nope")),
-        Err(PrimeRefusal::Session),
-    ));
-    assert!(matches!(
-        classify_prime_decision(false, crate::catalog::JsonDeadlineOutcome::Transport),
-        Err(PrimeRefusal::Session),
-    ));
-}
-

@@ -2292,9 +2292,6 @@ pub(crate) struct PlayingItem {
     /// would be the wrong file's, with nothing on screen to say so.
     pub(crate) sid: crate::catalog::ServerId,
     pub(crate) rk: String,
-    /// The show's ratingKey when this is an episode (`grandparentRatingKey`), else empty — what
-    /// the resolve asks the show's own language settings of (`route::plan::build_stream`).
-    pub(crate) show_rk: String,
     pub(crate) audio: Vec<Stream>,
     pub(crate) subs: Vec<Stream>,
     pub(crate) video_fps: f64, // the played leaf's video fps (0 = unknown) — feeds the Load esInfo
@@ -2331,7 +2328,6 @@ impl PlayingItem {
         PlayingItem {
             sid: crate::catalog::ServerId::from_raw(0),
             rk: "rk".into(),
-            show_rk: String::new(),
             audio: Vec::new(),
             subs,
             video_fps: 0.0,
@@ -2373,7 +2369,6 @@ fn cached_playing(state: &MetadataState, sid: crate::catalog::ServerId, rk: &str
         .map(|d| PlayingItem {
             sid,
             rk: rk.to_string(),
-            show_rk: d.show_rk.clone(),
             audio: d.audio.clone(),
             subs: d.subs.clone(),
             video_fps: d.video_fps,
@@ -2412,10 +2407,6 @@ pub(crate) fn fetch_playing_item(sid: crate::catalog::ServerId, rk: &str) -> Opt
         .and_then(|it| it.first_part().map(|p| convert_streams(&p.stream)))
         .unwrap_or_default();
     let (audio, subs, video_fps, dovi) = (st.audio, st.subs, st.fps, st.dovi);
-    let show_rk = it
-        .as_ref()
-        .map(|it| it.grandparent_rating_key.clone())
-        .unwrap_or_default();
     // the frame size rides the same PRIMARY version the streams come from (route.rs's
     // direct-play gate tests it against the device bound — see the field doc)
     let (width, height, bitrate) = it
@@ -2429,7 +2420,6 @@ pub(crate) fn fetch_playing_item(sid: crate::catalog::ServerId, rk: &str) -> Opt
     Some(PlayingItem {
         sid,
         rk: rk.to_string(),
-        show_rk,
         audio,
         subs,
         video_fps,

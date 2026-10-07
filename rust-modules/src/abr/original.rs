@@ -58,11 +58,51 @@ pub(crate) fn original_fallback_rung(
         .unwrap_or(Rung::P240)
 }
 
+/// Choose the first HLS actuator when an existing playback is handed back to Auto.
+///
+/// This is not a cold start: throwing the route away and applying [`policy_startup_floor_kbps`]
+/// would discard two kinds of evidence the playback may already own.  Let `F` be the feasible
+/// catalog, `W(r)` its calibrated wire demand, `r_c` the currently playing fixed rung, and `C_p`
+/// the carried posterior's conservative capacity.  The re-entry point is
+///
+/// `arg max W(r)` over the union of `{r_c in F}`, `{r in F: W(r) <= C_p}`, and the ordinary
+/// unknown-link fallback.
+///
+/// Thus Auto never begins below the control point it is replacing, may immediately reclaim a
+/// higher rung already supported by its own posterior, and invents no connection-speed claim when
+/// neither exists.  Source/device feasibility is applied before all three terms.
+pub(crate) fn hls_reentry_rung(
+    current: Option<Rung>,
+    prior: Option<CapacityEstimate>,
+    catalog: &HlsActuatorCatalog,
+    policy: &AbrPolicy,
+) -> Rung {
+    let fallback = catalog
+        .best_for_budget(policy_startup_floor_kbps(policy))
+        .or_else(|| catalog.feasible().next());
+    let current = current.and_then(|rung| catalog.feasible().find(|c| c.rung == rung));
+    let posterior =
+        prior.and_then(|estimate| catalog.best_for_budget(estimate.conservative_kbps()));
+    fallback
+        .into_iter()
+        .chain(current)
+        .chain(posterior)
+        .max_by_key(|candidate| candidate.expected_wire_kbps)
+        .map(|candidate| candidate.rung)
+        .unwrap_or(Rung::P480)
+}
+
+/// The opening rung when nothing at all is known — one the link almost certainly carries, chosen
+/// so the first upshift has real evidence behind it rather than being an immediate correction.
+pub(crate) fn policy_startup_floor_kbps(_policy: &AbrPolicy) -> u32 {
+    Rung::P480.kbps()
+}
+
 /// The HLS entry point when an admitted Original request is refused before it produces a body.
 ///
 /// This is deliberately not [`original_fallback_rung`] with a fabricated zero measurement.  No
 /// transfer took place, so the refusal says nothing about link capacity.  Reuse the exact rung
-/// [`bootstrap`] already computed while it still had the right evidence: Remote's completed source
+/// the cold start already computed while it still had the right evidence: Remote's completed source
 /// probe, or Local's explicit unknown-link fallback.  In particular, the source bitrate is demand,
 /// not capacity; turning a 28 Mbps file into a 28 Mbps connection claim would repeat the modelling
 /// error this seam exists to remove.
@@ -83,20 +123,6 @@ pub(crate) fn original_open_fallback_rung(
         .and_then(|rung| catalog.feasible().find(|candidate| candidate.rung == rung))
         .map(|candidate| candidate.rung)
         .unwrap_or(fallback)
-}
-
-/// **Cold-start Original admission, and only that.** The measured source prefix must complete and
-/// arrive no slower than the file's average consumption rate.  That is a physical conservation
-/// test: the prefix contributes media at least as quickly as playback removes it.  A finite prefix
-/// is still only evidence about that prefix, so everything after admission remains an observed
-/// trial under [`OriginalModeController`]; no invented multiplier turns it into a capacity claim.
-pub(crate) fn original_sustainable(
-    source_kbps: u32,
-    measured_kbps: u32,
-    complete: bool,
-    _policy: &AbrPolicy,
-) -> bool {
-    source_kbps > 0 && complete && measured_kbps >= source_kbps
 }
 
 /// What a completed source probe settled.

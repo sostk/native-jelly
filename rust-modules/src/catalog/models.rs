@@ -223,42 +223,6 @@ pub struct Setting {
     pub value: String,
 }
 
-/// A SHOW's language settings — its Advanced dialog in Plex Web. `None` / `-1` mean "Account
-/// default", inherited from the active Plex profile when its preferences are available.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ShowLangPrefs {
-    /// `audioLanguage`, e.g. `"hu-HU"`
-    pub audio: Option<String>,
-    /// `subtitleLanguage`, e.g. `"hu-HU"`
-    pub subtitle: Option<String>,
-    /// `subtitleMode`: -1 account default · 0 manually selected · 1 shown with foreign audio ·
-    /// 2 always enabled
-    pub subtitle_mode: i32,
-}
-
-impl Default for ShowLangPrefs {
-    fn default() -> Self { Self { audio: None, subtitle: None, subtitle_mode: -1 } }
-}
-
-impl ShowLangPrefs {
-    /// Read the three settings out of a `Setting[]`, or None when it carries none of them (so the
-    /// caller can ask the other endpoint).
-    pub fn from_settings(settings: &[Setting]) -> Option<ShowLangPrefs> {
-        let get = |id: &str| settings.iter().find(|s| s.id == id).map(|s| s.value.trim());
-        let (a, s, m) = (get("audioLanguage"), get("subtitleLanguage"), get("subtitleMode"));
-        if a.is_none() && s.is_none() && m.is_none() {
-            return None;
-        }
-        // `""` and `"-1"` are both "Account default" — unset as far as this struct is concerned
-        let lang = |v: Option<&str>| v.filter(|v| !v.is_empty() && *v != "-1").map(str::to_string);
-        Some(ShowLangPrefs {
-            audio: lang(a),
-            subtitle: lang(s),
-            subtitle_mode: m.and_then(|m| m.parse().ok()).unwrap_or(-1),
-        })
-    }
-}
-
 /// `Metadata.Preferences`, present when a metadata read asks `includePreferences=1`.
 #[derive(Deserialize, Default)]
 pub struct Preferences {

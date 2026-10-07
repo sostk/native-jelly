@@ -1,8 +1,6 @@
 //! Strict original-stream override and ordinary disabled-direct-play routing.
 use super::*;
 use super::test_support::*;
-#[cfg(feature = "devtriggers")]
-use std::time::Duration;
 
 #[test]
 fn direct_play_modes_compose_with_each_quality_ceiling() {
@@ -20,79 +18,87 @@ fn direct_play_modes_compose_with_each_quality_ceiling() {
     }
 }
 
+const HEVC_EAC3: &str = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"eac3","Index":1,"Channels":6}"#;
+
+/// One resolve of the loopback item under `configure`; the plan and what the server saw.
+#[cfg(feature = "devtriggers")]
+fn resolve_jf(info: String, configure: impl FnOnce(&mut ResolveEnv)) -> (Plan, Vec<JfRequest>) {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    resolve_jf_locked(&ps, info, configure)
+}
+
+/// [`resolve_jf`] for a test that already holds the registry guard.
+#[cfg(feature = "devtriggers")]
+fn resolve_jf_locked(ps: &PlaybackSession, info: String, configure: impl FnOnce(&mut ResolveEnv)) -> (Plan, Vec<JfRequest>) {
+    assert!(nj_net::net::global_init());
+    let lb = JfLoopback::start(info, user_config(None, true, None, "Default"));
+    let rk = jf_rk();
+    let mut env = ResolveEnv::snapshot(ps, crate::stores::metadata::MetadataStore::default().view(), lb.sid, &rk);
+    let mut track = eac3_track();
+    track.id = 2;
+    let mut item = fourk_item(lb.sid, vec![track]);
+    item.rk = rk.clone();
+    env.cached_item = Some(item);
+    configure(&mut env);
+    let part = format!("/Videos/{JF_GUID}/stream.mkv?static=true&MediaSourceId={JF_GUID}");
+    let plan = build_stream(&rk, &part, "hevc", "eac3", &env);
+    (plan, lb.finish())
+}
+
 #[test]
 #[cfg(feature = "devtriggers")]
 fn force_registers_original_despite_saved_quality_relay_and_device_raster() {
     let mut ps = PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    assert!(nj_net::net::global_init());
-    let (port, rx, server) = plan_pms(2, MDE_DIRECTPLAY);
-    let sid = crate::catalog::register_for_test("forced-original", "127.0.0.1", port, "token", "forced-client");
-    crate::catalog::client_for(sid).unwrap().set_link(crate::catalog::probe::Location::Relay);
     restore_quality(Quality::P480);
     restore_direct_play_mode(DirectPlayMode::Forced);
-    let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
-    let mut item = fourk_item(sid, vec![eac3_track()]);
-    item.width = 7680;
-    item.height = 4320;
-    env.cached_item = Some(item);
-    let plan = build_stream("rk-4k", "/library/parts/36013/1/file.mkv", "hevc", "eac3", &env);
-    let requests = rx.recv_timeout(Duration::from_secs(15)).unwrap();
-    server.join().unwrap();
-    assert!(plan.url.contains("/library/parts/36013/"));
+    let (plan, requests) = resolve_jf_locked(&ps, playback_info(true, "mkv", HEVC_EAC3, None), |env| {
+        crate::catalog::client_for(env.sid).unwrap().set_link(crate::catalog::probe::Location::Relay);
+        if let Some(item) = env.cached_item.as_mut() {
+            item.width = 7680;
+            item.height = 4320;
+        }
+    });
+    assert!(plan.url.contains(&format!("/Videos/{JF_GUID}/stream.mkv?static=true")), "{}", plan.url);
     assert!(plan.tsession.is_empty() && plan.contract.ceiling.is_none() && !plan.contract.remux);
     assert!(plan.auto_original.is_none() && !plan.auto_original_watched);
     assert_eq!(plan.direct_play_mode, DirectPlayMode::Forced);
-    let decision = requests.iter().find(|r| r.contains("/decision?")).unwrap();
-    assert_eq!(query_param(decision, "directPlay"), Some("1"));
-    assert_eq!(query_param(decision, "directStream"), Some("0"));
-    assert!(!requests.iter().any(|r| r.contains("start.") || r.starts_with("PUT ")));
+    let body = playback_info_body(&requests);
+    assert_eq!(body["EnableDirectPlay"], true);
+    assert_eq!(body["AllowVideoStreamCopy"], false);
+    assert_eq!(body["MaxStreamingBitrate"].as_i64(), Some(200_000_000), "Force asks for the original, unbounded");
     assert_eq!(quality(), Quality::P480, "Force must retain the saved ceiling");
     restore_quality(Quality::Original);
     restore_direct_play_mode(DirectPlayMode::Auto);
-    crate::catalog::reset_servers_for_test();
 }
 
 #[test]
 #[cfg(feature = "devtriggers")]
-fn force_server_refusal_or_missing_mde_never_attempts_conversion() {
-    let mut ps = PlaybackSession::IDLE;
-    let _g = fresh_registry(&mut ps);
-    assert!(nj_net::net::global_init());
-    for body in [MDE_TRANSCODE, EMPTY_MC] {
-        let (port, rx, server) = plan_pms(2, body);
-        let sid = crate::catalog::register_for_test("forced-refusal", "127.0.0.1", port, "token", "forced-client");
-        let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
-        env.direct_play_mode = DirectPlayMode::Forced;
-        env.cached_item = Some(fourk_item(sid, vec![eac3_track()]));
-        let plan = build_stream("rk-4k", "/library/parts/36013/1/file.mkv", "hevc", "eac3", &env);
-        let requests = rx.recv_timeout(Duration::from_secs(15)).unwrap();
-        server.join().unwrap();
+fn force_server_refusal_or_a_conversion_answer_never_plays_a_conversion() {
+    let url = format!("/videos/{JF_GUID}/master.m3u8?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported");
+    for info in [
+        playback_info(false, "mkv", HEVC_EAC3, Some(&url)),
+        r#"{"MediaSources":[],"ErrorCode":"NotAllowed"}"#.to_string(),
+    ] {
+        let (plan, requests) = resolve_jf(info, |env| env.direct_play_mode = DirectPlayMode::Forced);
         assert!(plan.url.is_empty() && plan.tsession.is_empty());
         assert!(plan.verdict.as_ref().unwrap().text().contains("Force Direct Play is on"));
-        assert_eq!(requests.iter().filter(|r| r.contains("/decision?")).count(), 1);
-        assert!(!requests.iter().any(|r| r.starts_with("PUT ") || r.contains("start.")));
-        crate::catalog::reset_servers_for_test();
+        assert_eq!(requests.iter().filter(|r| r.line.contains("/PlaybackInfo")).count(), 1);
     }
 }
 
 #[test]
 #[cfg(feature = "devtriggers")]
 fn disabling_direct_play_keeps_codec_preserving_remux() {
-    let mut ps = PlaybackSession::IDLE;
-    let _g = fresh_registry(&mut ps);
-    assert!(nj_net::net::global_init());
-    let (port, rx, server) = plan_pms(3, MDE_TRANSCODE_COPY);
-    let sid = crate::catalog::register_for_test("disabled-original", "127.0.0.1", port, "token", "disabled-client");
-    let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-4k");
-    env.direct_play_mode = DirectPlayMode::Disabled;
-    env.cached_item = Some(fourk_item(sid, vec![eac3_track()]));
-    let plan = build_stream("rk-4k", "/library/parts/36013/1/file.mkv", "hevc", "eac3", &env);
-    let requests = rx.recv_timeout(Duration::from_secs(15)).unwrap();
-    server.join().unwrap();
-    assert!(plan.contract.remux && plan.url.contains("start.mkv") && !plan.tsession.is_empty());
-    assert!(!requests.iter().any(|r| query_param(r, "directPlay") == Some("1")));
-    crate::catalog::reset_servers_for_test();
+    let url = format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=hevc&AudioCodec=eac3&TranscodeReasons=ContainerNotSupported");
+    let (plan, requests) = resolve_jf(playback_info(false, "mkv", HEVC_EAC3, Some(&url)), |env| {
+        env.direct_play_mode = DirectPlayMode::Disabled;
+    });
+    let body = playback_info_body(&requests);
+    assert_eq!(body["EnableDirectPlay"], false);
+    assert_eq!(body["AllowVideoStreamCopy"], true);
+    assert!(plan.contract.remux && !plan.tsession.is_empty(), "{}", plan.url);
 }
 
 #[test]

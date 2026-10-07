@@ -58,7 +58,6 @@
 // share. Re-exported flat, because `abr::Rung` is the name the rest of the crate has always used
 // and a split is not a reason to churn 26 call sites.
 
-mod bootstrap;
 mod controller;
 mod estimate;
 mod ladder;
@@ -69,7 +68,6 @@ mod units;
 mod viability;
 mod window;
 
-pub(crate) use bootstrap::*;
 pub(crate) use controller::*;
 pub(crate) use estimate::*;
 pub(crate) use ladder::*;

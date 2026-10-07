@@ -162,11 +162,12 @@ fn live_playback_decisions_reports_and_watched_state() {
     let part = d.media[0].part[0].key.clone();
 
     let session = "live-test-session";
-    let mde = c.mde_decision(&rk, session, 0, 0).expect("mde");
-    let p = mde.metadata[0].first_part().expect("part");
-    eprintln!("mde: code {:?} part {} streams {:?}", mde.general_decision_code, p.decision,
-        p.stream.iter().map(|s| (s.stream_type, s.codec.as_str(), s.decision.as_str())).collect::<Vec<_>>());
-    assert_eq!(mde.general_decision_code, Some(1000));
+    let n = c.negotiate(&crate::catalog::PlaybackAsk {
+        rk: &rk, session, audio_index: None, subtitle_index: None, start_ticks: 0, ceiling: None,
+        direct_play: true, video_copy: true, forced: false, burn: false,
+    }).playable().expect("negotiated");
+    eprintln!("negotiated: {} video {}->{} audio {}->{}", n.method.as_str(),
+        n.video.source, n.video.output, n.audio.source, n.audio.output);
 
     let url = c.direct_play_url(&part, session);
     assert!(url.path.contains("PlaySessionId=") && super::url::has_api_key(&url.path));
@@ -186,20 +187,19 @@ fn live_playback_decisions_reports_and_watched_state() {
             ceiling: Some(crate::catalog::Ceiling { max_kbps: 3000, max_w: 1280, max_h: 720 }), ..Default::default() },
         audio_stream_id: 0, subtitle_stream_id: 0, offset: TranscodeOffset::from_seconds(30),
     };
-    let dec = c.transcode_decision(&spec).expect("transcode decision");
-    let dp = dec.metadata[0].first_part().unwrap();
-    eprintln!("encode: code {:?} streams {:?}", dec.general_decision_code,
-        dp.stream.iter().map(|s| (s.stream_type, s.codec.as_str(), s.decision.as_str())).collect::<Vec<_>>());
-    assert_eq!(dp.stream[0].decision, "transcode");
-    let start = c.transcode_start_url(&spec);
-    assert!(start.path.contains("/stream.mkv") && start.path.contains("StartTimeTicks=300000000"));
+    let enc = c.transcode(&spec).playable().expect("transcode");
+    eprintln!("encode: {} video {}->{} audio {}->{}", enc.method.as_str(),
+        enc.video.source, enc.video.output, enc.audio.source, enc.audio.output);
+    assert_eq!(enc.method, crate::catalog::PlayMethod::Transcode);
+    assert!(enc.url.contains("StartTimeTicks=300000000"));
+    let start = crate::catalog::StreamUrl::parse(&enc.url);
     // A live encode never ends, so read the status line and the first bytes off a raw socket.
     let first = first_bytes(c.origin(), &start.path);
     eprintln!("encode first bytes: {:?}", first.as_ref().map(|(s, n)| (s.as_str(), n)));
     assert!(first.is_some_and(|(s, n)| s.contains(" 200 ") && n > 0));
     assert!(c.transcode_stop("live-test-encode"));
 
-    let pq = c.create_play_queue("", &rk, session, true).expect("queue");
+    let pq = c.create_play_queue(&rk, true).expect("queue");
     assert_eq!(pq.items.len(), 1, "a movie's queue is itself");
 
     assert!(c.scrobble(&rk));

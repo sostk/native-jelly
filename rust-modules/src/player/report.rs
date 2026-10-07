@@ -399,7 +399,8 @@ fn error_context(ps: &crate::route::PlaybackSession) -> PlaybackErrorContext {
     }
 }
 
-/// The refusal block for a refusal the SERVER made at `/decision`, else `None`.
+/// The refusal block for a refusal the SERVER made at `PlaybackInfo`, else `None`. Jellyfin
+/// refuses with a sentence, not a numbered code, so both code classes read `absent`.
 ///
 /// **`attempted` is read from the contract, and that is honest.** `build_stream` stores the route it
 /// is about to ask for in `plan.contract` BEFORE it asks `/decision`, and `apply_plan` installs
@@ -409,7 +410,9 @@ fn error_context(ps: &crate::route::PlaybackSession) -> PlaybackErrorContext {
 /// are the only three answers; it is ordered as [`delivery_class`] orders them. `delivery` itself
 /// stays `unknown`: reporting the attempt as the delivery would say a route existed.
 fn refusal_context(ps: &crate::route::PlaybackSession) -> Option<RefusalContext> {
-    let codes = crate::route::server_refusal_codes(ps)?;
+    if !crate::route::server_refused(ps) {
+        return None;
+    }
     let attempted = if crate::route::is_segmented_hls(ps) {
         DeliveryClass::Hls
     } else if crate::route::is_remux(ps) {
@@ -418,8 +421,8 @@ fn refusal_context(ps: &crate::route::PlaybackSession) -> Option<RefusalContext>
         DeliveryClass::Transcode
     };
     Some(RefusalContext {
-        general: DecisionCodeClass::from_code(codes.general),
-        transcode: DecisionCodeClass::from_code(codes.transcode),
+        general: DecisionCodeClass::Absent,
+        transcode: DecisionCodeClass::Absent,
         attempted,
         source_video: VideoCodecClass::from_name(&crate::route::source_vcodec(ps)),
         source_audio: AudioCodecClass::from_name(&crate::route::source_acodec(ps)),
@@ -1022,8 +1025,8 @@ mod tests {
     fn a_refused_plan_reports_no_delivery_and_no_requested_quality() {
         let _g = nj_base::testlock::serial();
         for verdict in [
-            crate::route::PlayVerdict::Server("Cannot convert this item.".into(), Default::default()),
-            crate::route::PlayVerdict::Server(String::new(), Default::default()),
+            crate::route::PlayVerdict::Server("Cannot convert this item.".into()),
+            crate::route::PlayVerdict::Server(String::new()),
             crate::route::PlayVerdict::DirectPlayDisabled,
             crate::route::PlayVerdict::Forced(crate::route::ForcedFailure::Video),
         ] {
@@ -1038,13 +1041,13 @@ mod tests {
     }
 
     /// Sentry PLX-NATIVE-14, the half `delivery: unknown` could not give: WHICH refusal. A server
-    /// refusal reports the verdict numbers it was made on, the route the plan ATTEMPTED (recorded
-    /// in the contract even though no route was installed), and the source file's codecs — while
-    /// `delivery` itself stays `unknown`, because nothing was installed.
+    /// refusal reports the route the plan ATTEMPTED (recorded in the contract even though no route
+    /// was installed) and the source file's codecs — while `delivery` itself stays `unknown`,
+    /// because nothing was installed. Jellyfin refuses without a numbered code, so both code
+    /// classes read `absent`.
     #[test]
-    fn a_server_refusal_reports_its_codes_the_attempted_route_and_the_source_codecs() {
+    fn a_server_refusal_reports_the_attempted_route_and_the_source_codecs() {
         let _g = nj_base::testlock::serial();
-        use crate::route::DecisionCodes as C;
         // (remux, hls) -> the attempt. Remux is checked after HLS, as `delivery_class` does.
         for (remux, hls, attempted) in [
             (true, false, "original_remux"),
@@ -1055,7 +1058,6 @@ mod tests {
             crate::route::refuse_by_server_for_test(
                 &mut ps,
                 "Cannot convert this item.",
-                C { general: Some(2000), transcode: Some(4007) },
                 remux,
                 hls,
                 "vp9",
@@ -1064,25 +1066,15 @@ mod tests {
             let ctx = error_context(&ps);
             assert_eq!(ctx.delivery.code(), "unknown", "no route was installed");
             let r = ctx.refusal.expect("a server refusal carries its refusal block");
-            assert_eq!(r.general.code(), "2000");
-            assert_eq!(r.transcode.code(), "4007");
+            assert_eq!((r.general.code(), r.transcode.code()), ("absent", "absent"));
             assert_eq!(r.attempted.code(), attempted, "remux={remux} hls={hls}");
             assert_eq!(r.source_video.code(), "vp9");
             assert_eq!(r.source_audio.code(), "eac3");
         }
-        // A body that carried only one of the two numbers keeps the other `absent`, not 0.
         let mut ps = crate::route::PlaybackSession::default();
-        crate::route::refuse_by_server_for_test(
-            &mut ps,
-            "",
-            C { general: Some(2000), transcode: None },
-            false,
-            false,
-            "",
-            "",
-        );
+        crate::route::refuse_by_server_for_test(&mut ps, "", false, false, "", "");
         let r = error_context(&ps).refusal.expect("refusal block");
-        assert_eq!((r.transcode.code(), r.source_video.code(), r.source_audio.code()), ("absent", "unknown", "unknown"));
+        assert_eq!((r.source_video.code(), r.source_audio.code()), ("unknown", "unknown"));
     }
 
     /// The server's sentence is free text — it can carry a file name, a path, a library or server
@@ -1092,14 +1084,12 @@ mod tests {
     #[test]
     fn no_free_text_from_the_server_decision_reaches_the_serialized_event() {
         let _g = nj_base::testlock::serial();
-        use crate::route::DecisionCodes as C;
         let sentence = "Cannot convert /media/Private Films/Secret Title (2020)/secret.mkv on SERVER-NAME-9 \
                         token=abc123 http://192.168.1.50:32400/library";
         let mut ps = crate::route::PlaybackSession::default();
         crate::route::refuse_by_server_for_test(
             &mut ps,
             sentence,
-            C { general: Some(2000), transcode: Some(4999) },
             false,
             false,
             "x-secret-video-tag",
@@ -1123,8 +1113,8 @@ mod tests {
         }
         let v: serde_json::Value = serde_json::from_str(&text).expect("event JSON");
         let refusal = &v["contexts"]["refusal"];
-        assert_eq!(refusal["general_code"], "2000");
-        assert_eq!(refusal["transcode_code"], "other_4xxx", "an unlisted number is bucketed, not echoed");
+        assert_eq!(refusal["general_code"], "absent");
+        assert_eq!(refusal["transcode_code"], "absent");
         assert_eq!(refusal["source_video"], "other");
         assert_eq!(refusal["source_audio"], "other");
         assert_eq!(v["tags"]["playback.attempted_delivery"], "progressive_transcode");
@@ -1148,32 +1138,6 @@ mod tests {
         assert!(error_context(&hls).refusal.is_none());
     }
 
-    /// The numbers are bucketed by their DOCUMENTED class (OpenAPI `generalDecisionCode`), and an
-    /// absent number is never read as 0.
-    #[test]
-    fn decision_codes_fall_into_a_closed_domain() {
-        for (code, want) in [
-            (None, "absent"),
-            (Some(2000), "2000"),
-            (Some(2003), "2003"),
-            (Some(4007), "4007"),
-            (Some(1001), "other_1xxx"),
-            (Some(2001), "other_2xxx"),
-            (Some(3000), "other_3xxx"),
-            (Some(4020), "other_4xxx"),
-            (Some(0), "other"),
-            (Some(5000), "other"),
-            (Some(-1), "other"),
-        ] {
-            assert_eq!(DecisionCodeClass::from_code(code).code(), want, "{code:?}");
-        }
-        // The listed domain is the whole enum, with no code repeated.
-        let mut codes: Vec<_> = DecisionCodeClass::ALL.iter().map(|c| c.code()).collect();
-        codes.sort_unstable();
-        codes.dedup();
-        assert_eq!(codes.len(), DecisionCodeClass::ALL.len());
-    }
-
     /// Source codecs reach the report through the closed tables only: a name the table does not
     /// know is `other` and is never echoed, which is what keeps a file's own tag out of Sentry.
     #[test]
@@ -1194,7 +1158,7 @@ mod tests {
     fn a_refused_plan_reports_mode_unknown_and_a_real_route_keeps_its_mode() {
         let _g = nj_base::testlock::serial();
         let mut refused = crate::route::PlaybackSession::default();
-        crate::route::refuse_by_server_for_test(&mut refused, "", Default::default(), true, false, "", "");
+        crate::route::refuse_by_server_for_test(&mut refused, "", true, false, "", "");
         assert_eq!(mode(&refused), "unknown");
         let mut policy = crate::route::PlaybackSession::default();
         crate::route::refuse_for_test(&mut policy, crate::route::PlayVerdict::DirectPlayDisabled);

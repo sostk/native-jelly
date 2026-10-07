@@ -126,20 +126,6 @@ impl DecisionCodeClass {
             Self::Other => "other",
         }
     }
-
-    pub(crate) fn from_code(code: Option<i64>) -> Self {
-        match code {
-            None => Self::Absent,
-            Some(2000) => Self::C2000,
-            Some(2003) => Self::C2003,
-            Some(4007) => Self::C4007,
-            Some(1000..=1999) => Self::Other1xxx,
-            Some(2000..=2999) => Self::Other2xxx,
-            Some(3000..=3999) => Self::Other3xxx,
-            Some(4000..=4999) => Self::Other4xxx,
-            Some(_) => Self::Other,
-        }
-    }
 }
 
 /// What a `decision_refused` report adds to the common context — all closed domains, none of the

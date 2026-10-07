@@ -250,9 +250,6 @@ pub(crate) struct PlaybackSession {
     /// else the account's — carried straight from [`super::plan::Plan::sub_pref_lang`] so the
     /// Subtitles menu's "yours" grouping (`metadata::sub_layout::sub_sections`) survives a reload.
     cur_sub_pref_lang: Option<String>,
-    /// the playing item's Part id (from the part key), so an audio switch can PUT the
-    /// server-side stream selection — the transcoder encodes the part's SELECTED audio.
-    cur_part_id: i64,
     /// Opaque internal playback generation, regenerated on each play_movie/play_episode. It is
     /// also the first encoder's PMS session id. Adaptive replacements keep this app generation
     /// stable but use their own coupled PMS wire id; the active encoder mutex supplies timeline,
@@ -370,9 +367,6 @@ pub(super) enum EnhancementOutcome {
     /// Remux, the audio decision was a transcode, and the source codec is in the profile's own
     /// copy list — the params demonstrably did something.
     Applied,
-    /// The audio would have been transcoded anyway (PMS M2's AAC 5.1 case) — asked for, delivered,
-    /// but not provably BECAUSE of the ask.
-    Unverified,
     /// The server refused the params outright, or silently ignored them (audio came back `copy`
     /// despite the ask) — an old or non-conforming PMS.
     Refused,
@@ -409,7 +403,6 @@ impl PlaybackSession {
         cur_sub_sid: 0,
         cur_sub_sidecar: false,
         cur_sub_pref_lang: None,
-        cur_part_id: 0,
         sess: String::new(),
         machine_id: String::new(),
         machine_sid: ServerId::UNSET,
@@ -478,7 +471,6 @@ impl PlaybackSession {
             cur_sub_sid,
             cur_sub_sidecar,
             cur_sub_pref_lang,
-            cur_part_id,
             sess,
             machine_id,
             machine_sid,
@@ -528,7 +520,6 @@ impl PlaybackSession {
             cur_sub_sid: *cur_sub_sid,
             cur_sub_sidecar: *cur_sub_sidecar,
             cur_sub_pref_lang: cur_sub_pref_lang.clone(),
-            cur_part_id: *cur_part_id,
             sess: sess.clone(),
             machine_id: machine_id.clone(),
             machine_sid: *machine_sid,
@@ -2256,18 +2247,11 @@ fn run_encoder_cleanup_check(check: EncoderCleanupCheck) {
     };
     let stop_accepted = (check.stop_needed && !check.physical_absent)
         .then(|| client.transcode_stop(&check.session));
-    let present = if check.physical_absent {
-        Some(false)
-    } else {
-        client.transcode_session_present(&check.session)
-    };
-    let physical_absent = check.physical_absent || present == Some(false);
-    let resource_reconciled = if physical_absent {
-        client.transcode_resource_reconciled(&check.session)
-    } else {
-        None
-    };
-    finish_encoder_cleanup_check(check, present, stop_accepted, resource_reconciled);
+    // Jellyfin ends the ffmpeg job on the Stopped report and has no per-job lookup, so an accepted
+    // stop (now or earlier) is the whole cleanup; a refused one stays owned and is retried.
+    let done = check.physical_absent || !check.stop_needed || stop_accepted == Some(true);
+    let present = if done { Some(false) } else { None };
+    finish_encoder_cleanup_check(check, present, stop_accepted, done.then_some(true));
 }
 
 /// Start every currently unowned cleanup observation for `sid`. There is no sleep, attempt count
@@ -2886,43 +2870,30 @@ impl HlsAbrControl {
                 audio: crate::catalog::AudioEnhancements::NONE,
             },
         );
-        // The deadline-bearing path preserves the cause where it is issued. A completed HTTP
-        // response (including malformed 2xx) and a transport failure are Control; only the timer
-        // which actually stopped the request is Deadline. The active encoder is checked on the far
-        // side of the request so a concurrent route change has priority over every one of them.
-        let decision = match deadline {
-            Some(at) => {
-                let outcome = client.transcode_decision_until(&spec, at);
-                classify_prime_decision(is_worker_ticket_current(expected), outcome)
-            }
-            None => {
-                let decision = client.transcode_decision(&spec);
-                if !is_worker_ticket_current(expected) {
-                    Err(PrimeRefusal::Session)
-                } else {
-                    decision.ok_or(PrimeRefusal::Control)
-                }
-            }
-        };
-        let decision = match decision {
-            Ok(decision) => decision,
-            Err(refusal) => {
-                // A lost response may still have registered both PMS objects. It cannot be allowed
-                // to become the invisible overlap which shrinks the next grant.
+        // The active encoder is checked on the far side so a concurrent route change has priority
+        // over the answer.
+        let negotiated = match client.transcode(&spec) {
+            crate::catalog::Negotiation::Playable(n) => n,
+            other => {
+                // A lost answer may still have started a job; it must not become an overlap.
                 request_encoder_cleanup(self.sid, &encoder_session);
-                return Err(refusal);
+                return Err(if !is_worker_ticket_current(expected) {
+                    PrimeRefusal::Session
+                } else if matches!(other, crate::catalog::Negotiation::Refused(_)) {
+                    PrimeRefusal::Rung
+                } else if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                    PrimeRefusal::Deadline
+                } else {
+                    PrimeRefusal::Control
+                });
             }
         };
         if !is_worker_ticket_current(expected) {
             request_encoder_cleanup(self.sid, &encoder_session);
             return Err(PrimeRefusal::Session);
         }
-        if refusal(&decision).is_some() {
-            request_encoder_cleanup(self.sid, &encoder_session);
-            return Err(PrimeRefusal::Rung);
-        }
         Ok(PrimedHls {
-            url: client.transcode_start_url(&spec).to_url(),
+            url: negotiated.url,
             encoder_session,
         })
     }
@@ -4263,7 +4234,7 @@ fn retire_hls_encoder_keep_source(ps: &PlaybackSession, encoder: String) {
         "abr-original-physical-stop",
         const { &nj_base::task::BlockingLabel::new("encoder physical stop (worker thread refused)") },
         move || {
-            let ok = client.transcode_stop_physical(&encoder);
+            let ok = client.transcode_stop(&encoder);
             crate::player::log(&format!(
                 "abr: stopped HLS encoder while retaining Original resource ok={}",
                 ok as i32
@@ -4297,15 +4268,11 @@ pub(crate) fn play_resolution_failed(ps: &PlaybackSession) -> bool {
 pub(crate) fn play_verdict(ps: &PlaybackSession) -> Option<&str> {
     ps.play_verdict.as_ref().map(PlayVerdict::text)
 }
-/// The verdict NUMBERS of a refusal the SERVER made at `/decision` — `None` when nothing was
-/// refused, or when the refusal was the app's own (Direct Play off, Force Direct Play): those carry
-/// no server codes because the server was never asked to decide. Numbers only; the sentence is
-/// [`play_verdict`], and it never reaches a report. MAIN THREAD.
-pub(crate) fn server_refusal_codes(ps: &PlaybackSession) -> Option<DecisionCodes> {
-    match ps.play_verdict {
-        Some(PlayVerdict::Server(_, codes)) => Some(codes),
-        _ => None,
-    }
+/// Did the SERVER refuse this playback (`PlaybackInfo` answered with no way to serve it)? `false`
+/// for the app's own refusals (Direct Play off, Force Direct Play), where the server was never
+/// asked to decide. The sentence is [`play_verdict`], and it never reaches a report. MAIN THREAD.
+pub(crate) fn server_refused(ps: &PlaybackSession) -> bool {
+    matches!(ps.play_verdict, Some(PlayVerdict::Server(_)))
 }
 /// Retire the refusal — "this playback request is withdrawn", the one thing besides a fresh
 /// resolve that ends a verdict's life. [`request_play`] clears it because a NEW item is being
@@ -4339,19 +4306,18 @@ pub(crate) fn refuse_for_test(ps: &mut PlaybackSession, verdict: PlayVerdict) {
     ps.play_verdict = Some(verdict);
 }
 /// Test-only: leave `ps` as a refusing [`apply_plan`] does after the SERVER refused a transcode —
-/// the verdict and its codes installed, the attempted route's contract and the source file's
-/// codecs recorded, and still no URL and no encoder session.
+/// the verdict installed, the attempted route's contract and the source file's codecs recorded,
+/// and still no URL and no encoder session.
 #[cfg(test)]
 pub(crate) fn refuse_by_server_for_test(
     ps: &mut PlaybackSession,
     sentence: &str,
-    codes: DecisionCodes,
     remux: bool,
     hls: bool,
     src_vcodec: &str,
     src_acodec: &str,
 ) {
-    ps.play_verdict = Some(PlayVerdict::Server(sentence.to_owned(), codes));
+    ps.play_verdict = Some(PlayVerdict::Server(sentence.to_owned()));
     ps.cur_contract.remux = remux;
     ps.cur_contract.delivery = if hls {
         crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
@@ -4424,13 +4390,6 @@ fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::catalog::Client> {
 /// keeps compiling against `cur_audio` unchanged.
 pub(crate) fn cur_audio_sid(ps: &PlaybackSession) -> i64 {
     ps.cur_audio.as_ref().map_or(0, |a| a.sid)
-}
-/// The currently-playing item's Part id. Written once per item by `build_stream` from its own
-/// `part` argument. In-playback callers (audio switch, subtitle toggle, retranscode) want this;
-/// `build_stream` must pass its freshly-derived local instead, since this is not yet updated
-/// for the item being started.
-fn cur_part_id(ps: &PlaybackSession) -> i64 {
-    ps.cur_part_id
 }
 /// The stable app-owned playback generation (and the first encoder's PMS session id).
 pub(crate) fn sess(ps: &PlaybackSession) -> String {
@@ -4660,7 +4619,7 @@ pub(crate) fn is_remux(ps: &PlaybackSession) -> bool {
 }
 /// The Plex Pass DSP the live route was ASKED for (issue #266) — `cur_contract.audio`, gated to
 /// what the server DEMONSTRABLY applied: `NONE` unless `cur_enhancement` is `Applied`
-/// (`Unverified`/`Refused`/`Off` say nothing was provably added to this stream, so a caller
+/// (`Refused`/`Off` say nothing was provably added to this stream, so a caller
 /// quoting the params must not claim them). Read by the diagnostics Audio row's suffix, which used
 /// to read the unfiltered ask and gate it on `cur_enhancement_label(ps) == Some("applied")` itself.
 pub(crate) fn applied_audio_enhancements(ps: &PlaybackSession) -> crate::catalog::AudioEnhancements {
@@ -4678,7 +4637,6 @@ pub(crate) fn cur_enhancement_label(ps: &PlaybackSession) -> Option<&'static str
     match ps.cur_enhancement {
         EnhancementOutcome::Off => None,
         EnhancementOutcome::Applied => Some("applied"),
-        EnhancementOutcome::Unverified => Some("unverified"),
         EnhancementOutcome::Refused => Some("refused"),
     }
 }
@@ -5123,19 +5081,14 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         cur_sub_sid(ps),
         ps.cur_contract,
     );
-    let Some(decision) = c.transcode_decision(&sp) else {
-        // A lost response may still have registered the key. The old route remains published;
-        // clean up only the uncommitted replacement.
+    let Some(negotiated) = c.transcode(&sp).playable() else {
+        // A lost answer may still have started a job. The old route remains published; clean up
+        // only the uncommitted replacement.
         let _ = c.transcode_stop(&replacement);
         reject_preparation();
         return None;
     };
-    if refusal(&decision).is_some() {
-        let _ = c.transcode_stop(&replacement);
-        reject_preparation();
-        return None;
-    }
-    let url = c.transcode_start_url(&sp).to_url();
+    let url = negotiated.url;
     let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
         // This is a NEW PMS response. Carrying the old decoded raster would turn the previous
         // session's observation into a claim about bytes nobody has opened yet; the new demux
@@ -5727,313 +5680,51 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
     crate::player::request_transcode_refresh(ps);
 }
 
-/// **One bounded measurement of the actual file, as an observation and nothing more.** It reports
-/// bytes, active duration and whether the target was reached, because all three decide how much
-/// the measurement is worth: a 40 KiB read that finished instantly honestly reports a huge rate
-/// and proves nothing. What it does NOT do is decide anything — [`crate::abr::bootstrap`] owns the
-/// admission rule, so the policy is stated once and is host-testable without a network.
+/// Auto quality's one network input: time Jellyfin's `/Playback/BitrateTest` payload and turn
+/// it into the `MaxStreamingBitrate` the negotiation advertises. This is the jellyfin-web /
+/// apiclient convention — measure, then ask for 70% of it so the stream has headroom. Cached per
+/// server for [`BITRATE_TTL`]: the measurement costs a few hundred KiB, and a play started within a
+/// minute of the last one is on the same link.
 ///
-/// `None` means there is nothing to reason from (no source bitrate, or the transfer never
-/// returned), which is deliberately distinct from a completed slow probe.
-pub(super) fn measure_remote_original(url: &str, source_kbps: i64) -> Option<crate::abr::CapacityObservation> {
-    let Some(plan) = remote_probe_plan(source_kbps) else {
-        crate::player::log(
-            "auto: remote Original unavailable — source bitrate is unknown; using HLS",
-        );
-        return None;
-    };
-    // `url` already names the playback's own identity. Direct play samples the Part; a remux
-    // Original samples start.mkv. A throwaway `source-N` forces an exact miss and makes PMS run a
-    // second AdHoc admission decision whose 500 says nothing about transport capacity.
-    let sample = match crate::curlio::sample_throughput_result(
-        url,
-        plan.target_bytes,
-        std::time::Duration::from_millis(plan.budget_ms),
-        std::time::Duration::from_millis(plan.budget_ms),
-    ) {
-        Ok(sample) => sample,
+/// `None` when the server has no Jellyfin seat or the transfer produced no sample; the caller then
+/// advertises no bound and lets the server decide.
+pub(super) fn auto_bitrate_kbps(client: &crate::catalog::Client) -> Option<i64> {
+    const PROBE_BYTES: usize = 500_000;
+    const BUDGET: std::time::Duration = std::time::Duration::from_secs(4);
+    const BITRATE_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+    let now = std::time::Instant::now();
+    if let Some((sid, at, kbps)) = *AUTO_BITRATE.lock().unwrap_or_else(|e| e.into_inner()) {
+        if sid == client.id() && now.duration_since(at) < BITRATE_TTL {
+            return Some(kbps);
+        }
+    }
+    let url = client.bitrate_test_url(PROBE_BYTES)?.to_url();
+    let sample = match crate::curlio::sample_whole_throughput_result(&url, PROBE_BYTES, BUDGET, BUDGET) {
+        Ok(sample) if sample.bytes > 0 => sample,
+        Ok(_) => return None,
         Err(failure) => {
-            crate::player::log(&format!(
-                "auto: remote Original preflight produced no capacity sample failure={failure:?}; using HLS"
-            ));
+            crate::player::log(&format!("auto: bitrate test produced no sample failure={failure:?}"));
             return None;
         }
     };
     let measured = sample.kbps();
+    let kbps = measured.saturating_mul(7) / 10;
     crate::player::log(&format!(
-        "auto: remote Original probe source={source_kbps}kbps sample={}KiB/{}ms measured={measured}kbps complete={}",
+        "auto: bitrate test {}KiB/{}ms measured={measured}kbps -> MaxStreamingBitrate {kbps}kbps",
         sample.bytes / 1024,
         sample.elapsed.as_millis(),
-        sample.target_reached as i32,
     ));
-    Some(crate::abr::CapacityObservation {
-        kbps: u32::try_from(measured).unwrap_or(u32::MAX),
-        bytes: u64::try_from(sample.bytes).unwrap_or(0),
-        active_us: u64::try_from(sample.elapsed.as_micros()).unwrap_or(u64::MAX),
-        completed: sample.target_reached,
-    })
+    let kbps = i64::try_from(kbps).unwrap_or(i64::MAX);
+    *AUTO_BITRATE.lock().unwrap_or_else(|e| e.into_inner()) = Some((client.id(), now, kbps));
+    Some(kbps)
 }
 
-/// PMS 1.43 503s a Part GET after a transcode MDE. The Original we would actually play is a
-/// codec-copy remux, so the Remote capacity sample has to be that `start.mkv`, under the same
-/// session identity a direct Part probe uses.
-///
-/// Encoder spin-up stays inside the existing 4s probe budget; a miss fails toward HLS rather
-/// than waiting longer. First-byte wait on this sample is the remux coming up, not a measure of
-/// transport capacity.
-///
-/// Issue #266: with an enhanced `audio` this is the FIRST decision the params reach, so the
-/// server's refusal (or silent ignoring) of them is caught here, not read as "no Original": the
-/// probe re-asks once with `NONE` on the same session — replacing the enhanced registration
-/// before any enhanced `start.mkv` is fetched — samples that plain remux, and reports
-/// [`RemuxProbe::enhancement_refused`] so the play is built without the params and records it.
-pub(super) fn measure_remote_remux(
-    client: &crate::catalog::Client,
-    rk: &str,
-    session: &str,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
-    source_kbps: i64,
-    // Issue #266: the DSP the play-path decision will carry on this same session, so the sample
-    // is the remux that plays (`build_stream`'s `pre_audio`); `NONE` without Plex Pass.
-    audio: crate::catalog::AudioEnhancements,
-) -> RemuxProbe {
-    // Never samples the Burn shape (M7): the bandwidth this probe measures is the uncapped remux's,
-    // and `build_stream`'s own flavor decision (which reads `enhancement_route` directly) is what
-    // actually forces a re-encode when a subtitle is being burned — see its doc for why.
-    let spec_for = |audio| {
-        transcode_spec(
-            rk,
-            session,
-            session,
-            crate::catalog::TranscodeOffset::Fresh,
-            audio_stream_id,
-            subtitle_stream_id,
-            enhanced_remux_contract(audio, false),
-        )
-    };
-    let mut spec = spec_for(audio);
-    let mut decision = client.transcode_decision(&spec);
-    let mut enhancement_refused = false;
-    if audio.any() && enhancement_fallback(decision.as_ref(), audio) == Fallback::Retry {
-        // Nothing enhanced has been fetched yet: re-deciding on the same session replaces the
-        // enhanced registration, exactly as the play path's own fallback does.
-        note_enhancement_refused(" in remote remux preflight; fell back", audio);
-        enhancement_refused = true;
-        spec = spec_for(crate::catalog::AudioEnhancements::NONE);
-        decision = client.transcode_decision(&spec);
-    }
-    let Some(decision) = decision else {
-        crate::player::log("auto: remote remux preflight had no /decision; using HLS");
-        return RemuxProbe { sample: None, enhancement_refused };
-    };
-    if refusal(&decision).is_some() {
-        crate::player::log("auto: remote remux preflight refused by /decision; using HLS");
-        return RemuxProbe { sample: None, enhancement_refused };
-    }
-    let sample = measure_remote_original(&client.transcode_start_url(&spec).to_url(), source_kbps);
-    if sample.is_none() {
-        // Same playback identity the HLS/remux that follows will register. closeResourceSession=1
-        // would 503 that next start; physical-stop keeps the Streaming Resource.
-        let _ = client.transcode_stop_physical(session);
-    }
-    RemuxProbe { sample, enhancement_refused }
-}
+/// The last Auto measurement: a server slot's sample stays good for a minute.
+static AUTO_BITRATE: Mutex<Option<(ServerId, std::time::Instant, i64)>> = Mutex::new(None);
 
-/// What [`measure_remote_remux`] learned: the capacity sample (`None` = no usable sample, fall to
-/// HLS), and whether the server refused or ignored the enhancement it was asked for — in which case
-/// the sample is of the PLAIN remux and the play must be built without the params.
-pub(super) struct RemuxProbe {
-    pub(super) sample: Option<crate::abr::CapacityObservation>,
-    pub(super) enhancement_refused: bool,
-}
-
-/// MDE handshake result. `None` from [`server_decision`] means the body was missing or unusable:
-/// the caller must not Original, but remux is still allowed. `Part.decision=transcode` is a
-/// container change, not a video-copy veto — see [`crate::catalog::MediaPart::video_forbids_copy`].
-pub(super) struct MdeVerdict {
-    pub(super) original: bool,
-    pub(super) video_forbids_copy: bool,
-}
-
-/// Ask PMS whether `rk` should direct-play (`original`) or go through start.mkv. None when the
-/// server returns no usable Media decision: the caller must not Original (PMS 1.43 503s a Part
-/// without a registered decision) but may still remux or re-encode via a separate
-/// `transcode_decision`. Registers the session as a side effect.
-///
-/// Takes the `Client` rather than looking one up: this runs on the resolve worker, and `rk` is only
-/// an item on the server the caller resolved from this playback's captured `ServerId`.
-pub(super) fn server_decision(
-    c: &crate::catalog::Client,
-    rk: &str,
-    session: &str,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
-) -> Option<MdeVerdict> {
-    let mc = match c.mde_decision(rk, session, audio_stream_id, subtitle_stream_id) {
-        Some(mc) => mc,
-        None => {
-            // failed fetch OR unparseable (XML/truncated) body — no Original Part
-            crate::player::log("decision: no/unparseable response -> no Original");
-            return None;
-        }
-    };
-    mde_verdict(&mc)
-}
-
-fn mde_verdict(mc: &crate::catalog::MediaContainer) -> Option<MdeVerdict> {
-    if refusal(mc).is_some() { return None; }
-    // Part.decision is the Original-vs-not verdict (Media/container carry none). Video copy
-    // is the VIDEO stream's own decision — Part=transcode + video=copy is a remux.
-    let part = match mc
-        .metadata
-        .first()
-        .and_then(|m| m.media.first())
-        .and_then(|md| md.part.first())
-    {
-        Some(p) => p,
-        None => {
-            crate::player::log(&format!(
-                "decision: no media (general={:?}) -> no Original",
-                mc.general_decision_code
-            ));
-            return None;
-        }
-    };
-    let original = part.decision == "directplay";
-    let video_forbids_copy = part.video_forbids_copy();
-    let video = part
-        .stream
-        .iter()
-        .find(|s| s.stream_type == 1)
-        .map(|s| s.decision.as_str())
-        .unwrap_or("-");
-    crate::player::log(&format!(
-        "decision: part={} video={video} general={:?} mde={:?} -> {}",
-        part.decision,
-        mc.general_decision_code,
-        mc.mde_decision_code,
-        if original {
-            "DIRECT PLAY"
-        } else if video_forbids_copy {
-            "TRANSCODE"
-        } else {
-            "REMUX"
-        }
-    ));
-    Some(MdeVerdict {
-        original,
-        video_forbids_copy,
-    })
-}
-
-pub(super) fn forced_server_decision(
-    c: &crate::catalog::Client, rk: &str, session: &str, audio: i64, sub: i64,
-) -> Option<MdeVerdict> {
-    mde_verdict(&c.mde_decision_forced(rk, session, audio, sub)?)
-}
-
-/// Select the audio + subtitle streams server-side for the current part before a
-/// transcode. The transcoder encodes the part's SELECTED audio and, when a subtitle id is
-/// non-zero, BURNS that subtitle (query-param subtitleStreamID does NOT suppress a
-/// default-selected sub, only the PUT does). The direct-play profile advertises text and
-/// client-rendered bitmap codecs; burn is still the remux/re-encode path when we PUT a
-/// positive subtitle id. We PUT subtitleStreamID=0 to keep subs OFF (no burn), or the chosen
-/// id to burn it; audioStreamID only when the user switched (else keep default).
-///
-/// `sid` names the server that owns `part` — the resolve worker passes the id it was given, and the
-/// in-playback callers pass [`cur_sid`]. A `Part.id` is server-local, so a PUT sent to the wrong
-/// one either 404s or, worse, re-selects streams on a stranger's part that happens to share the
-/// number.
-pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
-    if part <= 0 {
-        return;
-    }
-    let c = match crate::catalog::client_for(sid) {
-        Some(c) => c,
-        None => return,
-    };
-    let st = c.select_streams(&crate::catalog::StreamSelection {
-        part_id: part,
-        audio_stream_id: aud,
-        subtitle_stream_id: sub,
-    });
-    crate::player::log(&format!(
-        "select streams: part={part} audio={aud} sub={sub} -> HTTP {st}"
-    ));
-}
-
-struct QueuedSelection {
-    sid: ServerId,
-    part: i64,
-    aud: i64,
-    sub: i64,
-}
-
-/// The pending selection PUTs and whether a worker is draining them. One lock covers both, so the
-/// worker deciding to exit and a `queue_put_selection` deciding whether to spawn one cannot
-/// interleave: either the push lands before the worker's final empty check, or it sees the worker
-/// already gone and spawns its own.
-struct SelectionQueue {
-    pending: std::collections::VecDeque<QueuedSelection>,
-    worker_running: bool,
-}
-
-static SELECTION_QUEUE: std::sync::Mutex<SelectionQueue> =
-    std::sync::Mutex::new(SelectionQueue { pending: std::collections::VecDeque::new(), worker_running: false });
-
-fn selection_queue() -> std::sync::MutexGuard<'static, SelectionQueue> {
-    SELECTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// Test-only: every queued PUT has been sent and no worker is still draining.
 #[cfg(test)]
-fn selection_queue_idle() -> bool {
-    let queue = selection_queue();
-    !queue.worker_running && queue.pending.is_empty()
-}
-
-/// Same PUT as [`put_selection`], run on a worker instead of the frame thread
-/// (`commit_audio_selection`/`commit_subtitle_selection` are both reached from
-/// `app/playback.rs::commit_track` inside the run-loop's `FrameScope`). Requests are drained
-/// strictly FIFO by one serial worker at a time, never in parallel — PMS applies whichever PUT it
-/// receives last, so two picks made in quick succession (audio, then subtitle) must land on the
-/// server in the order the viewer made them, not in whatever order two independent threads happen
-/// to finish their requests.
-pub(super) fn queue_put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
-    if part <= 0 {
-        return;
-    }
-    let spawn = {
-        let mut queue = selection_queue();
-        queue.pending.push_back(QueuedSelection { sid, part, aud, sub });
-        !std::mem::replace(&mut queue.worker_running, true)
-    };
-    if spawn {
-        spawn_selection_worker();
-    }
-}
-
-fn spawn_selection_worker() {
-    let spawned = nj_base::task::spawn_small("put-selection", || loop {
-        let req = {
-            let mut queue = selection_queue();
-            let Some(req) = queue.pending.pop_front() else {
-                // Nothing left: retire under the same lock the push takes, so a racing
-                // `queue_put_selection` either pushed before this check or spawns a fresh worker.
-                queue.worker_running = false;
-                break;
-            };
-            req
-        };
-        put_selection(req.sid, req.part, req.aud, req.sub);
-    });
-    if !spawned {
-        // The OS refused the thread. Drop the running flag so a later `queue_put_selection` gets a
-        // chance to retry, rather than leaving every future selection stranded in the queue behind
-        // a flag nobody will ever clear.
-        selection_queue().worker_running = false;
-    }
+pub(super) fn forget_auto_bitrate() {
+    *AUTO_BITRATE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// What the queue told us, as owned data for `apply_plan` to install. `machine_id` is `""` when
@@ -6072,49 +5763,24 @@ pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::catalo
     f(&ps.queue)
 }
 
-/// Create a PlayQueue for `rk` so the session is a first-class, remote-controllable player and
-/// the timeline can carry a real playQueueItemID. Best-effort: on failure the timeline still
-/// works, just without the queue ids (and the player without an Up Next).
+/// The queue this play starts (the item, plus a series' following episodes when `continuous`),
+/// so the reports carry a queue position and the player has an Up Next. Best-effort: on failure
+/// the reports still work, just without queue ids.
 ///
-/// PURE: returns owned data for `apply_plan` to install.
-///
-/// **The machine id is THIS server's, three ways, in order.** It goes into
-/// `uri=server://{machineIdentifier}/…`, so naming the wrong server is a POST that either fails or
-/// builds a queue nobody asked for.
-///   1. **The registry's own id for this client** — it is the key the server is filed under, so it
-///      cannot belong to another one. Free, and refreshed whenever the slot is re-pointed.
-///   2. `cached`, which `ResolveEnv` only fills in when the cache was learned from *this* server
-///      (see [`PlaybackSession::machine_sid`]) — the `install(&Origin, token)` path registers with no id, so
-///      for the session's own server rung 1 is empty and this is what saves a round trip.
-///   3. `GET /identity`, whose answer travels back in `QueueInfo::machine_id` for `apply_plan` to
-///      cache against this server.
+/// PURE: returns owned data for `apply_plan` to install. The server's identity rides along when
+/// neither the registry nor `cached` already knows it, for `apply_plan` to cache.
 pub(super) fn resolve_playqueue(
     c: &crate::catalog::Client,
     rk: &str,
-    session: &str,
     cached: &str,
     continuous: bool,
 ) -> QueueInfo {
-    let known = c.machine_id();
-    // `mid` is the FETCHED id and nothing else: apply_plan's "" means "leave the cache alone", and
-    // the first two rungs are already-known values with nothing to write back.
-    let mid = if known.is_empty() && cached.is_empty() {
+    let mid = if c.machine_id().is_empty() && cached.is_empty() {
         c.machine_identity().unwrap_or_default()
     } else {
         String::new()
     };
-    let effective = if !known.is_empty() {
-        known
-    } else if !mid.is_empty() {
-        &mid
-    } else {
-        cached
-    };
-    if effective.is_empty() {
-        crate::player::log("playqueue: no machineIdentifier (skip)");
-        return QueueInfo::default();
-    }
-    match c.create_play_queue(effective, rk, session, continuous) {
+    match c.create_play_queue(rk, continuous) {
         Some(q) => {
             let up_next = q.next.as_ref().and_then(up_next_of);
             crate::player::log(&format!(
@@ -6145,7 +5811,7 @@ pub(super) fn resolve_playqueue(
             }
         }
         None => {
-            crate::player::log("playqueue: POST failed");
+            crate::player::log("playqueue: no queue for this item");
             QueueInfo {
                 machine_id: mid,
                 ..Default::default()
@@ -6191,7 +5857,6 @@ impl ResolveEnv {
             omit_queue_continuous: false,
             preview: false,
             audio_enhancements: crate::player::audio_enhancements(),
-            pass: crate::catalog::serverinfo::subscription_of(sid),
             #[cfg(test)]
             dv_capability: None,
         }
@@ -7041,7 +6706,6 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             // convention); `None` (Off) never sets `sub_sid` either, so this reads `false` for it.
             cur_sub_sidecar: plan.sub_render_ordinal.is_some_and(|ord| ord < 0),
             cur_sub_pref_lang: plan.sub_pref_lang,
-            cur_part_id: plan.part_id,
             sess: plan.sess,
             machine_id,
             machine_sid,
@@ -7161,71 +6825,46 @@ fn prepare_original_remux(
     let replacement = next_encoder_session(namespace);
     let subtitle = cur_sub_sid(ps);
     let candidate_audio_sid = candidate.audio.as_ref().map_or(0, |a| a.sid);
-    put_selection(cur_sid(ps), cur_part_id(ps), candidate_audio_sid, subtitle);
-    let spec_for = |audio, force_burn| {
-        transcode_spec(
-            &rk,
-            &replacement,
-            &replacement,
-            crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
-            candidate_audio_sid,
-            subtitle,
-            enhanced_remux_contract(audio, force_burn),
-        )
-    };
-    let mut audio = audio;
-    let mut force_burn = force_burn;
-    let mut spec = spec_for(audio, force_burn);
-    let mut decision = c.transcode_decision(&spec);
-    let mut enhancement_refused = false;
-    // A refused or ignored enhancement must not strand the recovery: the candidate's plain
-    // Original is still the route this recovery exists to reach. Fall back once, exactly as the
-    // resolve and the remote preflight do, and record `Refused` so no reconcile asks this server
-    // again this playback. Nothing enhanced was fetched, so re-deciding on the same replacement
-    // session replaces its registration; a direct candidate needs no remux at all.
-    if enhancement_fallback(decision.as_ref(), audio) == Fallback::Retry {
+    // Jellyfin has no audio DSP: an enhanced ask is refused before it is sent, and the
+    // candidate's plain Original is still the route this recovery exists to reach.
+    let enhancement_refused = audio.any();
+    if enhancement_refused {
         note_enhancement_refused(" in Original recovery; fell back", audio);
         if candidate.direct {
-            let _ = c.transcode_stop(&replacement);
             return Some(OriginalRemux::RefusedToDirect);
         }
-        enhancement_refused = true;
-        audio = crate::catalog::AudioEnhancements::NONE;
-        force_burn = false;
-        spec = spec_for(audio, force_burn);
-        decision = c.transcode_decision(&spec);
     }
-    if let Some(reason) = decision.as_ref().and_then(refusal) {
-        crate::player::log(&format!(
-            "abr: Original remux decision refused{}",
-            if reason.is_empty() {
-                ""
-            } else {
-                ": server supplied a reason"
-            },
-        ));
-        let _ = c.transcode_stop(&replacement);
-        return None;
-    }
-    let output_codecs = decision.as_ref().and_then(decision_codecs).unwrap_or_else(|| {
-        (
-            candidate.vcodec.clone(),
-            if audio.any() {
-                // I4: an enhanced remux re-encodes the audio; the profile's first target is what
-                // arrives, and the source codec here would be silent audio.
-                "ac3".to_owned()
-            } else {
-                // Server-default candidate: the file's own default codec, as the direct-play twin.
-                candidate.audio.as_ref().map_or_else(|| ps.src_acodec.clone(), |a| a.codec.clone())
-            },
-        )
-    });
+    let _ = force_burn;
+    let audio = crate::catalog::AudioEnhancements::NONE;
+    let contract = enhanced_remux_contract(audio, false);
+    let spec = transcode_spec(
+        &rk,
+        &replacement,
+        &replacement,
+        crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
+        candidate_audio_sid,
+        subtitle,
+        contract.clone(),
+    );
+    let negotiated = match c.transcode(&spec) {
+        crate::catalog::Negotiation::Playable(n) => n,
+        crate::catalog::Negotiation::Refused(_) => {
+            crate::player::log("abr: Original remux refused by the server");
+            let _ = c.transcode_stop(&replacement);
+            return None;
+        }
+        crate::catalog::Negotiation::Unreachable => {
+            let _ = c.transcode_stop(&replacement);
+            return None;
+        }
+    };
+    let output_codecs = (negotiated.video.output.clone(), negotiated.audio.output.clone());
     let enhancement = if enhancement_refused || known_refused {
         EnhancementOutcome::Refused
     } else {
-        classify_outcome(decision.as_ref(), candidate.audio.as_ref(), audio)
+        EnhancementOutcome::Off
     };
-    let url = c.transcode_start_url(&spec).to_url();
+    let url = negotiated.url;
     if replace_active_encoder_for(expected, &replacement).is_none() {
         let _ = c.transcode_stop(&replacement);
         return None;
@@ -7233,7 +6872,7 @@ fn prepare_original_remux(
     { let s = &mut *ps; {
         s.url = url;
         s.tsession = replacement.clone();
-        s.cur_contract = enhanced_remux_contract(audio, force_burn);
+        s.cur_contract = contract;
         s.cur_enhancement = enhancement;
         s.cur_auto_original_watched = watched;
         s.cur_audio = candidate.audio.clone();
@@ -7244,7 +6883,7 @@ fn prepare_original_remux(
         s.stream_immersive = false;
     } };
     crate::player::log(&format!(
-        "decision output: v={} a={}",
+        "playbackinfo output: v={} a={}",
         output_codecs.0, output_codecs.1
     ));
     Some(OriginalRemux::Prepared(replacement, enhancement))
@@ -7345,17 +6984,12 @@ pub(super) fn log_enhancement_outcome(
 #[derive(Clone)]
 struct RetranscodeClaimInputs {
     client: &'static crate::catalog::Client,
-    sid: ServerId,
     rk: String,
-    part_id: i64,
     audio_sid: i64,
     subtitle_sid: i64,
     namespace: String,
     offset_secs: i64,
     expected: WorkerTicket,
-    src_vcodec: String,
-    src_acodec: String,
-    carried_audio: Option<CarriedAudio>,
 }
 
 /// What one accepted `/decision` attempt produced: the session the worker started and committed
@@ -7389,53 +7023,8 @@ enum RetranscodeWorkerOutcome {
     Refused,
 }
 
-/// The fallback codecs `retranscode_as` used to compute inline, as a pure function of the owned
-/// inputs plus whichever contract this attempt is building — needed twice now (a primary attempt
-/// and, on refusal, a Legacy fallback attempt may build a different contract), so it is a function
-/// rather than a one-shot local.
-fn retranscode_fallback_codecs(
-    inputs: &RetranscodeClaimInputs,
-    contract: &crate::catalog::EncodeContract,
-) -> (String, String) {
-    if contract.remux {
-        (
-            inputs.src_vcodec.clone(),
-            if contract.audio.any() {
-                // I4: the enhanced audio is re-encoded to the profile's first target; the source
-                // codec here would describe bytes that never arrive (silent audio).
-                "ac3".to_owned()
-            } else {
-                // A plain remux copies the carried track; server default falls back to the file's.
-                inputs
-                    .carried_audio
-                    .as_ref()
-                    .filter(|a| !a.codec.is_empty())
-                    .map_or_else(|| inputs.src_acodec.clone(), |a| a.codec.clone())
-            },
-        )
-    } else if matches!(contract.delivery, crate::catalog::TranscodeDelivery::FixedHls { .. }) {
-        ("h264".to_owned(), "aac".to_owned())
-    } else {
-        (
-            nj_platform::devcaps::caps().encode_vcodec().to_owned(),
-            "ac3".to_owned(),
-        )
-    }
-}
-
-/// The PUT that drives the encode and the burn, sent once per claim BEFORE its first
-/// [`try_retranscode`] attempt: every attempt of a claim shares `inputs`, so a fallback attempt
-/// would send the identical PUT again. Skipped for a stale ticket, exactly as the attempt's own
-/// gate refuses to start.
-fn select_streams_for_encode(inputs: &RetranscodeClaimInputs) {
-    if is_worker_ticket_current(&inputs.expected) {
-        put_selection(inputs.sid, inputs.part_id, inputs.audio_sid, inputs.subtitle_sid);
-    }
-}
-
-/// One `/decision` attempt, gated on `inputs.expected` throughout — the network body
-/// `retranscode_as` used to run inline on the frame thread, less the selection PUT
-/// ([`select_streams_for_encode`]). Pure with respect to
+/// One `PlaybackInfo` negotiation, gated on `inputs.expected` throughout — the network body
+/// `retranscode_as` used to run inline on the frame thread. Pure with respect to
 /// `PlaybackSession` (never sees one): everything it needs is in `inputs`/`contract`, and
 /// everything it decides is returned rather than written, so it may run on
 /// [`nj_base::task::spawn_small`] as well as synchronously.
@@ -7449,7 +7038,12 @@ fn try_retranscode(
     let crate::catalog::EncodeContract {
         delivery, ceiling, audio, ..
     } = contract;
-    let (fallback_vcodec, fallback_acodec) = retranscode_fallback_codecs(inputs, &contract);
+    // A live enhancement toggle is a rejected action on Jellyfin (no audio DSP): the current
+    // stream is retained and the menu shows what plays.
+    if audio.any() {
+        note_enhancement_refused("; current stream retained", audio);
+        return RetranscodeWorkerOutcome::Refused;
+    }
     let qsess = next_encoder_session(&inputs.namespace);
     let sp = transcode_spec(
         &inputs.rk,
@@ -7460,31 +7054,18 @@ fn try_retranscode(
         inputs.subtitle_sid,
         contract,
     );
-    let Some(decision) = inputs.client.transcode_decision(&sp) else {
-        let _ = inputs.client.transcode_stop(&qsess);
-        return RetranscodeWorkerOutcome::Refused;
+    let negotiated = match inputs.client.transcode(&sp) {
+        crate::catalog::Negotiation::Playable(n) => n,
+        outcome => {
+            if matches!(outcome, crate::catalog::Negotiation::Refused(_)) {
+                crate::player::log("retranscode refused by the server");
+            }
+            let _ = inputs.client.transcode_stop(&qsess);
+            return RetranscodeWorkerOutcome::Refused;
+        }
     };
-    // A live toggle the server refuses (or silently ignores — audio `copy` despite the params)
-    // is a rejected action: the current stream is retained and the menu shows what plays.
-    if enhancement_fallback(Some(&decision), audio) == Fallback::Retry {
-        note_enhancement_refused("; current stream retained", audio);
-        let _ = inputs.client.transcode_stop(&qsess);
-        return RetranscodeWorkerOutcome::Refused;
-    }
-    if let Some(reason) = refusal(&decision) {
-        crate::player::log(&format!(
-            "retranscode decision refused{}",
-            if reason.is_empty() {
-                ""
-            } else {
-                ": server supplied a reason"
-            },
-        ));
-        let _ = inputs.client.transcode_stop(&qsess);
-        return RetranscodeWorkerOutcome::Refused;
-    }
-    let output_codecs = decision_codecs(&decision).unwrap_or((fallback_vcodec, fallback_acodec));
-    let url = inputs.client.transcode_start_url(&sp).to_url();
+    let output_codecs = (negotiated.video.output, negotiated.audio.output);
+    let url = negotiated.url;
     let replacement_ticket = match (delivery, ceiling.and_then(crate::abr::Rung::from_ceiling)) {
         (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
             replace_active_hls_for(&inputs.expected, &qsess, &url, rung, None)
@@ -7505,8 +7086,8 @@ fn try_retranscode(
         .filter(|old| !old.is_empty() && *old != qsess)
         .map(str::to_owned)
         .unwrap_or_default();
-    let enhancement = classify_outcome(Some(&decision), inputs.carried_audio.as_ref(), audio);
-    // NEVER log the URL. `transcode_start_url` ends in `X-Plex-Token=…`, and this line is reached
+    let enhancement = EnhancementOutcome::Off;
+    // NEVER log the URL. The negotiated URL ends in `ApiKey=…`, and this line is reached
     // by an ordinary audio-track switch — so the app's own support channel ("send us
     // /tmp/nativejelly-events.log") was asking users to paste a live PMS credential into a public
     // issue thread. The rk, the track ids and the offset are the whole diagnostic value here; the
@@ -7551,16 +7132,11 @@ fn prepare_retranscode_inputs(
     };
     Some(RetranscodeClaimInputs {
         client,
-        sid: cur_sid(ps),
-        part_id: cur_part_id(ps),
         audio_sid: cur_audio_sid(ps),
         subtitle_sid: cur_sub_sid(ps),
         namespace,
         offset_secs,
         expected: expected.clone(),
-        src_vcodec: ps.src_vcodec.clone(),
-        src_acodec: ps.src_acodec.clone(),
-        carried_audio: ps.cur_audio.clone(),
         rk,
     })
 }
@@ -7625,7 +7201,6 @@ fn retranscode_as(
     let inputs = prepare_retranscode_inputs(ps, expected, offset_secs)?;
     let outcome = {
         let _block = pending_split_block();
-        select_streams_for_encode(&inputs);
         try_retranscode(&inputs, contract)
     };
     match outcome {
@@ -8041,7 +7616,6 @@ fn run_retranscode_claim_worker(
     primary_contract: crate::catalog::EncodeContract,
     fallback: RetranscodeFallback,
 ) -> RetranscodeClaimResult {
-    select_streams_for_encode(inputs);
     if let RetranscodeWorkerOutcome::Applied(applied) = try_retranscode(inputs, primary_contract) {
         return RetranscodeClaimResult::Retranscode(applied);
     }
@@ -8481,9 +8055,6 @@ pub(crate) struct EnhTestFixture {
     pub(crate) subtitle_effect: SubtitleEffect,
     /// This playback's server already refused or ignored the params once.
     pub(crate) refused: bool,
-    /// The server never answered (an unreachable decision — `classify_outcome`'s `Unverified`).
-    /// Takes precedence over `applied.any()` alone, but `refused` wins if both are set.
-    pub(crate) unverified: bool,
     /// The contract's own `audio` — what the live route has actually applied.
     pub(crate) applied: crate::catalog::AudioEnhancements,
     /// The applied route is a Burn (M7) — `cur_contract.remux` is `false` even though this is the
@@ -8507,7 +8078,6 @@ impl Default for EnhTestFixture {
             carried_capable: Some(true),
             subtitle_effect: SubtitleEffect::None,
             refused: false,
-            unverified: false,
             applied: crate::catalog::AudioEnhancements::NONE,
             applied_burn: false,
             in_flight: false,
@@ -8526,8 +8096,6 @@ pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSessio
     ps.cur_sub_sidecar = route.subtitle_effect == SubtitleEffect::Sidecar;
     ps.cur_enhancement = if route.refused {
         EnhancementOutcome::Refused
-    } else if route.unverified {
-        EnhancementOutcome::Unverified
     } else if route.applied.any() {
         EnhancementOutcome::Applied
     } else {
@@ -8639,16 +8207,6 @@ pub(crate) fn commit_audio_selection(ps: &mut PlaybackSession, audio: CarriedAud
     let native = family == RouteFamily::Direct && direct_plays;
     let (ordinal, codec) = (audio.ordinal, audio.codec.clone());
     { let s = &mut *ps; s.cur_audio = Some(audio) };
-    if native {
-        // record the pick: the timeline then reports the stream that actually plays, and a
-        // later transcode event (subtitle burn refresh / transcode seek) keeps this track.
-        // persist the USER's pick server-side (official-client behavior): /status/sessions'
-        // selected-stream display keys on the part selection, not the timeline report. Only
-        // user picks persist — the start-of-play auto-pick (eng preference) reports only. Reached
-        // from `app/playback.rs::commit_track` inside the run-loop's `FrameScope`, so this PUT runs
-        // on the serial selection worker instead of blocking the frame thread.
-        queue_put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), cur_sub_sid(ps));
-    }
     // The new track may change what the enhancement offer says (capability, candidate). If the
     // route must change for that, the reconcile's Retranscode REPLACES this pick's own reload and
     // is marked as owing it, so a refused enhancement still switches the track.
@@ -8742,11 +8300,6 @@ pub(crate) fn commit_subtitle_selection(
         // part of the applied stream contract. Publish projection + reporter tracks as one reducer
         // event so a later rejected action cannot restore the pre-subtitle snapshot.
         commit_in_place_route_projection(ps, false);
-        // persist the pick server-side (and subs Off PUTs subtitleStreamID=0, clearing a
-        // stale server-side selection that would otherwise burn on the next transcode). Reached
-        // from `app/playback.rs::commit_track` inside the run-loop's `FrameScope`, so this PUT runs
-        // on the serial selection worker instead of blocking the frame thread.
-        queue_put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), cur_sub_sid(ps));
     }
     // A subtitle turns the enhancement's offer off (I6) and Off may turn it back on. On direct
     // play a subtitle never reloads, so there is no pick of its own to displace.
@@ -8910,6 +8463,10 @@ mod timeline_tests;
 mod direct_play_mode_tests;
 
 #[cfg(test)]
+#[path = "decision_retranscode_claim_tests.rs"]
+mod retranscode_claim_tests;
+
+#[cfg(test)]
 #[path = "decision_subtitle_style_tests.rs"]
 mod subtitle_style_tests;
 
@@ -8917,10 +8474,3 @@ mod subtitle_style_tests;
 #[path = "carried_audio_tests.rs"]
 mod carried_audio_tests;
 
-#[cfg(test)]
-#[path = "plan_audio_enhancement_tests.rs"]
-mod plan_audio_enhancement_tests;
-
-#[cfg(test)]
-#[path = "decision_audio_enhancement_tests.rs"]
-mod audio_enhancement_tests;

@@ -24,7 +24,7 @@ pub mod convert;
 pub mod ids;
 pub mod images;
 pub mod models;
-mod playback;
+pub(crate) mod playback;
 pub mod seat;
 pub mod store;
 pub mod ticks;
