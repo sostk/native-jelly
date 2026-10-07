@@ -1,10 +1,12 @@
-//! The Jellyfin operations behind `plex::Client`: each method answers what its PMS namesake does,
-//! in the same Plex-shaped types, so every store above the facade reads one vocabulary.
+//! The Jellyfin operations.
 //!
 //! `Client::jf()` hands one of these out when the client's origin is a Jellyfin seat
-//! ([`super::seat`]); the op methods in `plex/` delegate at their first line. Requests go through
-//! `Client::jf_send` — the same [`crate::http`] door, origin, resolve pin and credential gate as
-//! every PMS request — with the `Authorization: MediaBrowser …` header instead of a query token.
+//! ([`super::seat`]). The list stores ask it for Jellyfin results directly — [`JfShelf`]s,
+//! [`JfPage`]s, [`JfSearch`] and `BaseItemDto` rows — and build their own screen rows from them.
+//! The detail, playback and timeline ops still answer in the catalog record types the player and
+//! the route planner read, through `catalog::Client`'s delegation. Requests go through
+//! `Client::jf_send` — the one [`crate::http`] door, origin, resolve pin and credential gate —
+//! with the `Authorization: MediaBrowser …` header.
 use super::models::*;
 use super::{convert, ids, seat, url};
 use crate::http::Method;
@@ -14,6 +16,45 @@ use crate::catalog::{
     SortOption, Tag,
 };
 use serde::de::DeserializeOwned;
+
+/// One Home or Library shelf as Jellyfin answered it.
+#[derive(Debug, Default, Clone)]
+pub struct JfShelf {
+    /// The locale-independent shelf id Home and the Library key titles and focus memory by
+    /// (`home.movies.recent`, `tv.ondeck.{section}`, …).
+    pub identifier: String,
+    pub title: String,
+    pub key: String,
+    /// The library the shelf lists, 0 for none; and that library's name.
+    pub section: i64,
+    pub library: String,
+    pub items: Vec<BaseItemDto>,
+}
+
+/// One page of a library listing.
+#[derive(Default)]
+pub struct JfPage {
+    pub items: Vec<BaseItemDto>,
+    pub total: i64,
+    pub start: i64,
+    /// The sort menu, when the query asked for it.
+    pub meta: Option<Meta>,
+}
+
+/// A search answer: title hits per [`SEARCH_GROUPS`] type, in that order, and person hits.
+#[derive(Debug, Default, Clone)]
+pub struct JfSearch {
+    pub groups: Vec<(&'static str, Vec<BaseItemDto>)>,
+    pub people: Vec<BaseItemDto>,
+}
+
+/// `(Jellyfin Type, shelf kind, heading)` for each title group a search returns.
+pub const SEARCH_GROUPS: [(&str, &str, &str); 4] = [
+    ("Movie", "movie", "Movies"),
+    ("Series", "show", "Shows"),
+    ("Episode", "episode", "Episodes"),
+    ("BoxSet", "collection", "Collections"),
+];
 
 /// `Fields=` for list endpoints: what a poster grid and a shelf draw, without the per-item
 /// `MediaSources` a detail page needs (those make a 50-row page ~40x larger).
@@ -350,7 +391,8 @@ impl<'a> Jf<'a> {
         views.items.into_iter().find(|v| ids::normalize(&v.id) == section_guid).and_then(|v| v.collection_type)
     }
 
-    pub fn section_items_query(&self, q: &SectionQuery) -> Option<MediaContainer> {
+    /// One page of a library grid: `/Items` under the library, typed, sorted, filtered.
+    pub fn section_page(&self, q: &SectionQuery) -> Option<JfPage> {
         let section_guid = ids::guid_of(q.section_key)?;
         let jf_type = self.section_type(&section_guid, q.filters);
         let (sort, order) = sort_by(if q.sort.is_empty() {
@@ -383,11 +425,13 @@ impl<'a> Jf<'a> {
                 _ => b,
             };
         }
-        let mut mc = self.items_container(b, q.section_key)?;
-        if q.include_meta {
-            mc.meta = Some(sort_menu(jf_type));
-        }
-        Some(mc)
+        let r = self.items(b)?;
+        Some(JfPage {
+            items: r.items,
+            total: r.total_record_count,
+            start: r.start_index,
+            meta: q.include_meta.then(|| sort_menu(jf_type)),
+        })
     }
 
     pub fn section_directory(&self, section_key: i64, directory: &str, metadata_type: Option<i64>) -> Option<MediaContainer> {
@@ -512,26 +556,22 @@ impl<'a> Jf<'a> {
         self.items_container(Q::new(format!("/Shows/{guid}/Episodes")).s("Fields", PLAYABLE_FIELDS), 0)
     }
 
-    pub fn related(&self, rk: &str) -> Option<MediaContainer> {
+    /// "More Like This": `/Items/{id}/Similar`.
+    pub fn similar_items(&self, rk: &str) -> Option<Vec<BaseItemDto>> {
         let guid = self.guid(rk)?;
-        let r = self.items(Q::new(format!("/Items/{guid}/Similar")).i("Limit", 20).s("Fields", LIST_FIELDS))?;
-        let rows: Vec<Metadata> = r.items.iter().map(|i| convert::item(i, 0)).collect();
-        let kind = rows.first().map(|m| m.kind.clone()).unwrap_or_else(|| "movie".into());
-        Some(MediaContainer {
-            hub: vec![convert::hub(&format!("{kind}.similar"), "More Like This", &kind, "", rows)],
-            ..Default::default()
-        })
+        Some(self.items(Q::new(format!("/Items/{guid}/Similar")).i("Limit", 20).s("Fields", LIST_FIELDS))?.items)
     }
 
-    pub fn person_media(&self, person_id: &str) -> Option<MediaContainer> {
+    /// A person's filmography: every movie and series they are credited in, newest first.
+    pub fn person_items(&self, person_id: &str) -> Option<Vec<BaseItemDto>> {
         let guid = if person_id.bytes().all(|b| b.is_ascii_digit()) {
             self.guid(person_id)?
         } else {
             ids::normalize(person_id)
         };
-        self.items_container(Q::new("/Items").s("PersonIds", &guid).b("Recursive", true)
+        Some(self.items(Q::new("/Items").s("PersonIds", &guid).b("Recursive", true)
             .s("IncludeItemTypes", "Movie,Series").s("SortBy", "PremiereDate,SortName")
-            .s("SortOrder", "Descending").s("Fields", LIST_FIELDS), 0)
+            .s("SortOrder", "Descending").s("Fields", LIST_FIELDS))?.items)
     }
 
     /// `find_by_guid`: does this server hold the item a portable guid names (`imdb://tt…`)?
@@ -577,118 +617,124 @@ impl<'a> Jf<'a> {
         )
     }
 
-    // ---- hubs -----------------------------------------------------------------------------
+    // ---- shelves ---------------------------------------------------------------------------
 
-    /// Home shelves: one "Recently Added" per library, in the user's view order.
-    pub fn home_hubs(&self, count: i64) -> Option<MediaContainer> {
+    /// Home's library shelves: one "Recently Added" per library (`/Items/Latest`, grouped), in
+    /// the user's view order.
+    pub fn home_shelves(&self, count: i64) -> Option<Vec<JfShelf>> {
         let uid = self.user_id()?;
         let views: QueryResult<BaseItemDto> = self.get(&Q::new("/UserViews").s("userId", &uid).build())?;
-        let mut hubs = Vec::new();
+        let mut out = Vec::new();
         for v in &views.items {
             let Some(sec) = convert::section(v) else { continue };
-            let sid: i64 = sec.key.parse().unwrap_or(0);
-            let (identifier, kind) = match sec.kind.as_str() {
-                "show" => ("home.television.recent", "mixed"),
-                _ => ("home.movies.recent", "movie"),
+            let section: i64 = sec.key.parse().unwrap_or(0);
+            let (identifier, type_num) = match sec.kind.as_str() {
+                "show" => ("home.television.recent", 2),
+                _ => ("home.movies.recent", 1),
             };
             let latest: Option<Vec<BaseItemDto>> = self.get(&Q::new("/Items/Latest").s("userId", &uid)
                 .s("ParentId", &ids::normalize(&v.id)).i("Limit", count).b("GroupItems", true)
                 .s("Fields", LIST_FIELDS).s("ImageTypeLimit", "1")
                 .s("EnableImageTypes", "Primary,Backdrop,Logo,Thumb").build());
-            let rows: Vec<Metadata> = latest.unwrap_or_default().iter().map(|i| {
-                let mut m = convert::item(i, sid);
-                m.library_section_title = sec.title.clone();
-                m
-            }).collect();
-            if !rows.is_empty() {
-                hubs.push(convert::hub(identifier, &format!("Recently Added in {}", sec.title), kind,
-                    &format!("/hubs/home/recentlyAdded?type={}&sectionID={sid}", if kind == "movie" { 1 } else { 2 }), rows));
+            let items = latest.unwrap_or_default();
+            if !items.is_empty() {
+                out.push(JfShelf {
+                    identifier: identifier.into(),
+                    title: format!("Recently Added in {}", sec.title),
+                    key: format!("/hubs/home/recentlyAdded?type={type_num}&sectionID={section}"),
+                    section,
+                    library: sec.title,
+                    items,
+                });
             }
         }
-        Some(MediaContainer { size: hubs.len() as i64, hub: hubs, ..Default::default() })
+        Some(out)
     }
 
-    pub fn library_hubs(&self, section_key: i64, count: i64) -> Option<MediaContainer> {
+    /// One library's shelves: Continue Watching (`/UserItems/Resume`), Next Up for TV
+    /// (`/Shows/NextUp`) and Recently Added (`/Items/Latest`), empty ones dropped.
+    pub fn library_shelves(&self, section_key: i64, count: i64) -> Option<Vec<JfShelf>> {
         let guid = ids::guid_of(section_key)?;
         let uid = self.user_id()?;
-        let kind = self.view_kind(&guid);
-        let tv = kind.as_deref() == Some("tvshows");
-        let mut hubs = Vec::new();
-        let resume = self.items(Q::new("/UserItems/Resume").s("ParentId", &guid).i("Limit", count)
-            .s("Fields", PLAYABLE_FIELDS).s("MediaTypes", "Video"));
-        if let Some(r) = resume {
-            let rows: Vec<Metadata> = r.items.iter().map(|i| convert::item(i, section_key)).collect();
-            hubs.push(convert::hub(&format!("{}.inprogress.{section_key}", if tv { "tv" } else { "movie" }),
-                "Continue Watching", if tv { "episode" } else { "movie" },
-                &format!("/hubs/sections/{section_key}/continueWatching/items"), rows));
+        let tv = self.view_kind(&guid).as_deref() == Some("tvshows");
+        let family = if tv { "tv" } else { "movie" };
+        let shelf = |identifier: String, title: &str, key: String, items: Vec<BaseItemDto>| JfShelf {
+            identifier, title: title.into(), key, section: section_key, library: String::new(), items,
+        };
+        let mut out = Vec::new();
+        if let Some(r) = self.items(Q::new("/UserItems/Resume").s("ParentId", &guid).i("Limit", count)
+            .s("Fields", PLAYABLE_FIELDS).s("MediaTypes", "Video"))
+        {
+            out.push(shelf(format!("{family}.inprogress.{section_key}"), "Continue Watching",
+                format!("/hubs/sections/{section_key}/continueWatching/items"), r.items));
         }
         if tv {
             if let Some(r) = self.items(Q::new("/Shows/NextUp").s("ParentId", &guid).i("Limit", count).s("Fields", PLAYABLE_FIELDS)) {
-                let rows: Vec<Metadata> = r.items.iter().map(|i| convert::item(i, section_key)).collect();
-                hubs.push(convert::hub(&format!("tv.ondeck.{section_key}"), "Next Up", "episode", "", rows));
+                out.push(shelf(format!("tv.ondeck.{section_key}"), "Next Up", String::new(), r.items));
             }
         }
         let latest: Option<Vec<BaseItemDto>> = self.get(&Q::new("/Items/Latest").s("userId", &uid)
             .s("ParentId", &guid).i("Limit", count).b("GroupItems", true).s("Fields", LIST_FIELDS).build());
-        let rows: Vec<Metadata> = latest.unwrap_or_default().iter().map(|i| convert::item(i, section_key)).collect();
-        hubs.push(convert::hub(&format!("{}.recentlyadded.{section_key}", if tv { "tv" } else { "movie" }),
-            "Recently Added", if tv { "show" } else { "movie" }, "", rows));
-        hubs.retain(|h| h.size > 0);
-        Some(MediaContainer { size: hubs.len() as i64, hub: hubs, ..Default::default() })
+        out.push(shelf(format!("{family}.recentlyadded.{section_key}"), "Recently Added", String::new(),
+            latest.unwrap_or_default()));
+        out.retain(|s| !s.items.is_empty());
+        Some(out)
     }
 
-    /// Continue Watching: in-progress items (newest first) followed by Next Up episodes of series
-    /// that have none in progress — the merged deck the PMS hub serves.
-    pub fn continue_watching(&self, count: i64) -> Option<MediaContainer> {
+    /// Continue Watching: in-progress items (newest first) followed by the Next Up episode of each
+    /// series that has none in progress.
+    pub fn continue_watching_items(&self, count: i64) -> Option<Vec<BaseItemDto>> {
         let resume = self.items(Q::new("/UserItems/Resume").i("Limit", count).s("Fields", PLAYABLE_FIELDS)
             .s("MediaTypes", "Video").s("ImageTypeLimit", "1").s("EnableImageTypes", "Primary,Backdrop,Logo,Thumb"))?;
         let next = self.items(Q::new("/Shows/NextUp").i("Limit", count).s("Fields", PLAYABLE_FIELDS)
             .b("EnableResumable", false).b("EnableRewatching", false)).unwrap_or_default();
-        let mut rows: Vec<Metadata> = resume.items.iter().map(|i| convert::item(i, 0)).collect();
         let in_progress_series: std::collections::HashSet<String> = resume.items.iter()
             .filter_map(|i| i.series_id.as_deref().map(ids::normalize)).collect();
-        for it in &next.items {
+        let mut rows = resume.items;
+        for it in next.items {
             if rows.len() as i64 >= count {
                 break;
             }
             if it.series_id.as_deref().map(ids::normalize).is_some_and(|s| in_progress_series.contains(&s)) {
                 continue;
             }
-            rows.push(convert::item(it, 0));
+            rows.push(it);
         }
-        Some(MediaContainer {
-            hub: vec![convert::hub("home.continue", "Continue Watching", "mixed", "/hubs/continueWatching/items", rows)],
-            ..Default::default()
-        })
+        Some(rows)
     }
 
     pub fn promoted(&self) -> Option<MediaContainer> {
         Some(MediaContainer::default())
     }
 
-    pub fn search(&self, query: &str, limit: i64, _section_id: i64) -> Option<MediaContainer> {
+    // ---- search ---------------------------------------------------------------------------
+
+    /// Titles matching `query`, grouped Movies / Shows / Episodes / Collections, and the people
+    /// whose name matches it.
+    pub fn search_results(&self, query: &str, limit: i64) -> Option<JfSearch> {
         let limit = if limit > 0 { limit } else { 10 };
         let r = self.items(Q::new("/Items").s("searchTerm", query).b("Recursive", true)
             .s("IncludeItemTypes", "Movie,Series,Episode,BoxSet").i("Limit", limit * 4)
             .s("Fields", LIST_FIELDS))?;
-        let mut hubs = Vec::new();
-        for (t, kind, title) in [("Movie", "movie", "Movies"), ("Series", "show", "Shows"),
-            ("Episode", "episode", "Episodes"), ("BoxSet", "collection", "Collections")]
-        {
-            let rows: Vec<Metadata> = r.items.iter().filter(|i| i.kind == t).take(limit as usize)
-                .map(|i| convert::item(i, 0)).collect();
-            hubs.push(convert::hub(kind, title, kind, "", rows));
+        let mut groups: Vec<(&'static str, Vec<BaseItemDto>)> =
+            SEARCH_GROUPS.iter().map(|(t, _, _)| (*t, Vec::new())).collect();
+        for it in r.items {
+            if let Some((_, rows)) = groups.iter_mut().find(|(t, rows)| *t == it.kind && (rows.len() as i64) < limit) {
+                rows.push(it);
+            }
         }
         let people: Option<QueryResult<BaseItemDto>> = self.get(&Q::new("/Persons").s("searchTerm", query)
             .i("Limit", limit).s("userId", &self.user_id().unwrap_or_default()).build());
-        let tags: Vec<Tag> = people.map(|p| p.items).unwrap_or_default().iter().map(|p| Tag {
-            tag: p.name.clone(),
-            id: ids::intern(&p.id),
-            tag_key: ids::normalize(&p.id),
-            thumb: p.image_tags.get("Primary").map(|t| format!("/library/metadata/{}/thumb/{t}", ids::intern(&p.id)))
-                .unwrap_or_default(),
-            ..Default::default()
+        Some(JfSearch { groups, people: people.map(|p| p.items).unwrap_or_default() })
+    }
+
+    /// [`Self::search_results`] in the hub shape the person page's identity resolution reads.
+    pub fn search(&self, query: &str, limit: i64, _section_id: i64) -> Option<MediaContainer> {
+        let found = self.search_results(query, limit)?;
+        let mut hubs: Vec<Hub> = found.groups.iter().zip(SEARCH_GROUPS).map(|((_, rows), (_, kind, title))| {
+            convert::hub(kind, title, kind, "", rows.iter().map(|i| convert::item(i, 0)).collect())
         }).collect();
+        let tags: Vec<Tag> = found.people.iter().map(person_hit).collect();
         hubs.push(Hub {
             kind: "actor".into(),
             hub_identifier: "actor".into(),
@@ -718,26 +764,36 @@ impl<'a> Jf<'a> {
         collection_outcome(st, it.map(|i| convert::container(vec![convert::item(&i, 0)], 1, 0)))
     }
 
-    pub(crate) fn collection_children(&self, rk: &str, start: i64, size: i64) -> CollectionOutcome {
+    /// One page of a BoxSet's members.
+    pub(crate) fn collection_members(&self, rk: &str, start: i64, size: i64) -> CollectionOutcome<QueryResult<BaseItemDto>> {
         let Some(guid) = self.guid(rk) else { return CollectionOutcome::Missing };
         let mut q = Q::new("/Items").s("ParentId", &guid).s("Fields", LIST_FIELDS)
             .s("SortBy", "PremiereDate,SortName").b("EnableTotalRecordCount", true).i("StartIndex", start);
         if size > 0 {
             q = q.i("Limit", size);
         }
-        self.collection_page(q, 0)
+        self.collection_query(q)
     }
 
-    fn collection_page(&self, q: Q, section: i64) -> CollectionOutcome {
+    fn collection_query(&self, q: Q) -> CollectionOutcome<QueryResult<BaseItemDto>> {
         let q = match self.user_id() {
             Some(uid) => q.s("userId", &uid),
             None => return CollectionOutcome::Transport,
         };
         let (st, r) = self.get_status::<QueryResult<BaseItemDto>>(&q.build());
-        collection_outcome(st, r.map(|r| {
-            let rows = r.items.iter().map(|i| convert::item(i, section)).collect();
-            convert::container(rows, r.total_record_count, r.start_index)
-        }))
+        collection_outcome(st, r)
+    }
+
+    fn collection_page(&self, q: Q, section: i64) -> CollectionOutcome {
+        match self.collection_query(q) {
+            CollectionOutcome::Ok(r) => {
+                let rows = r.items.iter().map(|i| convert::item(i, section)).collect();
+                CollectionOutcome::Ok(convert::container(rows, r.total_record_count, r.start_index))
+            }
+            CollectionOutcome::Denied => CollectionOutcome::Denied,
+            CollectionOutcome::Missing => CollectionOutcome::Missing,
+            CollectionOutcome::Transport => CollectionOutcome::Transport,
+        }
     }
 
     // ---- subtitles ------------------------------------------------------------------------
@@ -761,7 +817,18 @@ impl<'a> Jf<'a> {
     }
 }
 
-fn collection_outcome(status: Option<i32>, page: Option<MediaContainer>) -> CollectionOutcome {
+/// A person search hit as the search shelf's tag row.
+fn person_hit(p: &BaseItemDto) -> Tag {
+    Tag {
+        tag: p.name.clone(),
+        id: ids::intern(&p.id),
+        tag_key: ids::normalize(&p.id),
+        thumb: super::images::person_thumb(p),
+        ..Default::default()
+    }
+}
+
+fn collection_outcome<T>(status: Option<i32>, page: Option<T>) -> CollectionOutcome<T> {
     match (status, page) {
         (Some(401 | 403), _) => CollectionOutcome::Denied,
         (Some(404), _) => CollectionOutcome::Missing,

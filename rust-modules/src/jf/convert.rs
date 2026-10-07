@@ -1,26 +1,24 @@
-//! Jellyfin DTOs → the Plex-shaped records every store and screen already reads.
+//! Jellyfin DTOs → the catalog records the detail page, the player and the route planner read.
 //!
-//! **The one translation layer.** Everything above `plex::Client` keeps reading `Metadata`,
-//! `Media`, `Stream`, `Hub` and `LibrarySection`; this file is where a `BaseItemDto` becomes one,
-//! and the rules it encodes are the port's semantic decisions (docs/jellyfin-port.md):
+//! List rows (Home, Library, Search, Person, Collection, Related) no longer pass through here:
+//! `catalog_fetch::jf_row` builds them straight from a `BaseItemDto`. What remains is the full
+//! item record — streams, chapters, cast, markers — and the rules it encodes are the port's
+//! semantic decisions (docs/jellyfin-port.md):
 //!
 //! * identities are interned ([`super::ids`]) — `ratingKey`, section keys and person ids stay
 //!   decimal integers;
 //! * time is ticks on the wire and milliseconds here ([`super::ticks`]);
-//! * artwork is emitted as the Plex-SHAPED path `/library/metadata/{rk}/{thumb|art}/{tag}` so the
-//!   poster store's keys, memo and caches work unchanged, and `jf_image_path` translates it to
-//!   `/Items/{id}/Images/{type}` at request time;
+//! * artwork paths come from [`super::images`];
 //! * a part key IS the Jellyfin direct-play path, so `Client::direct_play_url` only has to append
 //!   the play session and the credential;
 //! * track ids are `Index + 1`, so `0` keeps meaning "off".
+use super::images::{self, art_path};
 use super::models::*;
 use super::{ids, ticks};
 use crate::catalog::{
-    Chapter, Hub, HexColor, LibrarySection, Marker, Media, MediaContainer, MediaPart, Metadata,
-    Rating, Stream, Tag, UltraBlurColors,
+    Chapter, Hub, LibrarySection, Marker, Media, MediaContainer, MediaPart, Metadata, Rating,
+    Stream, Tag,
 };
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 /// `Type` → the Plex `type` the app switches on.
 pub fn kind(jf_type: &str) -> &'static str {
@@ -62,80 +60,6 @@ pub fn jf_type_of_number(n: i64) -> Option<&'static str> {
 
 fn is_folder_kind(k: &str) -> bool {
     matches!(k, "show" | "season" | "collection")
-}
-
-/// Which item's Logo image stands for an interned key — an episode or season has none of its own
-/// and borrows its series', which `/library/metadata/{rk}/clearLogo` (built by the poster store
-/// from a ratingKey alone) cannot say.
-fn logo_owners() -> &'static Mutex<HashMap<i64, String>> {
-    static T: OnceLock<Mutex<HashMap<i64, String>>> = OnceLock::new();
-    T.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub fn logo_owner(rk: i64) -> Option<String> {
-    logo_owners().lock().ok()?.get(&rk).cloned()
-}
-
-fn note_logo_owner(rk: i64, owner: &str) {
-    if rk == 0 || owner.is_empty() {
-        return;
-    }
-    if let Ok(mut t) = logo_owners().lock() {
-        t.insert(rk, ids::normalize(owner));
-    }
-}
-
-/// `/library/metadata/{rk}/{slot}/{guid}-{tag}` for `guid`'s image, `""` without a tag. The
-/// GUID rides in the tag segment because these paths outlive the process (the cold-open Home
-/// cache, the poster store's keys), and `rk` alone resolves only in the process that minted it.
-fn art_path(guid: &str, slot: &str, tag: Option<&str>) -> String {
-    match (ids::intern(guid), tag) {
-        (rk, Some(tag)) if rk != 0 && !tag.is_empty() => {
-            format!("/library/metadata/{rk}/{slot}/{}-{tag}", ids::normalize(guid))
-        }
-        _ => String::new(),
-    }
-}
-
-/// `{guid}-{tag}` → (`guid`, `tag`); a bare tag (an app-built path) → (`None`, `tag`).
-fn split_art_tag(seg: &str) -> (Option<&str>, &str) {
-    match seg.split_at_checked(32) {
-        Some((g, rest)) if rest.starts_with('-') && g.bytes().all(|b| b.is_ascii_hexdigit()) => (Some(g), &rest[1..]),
-        _ => (None, seg),
-    }
-}
-
-/// The Jellyfin image request for a Plex-shaped artwork path, or `None` when `src` is not one.
-/// Anonymous on every supported server (measured: 200 with no credential on 12.0), so no token.
-pub fn jf_image_path(src: &str, w: i64, h: i64, png: bool) -> Option<String> {
-    let rest = src.strip_prefix("/library/metadata/")?;
-    let mut parts = rest.splitn(3, '/');
-    let rk: i64 = parts.next()?.parse().ok()?;
-    let slot = parts.next()?;
-    let (carried, tag) = match parts.next().filter(|t| !t.is_empty()).map(split_art_tag) {
-        Some((g, t)) => (g.map(str::to_string), Some(t).filter(|t| !t.is_empty())),
-        None => (None, None),
-    };
-    let image_type = match slot {
-        "thumb" => "Primary",
-        "art" => "Backdrop",
-        "clearLogo" => "Logo",
-        "thumbLand" => "Thumb",
-        "banner" => "Banner",
-        _ => return None,
-    };
-    let owner = if slot == "clearLogo" { logo_owner(rk) } else { None }
-        .or(carried)
-        .or_else(|| ids::guid_of(rk))?;
-    let mut q = format!("/Items/{owner}/Images/{image_type}?maxWidth={w}&maxHeight={h}&quality=90");
-    if let Some(tag) = tag {
-        q.push_str("&tag=");
-        q.push_str(&crate::catalog::urlenc_str(tag));
-    }
-    if png {
-        q.push_str("&format=Png");
-    }
-    Some(q)
 }
 
 /// `2024-05-01T12:34:56.1234567Z` → unix seconds; 0 for anything unparseable (and for the
@@ -285,8 +209,8 @@ pub fn part_key(item_guid: &str, source: &MediaSourceInfo) -> String {
     )
 }
 
-/// One `MediaSourceInfo` → one `Media` version with its one `Part`.
-pub fn media(item_guid: &str, source: &MediaSourceInfo) -> Media {
+/// A source's video stream and its default (else first) audio stream.
+fn primary_streams(source: &MediaSourceInfo) -> (Option<&MediaStream>, Option<&MediaStream>) {
     let video = source.media_streams.iter().find(|s| s.kind == "Video");
     let audio_idx = source.default_audio_stream_index;
     let audio = source
@@ -295,11 +219,27 @@ pub fn media(item_guid: &str, source: &MediaSourceInfo) -> Media {
         .filter(|s| s.kind == "Audio")
         .find(|s| Some(s.index) == audio_idx)
         .or_else(|| source.media_streams.iter().find(|s| s.kind == "Audio"));
+    (video, audio)
+}
+
+/// `(video codec, audio codec)` of a source, in the spelling the route planner matches on.
+pub fn primary_codecs(source: &MediaSourceInfo) -> (String, String) {
+    let (video, audio) = primary_streams(source);
+    (
+        video.and_then(|v| v.codec.as_deref()).map(codec).unwrap_or_default(),
+        audio.and_then(|a| a.codec.as_deref()).map(codec).unwrap_or_default(),
+    )
+}
+
+/// One `MediaSourceInfo` → one `Media` version with its one `Part`.
+pub fn media(item_guid: &str, source: &MediaSourceInfo) -> Media {
+    let (video, _) = primary_streams(source);
+    let (video_codec, audio_codec) = primary_codecs(source);
     let (w, h) = video.map(|v| (v.width.unwrap_or(0), v.height.unwrap_or(0))).unwrap_or((0, 0));
     let container = source.container.clone().unwrap_or_default();
     Media {
-        video_codec: video.and_then(|v| v.codec.as_deref()).map(codec).unwrap_or_default(),
-        audio_codec: audio.and_then(|a| a.codec.as_deref()).map(codec).unwrap_or_default(),
+        video_codec,
+        audio_codec,
         bitrate: source.bitrate.unwrap_or(0) / 1000,
         width: w,
         height: h,
@@ -331,22 +271,6 @@ fn person_tag(p: &BaseItemPerson) -> Tag {
     }
 }
 
-fn ultra_blur(it: &BaseItemDto) -> Option<UltraBlurColors> {
-    let pick = |slot: &str, tag: Option<&str>| {
-        let m = it.image_blur_hashes.get(slot)?;
-        tag.and_then(|t| m.get(t)).or_else(|| m.values().next()).cloned()
-    };
-    let hash = pick("Backdrop", it.backdrop_image_tags.first().map(String::as_str))
-        .or_else(|| pick("Primary", it.image_tags.get("Primary").map(String::as_str)))?;
-    let c = super::blurhash::corners(&hash)?;
-    Some(UltraBlurColors {
-        top_left: HexColor(c[0]),
-        top_right: HexColor(c[1]),
-        bottom_right: HexColor(c[2]),
-        bottom_left: HexColor(c[3]),
-    })
-}
-
 fn ratings(it: &BaseItemDto) -> Vec<Rating> {
     let mut out = Vec::new();
     if let Some(c) = it.critic_rating.filter(|c| *c > 0.0) {
@@ -375,7 +299,7 @@ fn extra_type(t: &str) -> (i64, &'static str) {
 
 /// The portable identity "Also available" matches copies by: a provider id when the item has
 /// one, the server-local GUID otherwise.
-fn portable_guid(it: &BaseItemDto) -> String {
+pub fn portable_guid(it: &BaseItemDto) -> String {
     for (key, scheme) in [("Imdb", "imdb"), ("Tmdb", "tmdb"), ("Tvdb", "tvdb")] {
         if let Some(v) = it.provider_ids.get(key).filter(|v| !v.is_empty()) {
             return format!("{scheme}://{v}");
@@ -389,10 +313,8 @@ fn portable_guid(it: &BaseItemDto) -> String {
 pub fn item(it: &BaseItemDto, section_id: i64) -> Metadata {
     let k = kind(&it.kind);
     let rk = ids::rating_key(&it.id);
-    let rk_num = ids::intern(&it.id);
     let ud = it.user_data.clone().unwrap_or_default();
     let duration = ticks::to_ms(it.run_time_ticks.unwrap_or(0));
-    let primary = it.image_tags.get("Primary").map(String::as_str);
     let leaf_count = match k {
         "show" | "season" => it.recursive_item_count.or(it.child_count).unwrap_or(0),
         _ => 0,
@@ -404,24 +326,10 @@ pub fn item(it: &BaseItemDto, section_id: i64) -> Metadata {
     };
 
     let series = it.series_id.as_deref().unwrap_or("");
-    let series_thumb = art_path(series, "thumb", it.series_primary_image_tag.as_deref());
-    let thumb = match (k, primary) {
-        (_, Some(tag)) => art_path(&it.id, "thumb", Some(tag)),
-        ("season", None) => series_thumb.clone(),
-        _ => String::new(),
-    };
-    let art = match it.backdrop_image_tags.first() {
-        Some(tag) => art_path(&it.id, "art", Some(tag)),
-        None => match (&it.parent_backdrop_item_id, it.parent_backdrop_image_tags.first()) {
-            (Some(owner), Some(tag)) => art_path(owner, "art", Some(tag)),
-            _ => String::new(),
-        },
-    };
-    if it.image_tags.contains_key("Logo") {
-        note_logo_owner(rk_num, &it.id);
-    } else if let Some(owner) = it.parent_logo_item_id.as_deref().or(it.series_id.as_deref()) {
-        note_logo_owner(rk_num, owner);
-    }
+    let series_thumb = images::series_primary(it);
+    let thumb = images::thumb(it);
+    let art = images::backdrop(it);
+    images::note_logo(it);
 
     let (parent_rk, parent_title, grand_rk, grand_title, parent_thumb, grand_thumb) = match k {
         "season" => (ids::rating_key(series), it.series_name.clone().unwrap_or_default(),
@@ -496,7 +404,7 @@ pub fn item(it: &BaseItemDto, section_id: i64) -> Metadata {
         writer: people(&["Writer"]),
         role: people(&["Actor", "GuestStar"]),
         chapter: chapters,
-        ultra_blur_colors: ultra_blur(it),
+        ultra_blur_colors: images::ultra_blur(it),
         ratings: ratings(it),
         rating: it.critic_rating.map(|c| c / 10.0).unwrap_or(0.0),
         audience_rating: it.community_rating.unwrap_or(0.0),
@@ -566,6 +474,7 @@ pub fn hub(identifier: &str, title: &str, kind: &str, key: &str, items: Vec<Meta
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jf::images::{jf_image_path, split_art_tag};
 
     fn movie() -> BaseItemDto {
         serde_json::from_str(r#"{

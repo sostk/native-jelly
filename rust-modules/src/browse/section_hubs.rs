@@ -414,6 +414,9 @@ impl super::BrowseState {
         let worker_adapter = Arc::clone(&adapter);
         let spawned = nj_base::task::spawn_small("libhubs", move || {
             let shelves = catch_unwind(|| {
+                if let Some(j) = client.jf() {
+                    return Some(parse_jf_shelves(&j.library_shelves(key, HUB_FETCH_COUNT)?, sid, key));
+                }
                 let mc = client.library_hubs(key, HUB_FETCH_COUNT)?;
                 Some(parse_hubs(&mc, sid, key))
             })
@@ -766,24 +769,52 @@ pub(crate) fn parse_hubs(mc: &crate::catalog::MediaContainer, sid: ServerId, sec
         if hub.title.is_empty() {
             continue; // a row with no heading has nothing to say about what is in it
         }
-        out.push(Shelf {
-            is_continue: shelf_is_continue(&hub.hub_identifier, &hub.key),
-            landscape: is_episode_shelf(&items),
-            id: hub.hub_identifier.clone(),
-            key: hub.key.clone(),
-            link: crate::catalog::collections::promoted_collection_link(
-                sid, &hub.hub_identifier, &hub.key, &hub.title, section,
-            ),
-            total: hub.total(),
-            title: crate::catalog::hub_title::localized_hub_title(
-                crate::catalog::hub_title::Scope::Section,
-                &hub.hub_identifier,
-                &hub.title,
-            ),
-            items,
-        });
+        out.push(section_shelf(sid, section, &hub.hub_identifier, &hub.key, &hub.title, hub.total(), items));
     }
     out
+}
+
+/// [`parse_hubs`] for a Jellyfin library: its Continue Watching, Next Up and Recently Added
+/// shelves, rows built straight from the `BaseItemDto`s under the same filter.
+pub(crate) fn parse_jf_shelves(shelves: &[crate::jf::JfShelf], sid: ServerId, section: i64) -> Vec<Shelf> {
+    let mut out = Vec::new();
+    for shelf in shelves {
+        if out.len() >= MAX_SHELVES {
+            break;
+        }
+        let items: Vec<PmsMovie> = shelf
+            .items
+            .iter()
+            .filter(|it| crate::catalog_fetch::jf_row::listable(it))
+            .map(|it| crate::catalog_fetch::jf_row::row(it, sid, shelf.section))
+            .filter(|m| !m.title.is_empty() && !m.thumb.is_empty())
+            .take(MAX_SHELF_ITEMS)
+            .collect();
+        if items.is_empty() || shelf.title.is_empty() {
+            continue;
+        }
+        out.push(section_shelf(sid, section, &shelf.identifier, &shelf.key, &shelf.title, shelf.items.len(), items));
+    }
+    out
+}
+
+fn section_shelf(sid: ServerId, section: i64, id: &str, key: &str, title: &str, total: usize,
+    items: Vec<PmsMovie>) -> Shelf
+{
+    Shelf {
+        is_continue: shelf_is_continue(id, key),
+        landscape: is_episode_shelf(&items),
+        id: id.to_string(),
+        key: key.to_string(),
+        link: crate::catalog::collections::promoted_collection_link(sid, id, key, title, section),
+        total,
+        title: crate::catalog::hub_title::localized_hub_title(
+            crate::catalog::hub_title::Scope::Section,
+            id,
+            title,
+        ),
+        items,
+    }
 }
 
 /// Prints the shelf's identity and how many items it holds — `PmsMovie` has no `Debug` and a

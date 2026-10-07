@@ -1249,7 +1249,11 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
             // sectionId 0 = every section, which `opt_int` sends by omitting it. The Search screen
             // is deliberately account-wide: `sectionId` only RANKS (measured — every other
             // section's rows still come back), so it could not scope this even if we wanted it to.
-            let mc = crate::catalog::client_for(sid)?.search(&q, LIMIT, 0)?;
+            let client = crate::catalog::client_for(sid)?;
+            if let Some(j) = client.jf() {
+                return Some(project_jf(&j.search_results(&q, LIMIT)?, sid, &favs));
+            }
+            let mc = client.search(&q, LIMIT, 0)?;
             Some(project(&mc, sid, &favs))
         })
         .unwrap_or(None);
@@ -1332,6 +1336,41 @@ fn project(
 /// Are these two rows the same tag? `tagKey` is plex.tv's and global; `id` is server-local and
 /// dense from 1, so it may only be compared **within one server** — two servers' id 921 are two
 /// different people, and folding on it across sources would merge strangers.
+/// WORKER THREAD: [`project`] for a Jellyfin answer — its title groups into their shelves, a
+/// BoxSet as a collection hit, each matching person as a Cast & Crew row; every row built straight
+/// from the `BaseItemDto`.
+fn project_jf(found: &crate::jf::JfSearch, sid: ServerId, favs: &[(ServerId, i64, bool)]) -> Projection {
+    let mut out: Projection = Default::default();
+    for ((_, rows), (_, kind, _)) in found.groups.iter().zip(crate::jf::SEARCH_GROUPS) {
+        let Some(k) = KINDS.iter().position(|x| x.hubs().contains(&kind)) else { continue };
+        for it in rows {
+            let item = crate::catalog_fetch::jf_row::row(it, sid, 0);
+            out[k].push(if kind == "collection" {
+                Item::Collection(CollectionHit { item, tag: it.index_number.unwrap_or(0) })
+            } else {
+                Item::Media(item)
+            });
+        }
+    }
+    if let Some(k) = KINDS.iter().position(|x| *x == Kind::Person) {
+        for p in &found.people {
+            let id = crate::jf::ids::intern(&p.id);
+            out[k].push(Item::Tag(TagHit {
+                sid,
+                fav: section_is_fav(favs, sid, 0),
+                name: p.name.clone(),
+                tag_key: crate::jf::ids::normalize(&p.id),
+                id: if id != 0 { id.to_string() } else { String::new() },
+                thumb: crate::jf::images::person_thumb(p),
+                key: String::new(),
+                sec: 0,
+                count: 0,
+            }));
+        }
+    }
+    out
+}
+
 fn same_tag(a: &TagHit, b: &TagHit) -> bool {
     if !a.tag_key.is_empty() && !b.tag_key.is_empty() {
         return a.tag_key == b.tag_key;

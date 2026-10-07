@@ -332,8 +332,17 @@ pub(crate) fn member(row: &crate::catalog::Metadata, sid: ServerId) -> PmsMovie 
     item
 }
 
+/// [`member`] for a Jellyfin BoxSet member: an episode wears its series' poster, never its still.
+fn jf_member(it: &crate::jf::models::BaseItemDto, sid: ServerId) -> PmsMovie {
+    let mut item = crate::catalog_fetch::jf_row::row(it, sid, 0);
+    if item.kind == 3 {
+        item.thumb = crate::jf::images::series_primary(it);
+    }
+    item
+}
+
 /// A read's page, or the landing its failure is: the one mapping of the server's non-page answers.
-fn answered(outcome: CollectionOutcome) -> Result<crate::catalog::MediaContainer, Landing> {
+fn answered<T>(outcome: CollectionOutcome<T>) -> Result<T, Landing> {
     match outcome {
         CollectionOutcome::Ok(page) => Ok(page),
         CollectionOutcome::Denied => Err(Landing::Denied),
@@ -360,14 +369,24 @@ fn run_job(client: &'static crate::catalog::Client, sid: ServerId, job: Job) -> 
             }
             Job::Header { rk } => answered(client.collection(&rk))?.metadata.first()
                 .map_or(Landing::Missing, |row| Landing::Header { rk: None, head: Header::of(row) }),
-            Job::Children { rk, start } => {
-                let page = answered(client.collection_children(&rk, start as i64, PAGE_SIZE as i64))?;
-                let total = page.total_size.max(page.size).max(0) as usize;
-                let got = page.metadata.len();
-                let items = page.metadata.iter().filter(|row| crate::catalog_fetch::listable(&row.kind))
-                    .map(|row| member(row, sid)).collect();
-                Landing::Page { start, got, items, total }
-            }
+            Job::Children { rk, start } => match client.jf() {
+                Some(j) => {
+                    let page = answered(j.collection_members(&rk, start as i64, PAGE_SIZE as i64))?;
+                    let got = page.items.len();
+                    let total = page.total_record_count.max(got as i64).max(0) as usize;
+                    let items = page.items.iter().filter(|it| crate::catalog_fetch::jf_row::listable(it))
+                        .map(|it| jf_member(it, sid)).collect();
+                    Landing::Page { start, got, items, total }
+                }
+                None => {
+                    let page = answered(client.collection_children(&rk, start as i64, PAGE_SIZE as i64))?;
+                    let total = page.total_size.max(page.size).max(0) as usize;
+                    let got = page.metadata.len();
+                    let items = page.metadata.iter().filter(|row| crate::catalog_fetch::listable(&row.kind))
+                        .map(|row| member(row, sid)).collect();
+                    Landing::Page { start, got, items, total }
+                }
+            },
         })
     };
     run().unwrap_or_else(|failed| failed)

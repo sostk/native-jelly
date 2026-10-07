@@ -1,5 +1,5 @@
-//! Contract tests against a REAL Jellyfin server, through the same `plex::Client` facade the app
-//! reads. Ignored by default; run with
+//! Contract tests against a REAL Jellyfin server, through the same `catalog::Client` and `Jf` ops
+//! the app reads. Ignored by default; run with
 //!
 //! ```text
 //! JF_URL=http://127.0.0.1:8096 JF_USER=… JF_PASS=… cargo test --lib jf::live_tests -- --ignored --test-threads=1
@@ -78,17 +78,17 @@ fn live_sections_page_sort_and_filter() {
     eprintln!("sections: {}", secs.directory.len());
     assert!(!secs.directory.is_empty());
     let Some(movies) = first_section(c, "movie") else { return };
-    let page = c
-        .section_items_query(&SectionQuery { section_key: movies, sort: "addedAt:desc", filters: &[], start: 0, size: 5, include_meta: true })
+    let j = c.jf().expect("a Jellyfin seat");
+    let page = j
+        .section_page(&SectionQuery { section_key: movies, sort: "addedAt:desc", filters: &[], start: 0, size: 5, include_meta: true })
         .expect("page");
-    eprintln!("movies: total {} page {}", page.total_size, page.metadata.len());
-    assert!(page.total_size >= page.metadata.len() as i64);
+    eprintln!("movies: total {} page {}", page.total, page.items.len());
+    assert!(page.total >= page.items.len() as i64);
     assert!(page.meta.as_ref().is_some_and(|m| !m.types[0].sort.is_empty()));
-    let m = &page.metadata[0];
-    assert!(!m.rating_key.is_empty() && m.rating_key.parse::<i64>().is_ok());
-    assert!(m.thumb.starts_with("/library/metadata/"), "artwork is Plex-shaped");
-    let img = c.image_transcode_path(&m.thumb, 300, 450, false);
-    assert!(img.starts_with("/Items/") && img.contains("/Images/Primary"), "and translates to Jellyfin");
+    let first = &page.items[0];
+    assert!(ids::rating_key(&first.id).parse::<i64>().is_ok());
+    let img = c.image_transcode_path(&super::images::primary(first), 300, 450, false);
+    assert!(img.starts_with("/Items/") && img.contains("/Images/Primary"), "artwork resolves to a Jellyfin image");
     let bytes = c.fetch_built(&img).expect("poster bytes");
     assert!(bytes.len() > 1000);
 
@@ -96,12 +96,12 @@ fn live_sections_page_sort_and_filter() {
     eprintln!("genres: {}", genres.directory.len());
     if let Some(g) = genres.directory.first() {
         let f = vec![("genre".to_string(), g.key.clone())];
-        let p = c.section_items_query(&SectionQuery { section_key: movies, sort: "titleSort", filters: &f, start: 0, size: 50, include_meta: false }).expect("genre page");
-        assert!(p.total_size <= page.total_size);
+        let p = j.section_page(&SectionQuery { section_key: movies, sort: "titleSort", filters: &f, start: 0, size: 50, include_meta: false }).expect("genre page");
+        assert!(p.total <= page.total);
     }
     let letters = c.section_directory(movies, "firstCharacter", None).expect("letters");
     let n: i64 = letters.directory.iter().map(|d| d.size).sum();
-    assert_eq!(n, page.total_size, "the letter index covers the whole library");
+    assert_eq!(n, page.total, "the letter index covers the whole library");
 }
 
 #[test]
@@ -109,16 +109,17 @@ fn live_sections_page_sort_and_filter() {
 fn live_home_detail_and_search() {
     let l = need_live!();
     let c = &l.client;
-    let hubs = c.home_hubs(12).expect("home hubs");
-    eprintln!("home hubs: {:?}", hubs.hub.iter().map(|h| (h.hub_identifier.as_str(), h.size)).collect::<Vec<_>>());
-    let cw = c.continue_watching(12).expect("continue watching");
-    assert_eq!(cw.hub.len(), 1);
+    let j = c.jf().expect("a Jellyfin seat");
+    let shelves = j.home_shelves(12).expect("home shelves");
+    eprintln!("home shelves: {:?}", shelves.iter().map(|s| (s.identifier.as_str(), s.items.len())).collect::<Vec<_>>());
+    let cw = j.continue_watching_items(12).expect("continue watching");
+    eprintln!("continue watching: {}", cw.len());
     let _ = c.promoted(10);
     if let Some(sec) = first_section(c, "movie") {
-        let lh = c.library_hubs(sec, 10).expect("library hubs");
-        eprintln!("library hubs: {:?}", lh.hub.iter().map(|h| (h.hub_identifier.as_str(), h.size)).collect::<Vec<_>>());
+        let lh = j.library_shelves(sec, 10).expect("library shelves");
+        eprintln!("library shelves: {:?}", lh.iter().map(|s| (s.identifier.as_str(), s.items.len())).collect::<Vec<_>>());
     }
-    let any = hubs.hub.iter().flat_map(|h| h.metadata.iter()).next().map(|m| m.rating_key.clone());
+    let any = shelves.iter().flat_map(|s| s.items.iter()).next().map(|it| ids::rating_key(&it.id));
     let Some(rk) = any else { return };
     let d = c.metadata(&rk).expect("detail");
     eprintln!("detail: kind {} media {} markers {} roles {}", d.kind, d.media.len(), d.marker.len(), d.role.len());
@@ -138,12 +139,12 @@ fn live_home_detail_and_search() {
         }
         _ => {}
     }
-    let _ = c.related(&d.rating_key).expect("related");
+    let _ = j.similar_items(&d.rating_key).expect("similar");
     let _ = c.extras(&d.rating_key).expect("extras");
     let q: String = d.title.chars().take(4).collect();
-    let s = c.search(&q, 10, 0).expect("search");
-    let hits: i64 = s.hub.iter().map(|h| h.size).sum();
-    eprintln!("search hubs {} hits {hits}", s.hub.len());
+    let s = j.search_results(&q, 10).expect("search");
+    let hits: usize = s.groups.iter().map(|(_, rows)| rows.len()).sum::<usize>() + s.people.len();
+    eprintln!("search groups {} hits {hits}", s.groups.len());
     assert!(hits > 0, "an item's own title prefix finds something");
 }
 
@@ -153,10 +154,10 @@ fn live_playback_decisions_reports_and_watched_state() {
     let l = need_live!();
     let c = &l.client;
     let Some(movies) = first_section(c, "movie") else { return };
-    let page = c
-        .section_items_query(&SectionQuery { section_key: movies, sort: "titleSort", filters: &[], start: 0, size: 1, include_meta: false })
+    let page = c.jf().expect("a Jellyfin seat")
+        .section_page(&SectionQuery { section_key: movies, sort: "titleSort", filters: &[], start: 0, size: 1, include_meta: false })
         .expect("page");
-    let rk = page.metadata[0].rating_key.clone();
+    let rk = ids::rating_key(&page.items[0].id);
     let d = c.metadata(&rk).expect("detail");
     let part = d.media[0].part[0].key.clone();
 

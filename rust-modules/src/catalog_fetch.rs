@@ -30,6 +30,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 pub(crate) mod record;
 pub(crate) mod initial;
+pub(crate) mod jf_row;
 
 /// Catalog rows Home holds at most, across EVERY source. A hard ceiling on the store the whole
 /// screen indexes into, not a per-server one — see [`allot`] for how the sources divide it.
@@ -752,6 +753,11 @@ struct SourceBuild {
 /// comparison downstream then trusts). A `&'static Client` also pins the exact address this fetch
 /// was aimed at even if the registry re-points that slot mid-request.
 fn fetch_source(c: &crate::catalog::Client, sid: ServerId) -> Option<SourceBuild> {
+    if let Some(j) = c.jf() {
+        let shelves = j.home_shelves(HUB_FETCH_COUNT)?;
+        let cw = j.continue_watching_items(HUB_FETCH_COUNT)?;
+        return Some(project_jf(&shelves, &cw, sid));
+    }
     let mc = c.home_hubs(HUB_FETCH_COUNT)?;
     // The Continue Watching shelf comes from the DEDICATED hub (see `project`). Its failure fails
     // THIS SOURCE (`?`) — nothing of it commits and it retries on its own backoff. Losing the most
@@ -834,17 +840,56 @@ fn project(
             .unwrap_or("");
         let identifier_is_unique =
             hub_identifier_counts.get(hub.hub_identifier.as_str()).copied().unwrap_or(0) <= 1;
-        out.shelves.push(Shelf {
-            title: crate::catalog::hub_title::localized_hub_title(
-                crate::catalog::hub_title::Scope::Home { library, identifier_is_unique },
-                &hub.hub_identifier,
-                &hub.title,
-            ),
-            hub_id: hub.hub_identifier.clone(),
-            key: hub.key.clone(),
-            items,
-            total: hub.total(),
-        });
+        out.shelves.push(home_shelf(&hub.hub_identifier, &hub.key, &hub.title, library,
+            identifier_is_unique, hub.total(), items));
+    }
+    out
+}
+
+/// One Home shelf, its heading localized the way every source's is.
+fn home_shelf(id: &str, key: &str, title: &str, library: &str, identifier_is_unique: bool,
+    total: usize, items: Vec<PmsMovie>) -> Shelf
+{
+    Shelf {
+        title: crate::catalog::hub_title::localized_hub_title(
+            crate::catalog::hub_title::Scope::Home { library, identifier_is_unique },
+            id,
+            title,
+        ),
+        hub_id: id.to_string(),
+        key: key.to_string(),
+        items,
+        total,
+    }
+}
+
+/// [`project`] for a Jellyfin source: its library shelves (`/Items/Latest` per view) and its
+/// Continue Watching deck (`/UserItems/Resume` + `/Shows/NextUp`), rows built straight from the
+/// `BaseItemDto`s. Same rules — listable types only, a row needs a title and a poster, an empty
+/// shelf is dropped, a heading names its library when two shelves share an identifier.
+fn project_jf(
+    shelves: &[crate::jf::JfShelf],
+    cw: &[crate::jf::models::BaseItemDto],
+    sid: ServerId,
+) -> SourceBuild {
+    let keep = |it: &crate::jf::models::BaseItemDto, sec: i64| {
+        if !jf_row::listable(it) { return None; }
+        let m = jf_row::row(it, sid, sec);
+        (!m.title.is_empty() && !m.thumb.is_empty()).then_some(m)
+    };
+    let mut out = SourceBuild::default();
+    out.cw = cw.iter()
+        .filter_map(|it| keep(it, 0).map(|m| CwItem { last_viewed_at: jf_row::last_played(it), m }))
+        .collect();
+    for shelf in shelves {
+        let items: Vec<PmsMovie> = shelf.items.iter().filter_map(|it| keep(it, shelf.section)).collect();
+        if items.is_empty() {
+            continue;
+        }
+        let identifier_is_unique =
+            shelves.iter().filter(|s| s.identifier == shelf.identifier).count() <= 1;
+        out.shelves.push(home_shelf(&shelf.identifier, &shelf.key, &shelf.title, &shelf.library,
+            identifier_is_unique, shelf.items.len(), items));
     }
     out
 }

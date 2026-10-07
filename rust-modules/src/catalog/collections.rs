@@ -56,8 +56,8 @@ impl CollectionRef {
 /// A collection read preserves the server answers that collection UI must present distinctly.
 /// Every other failure — no response, an unexpected status, a malformed 2xx body — is one
 /// retryable `Transport`: the page presents them identically.
-pub(crate) enum CollectionOutcome {
-    Ok(MediaContainer),
+pub(crate) enum CollectionOutcome<T = MediaContainer> {
+    Ok(T),
     Denied,
     Missing,
     Transport,
@@ -86,13 +86,13 @@ impl Client {
     }
 
     /// `GET /library/collections/{ratingKey}/children`, paged with both required parameters.
+    /// A Jellyfin server's members are read through `Jf::collection_members` instead.
     pub(crate) fn collection_children(
         &self,
         rating_key: &str,
         start: i64,
         size: i64,
     ) -> CollectionOutcome {
-        if let Some(j) = self.jf() { return j.collection_children(rating_key, start, size); }
         let path = QueryBuilder::new(format!("/library/collections/{rating_key}/children"))
             .int("X-Plex-Container-Start", start)
             .int("X-Plex-Container-Size", size)

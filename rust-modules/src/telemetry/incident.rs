@@ -445,25 +445,6 @@ pub(crate) enum ReadoutGlyph {
     WifiSlash,
 }
 
-impl ReadoutGlyph {
-    /// Every mark, so the screen's mapping can be held to one icon per mark.
-    #[cfg(test)]
-    pub(crate) const ALL: [Self; 12] = [
-        Self::ClockBadgeAlert,
-        Self::CloudBadgeAlert,
-        Self::GlobeBadgeMinus,
-        Self::GlobeBadgeQuestion,
-        Self::KeyBadgeAlert,
-        Self::LockBadgeAlert,
-        Self::PeopleBadgeAlert,
-        Self::PersonBadgeXmark,
-        Self::ServerBadgeMinus,
-        Self::ServerBadgePlus,
-        Self::ServerBadgeXmark,
-        Self::WifiSlash,
-    ];
-}
-
 /// **The [`LinkClass`] outcomes a plex.tv-facing incident always reads the same way**, shared by
 /// [`IncidentKind::PinCreate`] (`mint_pin`, `auth.rs`) and the `Discovery(Silent)`/`PlexTv` arm of
 /// [`IncidentContext::readout_glyph`] — the one place both used to spell out the same three arms

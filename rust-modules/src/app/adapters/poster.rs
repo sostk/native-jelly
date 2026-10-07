@@ -1607,6 +1607,19 @@ impl fan::FanIo for WorkerFanIo<'_> {
     }
     fn members(&mut self) -> fan::Got<fan::Members> {
         use crate::catalog::collections::CollectionOutcome as O;
+        if let Some(j) = self.client.jf() {
+            return match j.collection_members(self.rk, 0, fan::FAN_MEMBERS as i64) {
+                O::Ok(page) => fan::Got::Ok(
+                    page.items
+                        .iter()
+                        .map(|it| (crate::jf::images::thumb(it),
+                            crate::jf::images::ultra_blur(it).and_then(|c| c.corners())))
+                        .collect(),
+                ),
+                O::Denied | O::Missing => fan::Got::Final,
+                O::Transport => fan::Got::Transient,
+            };
+        }
         match self.client.collection_children(self.rk, 0, fan::FAN_MEMBERS as i64) {
             O::Ok(page) => fan::Got::Ok(
                 page.metadata

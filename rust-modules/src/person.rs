@@ -1482,6 +1482,13 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
             ),
             K_MEDIA => Landing::Media(
                 catch_unwind(|| {
+                    if let Some(j) = c.jf() {
+                        let items = j.person_items(&arg[0])?;
+                        return Some(MediaLanding {
+                            shelves: split_jf_by_type(&items, sid),
+                            matches: jf_guid_index(&items),
+                        });
+                    }
                     let mc = c.person_media(&arg[0])?;
                     Some(MediaLanding {
                         shelves: split_by_type(&mc, sid),
@@ -1620,6 +1627,37 @@ pub(crate) fn guid_index(mc: &crate::catalog::MediaContainer) -> Vec<(String, St
         .filter(|it| matches!(it.kind.as_str(), "movie" | "show"))
         .filter(|it| !it.guid.is_empty() && !it.rating_key.is_empty())
         .map(|it| (it.guid.clone(), it.rating_key.clone()))
+        .collect()
+}
+
+/// [`split_by_type`] for a Jellyfin filmography: `Movie` rows to the Movies shelf, `Series` to
+/// Shows, rows built straight from the `BaseItemDto`s.
+pub(crate) fn split_jf_by_type(items: &[crate::jf::models::BaseItemDto], sid: ServerId) -> [Shelf; NSHELF] {
+    let mut out: [Shelf; NSHELF] = Default::default();
+    for it in items {
+        let sh = match it.kind.as_str() {
+            "Movie" => &mut out[0],
+            "Series" => &mut out[1],
+            _ => continue,
+        };
+        sh.total += 1;
+        if sh.items.len() < SHELF_MAX {
+            sh.items.push(crate::catalog_fetch::jf_row::row(it, sid, 0));
+        }
+    }
+    out
+}
+
+/// [`guid_index`] for a Jellyfin filmography: each movie and series by its provider id
+/// (`imdb://…`, else `tmdb://…`, `tvdb://…`, else its own `jellyfin://` id).
+pub(crate) fn jf_guid_index(items: &[crate::jf::models::BaseItemDto]) -> Vec<(String, String)> {
+    items
+        .iter()
+        .filter(|it| matches!(it.kind.as_str(), "Movie" | "Series"))
+        .filter_map(|it| {
+            let rk = crate::jf::ids::rating_key(&it.id);
+            (!rk.is_empty()).then(|| (crate::jf::convert::portable_guid(it), rk))
+        })
         .collect()
 }
 

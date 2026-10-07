@@ -23,8 +23,9 @@ impl Client {
     /// [`continue_watching`] fetches properly (see its doc for why the dedicated endpoint is the
     /// only honest one), so we parse and discard them today; and with several sources on Home the
     /// waste is per source per fetch, not once.
+    ///
+    /// PMS only: a Jellyfin server's shelves are read through `Jf::home_shelves`.
     pub fn home_hubs(&self, count: i64) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.home_hubs(count); }
         self.get_json(
             &QueryBuilder::new("/hubs")
                 .int("count", count)
@@ -55,8 +56,9 @@ impl Client {
     /// rotate their subject on every call, sometimes answering empty and vanishing from the drawn
     /// set. A refetch legitimately returns a different shelf count and different ids with nothing
     /// changed on the server, which is a fact about this endpoint rather than about any caller.
+    ///
+    /// PMS only: a Jellyfin library's shelves are read through `Jf::library_shelves`.
     pub fn library_hubs(&self, section_key: i64, count: i64) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.library_hubs(section_key, count); }
         self.get_json(
             &QueryBuilder::new(&format!("/hubs/sections/{section_key}"))
                 .int("count", count)
@@ -64,9 +66,9 @@ impl Client {
         )
     }
 
-    /// GET /hubs/continueWatching?count=… — the dedicated Continue Watching hub.
+    /// GET /hubs/continueWatching?count=… — the dedicated Continue Watching hub. PMS only: a
+    /// Jellyfin server's deck is read through `Jf::continue_watching_items`.
     pub fn continue_watching(&self, count: i64) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.continue_watching(count); }
         self.get_json(
             &QueryBuilder::new("/hubs/continueWatching")
                 .int("count", count)

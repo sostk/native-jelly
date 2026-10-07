@@ -2425,6 +2425,49 @@ fn restorable(sorts: &[SortEntry], restore: &Restore) -> Option<SortEntry> {
     })
 }
 
+/// One listing page as the server answered it: a PMS container or a Jellyfin page.
+enum Listing {
+    Plex(crate::catalog::MediaContainer),
+    Jf(crate::jf::JfPage),
+}
+
+impl Listing {
+    fn fetch(client: &crate::catalog::Client, query: &SectionQuery<'_>) -> Option<Self> {
+        match client.jf() {
+            Some(j) => j.section_page(query).map(Self::Jf),
+            None => client.section_items_query(query).map(Self::Plex),
+        }
+    }
+
+    fn meta(&self) -> Option<&crate::catalog::Meta> {
+        match self {
+            Self::Plex(mc) => mc.meta.as_ref(),
+            Self::Jf(p) => p.meta.as_ref(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Plex(mc) => mc.metadata.len(),
+            Self::Jf(p) => p.items.len(),
+        }
+    }
+
+    fn total_size(&self) -> i64 {
+        match self {
+            Self::Plex(mc) => mc.total_size,
+            Self::Jf(p) => p.total.max(p.items.len() as i64),
+        }
+    }
+
+    fn rows(&self, sid: ServerId, section: i64) -> Vec<PmsMovie> {
+        match self {
+            Self::Plex(mc) => mc.metadata.iter().map(|item| parse_item(item, sid)).collect(),
+            Self::Jf(p) => p.items.iter().map(|it| crate::catalog_fetch::jf_row::row(it, sid, section)).collect(),
+        }
+    }
+}
+
 fn fetch_listing_page(
     client: &crate::catalog::Client,
     sid: ServerId,
@@ -2432,10 +2475,10 @@ fn fetch_listing_page(
     confirm_sort: bool,
     restore: Option<&Restore>,
 ) -> ListingPage {
-    let Some(mut container) = client.section_items_query(query) else {
+    let Some(mut container) = Listing::fetch(client, query) else {
         return ListingPage::failed();
     };
-    let sorts: Option<Vec<SortEntry>> = container.meta.as_ref().and_then(|meta| {
+    let sorts: Option<Vec<SortEntry>> = container.meta().and_then(|meta| {
         meta.types.iter().find(|kind| kind.active != 0)
             .or_else(|| meta.types.first()).map(|kind| kind.sort.iter()
                 .filter(|sort| !sort.key.is_empty()).map(|sort| SortEntry {
@@ -2452,7 +2495,7 @@ fn fetch_listing_page(
         if let Some(first) = sorts.as_ref().and_then(|sorts| sorts.first()) {
             let sort = first.query(first.default_desc);
             let sorted = SectionQuery { sort: &sort, include_meta: false, ..*query };
-            let Some(sorted_container) = client.section_items_query(&sorted) else {
+            let Some(sorted_container) = Listing::fetch(client, &sorted) else {
                 return ListingPage::failed();
             };
             container = sorted_container;
@@ -2472,15 +2515,15 @@ fn fetch_listing_page(
         if let Some(entry) = sorts.as_deref().and_then(|sorts| restorable(sorts, restore)) {
             let sort = entry.query(restore.desc);
             let sorted = SectionQuery { sort: &sort, include_meta: false, ..*query };
-            if let Some(sorted_container) = client.section_items_query(&sorted) {
+            if let Some(sorted_container) = Listing::fetch(client, &sorted) {
                 container = sorted_container;
                 restored = Some((restore.sort.clone(), restore.desc));
             }
         }
     }
-    let total = if container.total_size > 0 { container.total_size }
-        else { query.start + container.metadata.len() as i64 };
-    let items = container.metadata.iter().map(|item| parse_item(item, sid)).collect();
+    let total = if container.total_size() > 0 { container.total_size() }
+        else { query.start + container.len() as i64 };
+    let items = container.rows(sid, query.section_key);
     ListingPage { items, total, sorts, restored }
 }
 
@@ -2962,8 +3005,8 @@ pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
                             size: 0,
                             include_meta: false,
                         };
-                        if let Some(mc) = client.section_items_query(&q) {
-                            out.push((k, mc.total_size));
+                        if let Some(page) = Listing::fetch(client, &q) {
+                            out.push((k, page.total_size()));
                         }
                     }
                     SrcWhat::Counts(out)

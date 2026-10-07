@@ -473,7 +473,7 @@ pub(crate) fn take_landings<T>(gate: &nj_machine::landgate::Gate, id: StoreId,
 mod tests {
     #[test]
     fn data_layers_do_not_execute_auth_endpoint_recovery() {
-        for file in ["pms.rs", "browse/mod.rs", "viewstate.rs"] {
+        for file in ["catalog_fetch.rs", "browse/mod.rs", "viewstate.rs"] {
             let source = std::fs::read_to_string(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
             ).unwrap();

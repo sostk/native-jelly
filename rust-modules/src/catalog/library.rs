@@ -94,9 +94,9 @@ impl Client {
 
     /// Sorted/filtered/paged section listing — the Library browse grid's one fetch.
     /// `GET /library/sections/{k}/all?includeMeta=1&sort=…&genre=…&X-Plex-Container-Start&Size`
-    /// → `.metadata[]` + `total_size` (+ `.meta` when `include_meta`).
+    /// → `.metadata[]` + `total_size` (+ `.meta` when `include_meta`). PMS only: a Jellyfin
+    /// library's pages are read through `Jf::section_page`.
     pub fn section_items_query(&self, q: &SectionQuery) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.section_items_query(q); }
         let mut b = QueryBuilder::new(format!("/library/sections/{}/all", q.section_key));
         if q.include_meta {
             b = b.int("includeMeta", 1);
@@ -238,9 +238,9 @@ impl Client {
         self.get_json(&format!("/library/metadata/{rating_key}/allLeaves"))
     }
 
-    /// GET /library/metadata/{rating_key}/related → `.hub[]`.
+    /// GET /library/metadata/{rating_key}/related → `.hub[]`. PMS only: a Jellyfin item's similar
+    /// titles are read through `Jf::similar_items`.
     pub fn related(&self, rating_key: &str) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.related(rating_key); }
         self.get_json(&format!("/library/metadata/{rating_key}/related"))
     }
 
@@ -251,9 +251,9 @@ impl Client {
     ///
     /// **Group the rows by each row's own `type`, never by the container's `viewGroup`** — that
     /// field is unreliable here: it read `"movie"` on a response whose only row was a `show`
-    /// (verified on person 6059, 5 movies + 1 show). See `crate::person::split_by_type`.
+    /// (verified on person 6059, 5 movies + 1 show). See `crate::person::split_by_type`. PMS only:
+    /// a Jellyfin person's filmography is read through `Jf::person_items`.
     pub fn person_media(&self, person_id: &str) -> Option<MediaContainer> {
-        if let Some(j) = self.jf() { return j.person_media(person_id); }
         self.get_json(&format!("/library/people/{person_id}/media"))
     }
 

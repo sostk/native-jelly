@@ -3023,18 +3023,35 @@ fn project_extras(
 }
 
 fn fetch_related(sid: crate::catalog::ServerId, rk: &str) -> RelatedRows {
-    let mc = match crate::catalog::client_for(sid).and_then(|c| c.related(rk)) {
-        Some(m) => m,
-        None => {
-            // Same shape as `fetch_seasons` above: the degrade is deliberate, the silence is not —
-            // an item with no related hub and a refused GET both reach `fetch_full`'s `related=0`.
-            nj_base::eventlog::log(&format!(
-                "detail: rk={rk} /related did not answer — the related= below is that refusal"
-            ));
-            return RelatedRows::default();
-        }
+    let client = crate::catalog::client_for(sid);
+    let answer = match client.and_then(|c| c.jf()) {
+        Some(j) => j.similar_items(rk).map(|items| related_rows_jf(&items, sid, rk)),
+        None => client.and_then(|c| c.related(rk)).map(|mc| related_rows(&mc, sid, rk)),
     };
-    related_rows(&mc, sid, rk)
+    answer.unwrap_or_else(|| {
+        // Same shape as `fetch_seasons` above: the degrade is deliberate, the silence is not —
+        // an item with no related hub and a refused GET both reach `fetch_full`'s `related=0`.
+        nj_base::eventlog::log(&format!(
+            "detail: rk={rk} /related did not answer — the related= below is that refusal"
+        ));
+        RelatedRows::default()
+    })
+}
+
+/// A Jellyfin item's "More Like This" (`/Items/{id}/Similar`) as the Related row: listable titles
+/// other than the item itself, each once, capped at [`RELATED_MAX`]. Jellyfin lists no collection
+/// beside similar titles, so the collection shelf stays empty.
+fn related_rows_jf(items: &[crate::jf::models::BaseItemDto], sid: crate::catalog::ServerId, rk: &str) -> RelatedRows {
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(rk.to_string());
+    let related = items
+        .iter()
+        .filter(|it| crate::catalog_fetch::jf_row::listable(it))
+        .map(|it| crate::catalog_fetch::jf_row::row(it, sid, 0))
+        .filter(|m| !m.rk.is_empty() && seen.insert(m.rk.clone()))
+        .take(RELATED_MAX)
+        .collect();
+    RelatedRows { collection: None, related }
 }
 
 /// Related tiles this shelf holds at most. PMS answers `/related` with several titled hubs and we

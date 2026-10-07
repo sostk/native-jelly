@@ -256,7 +256,7 @@ impl Client {
     /// http_get path. `src_path` is the raw thumb/art path; encoding is centralized in enc().
     pub fn image_transcode_path(&self, src_path: &str, w: i64, h: i64, png: bool) -> String {
         if self.jf().is_some() {
-            return crate::jf::convert::jf_image_path(src_path, w, h, png).unwrap_or_else(|| src_path.to_string());
+            return crate::jf::images::jf_image_path(src_path, w, h, png).unwrap_or_else(|| src_path.to_string());
         }
         let mut q = QueryBuilder::new("/photo/:/transcode")
             .int("width", w)
