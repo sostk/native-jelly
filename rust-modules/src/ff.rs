@@ -4647,6 +4647,10 @@ struct HlsCursor {
     ended: bool,
     target_duration_secs: u64,
     start_applied: bool,
+    /// The content time, ns, this cursor is to start at when its playlist has no EXT-X-START
+    /// (Jellyfin lists the whole film from zero): the display base for the first cursor, the
+    /// handoff boundary for a candidate.
+    start_hint_ns: i64,
 }
 
 fn hls_cursor_open(
@@ -4655,6 +4659,7 @@ fn hls_cursor_open(
     aq: *mut AuQueue,
     net: &mut HlsNet,
     publishes_duration: bool,
+    start_hint_ns: i64,
     reserve: Option<&mut ReserveDeadlineState>,
 ) -> Result<HlsCursor, HlsExit> {
     let master_resource = crate::hls::Resource::new(origin.clone(), path)
@@ -4682,7 +4687,41 @@ fn hls_cursor_open(
         ended: false,
         target_duration_secs: 1,
         start_applied: false,
+        start_hint_ns,
     })
+}
+
+/// Where a cursor's first refresh starts. EXT-X-START (PMS) names the segment itself, and the
+/// display base already places it. Without one the segment covering the hint is opened; the first
+/// cursor moves the display base onto that segment's real start, and a candidate whose segment
+/// does not begin at the handoff boundary would repeat or skip content, so it is refused.
+fn hls_start_index(cursor: &HlsCursor, media: &crate::hls::MediaPlaylist) -> Result<usize, HlsExit> {
+    if media.start_offset_micros.is_some() {
+        return media
+            .preferred_start_index()
+            .map_err(|_| HlsExit::Failed("HLS start offset is outside the supported timeline"));
+    }
+    let hint_ns = cursor.start_hint_ns.max(0);
+    let (index, start_ns) = media
+        .start_by_time(hint_ns / 1_000)
+        .map_err(|_| HlsExit::Failed("HLS playlist duration overflow"))?;
+    let drift_ns = start_ns - hint_ns;
+    if cursor.publishes_duration {
+        if drift_ns != 0 {
+            SHARED.disp_base.fetch_add(drift_ns, Ordering::Relaxed);
+            crate::player::log(&format!(
+                "hls: no start tag; segment {index} begins {}ms from the asked start, display base moved",
+                drift_ns / 1_000_000
+            ));
+        }
+    } else if drift_ns.abs() > 1_000_000 {
+        crate::player::log(&format!(
+            "hls: candidate segment {index} begins {}ms from the handoff boundary",
+            drift_ns / 1_000_000
+        ));
+        return Err(HlsExit::Failed("HLS candidate does not start on the handoff boundary"));
+    }
+    Ok(index)
 }
 
 fn hls_cursor_next(
@@ -4706,9 +4745,7 @@ fn hls_cursor_next(
             HlsExit::Failed("HLS media playlist rejected")
         })?;
         cursor.target_duration_secs = media.target_duration_secs;
-        let start_index = media
-            .preferred_start_index()
-            .map_err(|_| HlsExit::Failed("HLS start offset is outside the supported timeline"))?;
+        let start_index = if cursor.start_applied { 0 } else { hls_start_index(cursor, &media)? };
         let total_ns = i64::try_from(
             media
                 .total_duration()
@@ -6090,7 +6127,8 @@ fn hls_demux(
         SHARED.dg_abr_unsafe_deficit_ms.store(0, Ordering::Relaxed);
     }
     let mut net = HlsNet { hs, curl: None };
-    let mut cursor = hls_cursor_open(origin, path, aq, &mut net, true, None)?;
+    let start_hint_ns = SHARED.disp_base.load(Ordering::Relaxed);
+    let mut cursor = hls_cursor_open(origin, path, aq, &mut net, true, start_hint_ns, None)?;
     if abr.is_some() {
         SHARED.dg_abr_declared_kbps.store(
             i64::try_from(cursor.declared_bps / 1_000).unwrap_or(i64::MAX),
@@ -7002,6 +7040,7 @@ fn hls_demux(
             aq,
             &mut net,
             false,
+            offset_ns,
             exploration_reserve.as_mut(),
         ) {
             Ok(candidate) => candidate,

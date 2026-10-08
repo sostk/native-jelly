@@ -48,6 +48,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
         | AppArg::ItemMenu(_)
         | AppArg::PlayerOverlay(_)
         | AppArg::AltSources(_)
+        | AppArg::Versions(_)
         | AppArg::TracksPanel(_)
         | AppArg::AboutPanel
         | AppArg::PersonBio

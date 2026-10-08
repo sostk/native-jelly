@@ -40,6 +40,7 @@ pub(crate) const ELEM_ALT: u32 = 2;
 pub(crate) const ELEM_MARK_WATCHED: u32 = 3;
 pub(crate) const ELEM_MARK_UNWATCHED: u32 = 4;
 pub(crate) const ELEM_TRAILER: u32 = 5;
+pub(crate) const ELEM_VERSION: u32 = 6;
 
 /// The hero's one focus group. Local to this screen — nothing outside `screens::detail` ever names
 /// it — so, like `screens::profiles`'s `ROSTER_GROUP`/`FOOTER_GROUP`, any small integer would do;
@@ -76,6 +77,7 @@ const HERO_ICON_RATIO: f32 = 1.15;
 const HERO_ICON_GAP: f32 = 12.0;
 
 pub(crate) fn alt_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_also_available_c() }
+pub(crate) fn version_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_version_c() }
 
 fn mark_watched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_watched_c() }
 fn mark_unwatched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_unwatched_c() }
@@ -94,6 +96,8 @@ pub(crate) enum HeroCtl {
     Restart,
     /// the Trailer disc, present only while the loaded item has a playable extra
     Trailer,
+    /// the *Version* pill, present only while the item has more than one version
+    Version,
     /// the *Also available* pill, present only while a second pinned source holds this item
     Alt,
     /// the ✓ face of the watched TOGGLE — worn while the item is not watched (part-watched
@@ -110,12 +114,13 @@ impl HeroCtl {
             HeroCtl::Play => ELEM_PLAY,
             HeroCtl::Restart => ELEM_RESTART,
             HeroCtl::Trailer => ELEM_TRAILER,
+            HeroCtl::Version => ELEM_VERSION,
             HeroCtl::Alt => ELEM_ALT,
             HeroCtl::MarkWatched => ELEM_MARK_WATCHED,
             HeroCtl::MarkUnwatched => ELEM_MARK_UNWATCHED,
         }
     }
-    /// The inverse of [`elem`](Self::elem) — `None` for any `u32` outside the six identities
+    /// The inverse of [`elem`](Self::elem) — `None` for any `u32` outside the seven identities
     /// above, which is every elem a NON-hero group can mint (the completed sections use
     /// their own disjoint range, per the module doc).
     pub(crate) fn of_elem(e: u32) -> Option<Self> {
@@ -123,6 +128,7 @@ impl HeroCtl {
             ELEM_PLAY => Some(HeroCtl::Play),
             ELEM_RESTART => Some(HeroCtl::Restart),
             ELEM_TRAILER => Some(HeroCtl::Trailer),
+            ELEM_VERSION => Some(HeroCtl::Version),
             ELEM_ALT => Some(HeroCtl::Alt),
             ELEM_MARK_WATCHED => Some(HeroCtl::MarkWatched),
             ELEM_MARK_UNWATCHED => Some(HeroCtl::MarkUnwatched),
@@ -135,22 +141,23 @@ impl HeroCtl {
     }
 }
 
-/// Which of the conditional controls the row is showing: the three independent bits (restart,
-/// trailer, Also available), plus the item's watch state, which decides which FACE the watched
+/// Which of the conditional controls the row is showing: the four independent bits (restart,
+/// trailer, Version, Also available), plus the item's watch state, which decides which FACE the watched
 /// toggle wears.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct HeroSet {
     pub(crate) restart: bool,
     pub(crate) trailer: bool,
+    pub(crate) version: bool,
     pub(crate) alt: bool,
     pub(crate) mark: PosterMark,
 }
 
-/// The row's controls, in drawn order, for a given set. A fixed 5-slot array (Play + Restart +
-/// Trailer + Alt + one watch face is the widest the row ever gets) plus a live count, so no
-/// per-frame allocation.
-pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 5], usize) {
-    let mut v = [HeroCtl::Play; 5];
+/// The row's controls, in drawn order, for a given set. A fixed 6-slot array (Play + Restart +
+/// Trailer + Version + Alt + one watch face is the widest the row ever gets) plus a live count, so
+/// no per-frame allocation.
+pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 6], usize) {
+    let mut v = [HeroCtl::Play; 6];
     let mut n = 1;
     if set.restart {
         v[n] = HeroCtl::Restart;
@@ -158,6 +165,10 @@ pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 5], usize) {
     }
     if set.trailer {
         v[n] = HeroCtl::Trailer;
+        n += 1;
+    }
+    if set.version {
+        v[n] = HeroCtl::Version;
         n += 1;
     }
     if set.alt {
@@ -202,12 +213,12 @@ pub(crate) fn focusable(ctl: HeroCtl, full_trailer: bool) -> bool {
 /// presentation mode. Every call site that enumerates the row for focus/hit-testing extent must go
 /// through this rather than `hero_ctls` directly, or the two can disagree about which controls
 /// exist right now.
-pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 5], usize) {
+pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 6], usize) {
     let (all, n) = hero_ctls(set);
     if !full_trailer {
         return (all, n);
     }
-    let mut v = [HeroCtl::Play; 5];
+    let mut v = [HeroCtl::Play; 6];
     let mut count = 0;
     for &c in &all[..n] {
         if focusable(c, full_trailer) {
@@ -363,11 +374,16 @@ pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {
     pill_w(measure, alt_label(), theme::size::BODY, false, true)
 }
 
+pub(crate) fn version_pill_w(measure: &dyn Measure) -> f32 {
+    pill_w(measure, version_label(), theme::size::BODY, false, true)
+}
+
 /// Every measured width the row's accumulation needs, as one value — ported verbatim from
 /// `ui/detail.rs::HeroWidths`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HeroWidths {
     pub(crate) pill: f32,
+    pub(crate) version: f32,
     pub(crate) alt: f32,
     /// the three discs, in [`disc_verb`]'s slot order, each already unfurled
     pub(crate) disc: [f32; 3],
@@ -382,6 +398,7 @@ pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -
     for (k, c) in v[..n].iter().enumerate() {
         w = match c {
             HeroCtl::Play => cw.pill,
+            HeroCtl::Version => cw.version,
             HeroCtl::Alt => cw.alt,
             HeroCtl::Restart => cw.disc[0],
             HeroCtl::Trailer => cw.disc[1],
@@ -419,6 +436,7 @@ pub(crate) fn disc_caps(
         set,
         hero_pill_w(measure, set.restart),
         alt_pill_w(measure),
+        version_pill_w(measure),
         unfurl,
         label_w,
     )
@@ -428,12 +446,14 @@ pub(super) fn disc_caps_at(
     set: HeroSet,
     pill: f32,
     alt: f32,
+    version: f32,
     unfurl: [f32; 3],
     label_w: [f32; 3],
 ) -> [f32; 3] {
     let (_, n) = hero_ctls(set);
     let closed = HeroWidths {
         pill,
+        version,
         alt,
         disc: [CD; 3],
     };
@@ -453,6 +473,7 @@ pub(super) fn disc_caps_at(
         0.0,
         HeroWidths {
             pill,
+            version,
             alt,
             disc: open,
         },
@@ -475,6 +496,7 @@ pub(crate) fn hero_widths(
 ) -> HeroWidths {
     HeroWidths {
         pill: hero_pill_w(measure, has_restart),
+        version: version_pill_w(measure),
         alt: alt_pill_w(measure),
         disc: disc_caps(measure, set, unfurl, named_show),
     }
@@ -845,6 +867,7 @@ mod tests {
         HeroSet {
             restart,
             trailer,
+            version: false,
             alt,
             mark,
         }
@@ -1027,6 +1050,7 @@ mod tests {
     fn the_row_s_controls_never_overlap_at_any_set_size() {
         let cw = HeroWidths {
             pill: 200.0,
+            version: 0.0,
             alt: 260.0,
             disc: [CD, CD, CD],
         };
@@ -1255,6 +1279,7 @@ mod tests {
         let set = HeroSet {
             restart: true,
             trailer: false,
+            version: false,
             alt: false,
             mark: PosterMark::Watched,
         };
@@ -1270,6 +1295,7 @@ mod tests {
         let without = HeroSet {
             restart: false,
             trailer: false,
+            version: false,
             alt: false,
             mark: PosterMark::None,
         };
@@ -1288,6 +1314,7 @@ mod tests {
                 let set = HeroSet {
                     restart: true,
                     trailer,
+                    version: false,
                     alt,
                     mark: PosterMark::InProgress,
                 };
@@ -1408,12 +1435,14 @@ mod tests {
         let compact = HeroSet {
             restart: false,
             trailer: false,
+            version: false,
             alt: false,
             mark: PosterMark::None,
         };
         let wide = HeroSet {
             restart: true,
             trailer: false,
+            version: false,
             alt: true,
             mark: PosterMark::None,
         };
@@ -1427,11 +1456,13 @@ mod tests {
         let set = HeroSet {
             restart: true,
             trailer: false,
+            version: false,
             alt: true,
             mark: PosterMark::None,
         };
         let widths = HeroWidths {
             pill: 210.0,
+            version: 0.0,
             alt: 300.0,
             disc: [90.0, 120.0, 120.0],
         };
@@ -1474,13 +1505,14 @@ mod tests {
                                     [e, e, 0.0],
                                     [0.0, e, e],
                                 ] {
-                                    let disc = disc_caps_at(set, PW + 62.0, 340.0, unfurl, labels);
+                                    let disc = disc_caps_at(set, PW + 62.0, 340.0, 0.0, unfurl, labels);
                                     let last = hero_btn_rect_at(
                                         set,
                                         n - 1,
                                         0.0,
                                         HeroWidths {
                                             pill: PW + 62.0,
+                                            version: 0.0,
                                             alt: 340.0,
                                             disc,
                                         },
@@ -1503,6 +1535,7 @@ mod tests {
         let wide = HeroSet {
             restart: true,
             trailer: true,
+            version: false,
             alt: true,
             mark: PosterMark::Watched,
         };
@@ -1514,6 +1547,7 @@ mod tests {
             0.0,
             HeroWidths {
                 pill: hero_pill_w(&measure, true),
+                version: 0.0,
                 alt: alt_pill_w(&measure),
                 disc: caps,
             },
@@ -1526,6 +1560,7 @@ mod tests {
         let roomy = HeroSet {
             restart: false,
             trailer: true,
+            version: false,
             alt: false,
             mark: PosterMark::Watched,
         };
@@ -1552,6 +1587,7 @@ mod tests {
         let set = HeroSet {
             restart: true,
             trailer: true,
+            version: false,
             alt: true,
             mark: PosterMark::Watched,
         };
@@ -1591,6 +1627,7 @@ mod tests {
         let set = HeroSet {
             restart: true,
             trailer: true,
+            version: false,
             alt: true,
             mark: PosterMark::InProgress,
         };
@@ -1601,6 +1638,7 @@ mod tests {
             0.0,
             HeroWidths {
                 pill: PW + 62.0,
+                version: 0.0,
                 alt: 340.0,
                 disc: [CD; 3],
             },

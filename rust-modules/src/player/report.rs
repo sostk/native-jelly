@@ -1025,8 +1025,8 @@ mod tests {
     fn a_refused_plan_reports_no_delivery_and_no_requested_quality() {
         let _g = nj_base::testlock::serial();
         for verdict in [
-            crate::route::PlayVerdict::Server("Cannot convert this item.".into()),
-            crate::route::PlayVerdict::Server(String::new()),
+            crate::route::PlayVerdict::Server(crate::catalog::Refusal::NoCompatibleStream),
+            crate::route::PlayVerdict::Server(crate::catalog::Refusal::NoDeliveryMethod),
             crate::route::PlayVerdict::DirectPlayDisabled,
             crate::route::PlayVerdict::Forced(crate::route::ForcedFailure::Video),
         ] {
@@ -1057,7 +1057,7 @@ mod tests {
             let mut ps = crate::route::PlaybackSession::default();
             crate::route::refuse_by_server_for_test(
                 &mut ps,
-                "Cannot convert this item.",
+                crate::catalog::Refusal::NoCompatibleStream,
                 remux,
                 hls,
                 "vp9",
@@ -1072,7 +1072,7 @@ mod tests {
             assert_eq!(r.source_audio.code(), "eac3");
         }
         let mut ps = crate::route::PlaybackSession::default();
-        crate::route::refuse_by_server_for_test(&mut ps, "", false, false, "", "");
+        crate::route::refuse_by_server_for_test(&mut ps, crate::catalog::Refusal::NoDeliveryMethod, false, false, "", "");
         let r = error_context(&ps).refusal.expect("refusal block");
         assert_eq!((r.source_video.code(), r.source_audio.code()), ("unknown", "unknown"));
     }
@@ -1089,7 +1089,7 @@ mod tests {
         let mut ps = crate::route::PlaybackSession::default();
         crate::route::refuse_by_server_for_test(
             &mut ps,
-            sentence,
+            crate::catalog::Refusal::Unrecognized(sentence.into()),
             false,
             false,
             "x-secret-video-tag",
@@ -1158,7 +1158,7 @@ mod tests {
     fn a_refused_plan_reports_mode_unknown_and_a_real_route_keeps_its_mode() {
         let _g = nj_base::testlock::serial();
         let mut refused = crate::route::PlaybackSession::default();
-        crate::route::refuse_by_server_for_test(&mut refused, "", true, false, "", "");
+        crate::route::refuse_by_server_for_test(&mut refused, crate::catalog::Refusal::NoDeliveryMethod, true, false, "", "");
         assert_eq!(mode(&refused), "unknown");
         let mut policy = crate::route::PlaybackSession::default();
         crate::route::refuse_for_test(&mut policy, crate::route::PlayVerdict::DirectPlayDisabled);

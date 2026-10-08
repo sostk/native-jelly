@@ -382,6 +382,7 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
         &mut *aq,
         &mut net,
         false,
+        0,
         None,
     );
     let media = cursor
@@ -407,4 +408,74 @@ fn an_hls_redirect_off_the_pms_origin_is_refused_before_it_is_dialled() {
     let (outcome, _hs) = hls_open_plain(pms.port, "/start?X-Plex-Token=tok");
     assert!(outcome.is_err(), "{outcome:?}");
     assert!(cdn.requests().is_empty(), "nothing may reach another origin");
+}
+
+/// A Jellyfin-shaped HLS conversion (live 12.0 shape, synthetic ids): the master's child and a
+/// media playlist listing four 2.002 s segments from zero, with no EXT-X-START.
+fn jellyfin_hls() -> Scripted {
+    Scripted::start(|head, _port| {
+        let line = request_line(head);
+        if line.starts_with("GET /videos/0000-item/master.m3u8") {
+            ok_body("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=7104000,VIDEO-RANGE=SDR,CODECS=\"avc1.640029,mp4a.40.2\"\nmain.m3u8?PlaySessionId=ps&ApiKey=k1\n")
+        } else if line.starts_with("GET /videos/0000-item/main.m3u8") {
+            let mut text = String::from("#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:0\n");
+            for n in 0..4 {
+                text.push_str(&format!("#EXTINF:2.002000, nodesc\nhls1/main/{n}.ts?PlaySessionId=ps&ApiKey=k1\n"));
+            }
+            text.push_str("#EXT-X-ENDLIST\n");
+            ok_body(&text)
+        } else {
+            not_found()
+        }
+    })
+}
+
+fn jellyfin_first_segment(port: u16, publishes_duration: bool, start_hint_ns: i64) -> Result<String, String> {
+    let mut hs = nj_net::stream::http_stream_boxed();
+    let mut aq = crate::aq::aq_new(1 << 20);
+    let mut net = HlsNet { hs: &mut *hs, curl: None };
+    let origin = crate::catalog::Origin::http("127.0.0.1", i32::from(port));
+    let first = hls_cursor_open(
+        &origin,
+        "/videos/0000-item/master.m3u8?PlaySessionId=ps&ApiKey=k1",
+        &mut *aq,
+        &mut net,
+        publishes_duration,
+        start_hint_ns,
+        None,
+    )
+    .and_then(|mut cursor| hls_cursor_next(&mut cursor, &mut *aq, &mut net, None))
+    .map(|segment| segment.map(|s| s.resource.path).unwrap_or_default())
+    .map_err(|e| format!("{e:?}"));
+    nj_net::stream::http_close(&mut *hs);
+    crate::aq::aq_destroy(&mut *aq);
+    first
+}
+
+/// Jellyfin's playlist has no EXT-X-START: the first cursor opens the segment covering the display
+/// base and moves the base back onto that segment's start, so the fed timeline and the movie's
+/// agree from the first frame.
+#[test]
+fn a_jellyfin_playlist_starts_at_the_segment_covering_the_display_base() {
+    let _serial = nj_base::testlock::serial();
+    let server = jellyfin_hls();
+    let prev_base = SHARED.disp_base.swap(5_000_000_000, Ordering::AcqRel);
+    let first = jellyfin_first_segment(server.port, true, 5_000_000_000);
+    let moved = SHARED.disp_base.swap(prev_base, Ordering::AcqRel);
+    assert!(first.as_deref().is_ok_and(|p| p.starts_with("/videos/0000-item/hls1/main/2.ts?")), "{first:?}");
+    assert_eq!(moved, 4_004_000_000);
+}
+
+/// A rung-switch candidate continues the timeline at the handoff boundary; it opens the segment
+/// beginning there, and is refused when no segment does rather than repeat or skip content.
+#[test]
+fn a_jellyfin_candidate_opens_at_the_handoff_boundary_or_not_at_all() {
+    let _serial = nj_base::testlock::serial();
+    let server = jellyfin_hls();
+    let prev_base = SHARED.disp_base.load(Ordering::Acquire);
+    let on = jellyfin_first_segment(server.port, false, 4_004_000_000);
+    assert!(on.as_deref().is_ok_and(|p| p.starts_with("/videos/0000-item/hls1/main/2.ts?")), "{on:?}");
+    let off = jellyfin_first_segment(server.port, false, 5_000_000_000);
+    assert!(off.is_err(), "{off:?}");
+    assert_eq!(SHARED.disp_base.load(Ordering::Acquire), prev_base, "a candidate never moves the display base");
 }

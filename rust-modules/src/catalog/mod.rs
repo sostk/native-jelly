@@ -32,6 +32,7 @@ pub(crate) mod hub_title;
 /// Whole-file text subtitles are bounded before transport allocation and parsing.
 pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 mod timeline;
+pub(crate) mod capabilities; // what this client plays: device decoders ∩ pipeline limits, beneath the DeviceProfile
 mod transcoder;
 
 // The server's self-description (version + Plex Pass tristate), refreshed by `install` on every
@@ -237,5 +238,5 @@ pub use timeline::{queue_index_of, QueueRow};
 #[allow(unused_imports)]
 pub use transcoder::{
     DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LanguagePrefs, LinkPolicy, Negotiated, Negotiation, PlayMethod, PlaybackAsk,
-    is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
+    Refusal, is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
 };

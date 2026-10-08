@@ -138,13 +138,14 @@ pub(super) fn request_play_intent(
     session: &mut crate::route::PlaybackSession,
     meta: &mut crate::stores::metadata::MetadataStore,
     play: &crate::screens::registry::PlayIntent,
+    resume_ns: i64,
 ) -> bool {
     match play {
         crate::screens::registry::PlayIntent::Item {
             sid, rk, part, vcodec, acodec, title, context,
         } => {
             let ok = crate::route::request_play(
-                session, meta, *sid, rk, part, vcodec, acodec, title, context,
+                session, meta, *sid, rk, part, vcodec, acodec, title, context, resume_ns,
             );
             if ok {
                 note_extra_now_playing(meta, *sid, rk, context);
@@ -152,7 +153,7 @@ pub(super) fn request_play_intent(
             ok
         }
         crate::screens::registry::PlayIntent::Movie(m) =>
-            crate::route::request_play_movie(session, meta, m, &super::playback::movie_ctx(m)),
+            crate::route::request_play_movie(session, meta, m, &super::playback::movie_ctx(m), resume_ns),
     }
 }
 
@@ -220,7 +221,7 @@ fn drain_held_feature(app: &mut App) {
     }
     let held = HELD_FEATURE.with(|slot| slot.borrow_mut().take());
     let Some(held) = held else { return };
-    if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &held.play) {
+    if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &held.play, held.resume_ns) {
         return;
     }
     start_playback(
@@ -542,7 +543,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 // is what the page's own discarded `started` bool used to decide.
                 // Held-feature drain uses this same helper: a trailer Play pressed while a
                 // preview still occupies must install the Info-card descriptor too.
-                if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &play) { continue; }
+                if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &play, resume_ns) { continue; }
                 // The page's own `ReturnState` rides the push, so BACK out of the playback finds
                 // the spot the Play was pressed from. It was `Trail::set_top_spot` plus a
                 // second, hand-written `NavOp::Push` after the fact.

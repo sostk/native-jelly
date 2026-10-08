@@ -209,6 +209,14 @@ pub fn part_key(item_guid: &str, source: &MediaSourceInfo) -> String {
     )
 }
 
+/// The media source a [`part_key`] names — the version a playback of that part asks for.
+pub fn media_source_id(part_key: &str) -> Option<&str> {
+    part_key.split_once('?')?.1.split('&').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k.eq_ignore_ascii_case("MediaSourceId") && !v.is_empty()).then_some(v)
+    })
+}
+
 /// The file extension a static stream is requested under. Jellyfin reports a source's container
 /// as ffprobe's demuxer list — an MP4 is `mov,mp4,m4a,3gp,3g2,mj2` and a Matroska file
 /// `matroska,webm` on some versions — so the first entry is not the file's own extension, and the
@@ -264,6 +272,7 @@ pub fn media(item_guid: &str, source: &MediaSourceInfo) -> Media {
         container: container.clone(),
         aspect_ratio: if h > 0 { (w as f64 / h as f64 * 100.0).round() / 100.0 } else { 0.0 },
         video_profile: video.and_then(|v| v.profile.clone()).unwrap_or_default().to_ascii_lowercase(),
+        title: source.name.clone().unwrap_or_default(),
         part: vec![MediaPart {
             id: ids::intern(&source.id),
             key: part_key(item_guid, source),
@@ -541,6 +550,17 @@ mod tests {
         assert_eq!(m.chapter[1].end_time_offset, 8_177_216);
         assert_eq!(m.last_viewed_at, 1_790_848_800);
         assert_eq!(m.ratings.len(), 2);
+    }
+
+    #[test]
+    fn a_part_key_names_its_media_source() {
+        let m = item(&movie(), 0);
+        for media in &m.media {
+            let key = &media.part[0].key;
+            let id = media_source_id(key).expect("every part names its source");
+            assert!(key.ends_with(&format!("MediaSourceId={id}")), "{key}");
+        }
+        assert_eq!(media_source_id("/library/parts/5/1/f.mkv"), None, "a Plex-shaped part names none");
     }
 
     #[test]

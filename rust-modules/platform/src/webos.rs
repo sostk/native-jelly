@@ -39,6 +39,7 @@ use crate::tv::device::{Hardware, Info};
 pub mod jail_repair;
 pub mod caps;
 pub mod toast;
+pub mod volume;
 
 const OS_INFO: &str = "/var/run/nyx/os_info.json";
 

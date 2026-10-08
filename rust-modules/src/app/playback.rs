@@ -287,9 +287,10 @@ pub(crate) fn start_playback(
 /// return state: acceptance cannot invent where a session returns to.
 pub(super) trait PlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie) -> bool;
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie,
+        resume_ns: i64) -> bool;
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool;
+        meta: &mut crate::stores::metadata::MetadataStore, rk: &str, resume_ns: i64) -> bool;
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
         sid: crate::catalog::ServerId, rk: &str);
     fn prepare_start(&mut self, ps: &mut crate::route::PlaybackSession,
@@ -323,12 +324,13 @@ pub(super) struct LivePlaybackResources;
 
 impl PlaybackResources for LivePlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie) -> bool {
-        crate::route::request_play_movie(ps, meta, item, &movie_ctx(item))
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog_fetch::PmsMovie,
+        resume_ns: i64) -> bool {
+        crate::route::request_play_movie(ps, meta, item, &movie_ctx(item), resume_ns)
     }
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool {
-        request_loaded_episode(ps, meta, rk)
+        meta: &mut crate::stores::metadata::MetadataStore, rk: &str, resume_ns: i64) -> bool {
+        request_loaded_episode(ps, meta, rk, resume_ns)
     }
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
         sid: crate::catalog::ServerId, rk: &str) {
@@ -427,21 +429,23 @@ pub(crate) fn request_loaded_hero(ps: &mut crate::route::PlaybackSession, meta: 
         let ep = (if started { d.on_deck.as_ref() } else { None })
             .or_else(|| d.episodes.first())?
             .clone();
-        request_episode(ps, meta, &d, &ep).then(|| crate::metadata::resume_ns(ep.resume_ms, ep.dur_ms))
+        let resume = crate::metadata::resume_ns(ep.resume_ms, ep.dur_ms);
+        request_episode(ps, meta, &d, &ep, resume).then_some(resume)
     } else {
+        let resume = crate::metadata::resume_ns(d.resume_ms, d.dur_ms);
         crate::route::request_play(ps, meta, crate::route::item_sid(d.sid), &d.rk, &d.part,
-            &d.vcodec, &d.acodec, &d.title, "")
-            .then(|| crate::metadata::resume_ns(d.resume_ms, d.dur_ms))
+            &d.vcodec, &d.acodec, &d.title, "", resume)
+            .then_some(resume)
     }
 }
 
-pub(crate) fn request_loaded_episode(ps: &mut crate::route::PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool {
+pub(crate) fn request_loaded_episode(ps: &mut crate::route::PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, rk: &str, resume_ns: i64) -> bool {
     let Some(d) = meta.view().current().cloned() else { return false };
     let Some(ep) = d.episodes.iter().find(|e| e.rk == rk).cloned() else { return false };
-    request_episode(ps, meta, &d, &ep)
+    request_episode(ps, meta, &d, &ep, resume_ns)
 }
 
-fn request_episode(ps: &mut crate::route::PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, d: &crate::metadata::Detail, ep: &crate::metadata::Episode) -> bool {
+fn request_episode(ps: &mut crate::route::PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, d: &crate::metadata::Detail, ep: &crate::metadata::Episode, resume_ns: i64) -> bool {
     meta.run(crate::stores::metadata::MetadataCmd::SetNowPlaying(Some(crate::metadata::NowPlaying {
         is_episode: true, is_real_episode: true, title: d.title.clone(), ep_title: ep.title.clone(),
         season: ep.season, index: ep.index, summary: ep.summary.clone(),
@@ -451,7 +455,7 @@ fn request_episode(ps: &mut crate::route::PlaybackSession, meta: &mut crate::sto
     let title = if ep.title.is_empty() { &d.title } else { &ep.title };
     let context = format!("{}  ·  {}", d.title, crate::ui::fmt::episode_ordinal(ep.season, ep.index));
     crate::route::request_play(ps, meta, crate::route::item_sid(d.sid), &ep.rk, &ep.part,
-        &ep.vcodec, &ep.acodec, title, &context)
+        &ep.vcodec, &ep.acodec, title, &context, resume_ns)
 }
 
 /// Leaving playback (Stop / BACK / EOS / Info's jump-to-detail): retire every in-player panel.
@@ -825,7 +829,7 @@ pub(crate) fn play_up_next(
     close_player_overlays(pages);
     crate::player::stop_bufferfeed(ps, pa);
     let ctx = crate::ui::fmt::episode_kicker(u.season, u.index, &u.ep_title);
-    if !crate::route::request_play_up_next(ps, bridge.metadata_mut(), u, &ctx) {
+    if !crate::route::request_play_up_next(ps, bridge.metadata_mut(), u, &ctx, resume) {
         return false;
     }
     // Same ritual as `play_item_now`: retire the finished episode's descriptor so the HUD
@@ -888,7 +892,12 @@ pub(super) fn play_item_now_with<R: PlaybackResources>(
     if mm.rk.is_empty() {
         return;
     }
-    if !resources.request_movie(ps, bridge.metadata_mut(), mm) {
+    let resume = if from_start {
+        0
+    } else {
+        crate::metadata::resume_ns(mm.resume_ms, mm.dur_ns / 1_000_000)
+    };
+    if !resources.request_movie(ps, bridge.metadata_mut(), mm, resume) {
         return;
     }
     // resolve OFF the SDL loop — pump_play starts it
@@ -906,11 +915,7 @@ pub(super) fn play_item_now_with<R: PlaybackResources>(
     start_playback_with(
         ps,
         pa,
-        if from_start {
-            0
-        } else {
-            crate::metadata::resume_ns(mm.resume_ms, mm.dur_ns / 1_000_000)
-        },
+        resume,
         from,
         hud_ms,
         ret,

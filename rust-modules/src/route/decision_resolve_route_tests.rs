@@ -1290,7 +1290,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
         plan: Plan {
             sid,
             sess: "refused-logical-resource".into(),
-            verdict: Some(PlayVerdict::Server("server refused this route".into())),
+            verdict: Some(PlayVerdict::Server(crate::catalog::Refusal::NoCompatibleStream)),
             ..Default::default()
         },
         rk: rk.clone(),
@@ -1298,7 +1298,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
     assert_eq!(pump_play(&mut ps, &mut crate::stores::metadata::MetadataStore::default()), None, "a refusal has no playable URL");
     assert!(play_refused(&ps), "its server verdict still reaches the error read-out");
 
-    let stopped = || lb.seen().iter().filter(|r| r.line.starts_with("POST /Sessions/Playing/Stopped ")).count();
+    let stopped = || lb.seen().iter().filter(|r| r.line.starts_with("DELETE /Videos/ActiveEncodings?")).count();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     while stopped() < 2 {
         assert!(std::time::Instant::now() < deadline, "both ownerless sessions need a stop: {:?}", lb.seen());
@@ -1432,7 +1432,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 
     apply_plan(&mut ps,
         Plan {
-            verdict: Some(PlayVerdict::Server("temporary refusal".into())),
+            verdict: Some(PlayVerdict::Server(crate::catalog::Refusal::RateLimitExceeded)),
             ..Default::default()
         },
         "episode-42",

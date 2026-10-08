@@ -200,6 +200,7 @@ pub(super) struct JfLoopback {
     handle: std::thread::JoinHandle<()>,
     log: std::sync::Arc<std::sync::Mutex<Vec<JfRequest>>>,
     info: std::sync::Arc<std::sync::Mutex<String>>,
+    converted: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl JfLoopback {
@@ -219,6 +220,8 @@ impl JfLoopback {
         let requests = log.clone();
         let info = std::sync::Arc::new(std::sync::Mutex::new(info));
         let answer = info.clone();
+        let converted = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+        let converted_answer = converted.clone();
         let handle = std::thread::spawn(move || {
             loop {
                 match nj_base::testnet::accept(&listener) {
@@ -252,7 +255,12 @@ impl JfLoopback {
                             write_json(&mut socket, me.as_bytes());
                         } else if path.contains("/PlaybackInfo") {
                             std::thread::sleep(delay);
-                            let body = answer.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            let no_direct = serde_json::from_slice::<serde_json::Value>(&body)
+                                .is_ok_and(|b| b["EnableDirectPlay"] == false);
+                            let body = no_direct
+                                .then(|| converted_answer.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                                .flatten()
+                                .unwrap_or_else(|| answer.lock().unwrap_or_else(|e| e.into_inner()).clone());
                             write_json(&mut socket, body.as_bytes());
                         } else if path.starts_with("/Playback/BitrateTest") {
                             let n: usize = query_param(&line, "Size").and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -288,12 +296,18 @@ impl JfLoopback {
             ..Default::default()
         });
         let _ = jf_rk();
-        JfLoopback { sid, done, handle, log, info }
+        JfLoopback { sid, done, handle, log, info, converted }
     }
 
     /// Answer every later `PlaybackInfo` with `info`.
     pub(super) fn answer_playback_info(&self, info: &str) {
         *self.info.lock().unwrap_or_else(|e| e.into_inner()) = info.to_string();
+    }
+
+    /// Answer a `PlaybackInfo` that withdraws direct play with `info` instead — the server fills
+    /// `TranscodingUrl` only when direct play is not the answer.
+    pub(super) fn answer_converted(&self, info: &str) {
+        *self.converted.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.to_string());
     }
 
     /// Every request seen so far, while the loopback keeps serving.
@@ -317,7 +331,7 @@ impl JfLoopback {
 /// PlaySessionId a later stop reports.
 pub(super) fn negotiate_jf_session(sid: ServerId, rk: &str, session: &str, contract: crate::catalog::EncodeContract) {
     let client = crate::catalog::client_for(sid).expect("loopback registered");
-    let spec = transcode_spec(rk, session, session, crate::catalog::TranscodeOffset::from_seconds(0), 0, 0, contract);
+    let spec = transcode_spec(rk, session, session, "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 0, contract);
     assert!(
         matches!(client.transcode(&spec), crate::catalog::Negotiation::Playable(_)),
         "the loopback negotiates {session}"

@@ -193,6 +193,9 @@ pub struct MediaSourceInfo {
     pub default_subtitle_stream_index: Option<i64>,
     pub media_streams: Vec<MediaStream>,
     pub has_segments: bool,
+    /// Headers fetching a remote source's `Path` needs, name to value. Kept as JSON: only the
+    /// names are read, and an odd value must not cost the whole answer its parse.
+    pub required_http_headers: Option<serde_json::Value>,
 }
 
 /// One item of any type. `Type` is the discriminator: `Movie | Series | Season | Episode |
@@ -333,6 +336,12 @@ pub struct PlaybackReport {
     /// sent empty, because an empty string is a position the server would try to resolve.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub playlist_item_id: Option<String>,
+    /// The set's own mute and 0–100 volume, the only ones this player has. Both absent until the
+    /// set has answered, so the dashboard is never told a level nobody read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_muted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume_level: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed: Option<bool>,
 }
@@ -371,7 +380,7 @@ mod tests {
         assert!(!s.contains("AudioStreamIndex") && !s.contains("Failed"), "{s}");
         // An unset enum or instant is absent, never `""`/`0`: the server parses these, and a
         // year-1 start or a nameless repeat mode is a body it would reject.
-        for absent in ["PlaybackStartTimeTicks", "PlaybackOrder", "RepeatMode", "PlaylistItemId"] {
+        for absent in ["PlaybackStartTimeTicks", "PlaybackOrder", "RepeatMode", "PlaylistItemId", "IsMuted", "VolumeLevel"] {
             assert!(!s.contains(absent), "{absent} should be omitted when unset: {s}");
         }
     }

@@ -97,14 +97,14 @@ pub(crate) struct PlaybackSession {
     /// The server-side transcode session id, EMPTY on a direct play — that emptiness is the
     /// "is this a transcode?" test ([`is_transcoding`]) and the key the stop is sent with.
     tsession: String,
-    /// The server's PRE-FLIGHT refusal for the last resolve, or None.
+    /// The encoder the landing negotiated at a resume, and the whole second it starts at. Keyed by
+    /// encoder so a replaced one never matches; consumed by [`take_encoder_start`].
+    encoder_start: Option<(String, i64)>,
+    /// The PRE-FLIGHT refusal for the last resolve, or None.
     ///
-    /// `Some(sentence)` means `/decision` answered "neither direct play nor conversion is
-    /// available" (`generalDecisionCode` 2000) BEFORE a byte of video moved, so this playback never
-    /// got a URL — see [`refusal`]. The String is the server's OWN sentence, carried so the
-    /// player's read-out can quote it verbatim; it is `""` when the server named a code but no
-    /// reason, which is why the refusal itself lives in the `Option` and not in the emptiness of
-    /// the text.
+    /// `Some(_)` means this playback never got a URL, decided BEFORE a byte of video moved: the
+    /// server refused (`PlayVerdict::Server`, a typed `PlaybackInfo` refusal) or
+    /// the app's own Direct Play policy did. The read-out words it from the catalog.
     ///
     /// [`apply_plan`] installs it and [`request_play`] retires it, so it always describes the item
     /// the player is showing.
@@ -383,6 +383,7 @@ impl PlaybackSession {
         requested_resume_ns: 0,
         url: String::new(),
         tsession: String::new(),
+        encoder_start: None,
         play_verdict: None,
         resolve_failed: false,
         cur_contract: crate::catalog::EncodeContract::original(false, crate::catalog::AudioEnhancements::NONE),
@@ -451,6 +452,7 @@ impl PlaybackSession {
             requested_resume_ns,
             url,
             tsession,
+            encoder_start,
             play_verdict,
             resolve_failed,
             cur_contract,
@@ -500,6 +502,7 @@ impl PlaybackSession {
             requested_resume_ns: *requested_resume_ns,
             url: url.clone(),
             tsession: tsession.clone(),
+            encoder_start: encoder_start.clone(),
             play_verdict: play_verdict.clone(),
             resolve_failed: *resolve_failed,
             cur_contract: *cur_contract,
@@ -2247,8 +2250,8 @@ fn run_encoder_cleanup_check(check: EncoderCleanupCheck) {
     };
     let stop_accepted = (check.stop_needed && !check.physical_absent)
         .then(|| client.transcode_stop(&check.session));
-    // Jellyfin ends the ffmpeg job on the Stopped report and has no per-job lookup, so an accepted
-    // stop (now or earlier) is the whole cleanup; a refused one stays owned and is retried.
+    // Jellyfin ends the ffmpeg job on `DELETE /Videos/ActiveEncodings` and has no per-job lookup, so
+    // an accepted stop (now or earlier) is the whole cleanup; a refused one stays owned and is retried.
     let done = check.physical_absent || !check.stop_needed || stop_accepted == Some(true);
     let present = if done { Some(false) } else { None };
     finish_encoder_cleanup_check(check, present, stop_accepted, done.then_some(true));
@@ -2838,6 +2841,7 @@ impl HlsAbrControl {
             &self.rating_key,
             &encoder_session,
             &encoder_session,
+            expected.encoder(),
             crate::catalog::TranscodeOffset::from_micros(offset_micros),
             self.audio_stream_id,
             self.subtitle_stream_id,
@@ -4292,13 +4296,13 @@ pub(crate) fn refuse_for_test(ps: &mut PlaybackSession, verdict: PlayVerdict) {
 #[cfg(test)]
 pub(crate) fn refuse_by_server_for_test(
     ps: &mut PlaybackSession,
-    sentence: &str,
+    refusal: crate::catalog::Refusal,
     remux: bool,
     hls: bool,
     src_vcodec: &str,
     src_acodec: &str,
 ) {
-    ps.play_verdict = Some(PlayVerdict::Server(sentence.to_owned()));
+    ps.play_verdict = Some(PlayVerdict::Server(refusal));
     ps.cur_contract.remux = remux;
     ps.cur_contract.delivery = if hls {
         crate::catalog::TranscodeDelivery::FixedHls { seconds_per_segment: 2 }
@@ -5057,6 +5061,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         &rk,
         &replacement,
         &replacement,
+        &previous,
         crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
         cur_audio_sid(ps),
         cur_sub_sid(ps),
@@ -5831,12 +5836,13 @@ impl ResolveEnv {
             audio_sid: cur_audio_sid(ps),
             sub_sid: cur_sub_sid(ps),
             subtitle_override: None,
-            cached_item: meta.cached_playing(sid, rk),
+            cached_item: meta.cached_playing(sid, rk, ""),
             quality: quality(),
             direct_play_mode: direct_play_mode(),
             src_kbps: resolve_src_kbps(meta.current(), sid, rk),
             omit_queue_continuous: false,
             preview: false,
+            start_ns: 0,
             audio_enhancements: crate::player::audio_enhancements(),
             #[cfg(test)]
             dv_capability: None,
@@ -5996,9 +6002,9 @@ pub(crate) fn preview_request(ps: &PlaybackSession) -> bool {
 
 /// Attach the UI's resume point to the resolve currently in flight.
 ///
-/// `request_play_*` is issued immediately before `app::start_playback`, so the latter knows the
-/// position one call later than the former knows the generation.  Tagging here closes that seam:
-/// a cancelled or superseded landing cannot consume a bare process-global resume value.
+/// `request_play_*` already carries the press's resume (and negotiates a conversion at it);
+/// `app::start_playback` confirms it here, tagged with the generation, so a cancelled or
+/// superseded landing cannot consume a bare process-global resume value.
 pub(crate) fn arm_play_resume(ps: &mut PlaybackSession, resume_ns: i64) -> bool {
     if resume_ns <= 0 || !play_pending() {
         return false;
@@ -6039,6 +6045,7 @@ pub(crate) fn request_play(
     acodec: &str,
     title: &str,
     ctx: &str,
+    resume_ns: i64,
 ) -> bool {
     request_play_inner(
         ps,
@@ -6053,6 +6060,7 @@ pub(crate) fn request_play(
             ctx: ctx.to_owned(),
             preview: false,
         },
+        resume_ns,
         None,
         None,
         false,
@@ -6084,6 +6092,7 @@ pub(crate) fn request_preview(
             ctx: crate::metadata::TRAILER_CONTEXT.to_owned(),
             preview: true,
         },
+        0,
         None,
         None,
         false,
@@ -6097,6 +6106,7 @@ fn request_play_inner(
     ps: &mut PlaybackSession,
     meta: &mut crate::stores::metadata::MetadataStore,
     request: PlaybackRequest,
+    resume_ns: i64,
     retry: Option<RetryContext>,
     trace_generation: Option<u32>,
     drain_previous: bool,
@@ -6126,6 +6136,7 @@ fn request_play_inner(
     } else {
         trace_generation.unwrap_or_else(|| crate::player::report::requested(ps, sid))
     };
+    let resume_ns = if request.preview { 0 } else { resume_ns.max(0) };
     // The fields a play REQUEST owns, as against the ones only a landing may install: the HUD
     // strings (published now, so the pre-roll has a title through the whole resolve) and the five
     // the OUTGOING item leaves behind. Everything else — url, session ids, codecs — stays as it is
@@ -6133,11 +6144,7 @@ fn request_play_inner(
     // for itself while the next one resolves.
     { let s = &mut *ps; {
         s.request = Some(request.clone());
-        s.requested_resume_ns = if request.preview {
-            0
-        } else {
-            retry.map_or(0, |r| r.resume_ns.max(0))
-        };
+        s.requested_resume_ns = resume_ns;
         // SAFETY: `s.title`/`s.ctxline` are exactly the fixed C buffers `set_c` is given the length
         // of, taken from the arrays themselves so the two can never disagree.
         unsafe {
@@ -6176,6 +6183,8 @@ fn request_play_inner(
     let contract_revision = desired_contract_revision();
     // captured HERE, on the main thread, and moved into the worker — see ResolveEnv
     let mut env = ResolveEnv::snapshot(ps, meta.view(), sid, rk);
+    env.cached_item = meta.view().cached_playing(sid, rk, part);
+    env.start_ns = resume_ns;
     env.omit_queue_continuous = crate::metadata::context_omits_queue_continuous(ctx);
     env.set_preview(request.preview);
     if let Some(retry) = retry {
@@ -6189,7 +6198,7 @@ fn request_play_inner(
         env.subtitle_override = Some(retry.sub_sid);
     }
     let gen = PLAY_GEN.fetch_add(1, Ordering::SeqCst) + 1;
-    if let Some(resume_ns) = retry.map(|r| r.resume_ns).filter(|ns| *ns > 0) {
+    if resume_ns > 0 {
         *PLAY_RESUME.lock().unwrap_or_else(|e| e.into_inner()) = Some((gen, resume_ns));
     }
     PLAY_BUSY.store(true, Ordering::SeqCst);
@@ -6315,6 +6324,16 @@ pub(crate) fn can_retry_current_play(ps: &PlaybackSession) -> bool {
 
 /// Resume target not yet proven by a presented frame.  A refused retry keeps this so the next
 /// quality choice can try again at the same point.
+/// Did the landing already negotiate the live encoder at `offset_secs`? True once, for the encoder
+/// the plan installed: the resume then needs no replacement encoder. A seek, an ABR switch or a
+/// retranscode replaces `tsession`, so their encoders never match.
+pub(crate) fn take_encoder_start(ps: &mut PlaybackSession, offset_secs: i64) -> bool {
+    match ps.encoder_start.take() {
+        Some((encoder, secs)) => secs == offset_secs && encoder == ps.tsession,
+        None => false,
+    }
+}
+
 pub(crate) fn unpresented_resume_ns(ps: &PlaybackSession) -> i64 {
     ps.requested_resume_ns.max(0)
 }
@@ -6373,7 +6392,7 @@ pub(crate) fn retry_current_play(
         quality(),
     ));
     let retry = retry_context_with(ps, resume_ns, direct_play);
-    request_play_inner(ps, meta, request, Some(retry), None, true)
+    request_play_inner(ps, meta, request, retry.resume_ns, Some(retry), None, true)
 }
 
 /// [`rescue_retry_context`] with the failed attempt's Direct Play mode optionally replaced — the
@@ -6394,7 +6413,7 @@ fn retry_context_with(ps: &PlaybackSession, resume_ns: i64, direct_play: Option<
 /// `ctx` is the HUD's context line (`year · rating · runtime`). The caller formats it
 /// (`app::playback::movie_ctx`) because the runtime string is `ui::fmt`'s and `route` sits below
 /// `ui`.
-pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, m: &PmsMovie, ctx: &str) -> bool {
+pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, m: &PmsMovie, ctx: &str, resume_ns: i64) -> bool {
     if m.part.is_empty() {
         return false;
     }
@@ -6418,6 +6437,7 @@ pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::sto
         &m.acodec,
         &m.title,
         ctx,
+        resume_ns,
     )
 }
 
@@ -6444,7 +6464,7 @@ pub(crate) fn item_sid(sid: ServerId) -> ServerId {
 /// pre-roll doesn't change shape underneath the user when it does. `ctx` is the context line, the
 /// episode kicker (`ui::fmt::episode_kicker(u.season, u.index, &u.ep_title)`): the caller formats it
 /// before handing `u` over, because `route` sits below `ui`.
-pub(crate) fn request_play_up_next(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, u: UpNext, ctx: &str) -> bool {
+pub(crate) fn request_play_up_next(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, u: UpNext, ctx: &str, resume_ns: i64) -> bool {
     let title = if u.show_title.is_empty() {
         &u.ep_title
     } else {
@@ -6458,7 +6478,7 @@ pub(crate) fn request_play_up_next(ps: &mut PlaybackSession, meta: &mut crate::s
     } else {
         surface_sid()
     };
-    request_play(ps, meta, sid, &u.rk, &u.part, &u.vcodec, &u.acodec, title, ctx)
+    request_play(ps, meta, sid, &u.rk, &u.part, &u.vcodec, &u.acodec, title, ctx, resume_ns)
 }
 
 /// Supersede an in-flight resolve (BACK during a load). The landing is dropped by generation.
@@ -6526,7 +6546,7 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
             crate::player::log(
                 "playback resolve: desired contract changed in flight; discarding and resolving the latest contract",
             );
-            let _ = request_play_inner(ps, meta, request, Some(retry), Some(trace_generation), false);
+            let _ = request_play_inner(ps, meta, request, retry.resume_ns, Some(retry), Some(trace_generation), false);
         } else {
             cancel_playback_request(ps, has_url(ps));
         }
@@ -6649,6 +6669,8 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             request,
             requested_resume_ns,
             url: plan.url,
+            encoder_start: (plan.encoder_start_secs > 0 && !plan.tsession.is_empty())
+                .then(|| (plan.tsession.clone(), plan.encoder_start_secs)),
             tsession: plan.tsession,
             // Installed on EVERY landing, not only a refusing one: a plan that resolved is itself
             // the statement that the last refusal is over, and assigning unconditionally is what
@@ -6822,6 +6844,7 @@ fn prepare_original_remux(
         &rk,
         &replacement,
         &replacement,
+        expected_hls,
         crate::catalog::TranscodeOffset::from_seconds(offset_secs.max(0)),
         candidate_audio_sid,
         subtitle,
@@ -7030,6 +7053,7 @@ fn try_retranscode(
         &inputs.rk,
         &qsess,
         &qsess,
+        inputs.expected.encoder(),
         crate::catalog::TranscodeOffset::from_seconds(inputs.offset_secs.max(0)),
         inputs.audio_sid,
         inputs.subtitle_sid,
@@ -8434,6 +8458,10 @@ mod plan_tests;
 #[cfg(test)]
 #[path = "decision_quality_recovery_tests.rs"]
 mod quality_recovery_tests;
+
+#[cfg(test)]
+#[path = "decision_jf_session_tests.rs"]
+mod jf_session_tests;
 
 #[cfg(test)]
 #[path = "decision_timeline_tests.rs"]

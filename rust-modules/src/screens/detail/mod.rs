@@ -1938,6 +1938,22 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                 self.content(fx, ContentReq::Present(arg.clone()));
                 Handled::Yes
             }
+            // The *Version* surface committed a row. The store swaps which version this page's
+            // item describes; the next layout pass reads it back like any other landing.
+            ScreenEvent::App(AppMsg::VersionChosen { sid, rk, part }) => {
+                if *sid == self.sid && *rk == self.rk {
+                    fx.push(Fx::App(AppFx::Store(
+                        StoreId::Metadata,
+                        StoreCmd::Metadata(MetadataCmd::SelectVersion {
+                            sid: *sid,
+                            rk: rk.clone(),
+                            part: part.clone(),
+                        }),
+                    )));
+                    fx.invalidate(Provenance::Input);
+                }
+                Handled::Yes
+            }
             ScreenEvent::WillLeave(Leave::ForGood) | ScreenEvent::Unmount => {
                 self.pending_season = None;
                 self.season_settle = 0.0;
@@ -2589,8 +2605,13 @@ impl DetailScreen {
                 .ground(ground)
                 .scale(scale)
                 .draw(&Env::inert(), p),
-                hero::HeroCtl::Alt => {
-                    Button::new(hero::alt_label().as_ptr(), theme::size::BODY, rect)
+                hero::HeroCtl::Alt | hero::HeroCtl::Version => {
+                    let label = if ctl == hero::HeroCtl::Alt {
+                        hero::alt_label()
+                    } else {
+                        hero::version_label()
+                    };
+                    Button::new(label.as_ptr(), theme::size::BODY, rect)
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
                         .focused(focused)
                         .palette(palette)
@@ -3582,15 +3603,16 @@ impl DetailScreen {
     }
 
     fn hero_set(&self, meta: crate::metadata::MetadataView<'_>) -> hero::HeroSet {
-        let (restart, mark) = self
+        let (restart, mark, version) = self
             .detail(meta)
             .map(|d| {
                 (
                     hero::has_restart(hero::hero_resume_ns(d)),
                     hero::hero_mark(d),
+                    d.versions.len() > 1,
                 )
             })
-            .unwrap_or((false, PosterMark::None));
+            .unwrap_or((false, PosterMark::None, false));
         // The preview path replaced the disc. Play Trailer stays in the item menu. (Confirmed as
         // the shipped decision by `screens::detail::tests` — see
         // `a_movie_trailer_disc_plays_the_extra_from_the_start` et al., which explicitly assert
@@ -3599,6 +3621,7 @@ impl DetailScreen {
         hero::HeroSet {
             restart,
             trailer: false,
+            version,
             alt: self.alt_available(meta),
             mark,
         }
@@ -3761,7 +3784,7 @@ impl DetailScreen {
                 };
                 self.content(fx, ContentReq::Play { play, resume_ns: 0 });
             }
-            hero::HeroCtl::Alt => {
+            hero::HeroCtl::Alt | hero::HeroCtl::Version => {
                 let set = self.hero_set(meta);
                 if let Some(i) = hero::index_of(set, ctl) {
                     let widths = hero::hero_widths(
@@ -3775,12 +3798,13 @@ impl DetailScreen {
                     rect.y -= self.scroll.pos;
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
-                    self.content(
-                        fx,
-                        ContentReq::Panel(ContentPanel::AltSources {
-                            anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
-                        }),
-                    );
+                    let anchor = [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits);
+                    let panel = if ctl == hero::HeroCtl::Alt {
+                        ContentPanel::AltSources { anchor }
+                    } else {
+                        ContentPanel::Versions { anchor }
+                    };
+                    self.content(fx, ContentReq::Panel(panel));
                 }
             }
             hero::HeroCtl::MarkWatched | hero::HeroCtl::MarkUnwatched => {

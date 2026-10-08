@@ -749,6 +749,30 @@
     "value": "Force Direct Play is on, and this audio track needs conversion.",
     "description": "Playback failure detail while Force Direct Play is on: the selected audio track would need server conversion."
   },
+  "widgets.verdict.server_not_allowed": {
+    "value": "Your Jellyfin account isn’t allowed to play this item.",
+    "description": "Playback failure detail: the Jellyfin server answered that the signed-in user's policy does not allow this playback."
+  },
+  "widgets.verdict.server_no_compatible_stream": {
+    "value": "The server found no way to play this item on this TV.",
+    "description": "Playback failure detail: the Jellyfin server found no direct play or conversion that suits this television."
+  },
+  "widgets.verdict.server_rate_limited": {
+    "value": "The server is limiting playback right now. Try again later.",
+    "description": "Playback failure detail: the Jellyfin server refused because it is limiting the number or rate of streams."
+  },
+  "widgets.verdict.server_no_media_source": {
+    "value": "The server has no playable file for this item.",
+    "description": "Playback failure detail: the Jellyfin server answered with no file (media source) for the item."
+  },
+  "widgets.verdict.server_no_delivery": {
+    "value": "The server can neither send this file as it is nor convert it.",
+    "description": "Playback failure detail: the Jellyfin server offered neither the original file nor a conversion."
+  },
+  "widgets.verdict.server_refused": {
+    "value": "The server refused to play this item.",
+    "description": "Playback failure detail: the Jellyfin server refused for a reason this app does not recognise."
+  },
   "widgets.quality.original": {
     "value": "Original",
     "description": "Playback quality choice that plays the original file without conversion."

@@ -303,7 +303,7 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
         ..Default::default()
     }));
 
-    let hit = cached_playing(test_state(), SRV_A, "42").expect("the loaded page IS this item");
+    let hit = cached_playing(test_state(), SRV_A, "42", "").expect("the loaded page IS this item");
     assert_eq!(
         (hit.sid, hit.rk.as_str()),
         (SRV_A, "42"),
@@ -312,12 +312,12 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
     assert_eq!(hit.audio.first().map(|s| s.id), Some(7));
 
     assert!(
-        cached_playing(test_state(), SRV_B, "42").is_none(),
+        cached_playing(test_state(), SRV_B, "42", "").is_none(),
         "the SHARE's 42 is a different film"
     );
-    assert!(cached_playing(test_state(), SRV_A, "43").is_none());
+    assert!(cached_playing(test_state(), SRV_A, "43", "").is_none());
     assert!(
-        cached_playing(test_state(), crate::catalog::ServerId::UNSET, "42").is_none(),
+        cached_playing(test_state(), crate::catalog::ServerId::UNSET, "42", "").is_none(),
         "unscoped names neither"
     );
 
@@ -329,9 +329,67 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
         ..Default::default()
     }));
     assert!(
-        cached_playing(test_state(), SRV_A, "42").is_none(),
+        cached_playing(test_state(), SRV_A, "42", "").is_none(),
         "no streams loaded yet — go and fetch"
     );
+    clear(test_state(), test_adapter());
+}
+
+fn two_versions() -> Detail {
+    let version = |part: &str, audio_id: i64, width: i64| Version {
+        title: format!("{width}p"),
+        facts: VersionFacts {
+            part: part.into(),
+            vcodec: "hevc".into(),
+            width,
+            audio: vec![Stream { id: audio_id, ..Default::default() }],
+            ..Default::default()
+        },
+    };
+    let versions = vec![version("/p/0", 1, 3840), version("/p/1", 2, 1920)];
+    let mut d = Detail { sid: SRV_A, rk: "42".into(), versions, ..Default::default() };
+    d.part = "/p/x".into();
+    assert!(d.select_version("/p/0"));
+    d
+}
+
+/// Choosing a version makes the page describe it and Play play it: its part, its frame size and its
+/// track list (whose ids are what a track switch PUTs back). The playing-item cache follows the
+/// part, so a play of the OTHER version — from Home, say — fetches its own tracks instead.
+#[test]
+fn a_chosen_version_is_the_one_the_page_describes_and_plays() {
+    let _serial = nj_base::testlock::serial();
+    set_current_for_test(test_state(), Some(two_versions()));
+    let select = |part: &str| crate::stores::metadata::MetadataCmd::SelectVersion {
+        sid: SRV_A,
+        rk: "42".into(),
+        part: part.into(),
+    };
+    assert!(run(test_state(), test_adapter(), select("/p/1")));
+    let d = current(test_state()).unwrap();
+    assert_eq!((d.part.as_str(), d.width, d.audio[0].id), ("/p/1", 1920, 2));
+    assert!(!run(test_state(), test_adapter(), select("/p/1")), "already the one");
+    assert!(!run(test_state(), test_adapter(), select("/p/9")), "no such version");
+
+    assert_eq!(cached_playing(test_state(), SRV_A, "42", "/p/1").map(|p| p.audio[0].id), Some(2));
+    assert!(cached_playing(test_state(), SRV_A, "42", "/p/0").is_none(), "the page shows another version");
+    clear(test_state(), test_adapter());
+}
+
+/// A refetch of the same item (back from playback) keeps the chosen version; a different item does
+/// not inherit it.
+#[test]
+fn a_refreshed_page_keeps_the_chosen_version() {
+    let _serial = nj_base::testlock::serial();
+    let mut chosen = two_versions();
+    assert!(chosen.select_version("/p/1"));
+    set_current_for_test(test_state(), Some(chosen));
+    assert!(install_landed_detail(test_state(), test_adapter(), Some(two_versions())));
+    assert_eq!(current(test_state()).unwrap().part, "/p/1");
+
+    let other = Detail { rk: "43".into(), ..two_versions() };
+    assert!(install_landed_detail(test_state(), test_adapter(), Some(other)));
+    assert_eq!(current(test_state()).unwrap().part, "/p/0");
     clear(test_state(), test_adapter());
 }
 

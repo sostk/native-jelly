@@ -1,13 +1,14 @@
 //! The playback facade over Jellyfin (impl Client) and the device gates the route layer shares.
 //!
 //! The protocol lives in `jf::playback`: one `POST /Items/{id}/PlaybackInfo` per playback, answered
-//! as a typed [`Negotiation`] — the `PlayMethod` the server agreed to (DirectPlay / DirectStream /
-//! Transcode), the URL to open, and per lane the source codec beside the codec that will arrive.
+//! as a typed [`Negotiation`] — the `PlayMethod` the server agreed to (DirectPlay for the file's
+//! own bytes, Transcode for anything from the `TranscodingUrl`), the URL to open, and per lane the
+//! source codec beside the codec that will arrive — or a typed [`Refusal`].
 //! A server without a Jellyfin seat has no playback here: every call answers "unreachable".
 use super::client::{Client, QueryBuilder, StreamUrl};
 use super::params::TranscodeSpec;
 use super::probe::Location;
-pub use crate::jf::playback::{Ask as PlaybackAsk, LanguagePrefs, Negotiated, Negotiation, PlayMethod};
+pub use crate::jf::playback::{Ask as PlaybackAsk, LanguagePrefs, Negotiated, Negotiation, PlayMethod, Refusal};
 // `DP_AUDIO_CODECS` — the AUDIO codec set the buffer-feed pipeline decodes — is defined in
 // `devcaps` (the platform layer intersects it with the device's own codec table) and re-exported
 // here for the route layer. The live set is `devcaps::Caps::audio`; normal routing uses
@@ -25,14 +26,9 @@ pub fn is_dp_audio_track(codec: &str, channels: i64) -> bool {
 
 /// Subtitle codecs the client renders itself (`ff.rs` / the track menu): an embedded track whose
 /// codec is here rides a direct play and is drawn locally, so selecting it never asks the server
-/// to burn it into a conversion. Spellings are Jellyfin/FFmpeg codec names plus the aliases they
-/// arrive as (`movtext`; `dvd` beside `vobsub` / `dvd_subtitle`). Obscure `ff.rs` Plain aliases
-/// (`vplayer`, `jacosub`, …) stay off on purpose.
-pub const DP_SUBTITLE_CODECS: &str = "srt,subrip,ass,ssa,mov_text,movtext,webvtt,text,pgs,hdmv_pgs_subtitle,vobsub,dvd,dvd_subtitle,dvdsub,dvb_subtitle,dvbsub";
-pub fn is_dp_subtitle(codec: &str) -> bool {
-    let codec = codec.to_ascii_lowercase();
-    DP_SUBTITLE_CODECS.split(',').any(|c| c == codec)
-}
+/// to burn it into a conversion. Defined with the rest of the client's capabilities, beside the
+/// subtitle formats the device profile offers, so the two cannot drift.
+pub use super::capabilities::{is_rendered_subtitle as is_dp_subtitle, RENDERED_SUBTITLES as DP_SUBTITLE_CODECS};
 
 // ---- the relay policy: what the LINK to a server allows a plan to ask for -------------------
 
@@ -134,9 +130,9 @@ impl Client {
         }
     }
 
-    /// End the server's encoder for `session` — a `Stopped` report for its PlaySessionId, which is
-    /// what Jellyfin kills the ffmpeg job on. Returns whether the report landed; a direct play has
-    /// no encoder and answers true without a request.
+    /// End the server's encoder for `session` (`DELETE /Videos/ActiveEncodings` for its
+    /// PlaySessionId) without reporting the playback stopped. Returns whether the server took it; a
+    /// direct play has no encoder and answers true without a request.
     pub fn transcode_stop(&self, session: &str) -> bool {
         if session.is_empty() {
             return false;

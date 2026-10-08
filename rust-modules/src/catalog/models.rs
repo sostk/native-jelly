@@ -447,6 +447,10 @@ pub struct Media {
     /// reads it, and the profile that matters to the decoder rides the Load payload's own fields.
     #[serde(rename = "videoProfile", default)]
     pub video_profile: String,
+    /// The server's own name for this version — Jellyfin's `MediaSource.Name`, what its version
+    /// selector lists. Empty when the server names none.
+    #[serde(default)]
+    pub title: String,
     #[serde(rename = "Part", default)]
     pub part: Vec<MediaPart>,
 }

@@ -374,7 +374,7 @@ impl<R: super::playback::PlaybackResources> LiveItemPlayback<'_, R> {
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         bridge: &mut super::bridge::Bridge,
     ) {
-        if self.0.request_episode(ps, bridge.metadata_mut(), rk) {
+        if self.0.request_episode(ps, bridge.metadata_mut(), rk, 0) {
             super::playback::start_playback_with(ps, pa, 0, Origin::Here, HUD_LINGER_MS,
                 None, pages, bridge, self.0);
         }
@@ -573,7 +573,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                 super::content::hold_feature(intent, 0, None);
                 return;
             }
-            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent) {
+            if !super::content::request_play_intent(ps, bridge.metadata_mut(), &intent, 0) {
                 return;
             }
             super::playback::start_playback_with(

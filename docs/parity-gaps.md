@@ -175,8 +175,8 @@ agrees with, or on an emergency reserve guard. HLS measures each candidate befor
 unknown excursion asks the maximum informative request, while failed response-size endpoints guide
 a minimax midpoint search that may jump farther when the conservative delivery/refill model
 supports it.**
-Still open: no direct-play/direct-stream policy toggles, no version picker (`mediaIndex` is
-hard-coded 0 while `docs/pms-api.md` §4 explicitly warns not to take `Media[0]` blindly), and a
+Still open: no direct-play/direct-stream policy toggles (the version picker this line once listed
+now exists on the Jellyfin backend, `docs/jellyfin-playback.md`), and a
 failed manual/fixed direct play still needs the viewer to choose quality or retry rather than
 automatically falling back to transcode. Cold Auto Original does automatically start its retained
 HLS contingency. Auto also has a measured way back mid-session, and it needs neither the top rung

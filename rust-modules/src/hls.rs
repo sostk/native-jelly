@@ -1,10 +1,11 @@
-//! Strict parser and refresh state for the fixed PMS HLS shape.
+//! Strict parser and refresh state for the fixed PMS and Jellyfin HLS shapes.
 //!
-//! This deliberately is not a general HLS implementation. It accepts one master variant and
-//! growing MPEG-TS media playlists, and rejects every feature that would change how bytes must be
-//! assembled before they reach the demuxer (encryption, byte ranges, fMP4 maps and
-//! discontinuities). URI resolution is also part of the parser: every child stays on the source
-//! PMS origin, so a playlist cannot turn the media worker into an arbitrary URL fetcher.
+//! This deliberately is not a general HLS implementation. It plays a master's first variant (the
+//! rendition the request named) from growing MPEG-TS media playlists, and rejects every feature
+//! that would change how bytes must be assembled before they reach the demuxer (encryption, byte
+//! ranges, fMP4 maps and discontinuities). URI resolution is also part of the parser: every child
+//! stays on the source server's origin, so a playlist cannot turn the media worker into an
+//! arbitrary URL fetcher.
 use crate::abr::MediaTimeMs;
 use crate::catalog::{origin, Origin};
 use std::collections::BTreeMap;
@@ -27,9 +28,11 @@ pub(crate) struct InheritedAuth {
     token_pair: String,
 }
 
+/// Plex names the credential `X-Plex-Token`, Jellyfin `ApiKey`; a URL carries one or the other.
 fn is_token_pair(pair: &str) -> bool {
-    pair.split_once('=')
-        .is_some_and(|(name, _)| name.eq_ignore_ascii_case("X-Plex-Token"))
+    pair.split_once('=').is_some_and(|(name, _)| {
+        name.eq_ignore_ascii_case("X-Plex-Token") || name.eq_ignore_ascii_case("ApiKey")
+    })
 }
 
 impl fmt::Debug for InheritedAuth {
@@ -48,7 +51,7 @@ impl InheritedAuth {
         let mut found = query.split('&').filter(|pair| is_token_pair(pair));
         let token_pair = found
             .next()
-            .filter(|pair| pair.len() > "X-Plex-Token=".len())
+            .filter(|pair| pair.split_once('=').is_some_and(|(_, value)| !value.is_empty()))
             .ok_or(Error::MissingCredential)?;
         if found.next().is_some() {
             return Err(Error::MultipleCredentials);
@@ -307,6 +310,26 @@ impl MediaPlaylist {
         }
         Ok(self.segments.len())
     }
+
+    /// For a playlist without EXT-X-START: the segment covering a content time, and where that
+    /// segment begins in nanoseconds. A time on a boundary opens the segment starting there.
+    pub(crate) fn start_by_time(&self, micros: i64) -> Result<(usize, i64), Error> {
+        let target_ns = i64::try_from(i128::from(micros.max(0)) * 1_000)
+            .map_err(|_| Error::DurationOverflow)?;
+        let mut start_ns = 0i64;
+        for (index, segment) in self.segments.iter().enumerate() {
+            let duration_ns = i64::try_from(segment.duration.as_nanos())
+                .map_err(|_| Error::DurationOverflow)?;
+            let end_ns = start_ns
+                .checked_add(duration_ns)
+                .ok_or(Error::DurationOverflow)?;
+            if end_ns > target_ns {
+                return Ok((index, start_ns));
+            }
+            start_ns = end_ns;
+        }
+        Ok((self.segments.len(), start_ns))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -404,7 +427,6 @@ pub(crate) enum Error {
     UnsupportedTag(String),
     UnsupportedFeature(&'static str),
     MissingVariant,
-    MultipleVariants,
     MissingTargetDuration,
     MissingMediaSequence,
     ChildIsNotPlaylist,
@@ -434,7 +456,6 @@ impl fmt::Display for Error {
             Self::UnsupportedTag(tag) => write!(f, "unsupported HLS tag {tag}"),
             Self::UnsupportedFeature(feature) => write!(f, "unsupported HLS feature: {feature}"),
             Self::MissingVariant => f.write_str("master playlist has no variant"),
-            Self::MultipleVariants => f.write_str("master playlist has more than one variant"),
             Self::MissingTargetDuration => f.write_str("media playlist has no target duration"),
             Self::MissingMediaSequence => f.write_str("media playlist has no media sequence"),
             Self::ChildIsNotPlaylist => f.write_str("master child is not an m3u8 playlist"),
@@ -454,9 +475,9 @@ impl fmt::Display for Error {
                 write!(f, "segment {sequence} appeared after ENDLIST")
             }
             Self::StaleEndList => f.write_str("ENDLIST came from a playlist older than the cursor"),
-            Self::MissingCredential => f.write_str("HLS master URL has no Plex credential"),
+            Self::MissingCredential => f.write_str("HLS master URL has no server credential"),
             Self::MultipleCredentials => {
-                f.write_str("HLS master URL has multiple Plex credentials")
+                f.write_str("HLS master URL has multiple server credentials")
             }
             Self::CredentialChanged => f.write_str("playlist URI replaces the route credential"),
             Self::DurationOverflow => f.write_str("HLS timeline duration overflows"),
@@ -492,9 +513,6 @@ pub(crate) fn parse_master(source: &Resource, text: &str) -> Result<MasterPlayli
                 );
             }
             if let Some(value) = line.strip_prefix("#EXT-X-STREAM-INF:") {
-                if variant.is_some() {
-                    return Err(Error::MultipleVariants);
-                }
                 pending_bandwidth = Some(parse_variant_bandwidth(value, line_no)?);
             } else if let Some(value) = line.strip_prefix("#EXT-X-VERSION:") {
                 set_once(
@@ -525,14 +543,13 @@ pub(crate) fn parse_master(source: &Resource, text: &str) -> Result<MasterPlayli
             line: line_no,
             reason: "URI has no EXT-X-STREAM-INF",
         })?;
-        if variant.is_some() {
-            return Err(Error::MultipleVariants);
-        }
         let resource = source.resolve(line)?;
         if !path_without_query(&resource.path).ends_with(".m3u8") {
             return Err(Error::ChildIsNotPlaylist);
         }
-        variant = Some(Variant {
+        // Jellyfin lists alternates after the requested rendition (DynamicHlsHelper); the first
+        // entry is the one the route asked for.
+        variant.get_or_insert(Variant {
             resource,
             bandwidth,
         });
@@ -1243,13 +1260,74 @@ mod tests {
         assert_eq!(tracker.apply(&growth), Err(Error::SegmentAfterEndList(13)));
     }
 
+    /// Jellyfin's master lists alternates after the rendition the request named — a `dvh1` entry
+    /// for a Dolby Vision copy, SDR re-encodes for an HDR copy (`DynamicHlsHelper`) — and the
+    /// first is always the one asked for. The shape is the live 12.0 answer's, with synthetic ids.
     #[test]
-    fn multiple_variants_are_rejected() {
-        let result = parse_master(
-            &source("/start.m3u8"),
-            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\na.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nb.m3u8\n",
+    fn several_variants_play_the_first() {
+        let master = source("/videos/0000-item/master.m3u8?MediaSourceId=src&PlaySessionId=ps&ApiKey=k1");
+        let parsed = parse_master(
+            &master,
+            "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=7104000,AVERAGE-BANDWIDTH=7104000,VIDEO-RANGE=SDR,CODECS=\"avc1.424029,mp4a.40.2\",RESOLUTION=1920x1080,FRAME-RATE=23.976\nmain.m3u8?MediaSourceId=src&PlaySessionId=ps&ApiKey=k1\n#EXT-X-STREAM-INF:BANDWIDTH=7104000,AVERAGE-BANDWIDTH=7104000,VIDEO-RANGE=SDR,CODECS=\"avc1.640029,mp4a.40.2\",RESOLUTION=1920x1080,FRAME-RATE=23.976\nmain.m3u8?MediaSourceId=src&PlaySessionId=ps&VideoCodec=h264&ApiKey=k1\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.variant.bandwidth, 7_104_000);
+        assert_eq!(parsed.variant.resource.path, "/videos/0000-item/main.m3u8?MediaSourceId=src&PlaySessionId=ps&ApiKey=k1");
+    }
+
+    /// Jellyfin's credential is `ApiKey`, and the server repeats it in every child it lists; it is
+    /// inherited, checked and stripped exactly as the Plex token is.
+    #[test]
+    fn the_jellyfin_credential_is_inherited_like_the_plex_one() {
+        let master = source("/videos/0000-item/master.m3u8?PlaySessionId=ps&ApiKey=k1");
+        let auth = InheritedAuth::capture(&master).unwrap();
+        let child = source("/videos/0000-item/hls1/main/3.ts?PlaySessionId=ps&ApiKey=k1&runtimeTicks=60060000");
+        assert_eq!(auth.request_path(&child).unwrap(), child.path);
+        assert_eq!(
+            auth.request_path(&source("/videos/0000-item/main.m3u8?PlaySessionId=ps")).unwrap(),
+            "/videos/0000-item/main.m3u8?PlaySessionId=ps&ApiKey=k1"
         );
-        assert_eq!(result, Err(Error::MultipleVariants));
+        assert_eq!(auth.request_path(&source("/x.ts?ApiKey=k2")), Err(Error::CredentialChanged));
+        let landed = Resource::from_request_path(master.origin.clone(), &master.path).unwrap();
+        assert_eq!(landed.path, "/videos/0000-item/master.m3u8?PlaySessionId=ps");
+    }
+
+    /// Jellyfin's media playlist (live 12.0 shape, synthetic ids): complete from segment 0, no
+    /// `EXT-X-START`, relative `hls1/main/{n}.ts` children carrying the whole query.
+    fn jellyfin_media() -> MediaPlaylist {
+        let base = source("/videos/0000-item/main.m3u8?PlaySessionId=ps&ApiKey=k1");
+        let mut text = String::from(
+            "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:3\n#EXT-X-MEDIA-SEQUENCE:0\n",
+        );
+        for n in 0..4 {
+            text.push_str(&format!(
+                "#EXTINF:2.002000, nodesc\nhls1/main/{n}.ts?PlaySessionId=ps&ApiKey=k1&runtimeTicks={}&actualSegmentLengthTicks=20020000\n",
+                n * 20_020_000
+            ));
+        }
+        text.push_str("#EXT-X-ENDLIST\n");
+        parse_media(&base, &text).unwrap()
+    }
+
+    #[test]
+    fn a_jellyfin_media_playlist_parses_whole() {
+        let media = jellyfin_media();
+        assert_eq!((media.segments.len(), media.end_list, media.start_offset_micros), (4, true, None));
+        assert_eq!(media.playlist_type, Some(PlaylistType::Vod));
+        assert!(media.segments[2].resource.path.starts_with("/videos/0000-item/hls1/main/2.ts?"));
+    }
+
+    /// With no `EXT-X-START` the caller names the time: playback starts on the segment covering it,
+    /// and the answer says where that segment begins, so the content timeline can be placed on it
+    /// rather than on the time asked for. A time on a boundary starts the segment it opens.
+    #[test]
+    fn a_playlist_without_a_start_tag_starts_at_the_segment_covering_the_time() {
+        let media = jellyfin_media();
+        assert_eq!(media.start_by_time(0), Ok((0, 0)));
+        assert_eq!(media.start_by_time(5_000_000), Ok((2, 4_004_000_000)));
+        assert_eq!(media.start_by_time(4_004_000), Ok((2, 4_004_000_000)));
+        assert_eq!(media.start_by_time(-1), Ok((0, 0)));
+        assert_eq!(media.start_by_time(60_000_000), Ok((4, 8_008_000_000)), "past the end is the end");
     }
 
     #[test]

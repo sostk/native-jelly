@@ -35,6 +35,7 @@ static PORT: nj_platform::tv::Port = nj_platform::tv::Port {
     frame_probe_waiting: crate::system::frame_probe_waiting,
     frame_probe_acquired: crate::system::frame_probe_acquired,
     frame_probe_fields: crate::system::frame_probe_fields,
+    refresh_volume: nj_platform::webos::volume::refresh,
     sink: SINK,
 };
 

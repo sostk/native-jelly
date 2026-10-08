@@ -916,6 +916,9 @@ pub(crate) enum ContentPanel {
     /// *Also available* (`screens::alt_sources`), anchored to the drawn rect of the pill that
     /// opened it — bit-preserving, so a canonical argument holds it without float equality.
     AltSources { anchor: [u32; 4] },
+    /// *Version* (`screens::versions`), anchored to the drawn rect of the pill that opened it, as
+    /// `AltSources` is.
+    Versions { anchor: [u32; 4] },
     /// *Track information* (`screens::tracks_panel`), opened at 1-based `page`. Every interactive
     /// opening passes 1; `/tmp/nativejelly-tracks=<n>` is the only caller that does not, and it is
     /// what makes a headless capture of page 2 possible at all.
@@ -965,6 +968,13 @@ impl ContentPanel {
                         rk: rk.to_string(),
                         anchor,
                     }),
+                )
+            }
+            Self::Versions { anchor } => {
+                let (sid, rk) = subject?;
+                (
+                    Style::Compact,
+                    AppArg::Versions(crate::screens::versions::VersionsArg { host, sid, rk: rk.to_string(), anchor }),
                 )
             }
             Self::Tracks { page } => (
@@ -1100,6 +1110,9 @@ pub(crate) enum AppMsg {
     /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
     /// what keeps "what a press means on the Detail page" in one place instead of two.
     AltSourceOpen(ContentArg),
+    /// The *Version* surface committed a row: make the version whose part is `part` the one the
+    /// page on `(sid, rk)` describes and plays.
+    VersionChosen { sid: crate::catalog::ServerId, rk: String, part: String },
 }
 
 /// What the consent machine is told (§2.3): a person's answer to both questions at once.
@@ -1475,6 +1488,8 @@ pub(crate) enum AppArg {
     /// rect of the pill it hangs off — is on the argument, `LibraryMenuArg`'s shape and for the
     /// same reason: the entry outlives any one frame's idea of where that pill was.
     AltSources(crate::screens::alt_sources::AltSourcesArg),
+    /// The Detail page's *Version* chooser, anchored like `AltSources`.
+    Versions(crate::screens::versions::VersionsArg),
     /// The Detail page's *Track information* sheet (§6.2's page-owned panels). It carries only the
     /// 1-based PAGE the sheet opens at — a boot address like `Settings`'s root, not an identity —
     /// because the sheet describes `metadata::current()` and the host it is presented over is the
@@ -1531,7 +1546,8 @@ pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,S
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
      ItemMenu{sid:u32,rk:str,kind:{Card{from_deck:bool,type:u32},Episode{mark:u32},Season{mark:u32}},\
-     host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool}}";
+     host:u32,focus:Option<{entry:u32,elem:u32}>,anchor:[u32;4],loaded_episode:bool,from_home:bool},\
+     Versions{host:u32,sid:u32,rk:str,anchor:[u32;4]}}";
 
 impl LogicalState for AppArg {
     fn write(&self, c: &mut Canon) {
@@ -1546,6 +1562,7 @@ impl LogicalState for AppArg {
             Self::AboutPanel => { c.u32(10); }
             Self::PersonBio => { c.u32(11); }
             Self::CollectionAbout => { c.u32(12); }
+            Self::Versions(arg) => { c.u32(13); arg.write(c); }
             // 8 and 9 rather than the 6/7 the profile and card menus carried on their own
             // branch: this canon tag is the surface's identity in a recorded state, so two
             // surfaces merged from two lanes may not share one. 4/5 are the library and player
@@ -1592,6 +1609,7 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::ItemMenu(_)
             | AppArg::PlayerOverlay(_)
             | AppArg::AltSources(_)
+            | AppArg::Versions(_)
             | AppArg::TracksPanel(_)
             | AppArg::AboutPanel
             | AppArg::PersonBio
@@ -1612,6 +1630,7 @@ impl crate::ui::screen::ScreenArg for AppArg {
             AppArg::AboutPanel => 21,
             AppArg::PersonBio => 22,
             AppArg::CollectionAbout => 24,
+            AppArg::Versions(_) => 25,
             // 19 and 20, not the 5 and 6 `Route::Account`/`Route::ItemMenu` vacated when this
             // phase deleted them, and not the 17/18 these two carried on their own branch: ids
             // are allocated forward here so a retired identity is never handed to the screen
@@ -1742,6 +1761,9 @@ where
             ),
             AppArg::AltSources(arg) => Box::new(
                 crate::screens::alt_sources::AltSourcesScreen::new(entry, arg.clone(), H::metadata(cx)),
+            ),
+            AppArg::Versions(arg) => Box::new(
+                crate::screens::versions::VersionsScreen::new(entry, arg.clone(), H::metadata(cx)),
             ),
             AppArg::TracksPanel(arg) => Box::new(
                 crate::screens::tracks_panel::TracksPanelScreen::new(entry, *arg),
@@ -1909,6 +1931,12 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             rk: "1".into(),
             anchor: [0; 4],
         }),
+        AppArg::Versions(crate::screens::versions::VersionsArg {
+            host: nj_machine::machine::InstanceId(1),
+            sid: crate::catalog::ServerId::UNSET,
+            rk: "1".into(),
+            anchor: [0; 4],
+        }),
         AppArg::TracksPanel(crate::screens::tracks_panel::TracksPanelArg { page: 1 }),
         AppArg::AboutPanel,
         AppArg::PersonBio,
@@ -1924,6 +1952,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::AccountMenu
             | AppArg::ItemMenu(_)
             | AppArg::AltSources(_)
+            | AppArg::Versions(_)
             | AppArg::TracksPanel(_)
             | AppArg::AboutPanel
             | AppArg::PersonBio
@@ -1997,6 +2026,8 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::preferences::SHAPE,
     crate::screens::preferences::PICKER_SHAPE,
     crate::screens::jf_login::SHAPE,
+    crate::screens::versions::SHAPE[0],
+    crate::screens::versions::SHAPE[1],
 ];
 
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
@@ -2100,7 +2131,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // carries it too; the previous pin was 0x97ff_59c7_9aab_e35e.
 // Jellyfin sign-in: `screens::jf_login::SHAPE` joins the inventory; the previous pin was
 // 0x7063_dff7_775b_9075.
-const SCREEN_SHAPES_PIN: u64 = 0xe44c_06bc_cecb_7c50;
+// The Detail page's *Version* chooser: `screens::versions::SHAPE` joins the inventory and `AppArg`
+// gains `Versions`; the previous pin was 0xe44c_06bc_cecb_7c50.
+const SCREEN_SHAPES_PIN: u64 = 0x43a6_f222_5edc_87aa;
 
 #[cfg(test)]
 mod arg_tests {

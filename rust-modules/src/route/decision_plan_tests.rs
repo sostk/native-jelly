@@ -206,6 +206,32 @@ fn a_direct_play_answer_returns_the_static_stream_url() {
     assert_eq!((plan.vcodec.as_str(), plan.acodec.as_str()), ("hevc", "eac3"));
 }
 
+/// The ask names the media source the part points at. The server applies `AudioStreamIndex` and
+/// `SubtitleStreamIndex` only to the source whose id matches `MediaSourceId`
+/// (`MediaInfoHelper.SetDeviceSpecificData`), so an ask without one has its track picks ignored.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn the_playback_info_ask_names_the_parts_media_source() {
+    let (_, requests) =
+        resolve_jf(playback_info(true, "mkv", HEVC_EAC3, None), default_user(), eac3_only(), Vec::new(), |_| {});
+    assert_eq!(playback_info_body(&requests)["MediaSourceId"], JF_GUID);
+}
+
+/// An item with several versions answers with several sources. The one played is the one asked
+/// for — by id — not whichever the server happened to list first.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn the_answer_source_is_the_one_asked_for_not_merely_the_first() {
+    let other = "fedcba9876543210fedcba9876543210";
+    let url = format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported&MediaSourceId={other}");
+    let info = format!(
+        r#"{{"MediaSources":[{{"Id":"{other}","Container":"avi","Protocol":"File","SupportsDirectPlay":false,"SupportsDirectStream":false,"SupportsTranscoding":true,"TranscodingUrl":{url:?},"MediaStreams":[{HEVC_EAC3}]}},{{"Id":"{JF_GUID}","Container":"mkv","Protocol":"File","SupportsDirectPlay":true,"SupportsDirectStream":true,"SupportsTranscoding":true,"MediaStreams":[{HEVC_EAC3}]}}],"PlaySessionId":"ps-loopback"}}"#
+    );
+    let (plan, _) = resolve_jf(info, default_user(), eac3_only(), Vec::new(), |_| {});
+    assert!(plan.url.contains(&format!("stream.mkv?static=true&MediaSourceId={JF_GUID}")), "{}", plan.url);
+    assert!(plan.tsession.is_empty(), "the requested version direct-plays: {}", plan.url);
+}
+
 #[test]
 #[cfg(feature = "devtriggers")]
 fn smart_direct_play_asks_for_the_ac3_sibling_of_a_truehd_default() {
@@ -235,6 +261,52 @@ fn a_transcode_answer_plays_the_transcoding_url_in_its_output_codecs() {
     assert!(!plan.tsession.is_empty() && plan.tsession == plan.sess, "the conversion is stoppable by its session");
 }
 
+/// Resolve the loopback's conversion with the press's resume, install it, and run the landing's
+/// resume to `resume_ns`; returns every request the server saw.
+fn resume_jf_conversion(start_ns: i64, resume_ns: i64) -> Vec<JfRequest> {
+    let url = format!(
+        "/videos/{JF_GUID}/stream.mkv?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported&PlaySessionId=ps-loopback"
+    );
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    restore_quality(Quality::Original);
+    let lb = JfLoopback::start(playback_info(false, "mkv", HEVC_EAC3, Some(&url)), default_user());
+    let rk = jf_rk();
+    let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), lb.sid, &rk);
+    env.cached_item = Some(jf_item(lb.sid, eac3_only(), Vec::new()));
+    env.start_ns = start_ns;
+    let plan = build_stream(&rk, &jf_part(), "hevc", "eac3", &env);
+    assert!(!plan.tsession.is_empty(), "the loopback converts: {}", plan.url);
+    apply_plan(&mut ps, plan, &rk);
+    assert_eq!(crate::player::resume_at(&mut ps, resume_ns), crate::player::ResumeOutcome::Prepared);
+    lb.finish()
+}
+
+/// A resumed conversion asks the server once. The press knows the resume before the resolve
+/// starts, so the first PlaybackInfo already starts the encoder there, and the landing's resume
+/// finds it in place instead of negotiating a second encoder and ending the first.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_resumed_conversion_is_negotiated_once_at_the_resume() {
+    let seen = resume_jf_conversion(754_400_000_000, 754_400_000_000);
+    let asks: Vec<_> = seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).collect();
+    assert_eq!(asks.len(), 1, "{seen:?}");
+    assert_eq!(asks[0].json()["StartTimeTicks"], 754_i64 * 10_000_000);
+    assert!(!seen.iter().any(|r| r.line.starts_with("DELETE ")), "no encoder to retire: {seen:?}");
+}
+
+/// The encoder only stands in for the resume it was started at. A landing that resumes somewhere
+/// else still restarts the conversion there.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_landing_resuming_elsewhere_still_restarts_the_conversion() {
+    let seen = resume_jf_conversion(754_400_000_000, 100_000_000_000);
+    let asks: Vec<_> = seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).collect();
+    assert_eq!(asks.len(), 2, "{seen:?}");
+    assert_eq!(asks[1].json()["StartTimeTicks"], 100_i64 * 10_000_000);
+}
+
 #[test]
 #[cfg(feature = "devtriggers")]
 fn a_direct_stream_answer_is_a_remux_that_keeps_the_source_codecs() {
@@ -254,7 +326,31 @@ fn a_playback_info_error_code_is_the_servers_verdict() {
     let info = r#"{"MediaSources":[],"ErrorCode":"NoCompatibleStream"}"#.to_string();
     let (plan, _) = resolve_jf(info, default_user(), eac3_only(), Vec::new(), |_| {});
     assert!(plan.url.is_empty());
-    assert_eq!(plan.verdict, Some(PlayVerdict::Server("NoCompatibleStream".into())));
+    let verdict = plan.verdict.expect("a refusal is a verdict");
+    assert_eq!(verdict, PlayVerdict::Server(crate::catalog::Refusal::NoCompatibleStream));
+    // The viewer reads a sentence, not the API's enum name.
+    assert!(!verdict.text().contains("NoCompatibleStream"), "{}", verdict.text());
+}
+
+/// Each `PlaybackErrorCode` the API defines is its own category, and a code this client does not
+/// know is still a refusal — worded generically, never echoed.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn every_playback_error_code_is_a_typed_refusal() {
+    use crate::catalog::Refusal;
+    for (code, expected) in [
+        ("NotAllowed", Refusal::NotAllowed),
+        ("RateLimitExceeded", Refusal::RateLimitExceeded),
+        ("SomethingNew", Refusal::Unrecognized("SomethingNew".into())),
+    ] {
+        let info = format!(r#"{{"MediaSources":[],"ErrorCode":"{code}"}}"#);
+        let (plan, _) = resolve_jf(info, default_user(), eac3_only(), Vec::new(), |_| {});
+        let verdict = plan.verdict.expect("a refusal is a verdict");
+        assert_eq!(verdict, PlayVerdict::Server(expected), "{code}");
+        assert!(!verdict.text().contains(code), "{code}: {}", verdict.text());
+    }
+    let (plan, _) = resolve_jf(r#"{"MediaSources":[]}"#.to_string(), default_user(), eac3_only(), Vec::new(), |_| {});
+    assert_eq!(plan.verdict, Some(PlayVerdict::Server(Refusal::NoMediaSource)));
 }
 
 #[test]
@@ -367,7 +463,11 @@ fn a_preview_never_plays_a_conversion() {
     });
     assert!(plan.url.is_empty() && plan.tsession.is_empty());
     assert!(
-        requests.iter().any(|r| r.line.contains("/Sessions/Playing/Stopped")),
-        "the conversion the server started for it is stopped: {requests:?}"
+        requests.iter().any(|r| r.line.starts_with("DELETE /Videos/ActiveEncodings?")),
+        "the conversion the server started for it is ended: {requests:?}"
+    );
+    assert!(
+        !requests.iter().any(|r| r.line.contains("/Sessions/Playing/Stopped")),
+        "a preview that never played reports no stop, which would rewrite the resume point: {requests:?}"
     );
 }

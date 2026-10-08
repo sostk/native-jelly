@@ -2569,6 +2569,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::ItemMenu(_)
                 | AppArg::PlayerOverlay(_)
                 | AppArg::AltSources(_)
+                | AppArg::Versions(_)
                 | AppArg::TracksPanel(_)
                 | AppArg::AboutPanel
                 | AppArg::PersonBio
@@ -3612,7 +3613,8 @@ mod lifecycle_regression_tests {
                 "h264",
                 "aac",
                 "First",
-                ""
+                "",
+                0
             ));
             self.entered.recv_timeout(Duration::from_secs(3)).unwrap();
         }
@@ -3950,7 +3952,8 @@ mod lifecycle_regression_tests {
             "h264",
             "aac",
             "Replacement",
-            ""
+            "",
+            0
         ));
         rig.accept_start();
         assert!(crate::route::play_pending());

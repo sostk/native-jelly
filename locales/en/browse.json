@@ -131,6 +131,10 @@
     "value": "Also available",
     "description": "browse detail also_available"
   },
+  "browse.detail.version": {
+    "value": "Version",
+    "description": "browse detail version: the hero pill that opens the list of an item's versions (4K, 1080p, ...)"
+  },
   "browse.detail.mark_watched": {
     "value": "Mark as Watched",
     "description": "browse detail mark_watched"

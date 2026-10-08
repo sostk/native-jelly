@@ -57,8 +57,8 @@ impl<'a> MetadataView<'a> {
     pub(crate) fn detail_generation(&self) -> u32 {
         detail_generation(self.adapter)
     }
-    pub(crate) fn cached_playing(&self, sid: crate::catalog::ServerId, rk: &str) -> Option<PlayingItem> {
-        cached_playing(self.state, sid, rk)
+    pub(crate) fn cached_playing(&self, sid: crate::catalog::ServerId, rk: &str, part: &str) -> Option<PlayingItem> {
+        cached_playing(self.state, sid, rk, part)
     }
     pub(crate) fn active_marker(&self, head: Playhead) -> Option<Marker> {
         if !head.playing {
@@ -1551,9 +1551,109 @@ pub(crate) struct Detail {
     /// Rating key of the picker winner inside [`Self::extras`]. Empty when there is none.
     #[serde(default)]
     pub(crate) trailer_rk: String,
+    /// Every version of a leaf that has more than one (`Media[]`), in server order; empty
+    /// otherwise. The version fields above describe whichever of these `part` names — version 0
+    /// until the viewer chooses another ([`Self::select_version`]). Kept off the wire when empty,
+    /// so a recorded `Detail` from before the field still round-trips canonically.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) versions: Vec<Version>,
+}
+
+/// One version of a leaf: the server's name for it and everything that differs between versions.
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Version {
+    /// `Media.title` — empty when the server names none.
+    pub(crate) title: String,
+    pub(crate) facts: VersionFacts,
+}
+
+/// The fields of [`Detail`] that belong to one version rather than to the item.
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct VersionFacts {
+    pub(crate) part: String,
+    pub(crate) vcodec: String,
+    pub(crate) acodec: String,
+    #[serde(with = "record::float_bits")]
+    pub(crate) video_fps: f64,
+    pub(crate) video_resolution: String,
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    pub(crate) bitrate: i64,
+    pub(crate) container: String,
+    pub(crate) file: String,
+    pub(crate) size: i64,
+    #[serde(with = "record::float_bits")]
+    pub(crate) aspect_ratio: f64,
+    pub(crate) video: Option<Stream>,
+    pub(crate) hdr: bool,
+    pub(crate) dovi: Dovi,
+    pub(crate) audio: Vec<Stream>,
+    pub(crate) subs: Vec<Stream>,
+}
+
+/// One `Media` version, reduced to the fields a [`Detail`] carries for it: its first part's key,
+/// file and streams. The part's container wins where it has one — a version can hold parts in
+/// different containers, and the part is the thing the page describes.
+fn version_facts(m: &crate::catalog::Media) -> VersionFacts {
+    let p = m.part.first();
+    let s = p.map(|p| convert_streams(&p.stream)).unwrap_or_default();
+    VersionFacts {
+        part: p.map(|p| p.key.clone()).unwrap_or_default(),
+        vcodec: m.video_codec.clone(),
+        acodec: m.audio_codec.clone(),
+        video_fps: s.fps,
+        video_resolution: m.video_resolution.clone(),
+        width: m.width,
+        height: m.height,
+        bitrate: m.bitrate,
+        container: p.map(|p| p.container.clone()).filter(|c| !c.is_empty()).unwrap_or_else(|| m.container.clone()),
+        file: p.map(|p| p.file.clone()).unwrap_or_default(),
+        size: p.map_or(0, |p| p.size),
+        aspect_ratio: m.aspect_ratio,
+        video: s.video,
+        hdr: s.hdr,
+        dovi: s.dovi,
+        audio: s.audio,
+        subs: s.subs,
+    }
 }
 
 impl Detail {
+    /// Describe the version `f` everywhere but `part`/`vcodec`/`acodec` — the half a SHOW borrows
+    /// from its first episode without claiming a file of its own.
+    fn apply_technicals(&mut self, f: &VersionFacts) {
+        self.video_fps = f.video_fps;
+        self.video_resolution = f.video_resolution.clone();
+        self.width = f.width;
+        self.height = f.height;
+        self.bitrate = f.bitrate;
+        self.container = f.container.clone();
+        self.file = f.file.clone();
+        self.size = f.size;
+        self.aspect_ratio = f.aspect_ratio;
+        self.video = f.video.clone();
+        self.hdr = f.hdr;
+        self.dovi = f.dovi;
+        self.audio = f.audio.clone();
+        self.subs = f.subs.clone();
+    }
+
+    /// Make the version whose part is `part` the one this page describes and Play plays. `false`
+    /// when there is no such version or it is already the one.
+    pub(crate) fn select_version(&mut self, part: &str) -> bool {
+        if self.part == part {
+            return false;
+        }
+        let Some(f) = self.versions.iter().find(|v| v.facts.part == part).map(|v| v.facts.clone()) else {
+            return false;
+        };
+        self.part = f.part.clone();
+        self.vcodec = f.vcodec.clone();
+        self.acodec = f.acodec.clone();
+        self.apply_technicals(&f);
+        true
+    }
+
     /// **Does this item have a FILE of its own?** — the rule behind the *Track information* sheet
     /// (`screens::tracks_panel`) and the Languages column's press gate on the detail page.
     ///
@@ -2033,6 +2133,11 @@ fn fetch_detail(sid: crate::catalog::ServerId, rk: &str) -> Option<(Detail, Stri
         ratings: convert_ratings(&it),
         extras: Vec::new(),
         trailer_rk: String::new(),
+        versions: if it.media.len() > 1 {
+            it.media.iter().map(|m| Version { title: m.title.clone(), facts: version_facts(m) }).collect()
+        } else {
+            Vec::new()
+        },
     };
     // audio/subtitle streams (movies carry Media/Part/Stream; a show does not — its
     // episodes do, so load_detail backfills a show's streams from its first episode).
@@ -2244,31 +2349,7 @@ mod convert_streams_tests {
 /// first episode by the same call in `fetch_item_streams`, so they can't describe different files.
 fn parse_streams(it: &crate::catalog::Metadata, d: &mut Detail) {
     if let Some(m) = it.primary_media() {
-        d.video_resolution = m.video_resolution.clone();
-        d.width = m.width;
-        d.height = m.height;
-        d.bitrate = m.bitrate;
-        d.container = m.container.clone();
-        d.aspect_ratio = m.aspect_ratio;
-    }
-    if let Some(p) = it.first_part() {
-        d.file = p.file.clone();
-        d.size = p.size;
-        // The PART's container wins where it has one — a version can hold parts in different
-        // containers, and the part is the thing the panel is describing. `Media.container` is the
-        // fallback, already assigned above.
-        if !p.container.is_empty() {
-            d.container = p.container.clone();
-        }
-        let s = convert_streams(&p.stream);
-        d.audio = s.audio;
-        d.subs = s.subs;
-        d.video = s.video;
-        d.hdr = s.hdr;
-        d.dovi = s.dovi;
-        if s.fps > 0.0 {
-            d.video_fps = s.fps;
-        }
+        d.apply_technicals(&version_facts(m));
     }
 }
 
@@ -2363,9 +2444,14 @@ impl PlayingItem {
 /// This closed a TODO that stood here through the foundation commits: `Detail` had no server, so
 /// the filter was the rk alone and the parameter was deliberately unused. `Detail.sid` is what
 /// made the pair test possible.
-fn cached_playing(state: &MetadataState, sid: crate::catalog::ServerId, rk: &str) -> Option<PlayingItem> {
+///
+/// The page describes ONE version of the item, so the hit also needs the played `part` to be that
+/// version's: playing version 0 from Home while the page shows version 2 is a miss. An empty `part`
+/// names no version and matches whichever the page holds.
+fn cached_playing(state: &MetadataState, sid: crate::catalog::ServerId, rk: &str, part: &str) -> Option<PlayingItem> {
     current(state)
         .filter(|d| crate::catalog::same_item((d.sid, &d.rk), (sid, rk)) && !d.audio.is_empty())
+        .filter(|d| part.is_empty() || d.part == part)
         .map(|d| PlayingItem {
             sid,
             rk: rk.to_string(),
@@ -2385,11 +2471,20 @@ fn cached_playing(state: &MetadataState, sid: crate::catalog::ServerId, rk: &str
 /// `sid` names the server `rk` is a key on. It runs on the resolve worker, so the server must
 /// arrive by value: `client_opt()` here would fetch whichever server is CURRENT, and a ratingKey
 /// that also exists there would come back with a different film's stream list.
-pub(crate) fn fetch_playing_item(sid: crate::catalog::ServerId, rk: &str) -> Option<PlayingItem> {
+///
+/// `part` is the version being played: its streams and frame size are the ones a multi-version item
+/// plays with. A part the response does not list (or an empty one) falls back to the first version.
+pub(crate) fn fetch_playing_item(sid: crate::catalog::ServerId, rk: &str, part: &str) -> Option<PlayingItem> {
     if rk.is_empty() {
         return None;
     }
     let it = crate::catalog::client_for(sid).and_then(|c| c.metadata(rk));
+    let version = it.as_ref().and_then(|it| {
+        it.media
+            .iter()
+            .find(|m| !part.is_empty() && m.part.first().is_some_and(|p| p.key == part))
+            .or_else(|| it.primary_media())
+    });
     // Markers and chapters hang off the ITEM, streams off its first Part — so a part-less response
     // still yields both of those instead of discarding all three. `Client::metadata` already sends
     // `includeChapters=1` (plex/library.rs), so the Chapter[] is on the wire either way: taking it
@@ -2402,17 +2497,13 @@ pub(crate) fn fetch_playing_item(sid: crate::catalog::ServerId, rk: &str) -> Opt
         .as_ref()
         .map(|it| convert_chapters(&it.chapter))
         .unwrap_or_default();
-    let st = it
-        .as_ref()
-        .and_then(|it| it.first_part().map(|p| convert_streams(&p.stream)))
+    let st = version
+        .and_then(|m| m.part.first().map(|p| convert_streams(&p.stream)))
         .unwrap_or_default();
     let (audio, subs, video_fps, dovi) = (st.audio, st.subs, st.fps, st.dovi);
-    // the frame size rides the same PRIMARY version the streams come from (route.rs's
-    // direct-play gate tests it against the device bound — see the field doc)
-    let (width, height, bitrate) = it
-        .as_ref()
-        .and_then(|it| it.primary_media().map(|m| (m.width, m.height, m.bitrate)))
-        .unwrap_or((0, 0, 0));
+    // the frame size rides the same version the streams come from (route.rs's direct-play gate
+    // tests it against the device bound — see the field doc)
+    let (width, height, bitrate) = version.map(|m| (m.width, m.height, m.bitrate)).unwrap_or((0, 0, 0));
     let blur = it
         .as_ref()
         .and_then(|it| it.ultra_blur_colors)
@@ -3450,6 +3541,11 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
             true
         }
         MetadataCmd::SetWatchedLocal { sid, rk, on } => set_watched_local(state, sid, &rk, on),
+        MetadataCmd::SelectVersion { sid, rk, part } => state
+            .current
+            .as_mut()
+            .filter(|d| crate::catalog::same_item((d.sid, &d.rk), (sid, &rk)))
+            .is_some_and(|d| d.select_version(&part)),
         MetadataCmd::InstallPlaying(p) => {
             install_playing(state, p);
             true
@@ -3539,6 +3635,12 @@ fn install_landed_detail(state: &mut MetadataState, adapter: &std::sync::Arc<Met
     // server and its portable guid, and this is the one place both are known on the main thread.
     // A page with no guid, or a one-server install, spawns nothing.
     request_alt_sources(state, adapter, d.sid, &d.rk, &d.guid);
+    let mut d = d;
+    // A refresh of the same item (back from playback, a watch-state write) keeps the version the
+    // viewer chose, while the server still lists it.
+    if let Some(held) = state.current.as_ref().filter(|c| crate::catalog::same_item((c.sid, &c.rk), (d.sid, &d.rk))) {
+        d.select_version(&held.part);
+    }
     state.current = Some(d);
     // if this load is a playing leaf (episode/movie), refresh the Info card's descriptor from it
     sync_now_playing(state);

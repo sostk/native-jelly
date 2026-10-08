@@ -730,6 +730,56 @@ fn apply_metadata_effects(effects: &[nj_machine::machine::Stamped<TestHost>]) {
     }
 }
 
+/// **The *Version* pill is there exactly while the item has more than one version**, opens the
+/// *Version* surface, and a choice that comes back for THIS page's item swaps the version the page
+/// describes — while one for another item is ignored.
+#[test]
+fn the_version_pill_opens_the_chooser_and_a_choice_swaps_the_page() {
+    let sid = ServerId::from_raw(1);
+    let version = |part: &str, vcodec: &str| crate::metadata::Version {
+        title: String::new(),
+        facts: crate::metadata::VersionFacts { part: part.into(), vcodec: vcodec.into(), ..Default::default() },
+    };
+    let guard = install(Detail {
+        sid,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        part: "/p/0".into(),
+        vcodec: "hevc".into(),
+        versions: vec![version("/p/0", "hevc"), version("/p/1", "h264")],
+        ..Default::default()
+    });
+    let mut screen = bare(&guard, sid, "movie");
+    assert!(screen.hero_set(test_store().view()).version);
+
+    let (_, opened) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_VERSION), None);
+    assert!(
+        opened.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::Versions { .. }))))),
+        "the pill opens the Version surface"
+    );
+
+    let elsewhere = AppMsg::VersionChosen { sid, rk: "other".into(), part: "/p/1".into() };
+    let (_, ignored) = step(&mut screen, &ScreenEvent::App(elsewhere), None);
+    assert!(ignored.iter().all(|e| !matches!(&e.fx, Fx::App(AppFx::Store(..)))));
+
+    let chosen = AppMsg::VersionChosen { sid, rk: "movie".into(), part: "/p/1".into() };
+    let (_, swapped) = step(&mut screen, &ScreenEvent::App(chosen), None);
+    apply_metadata_effects(&swapped);
+    let d = test_store().view().current().cloned().expect("still loaded");
+    assert_eq!((d.part.as_str(), d.vcodec.as_str()), ("/p/1", "h264"));
+
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
+        sid,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        part: "/p/0".into(),
+        versions: vec![version("/p/0", "hevc")],
+        ..Default::default()
+    }));
+    assert!(!screen.hero_set(test_store().view()).version, "one version, no pill");
+    clear();
+}
+
 #[test]
 fn the_episode_text_highlight_fits_the_block_the_flow_already_reserves() {
     let d = detail(ServerId::UNSET, "show");
@@ -894,6 +944,7 @@ fn hero_focus_survives_a_control_appearing_in_the_middle_of_the_row() {
     let before = hero::HeroSet {
         restart: true,
         trailer: false,
+        version: false,
         alt: false,
         mark: PosterMark::None,
     };
@@ -1056,15 +1107,17 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
     let set = hero::HeroSet {
         restart: true,
         trailer: false,
+        version: false,
         alt: false,
         mark: PosterMark::InProgress,
     };
     let index = hero::watch_index(set).unwrap();
     assert_eq!(hero::ctl_at(set, index - 1), Some(hero::HeroCtl::Restart));
     for unfurl in [0.2, 0.6, 1.0] {
-        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl], [201.0, 0.0, 267.0]);
+        let disc = hero::disc_caps_at(set, 230.0, 0.0, 0.0, [0.0, 0.0, unfurl], [201.0, 0.0, 267.0]);
         let widths = hero::HeroWidths {
             pill: 230.0,
+            version: 0.0,
             alt: 0.0,
             disc,
         };

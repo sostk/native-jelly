@@ -20,7 +20,7 @@
 //!   (`route.rs`'s track menu and skip/Up Next controls read this, not `current()`).
 //! - `playing_markers() -> &'a [Marker]`, `playing_chapters() -> &'a [Chapter]` — the
 //!   playing item's own lists, unqualified by anything else.
-//! - `cached_playing(sid: ServerId, rk: &str) -> Option<PlayingItem>` — an in-memory-only lookup
+//! - `cached_playing(sid: ServerId, rk: &str, part: &str) -> Option<PlayingItem>` — an in-memory-only lookup
 //!   (checks `current()` alone; never touches the network). Its `fetch_playing_item` NEIGHBOUR
 //!   below looks similar and is not this: see the WRITE surface's note on it.
 //! - `detail_loading() -> bool`, `season_loading() -> bool` — status flags for a spinner/read-out.
@@ -39,7 +39,7 @@
 //!   pure formatting/policy, no state at all; free functions.
 //!
 //! **Two names that LOOK like reads and are not, on purpose — read the exclusion, not just the
-//! list.** `fetch_playing_item(sid, rk) -> Option<PlayingItem>` performs a BLOCKING `plex::client`
+//! list.** `fetch_playing_item(sid, rk, part) -> Option<PlayingItem>` performs a BLOCKING `plex::client`
 //! network call (`route.rs`'s one caller runs it on the resolve WORKER, never the main thread); a
 //! screen must route it through a request/pump, never call it from `step`/`draw`. `sync_now_playing()`
 //! mutates `NOW` and its one remaining caller is already inside the WRITE surface below
@@ -62,6 +62,8 @@
 //! - `SetNowPlaying(Option<NowPlaying>)` → `metadata::set_now_playing`.
 //! - `SetWatchedLocal{sid, rk, on}` → `metadata::set_watched_local` — the optimistic half of a
 //!   view-state write, answers whether it actually changed anything.
+//! - `SelectVersion{sid, rk, part}` → `Detail::select_version` on the loaded item — the version
+//!   chooser; answers whether the page now describes a different version.
 //! - `InstallPlaying(Option<PlayingItem>)` → `metadata::install_playing` — the playback plan's leaf
 //!   (`route.rs`).
 //! - `MarkSkipped(Marker)` → `metadata::mark_skipped`.
@@ -167,6 +169,9 @@ pub(crate) enum MetadataCmd {
     SetNowPlaying(Option<crate::metadata::NowPlaying>),
     /// The optimistic half of a view-state write on the loaded item, its episodes and Related.
     SetWatchedLocal { sid: ServerId, rk: String, on: bool },
+    /// The version chooser: describe and play the version of the loaded `(sid, rk)` whose part is
+    /// `part` (`Detail::select_version`).
+    SelectVersion { sid: ServerId, rk: String, part: String },
     /// The playback plan's leaf (`route.rs`).
     InstallPlaying(Option<crate::metadata::PlayingItem>),
     MarkSkipped(crate::metadata::Marker),

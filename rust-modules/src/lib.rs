@@ -24,7 +24,7 @@ mod dev; // the /tmp/nativejelly-* trigger surface, behind one `devtriggers` fea
 mod diag; // typed usage schema plus log/lab scrub, ring and zlib; native crashes have a separate allowlist
 mod ff; // THE demuxer — the FFmpeg 9.0 this app BUNDLES and pins (majors 63/63/61), dlopen'd by absolute path beside the binary, never the television's
 mod focusprobe; // dev: one diffable line naming everything app.rs's key ladder can move, logged when it changes
-mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
+mod hls; // strict parser/auth/timeline for the measured PMS and Jellyfin HLS shapes
 mod http; // the ONE door out of the control plane: dispatch a catalog REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
 mod jf; // Jellyfin behind the catalog::Client facade: seat registry, DTOs, DTO→catalog conversion, ops
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll

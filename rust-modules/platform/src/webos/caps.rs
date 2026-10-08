@@ -5,12 +5,17 @@
 //! an early render-thread read never initializes the cache (`devcaps::dv`'s, which this module
 //! publishes into): the worker is the only publisher, and a failed or late answer cannot be
 //! mistaken for an affirmative capability.
+//!
+//! The same call asks for the panel's HDR10 support (`devcaps::hdr`), graded key by key, so one
+//! key missing from a firmware's configd cannot cost the other its answer.
 
 use crate::devcaps::dv::{DvCapability, DvProbe, ProbeSource};
+use crate::devcaps::hdr::HdrCapability;
 use std::sync::OnceLock;
 use std::time::Instant;
 
 const KEY: &str = "tv.config.supportDolbyHDRContents";
+const HDR_KEY: &str = "tv.model.supportHDR";
 
 static STARTED: OnceLock<()> = OnceLock::new();
 
@@ -57,6 +62,11 @@ fn publish(probe: DvProbe, started: Instant, code: Option<i64>, detail: Option<&
     nj_machine::idle::invalidate();
 }
 
+fn publish_hdr(capability: HdrCapability, stage: &str) {
+    crate::devcaps::hdr::publish(capability);
+    nj_base::eventlog::log(&format!("webos-caps: key={HDR_KEY} answer={} stage={stage}", capability.label()));
+}
+
 /// Start the one boot probe. The registration and its private GLib context are both created and
 /// dropped on this worker; no LS2 handle crosses a thread boundary and the app never joins it.
 pub fn start_probe() {
@@ -74,6 +84,7 @@ pub fn start_probe() {
             None,
             None,
         );
+        publish_hdr(HdrCapability::Unknown, "spawn");
     }
 }
 
@@ -99,6 +110,7 @@ fn run_probe() {
             None,
             None,
         );
+        publish_hdr(HdrCapability::Unknown, "dv-override");
         return;
     }
     run_transport(started);
@@ -120,6 +132,7 @@ fn run_transport(started: Instant) {
             detail,
             code,
         }) => {
+            publish_hdr(HdrCapability::Unknown, stage);
             publish(
                 DvProbe {
                     capability: DvCapability::Unknown,
@@ -135,9 +148,14 @@ fn run_transport(started: Instant) {
     };
     let reply = registration.call(
         "luna://com.webos.service.config/getConfigs",
-        r#"{"configNames":["tv.config.supportDolbyHDRContents"]}"#,
+        r#"{"configNames":["tv.config.supportDolbyHDRContents","tv.model.supportHDR"]}"#,
         Duration::from_millis(1500),
     );
+    match &reply {
+        Ok(reply) => publish_hdr(parse_hdr_reply(reply), "configd"),
+        Err(super::ls2::Fail::Timeout) => publish_hdr(HdrCapability::Unknown, "timeout"),
+        Err(super::ls2::Fail::Setup { stage, .. }) => publish_hdr(HdrCapability::Unknown, stage),
+    }
     match reply {
         Ok(reply) => match parse_dv_reply(&reply) {
             Ok(capability) => publish(
@@ -205,6 +223,7 @@ fn run_transport(started: Instant) {
         None,
         None,
     );
+    publish_hdr(HdrCapability::Unknown, "host");
 }
 
 #[cfg(all(
@@ -264,6 +283,31 @@ impl ProbeFailure {
     all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
 ))]
 fn parse_dv_reply(reply: &str) -> Result<DvCapability, ProbeFailure> {
+    Ok(if parse_config_bool(reply, KEY)? {
+        DvCapability::Supported
+    } else {
+        DvCapability::Unsupported
+    })
+}
+
+/// `tv.model.supportHDR` out of the same reply, by the same strict rules; any failure is Unknown.
+#[cfg(any(
+    test,
+    all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
+))]
+fn parse_hdr_reply(reply: &str) -> HdrCapability {
+    match parse_config_bool(reply, HDR_KEY) {
+        Ok(true) => HdrCapability::Supported,
+        Ok(false) => HdrCapability::Unsupported,
+        Err(_) => HdrCapability::Unknown,
+    }
+}
+
+#[cfg(any(
+    test,
+    all(target_arch = "arm", target_os = "linux", not(feature = "hostsim"))
+))]
+fn parse_config_bool(reply: &str, key: &str) -> Result<bool, ProbeFailure> {
     let value: serde_json::Value = serde_json::from_str(reply).map_err(|_| ProbeFailure::Json)?;
     let root = value.as_object().ok_or(ProbeFailure::Json)?;
     if root.get("returnValue").and_then(serde_json::Value::as_bool) != Some(true) {
@@ -274,7 +318,7 @@ fn parse_dv_reply(reply: &str) -> Result<DvCapability, ProbeFailure> {
         let mut target_missing = false;
         for item in missing {
             let item = item.as_str().ok_or(ProbeFailure::MissingConfigs)?;
-            target_missing |= item == KEY;
+            target_missing |= item == key;
         }
         if target_missing {
             return Err(ProbeFailure::MissingConfigs);
@@ -284,18 +328,36 @@ fn parse_dv_reply(reply: &str) -> Result<DvCapability, ProbeFailure> {
         .get("configs")
         .and_then(serde_json::Value::as_object)
         .ok_or(ProbeFailure::MissingKey)?;
-    let requested = configs.get(KEY).ok_or(ProbeFailure::MissingKey)?;
-    let answer = requested.as_bool().ok_or(ProbeFailure::ValueType)?;
-    Ok(if answer {
-        DvCapability::Supported
-    } else {
-        DvCapability::Unsupported
-    })
+    let requested = configs.get(key).ok_or(ProbeFailure::MissingKey)?;
+    requested.as_bool().ok_or(ProbeFailure::ValueType)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{override_capability, parse_dv_reply, DvCapability, ProbeFailure};
+    use super::{override_capability, parse_dv_reply, parse_hdr_reply, DvCapability, HdrCapability, ProbeFailure};
+
+    /// Both keys come back in one reply; each is graded on its own, so a firmware whose configd
+    /// lacks the HDR key still answers Dolby Vision, and the reverse.
+    #[test]
+    fn hdr_and_dv_are_graded_independently_from_one_reply() {
+        let both = r#"{"returnValue":true,"configs":{"tv.config.supportDolbyHDRContents":false,"tv.model.supportHDR":true}}"#;
+        assert_eq!(parse_dv_reply(both), Ok(DvCapability::Unsupported));
+        assert_eq!(parse_hdr_reply(both), HdrCapability::Supported);
+        let no_hdr = r#"{"returnValue":true,"configs":{"tv.config.supportDolbyHDRContents":true},"missingConfigs":["tv.model.supportHDR"]}"#;
+        assert_eq!(parse_dv_reply(no_hdr), Ok(DvCapability::Supported));
+        assert_eq!(parse_hdr_reply(no_hdr), HdrCapability::Unknown);
+        let sdr = r#"{"returnValue":true,"configs":{"tv.model.supportHDR":false},"missingConfigs":["tv.config.supportDolbyHDRContents"]}"#;
+        assert_eq!(parse_hdr_reply(sdr), HdrCapability::Unsupported);
+        assert!(parse_dv_reply(sdr).is_err());
+        for reply in [
+            r#"{"returnValue":false,"configs":{"tv.model.supportHDR":true}}"#,
+            r#"{"returnValue":true,"configs":{"tv.model.supportHDR":"true"}}"#,
+            r#"{"returnValue":true,"configs":{"tv.model.supportHDR":1}}"#,
+            "not json",
+        ] {
+            assert_eq!(parse_hdr_reply(reply), HdrCapability::Unknown, "{reply}");
+        }
+    }
 
     #[test]
     fn dv_caps_override_precedence() {

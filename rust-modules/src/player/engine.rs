@@ -1479,10 +1479,16 @@ pub(crate) fn resume_at(ps: &mut crate::route::PlaybackSession, resume_ns: i64) 
     if crate::route::url(ps).is_empty() {
         return ResumeOutcome::NoRoute;
     }
+    let offset_secs = resume_ns / 1_000_000_000;
     if !crate::route::is_transcoding(ps) {
         arm_seek(resume_ns); // direct-play: av_seek the file at the first open
         ResumeOutcome::Prepared
-    } else if crate::route::transcode_seek(ps, resume_ns / 1_000_000_000).is_some() {
+    } else if crate::route::take_encoder_start(ps, offset_secs) {
+        SHARED.disp_base.store(resume_ns, Ordering::Relaxed);
+        SHARED.playpos_ns.store(resume_ns, Ordering::Relaxed);
+        log(&format!("resume(transcode): the encoder already starts at {offset_secs}s"));
+        ResumeOutcome::Prepared
+    } else if crate::route::transcode_seek(ps, offset_secs).is_some() {
         // transcode: the encode restarts at &offset (0-based); disp_base carries the offset
         SHARED.disp_base.store(resume_ns, Ordering::Relaxed);
         SHARED.playpos_ns.store(resume_ns, Ordering::Relaxed);

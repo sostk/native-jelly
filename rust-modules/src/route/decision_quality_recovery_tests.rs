@@ -545,8 +545,9 @@ fn install_jf_hls(ps: &mut PlaybackSession, lb: &JfLoopback, logical: &str, enco
     );
 }
 
-fn stopped_reports(requests: &[JfRequest]) -> usize {
-    requests.iter().filter(|r| r.line.starts_with("POST /Sessions/Playing/Stopped ")).count()
+/// Encoders the server was asked to end (`DELETE /Videos/ActiveEncodings`).
+fn ended_encoders(requests: &[JfRequest]) -> usize {
+    requests.iter().filter(|r| r.line.starts_with("DELETE /Videos/ActiveEncodings?")).count()
 }
 
 /// A seek during a conversion is a fresh negotiation at the new offset under a fresh encoder
@@ -560,7 +561,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
     let lb = JfLoopback::start(jf_hls_info(), user_config(None, true, None, "Default"));
     restore_quality(Quality::Auto);
     install_jf_hls(&mut ps, &lb, "playback-seek", "playback-seek-abr-old");
-    let before = stopped_reports(&lb.seen());
+    let before = ended_encoders(&lb.seen());
 
     let new_url = transcode_seek(&mut ps, 300).expect("accepted seek negotiation");
     let new_encoder = transcode_session(&ps);
@@ -577,7 +578,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
     assert_eq!(seek["StartTimeTicks"], 300 * 10_000_000_i64, "negotiated at the seek target");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while stopped_reports(&lb.seen()) == before {
+    while ended_encoders(&lb.seen()) == before {
         assert!(std::time::Instant::now() < deadline, "the replaced session was never stopped");
         std::thread::sleep(std::time::Duration::from_millis(5));
     }

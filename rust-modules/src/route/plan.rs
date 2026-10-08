@@ -332,10 +332,12 @@ pub(crate) enum PrimeRefusal {
 /// [`AudioEnhancements`](crate::catalog::AudioEnhancements)) into one [`EncodeContract`] argument is
 /// what keeps every caller stating the whole shape at once rather than four/five positional bools
 /// and options a reader has to keep straight by position.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn transcode_spec<'a>(
     rk: &'a str,
     session: &'a str,
     encoder_session: &'a str,
+    continues: &'a str,
     offset: crate::catalog::TranscodeOffset,
     aud: i64,
     sub: i64,
@@ -345,6 +347,7 @@ pub(super) fn transcode_spec<'a>(
         rating_key: rk,
         session,
         encoder_session,
+        continues,
         contract,
         audio_stream_id: aud,
         subtitle_stream_id: sub,
@@ -666,15 +669,14 @@ pub(super) fn note_enhancement_refused(context: &str, audio: crate::catalog::Aud
 
 /// **Why a plan leaves without a URL on purpose**, as a typed verdict rather than a sentence.
 ///
-/// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: PMS wrote it, in the
-/// server's language, and it may be empty). Every other arm is the APP's policy decision, so it is
-/// stored as a variant and worded only where it is read ([`PlayVerdict::text`]) — a stored sentence
-/// would freeze one language into playback state that tests, logs and replays also read.
+/// Every arm is stored as a variant and worded only where it is read ([`PlayVerdict::text`]) — a
+/// stored sentence would freeze one language into playback state that tests, logs and replays also
+/// read. Jellyfin refuses with an enum code, not a sentence, so the server's refusal is typed too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PlayVerdict {
-    /// The server's own refusal (`PlaybackInfo`'s `ErrorCode`, or no way to serve the item),
-    /// quoted and never translated. It stays on this device: the failure report never sends it.
-    Server(String),
+    /// The server's refusal (`PlaybackInfo`'s `ErrorCode`, or no way to serve the item). Its
+    /// technical code goes to the event log; the failure report never sends it.
+    Server(crate::catalog::Refusal),
     /// Direct Play is Disabled, and this stream can only be played as the original.
     DirectPlayDisabled,
     /// Force Direct Play is on, and this is why the original cannot play.
@@ -696,11 +698,19 @@ pub(crate) enum ForcedFailure {
 }
 
 impl PlayVerdict {
-    /// The read-out's sentence: the server's verbatim, or the app's own from the catalog.
+    /// The read-out's sentence, from the catalog.
     pub(crate) fn text(&self) -> &str {
+        use crate::catalog::Refusal;
         use nj_platform::i18n::msg;
         match self {
-            Self::Server(sentence) => sentence,
+            Self::Server(why) => match why {
+                Refusal::NotAllowed => msg::widgets_verdict_server_not_allowed(),
+                Refusal::NoCompatibleStream => msg::widgets_verdict_server_no_compatible_stream(),
+                Refusal::RateLimitExceeded => msg::widgets_verdict_server_rate_limited(),
+                Refusal::NoMediaSource => msg::widgets_verdict_server_no_media_source(),
+                Refusal::NoDeliveryMethod => msg::widgets_verdict_server_no_delivery(),
+                Refusal::Unrecognized(_) => msg::widgets_verdict_server_refused(),
+            },
             Self::DirectPlayDisabled => msg::widgets_verdict_direct_play_disabled(),
             Self::Forced(why) => match why {
                 ForcedFailure::NoOriginal => msg::widgets_verdict_forced_no_original(),
@@ -825,6 +835,9 @@ pub(crate) struct ResolveEnv {
     pub omit_queue_continuous: bool,
     /// Hero preview. Skip the PlayQueue entirely, and refuse anything that is not a direct play.
     pub preview: bool,
+    /// Where the viewer resumes, known at the press (`0` = the start). A conversion is negotiated
+    /// to begin there, so the landing does not replace an encoder it has only just started.
+    pub start_ns: i64,
     /// The viewer's Plex Pass audio-DSP preference (`player::audio_enhancements`), captured at the
     /// request like the quality: the worker must not read the atomic the main thread moves. Only
     /// ever reaches the wire through [`desired_audio`]. A preview and a start-failure retry
@@ -925,6 +938,10 @@ pub(crate) struct Plan {
     pub sid: ServerId,
     pub url: String,
     pub tsession: String,
+    /// Whole seconds into the item at which `tsession`'s encoder begins (`0` for a direct play and
+    /// for a conversion from the start). The landing's resume compares against it before it
+    /// replaces the encoder.
+    pub encoder_start_secs: i64,
     pub sess: String,
     pub pq_id: String,
     pub pq_item_id: String,
@@ -1019,9 +1036,10 @@ pub(crate) struct Plan {
 
 /// Pick the stream for an item with ONE Jellyfin negotiation (`POST /Items/{id}/PlaybackInfo`):
 /// offer direct play when the pipeline can feed the file itself, and let the server answer with
-/// the method it will serve — `DirectPlay` (the file's own bytes), `DirectStream` (video copied,
-/// container and/or audio converted) or `Transcode` (video re-encoded). The Load payload is built
-/// from the codecs the server says will ARRIVE, never from the source.
+/// the method it will serve — `DirectPlay` (the file's own bytes) or `Transcode` (its
+/// `TranscodingUrl`: a remux when the video lane is copied, a re-encode otherwise). The ask names
+/// the part's media source, so the track indexes apply to it. The Load payload is built from the
+/// codecs the server says will ARRIVE, never from the source.
 ///
 /// PURE: runs on the resolve worker. It must neither WRITE nor READ any `static mut` — every
 /// input arrives in `ResolveEnv`, every output leaves in `Plan`, and `apply_plan` installs both
@@ -1070,7 +1088,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     plan.playing = env
         .cached_item
         .clone()
-        .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk));
+        .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk, part));
     if let (Some(id), Some(item)) = (env.subtitle_override, plan.playing.as_mut()) {
         // The retry's explicit selection owns both embedded and sidecar restoration; a stale
         // selection must not turn subtitles back on after the viewer chose Off.
@@ -1106,7 +1124,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         video_direct_plays(vcodec, src_w, src_h, dv, nj_platform::devcaps::caps())
     };
     plan.source_decodable = video_dp;
-    // **Refusing direct play is only half of it.** A DirectStream COPIES the video, and no
+    // **Refusing direct play is only half of it.** A remux COPIES the video, and no
     // profile axis can say "Dolby Vision", so a refused Profile 5 would come back as the same
     // IPT-PQ bitstream one container down. Withdrawing the copy is what makes the refusal mean
     // something. This stays the base-layer question: a copy carries no declaration.
@@ -1258,19 +1276,21 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     let negotiation = client.negotiate(&crate::catalog::PlaybackAsk {
         rk,
         session: &session,
+        media_source_id: crate::jf::convert::media_source_id(part),
         audio_index: (ask_audio > 0).then(|| crate::jf::ids::stream_index(ask_audio)),
         subtitle_index: (subtitle_id > 0).then(|| crate::jf::ids::stream_index(subtitle_id)),
-        start_ticks: 0,
+        start_ticks: encoder_start_secs(env) * 10_000_000,
         ceiling,
         direct_play: direct_candidate || forced,
         video_copy: !forced && !no_video_copy && allowed.remux,
         forced,
         burn,
+        hls_segment_secs: None,
     });
     let n = match negotiation {
         crate::catalog::Negotiation::Playable(n) => n,
         crate::catalog::Negotiation::Refused(why) => {
-            crate::player::log(&format!("playbackinfo: REFUSED — {why}"));
+            crate::player::log(&format!("playbackinfo: REFUSED — {}", why.code()));
             plan.verdict = Some(if forced {
                 PlayVerdict::Forced(ForcedFailure::Unauthorized)
             } else {
@@ -1313,12 +1333,21 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     // switch re-negotiates from (`Session::cur_contract`).
     plan.vcodec = n.video.output;
     plan.acodec = n.audio.output;
-    plan.contract.remux = n.method == crate::catalog::PlayMethod::DirectStream;
+    // A remux is a conversion whose video lane is copied; the wire method says `Transcode` for it,
+    // as for every TranscodingUrl.
+    plan.contract.remux = n.video.copied;
     let carried_id = n.audio_index.map_or(ask_audio, crate::jf::ids::track_id);
     plan.audio = plan_track(tracks, carried_id, -1, false);
     plan.url = n.url;
     plan.tsession = session;
+    plan.encoder_start_secs = encoder_start_secs(env);
     plan
+}
+
+/// The offset a conversion starts at: the resume in whole seconds, the unit a transcode seek
+/// restarts at (`player::resume_at`), so both paths ask the server for the same position.
+fn encoder_start_secs(env: &ResolveEnv) -> i64 {
+    if env.preview { 0 } else { env.start_ns.max(0) / 1_000_000_000 }
 }
 
 

@@ -196,6 +196,10 @@ pub struct TranscodeSpec<'a> {
     /// Physical universal-transcoder identity. Production keeps it equal to `session`; the two
     /// fields remain explicit because the protocol probe and fixtures grade their wire roles.
     pub encoder_session: &'a str,
+    /// The session this encoder replaces — the one the playback has been reporting under — or `""`.
+    /// The replacement continues that playback: same media source, same start, no second
+    /// `/Sessions/Playing`.
+    pub continues: &'a str,
     /// The encode's flavor/delivery/ceiling/audio-DSP shape — see [`EncodeContract`]. Was four
     /// separate fields (`delivery`, `remux`, `no_video_copy`, `ceiling`) until issue #266 needed a
     /// fifth (`audio`) that only ever means anything alongside `remux == true`; one value keeps

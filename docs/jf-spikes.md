@@ -47,8 +47,8 @@ through `Client::direct_play_url` (which adds `PlaySessionId` and `ApiKey`).
 
 ## S3 — PlaybackInfo
 
-`POST /Items/{id}/PlaybackInfo` with a `DeviceProfile` built from `devcaps` (the same limits the
-PMS profile states — `jf::playback::device_profile`) answers per media source
+`POST /Items/{id}/PlaybackInfo` with a `DeviceProfile` built from the client's capabilities
+(`catalog::capabilities`, over `devcaps` — `jf::playback::device_profile`) answers per media source
 `SupportsDirectPlay`, `SupportsDirectStream`, `SupportsTranscoding` and, when it would transcode,
 a `TranscodingUrl` whose `TranscodeReasons` say why.
 
@@ -57,8 +57,9 @@ a `TranscodingUrl` whose `TranscodeReasons` say why.
   the same answer PMS's MDE gives for that file.
 * With no profile at all the server answers transcode-only (`SupportsDirectPlay=false`) — the
   profile is required, not advisory.
-* `ErrorCode` (`NotAllowed`, `NoCompatibleStream`, …) maps to `generalDecisionCode` 2000, which
-  `route::refusal` already turns into the player's read-out.
+* `ErrorCode` (`PlaybackErrorCode`: `NotAllowed`, `NoCompatibleStream`, `RateLimitExceeded`) is a
+  typed `jf::playback::Refusal`; the read-out words each category from the catalog and the code
+  itself goes only to the event log (`docs/jellyfin-playback.md`).
 
 ## S4 — Progressive transcode
 
@@ -67,21 +68,63 @@ a `TranscodingUrl` whose `TranscodeReasons` say why.
 `StartTimeTicks` for a 30 s offset answered **200** with Matroska bytes within the first read.
 
 * Start offset: the client appends `StartTimeTicks` (ticks = µs × 10) when the URL lacks it.
-* Stopping: Jellyfin 12.0 has **no** `/Videos/ActiveEncodings`; `POST /Sessions/Playing/Stopped`
-  with the `PlaySessionId` ends the ffmpeg job. `transcode_session_present` therefore answers
-  `Some(false)` and `transcode_resource_reconciled` `Some(true)` once the Stopped report is sent.
+* Stopping (corrected 2026-10-08): `DELETE /Videos/ActiveEncodings?deviceId=&playSessionId=`
+  exists on 10.10.7, 12.0 and 12.2 but is **absent from the OpenAPI document** — its controller
+  action is marked `[ApiExplorerSettings(IgnoreApi = true)]` (`HlsSegmentController`). This page
+  first concluded from the pinned spec that the route did not exist; the server source says
+  otherwise. It kills the jobs whose `PlaySessionId` matches and answers 204; it is what the web
+  client's `stopActiveEncodings` calls. The app ends a superseded encoder with it — a `Stopped`
+  report would also end the job, but the server writes its position into the user's resume point.
+  Measured 2026-10-08 against 12.0: the call answered **204**.
 * Track change / seek: a new PlaybackInfo with the new indexes and offset, i.e. a new encoder,
-  which is what the PMS `EncodeContract` rebuild already does.
+  which is what the PMS `EncodeContract` rebuild already does. The new ask names the playing
+  `MediaSourceId` — without it the server ignores `AudioStreamIndex`/`SubtitleStreamIndex`.
 
 ## S5 — HLS shape
 
 12.0's OpenAPI and the server expose `/Videos/{id}/master.m3u8` (fMP4 or TS segments chosen by the
-profile's `SegmentContainer`), but with a progressive `mkv` TranscodingProfile the server never
-hands out an HLS URL. The app's strict `hls.rs` parser (one variant, growing MPEG-TS, no fMP4) is
-not exercised.
+profile's `SegmentContainer`). A progressive `mkv` TranscodingProfile never gets an HLS URL, so the
+app sends an HLS/TS profile when the route's contract is HLS (`jf::playback::device_profile`).
 
-**Verdict:** v1 ships without Auto (recorded in `docs/adaptive-playback.md`). Fixed quality picks
-are honoured through the re-encode's `MaxStreamingBitrate` and resolution conditions.
+Read from the v12.0 source (`StreamInfo.cs`, `DynamicHlsHelper.cs`, `DynamicHlsController.cs`,
+`DynamicHlsPlaylistGenerator.cs`) and measured 2026-10-08 against 12.0 on a test account
+(`jf::live_tests::live_hls_rung_from_an_offset`): the URL, the playlist tags, the one-variant
+master, the 2.002 s segments and the on-request start at a mid-film segment (the server's ffmpeg
+ran `-ss` at that segment's start with `-start_number` its index). The multi-variant cases are
+from the source only.
+
+* `TranscodingUrl` is `/videos/{id}/master.m3u8?…&SegmentContainer=&SegmentLength=&MinSegments=
+  &PlaySessionId=&ApiKey=…`. It carries **no `StartTimeTicks`**: `StreamInfo` writes the start only
+  on the progressive branch.
+* The master copies its whole query string into `main.m3u8?…`, and the media playlist copies that
+  into every segment URI (`hls1/main/{n}.ts?…&runtimeTicks=&actualSegmentLengthTicks=`). So the
+  credential is `ApiKey` in every child, and a segment request with `StartTimeTicks > 0` throws
+  ("StartTimeTicks is not allowed"). A resume or seek has to start at the segment that covers
+  the time.
+* The media playlist is complete from the start: `#EXT-X-PLAYLIST-TYPE:VOD`, `#EXT-X-VERSION:3`
+  (7 for fMP4), `#EXT-X-MEDIA-SEQUENCE:0`, `#EXTINF:<s>, nodesc` for every segment, then
+  `#EXT-X-ENDLIST`. There is no `EXT-X-START`. Segments are equal length for a video encode,
+  stretched for a fractional frame rate (2 s at 23.976 fps is 2.002 s). For a video copy the
+  playlist follows the file's keyframes only when the server can extract them
+  (`AllowOnDemandMetadataBasedKeyframeExtractionForExtensions`, `mkv` by default). Otherwise it
+  lists equal lengths, while ffmpeg still cuts the copy at keyframes.
+* The master can list more than one `EXT-X-STREAM-INF`. A Dolby Vision copy adds a `dvh1`
+  variant first; an HDR copy adds SDR re-encode alternates. Two lower-bitrate variants are added
+  only for a remote client that sends `EnableAdaptiveBitrateStreaming=true` (the controller's
+  default is `false`, and `StreamInfo` does not write the parameter). In every case the first
+  variant's URI is the main playlist the request asked for. Attributes
+  include `AVERAGE-BANDWIDTH`, `VIDEO-RANGE`, `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`,
+  `FRAME-RATE` and, with subtitles in the manifest, `SUBTITLES` plus `EXT-X-MEDIA` lines.
+
+**Verdict (first spike):** v1 ships without Auto (recorded in `docs/adaptive-playback.md`). Fixed
+quality picks are honoured through the re-encode's `MaxStreamingBitrate` and resolution conditions.
+
+**Update 2026-10-08:** an HLS contract (Auto's rungs) now asks for HLS. `hls.rs` takes `ApiKey` as
+the credential and the first variant of a master. Without `EXT-X-START` the player starts on the
+segment covering the content time and moves its display base onto that segment's start. A rung
+candidate must open exactly on the handoff boundary or it is refused. The video is always
+re-encoded on HLS, because a copy follows keyframes the playlist matches only when the server
+could extract them. The full player path has not been run on the simulator or a set.
 
 ## S6 — Media segments
 
@@ -138,7 +181,8 @@ requested by sending the transcode profile with no Embed/External method for it.
 ## Corrections to the analysis
 
 * `api_key` / `X-Emby-Token` / `/emby` are gone on 12.0, not merely deprecated.
-* There is no `ActiveEncodings` route; transcodes stop via the Stopped report.
+* ~~There is no `ActiveEncodings` route; transcodes stop via the Stopped report.~~ Wrong, inferred
+  from the OpenAPI document, which hides the route; see S4.
 * No `HideFromResume`: "Remove from Continue Watching" resets the resume position to 0.
 * `/Sessions/Playing/Progress` reports below the server's minimum resume percentage do not
   set a resume point (`resume_ticks_after_report` was 0 for a 1 s report).
