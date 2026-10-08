@@ -1011,10 +1011,14 @@ pub(crate) struct Plan {
     pub feed_audio_ordinal: Option<i32>,
     /// the subtitle selected for this part or by the show preference (0 = none/off), so the
     /// menu checkmark and the timeline report agree with what is on screen — and a later
-    /// transcode of this item burns the subtitle the user was already watching.
+    /// conversion of this item carries the subtitle the user was already watching. On a
+    /// conversion it is set only when the answer delivered one ([`Plan::sub_delivery`]).
     pub sub_sid: i64,
     /// client-renderer ordinal for that subtitle (`metadata::sub_render_ordinal`). None = subs off.
     pub sub_render_ordinal: Option<i32>,
+    /// How a CONVERSION delivers `sub_sid` (`None` on direct play, where the client draws the
+    /// file's own track, and when no subtitle is on). See [`Session::cur_sub_delivery`].
+    pub sub_delivery: Option<crate::catalog::SubtitleDelivery>,
     /// The subtitle-language preference this play resolved under — the SHOW's own pref if it set
     /// one, else the ACCOUNT's — as a BCP-47 code, for the Subtitles menu's "yours" grouping
     /// (`metadata::sub_layout::sub_sections`). `ui/` sees only this code, never a Plex account type.
@@ -1263,16 +1267,25 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     let direct_candidate = allowed.direct_play && video_dp && streamable && !part.is_empty()
         && (audio_sel.is_some() || tracks.is_empty());
     // Direct play feeds the smart-DP audio pick; a conversion can carry any track (the server
-    // converts what the panel cannot decode), so it carries the preference-ranked one. A positive
-    // `env.sub_sid` is a burn already on screen (a retry), kept only on a conversion — direct play
-    // draws the subtitle itself.
+    // converts what the panel cannot decode), so it carries the preference-ranked one.
     let ask_audio = if direct_candidate {
         audio_id
     } else {
         encode_audio_id(audio_id, env.audio_sid, tracks, audio_prefs)
     };
-    let burn = !direct_candidate && env.sub_sid > 0;
-    let subtitle_id = if direct_candidate { sub_pick.map_or(0, |(id, _)| id) } else if burn { env.sub_sid } else { 0 };
+    // ONE subtitle for either path. Direct play draws the file's own track (`sub_pick`). A
+    // conversion asks for the same pick — else the sidecar the server has selected, else a retry's
+    // track (`env.sub_sid`) — and the answer says how it arrives (`Plan::sub_delivery`). Nothing
+    // here forces a burn: the server burns only a track no soft delivery fits.
+    let subtitle_id = if direct_candidate {
+        sub_pick.map_or(0, |(id, _)| id)
+    } else {
+        sub_pick
+            .map(|(id, _)| id)
+            .or_else(|| plan.playing.as_ref().and_then(crate::metadata::server_selected_sidecar).map(|s| s.id))
+            .or((env.sub_sid > 0).then_some(env.sub_sid))
+            .unwrap_or(0)
+    };
     let negotiation = client.negotiate(&crate::catalog::PlaybackAsk {
         rk,
         session: &session,
@@ -1284,7 +1297,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         direct_play: direct_candidate || forced,
         video_copy: !forced && !no_video_copy && allowed.remux,
         forced,
-        burn,
+        burn: false,
         hls_segment_secs: None,
     });
     let n = match negotiation {
@@ -1338,6 +1351,12 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     plan.contract.remux = n.video.copied;
     let carried_id = n.audio_index.map_or(ask_audio, crate::jf::ids::track_id);
     plan.audio = plan_track(tracks, carried_id, -1, false);
+    // The subtitle rides the conversion only as the answer delivers it; `apply_plan` points the
+    // client renderer at it (`decision::adopt_subtitle_delivery`).
+    if n.subtitle.is_some() {
+        plan.sub_sid = subtitle_id;
+    }
+    plan.sub_delivery = n.subtitle;
     plan.url = n.url;
     plan.tsession = session;
     plan.encoder_start_secs = encoder_start_secs(env);

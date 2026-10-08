@@ -33,8 +33,8 @@
 //! dismisses this panel and presents the Timing capsule overlay (`OverlayKind::Timing`,
 //! `appkit::timing_capsule`) in its place. The row is dim and inert while subtitles are Off (OK there
 //! neither opens the capsule nor closes the panel), and Timing together with Style is omitted
-//! during an ordinary transcode, which burns captions into the picture where no client-side offset
-//! or style can reach. When the live route is instead this app's OWN Plex Pass audio-enhancement
+//! while the playing conversion burns the subtitle into the picture (`route::client_renders_subtitle`),
+//! where no client-side offset or style can reach; a conversion that delivers it softly keeps both. When the live route is instead this app's OWN Plex Pass audio-enhancement
 //! Burn (M7), both stay visible — dim, with a one-line reason (`Row::note`) — so the viewer who
 //! turned Boost dialog / Normalize loudness on sees why the control is locked rather than finding
 //! it simply gone.
@@ -327,14 +327,17 @@ impl SubRenderer {
 /// **What the Subtitles root's rows and locks were built from** — the rebuild signature. A live
 /// poll compares it to the current answers and rebuilds when any input changed: the subs list
 /// (stream ids and whether each is offered on this route), the active index, the renderer kind,
-/// whether the route is transcoding, and the enhancement route and subtitle effect (what the Style
+/// whether the route burns the subtitle, and the enhancement route and subtitle effect (what the Style
 /// lock and Timing's omission read).
 #[derive(Clone, Debug, PartialEq)]
 struct SubSig {
     subs: Vec<(i64, bool)>,
     active: c_int,
     renderer: SubRenderer,
-    transcoding: bool,
+    /// The playing route burns the subtitle into the picture (`!route::client_renders_subtitle`)
+    /// — the server-side gate Style and Timing are omitted by. Not "is transcoding": a conversion
+    /// that delivers the subtitle softly leaves it the client's to style.
+    burned: bool,
     own_burn: bool,
     enhancement: Option<crate::route::EnhancementRoute>,
     effect: crate::route::SubtitleEffect,
@@ -343,10 +346,10 @@ struct SubSig {
 impl SubSig {
     /// What a pushed Style page's availability was built from: the renderer (Size / Position reach
     /// only text), whether the app's own burn locks Style, and whether an ordinary server burn
-    /// omits it (`transcoding && !own_burn`, the gate [`TrackMenuState::layout`] shows Style by).
+    /// omits it (`burned && !own_burn`, the gate [`TrackMenuState::layout`] shows Style by).
     /// A page is popped when this changes and refreshed in place otherwise.
     fn page_availability(&self) -> (SubRenderer, bool, bool) {
-        (self.renderer, self.own_burn, self.transcoding && !self.own_burn)
+        (self.renderer, self.own_burn, self.burned && !self.own_burn)
     }
 }
 
@@ -723,7 +726,7 @@ impl TrackMenuState {
     /// tab's own poll.
     ///
     /// **It rebuilds on a [`SubSig`] change**, not on the two values it once compared: the subs
-    /// list, the active index, the renderer kind, transcoding, and the enhancement route and
+    /// list, the active index, the renderer kind, whether the route burns it, and the enhancement route and
     /// subtitle effect. On the root that is a refresh in place. ON A SUB-PAGE the page is refreshed in
     /// place too (focus kept by id) and popped to the root only when its availability no longer
     /// holds ([`SubSig::page_availability`]: the renderer, or whether Style is shown / locked), so a
@@ -799,7 +802,7 @@ impl TrackMenuState {
             subs,
             active,
             renderer,
-            transcoding: crate::route::is_transcoding(ps),
+            burned: !crate::route::client_renders_subtitle(ps),
             own_burn: crate::route::live_is_own_burn(ps),
             enhancement,
             effect,
@@ -1391,7 +1394,7 @@ impl TrackMenuState {
     fn layout(&mut self, ps: &crate::route::PlaybackSession, meta: metadata::MetadataView<'_>) -> TrackForm {
         // M7 follow-up: while the live route is actually burning a subtitle in, Timing and Style
         // stay drawn (dim, with a reason) instead of being omitted the way an ordinary
-        // non-enhancement transcode omits both — a viewer who turned the enhancement on must still
+        // server burn omits both — a viewer who turned the enhancement on must still
         // see why the control they had is gone, not just find it missing.
         let sig = self.sub_sig_for(ps, meta, self.active_sub);
         self.renderer = sig.renderer;
@@ -1414,7 +1417,7 @@ impl TrackMenuState {
     /// keeps what it needs from the model, [`Self::warm_other_tab`] only draws the form.
     fn sub_root_form(&self, ps: &crate::route::PlaybackSession, meta: metadata::MetadataView<'_>) -> (TrackForm, SubModel) {
         let locked = crate::route::live_is_own_burn(ps);
-        let show_timing = !crate::route::is_transcoding(ps) || locked;
+        let show_timing = crate::route::client_renders_subtitle(ps) || locked;
         let model = self.sub_model(ps, meta, show_timing);
         (table_form(&model, self.active_sub, self.offset_ms, locked), model)
     }
@@ -1759,7 +1762,7 @@ fn n_audio(meta: metadata::MetadataView<'_>) -> c_int {
     tracks(meta).map(|t| t.audio.len()).unwrap_or(0) as c_int
 }
 /// Subtitle rows offered on this route: text sidecars can be drawn on direct play;
-/// all sidecars are offered during transcoding, when the server burns them.
+/// all sidecars are offered during a conversion, which delivers them as a file or burns them.
 fn visible_subs(ps: &crate::route::PlaybackSession, meta: metadata::MetadataView<'_>) -> Vec<usize> {
     tracks(meta)
         .map(|t| {
@@ -4354,6 +4357,32 @@ mod style_page_tests {
         assert_eq!(menu.renderer, SubRenderer::Image);
         assert_eq!(menu.selected_id(), Some(TrackRow::Style), "on the row that opened it");
         assert_eq!(menu.form.table.title(), None);
+        teardown(&ps);
+    }
+
+    /// **A Style page follows the burn, not the transcode.** On a conversion that delivers the
+    /// subtitle softly the client still draws it, so Style is offered; when the conversion's
+    /// delivery becomes a burn (a bitmap track on an HLS rung) Style is no longer the client's,
+    /// and an open Style page pops — though the route was a transcode all along.
+    #[test]
+    fn a_style_page_pops_when_a_conversion_starts_burning_its_subtitle() {
+        let _g = nj_base::testlock::serial();
+        let (_, mut ps, store) = open_text();
+        crate::route::install_transcode_for_test(&mut ps, true, false);
+        crate::route::set_subtitle_delivery_for_test(
+            &mut ps,
+            Some(crate::catalog::SubtitleDelivery::External { path: "/Videos/a/b/Subtitles/0/0/Stream.srt".into(), codec: "srt".into() }),
+        );
+        let mut menu = TrackMenuState::new(&ps, store.view(), 1, vec!["eng".into()]);
+        focus_id(&mut menu, TrackRow::Style);
+        menu.on_ok(store.view());
+        menu.update(0.016, &crate::ui::fixture::FixtureMeasure, &ps, store.view());
+        assert_eq!(menu.page_path(), [TrackPage::Style], "a soft delivery keeps Style the client's");
+
+        crate::route::set_subtitle_delivery_for_test(&mut ps, Some(crate::catalog::SubtitleDelivery::Burned));
+        menu.update(0.016, &crate::ui::fixture::FixtureMeasure, &ps, store.view());
+        assert!(menu.page_path().is_empty(), "the burn took Style away: popped to the root");
+        assert!(!menu.form.index_of(&TrackRow::Style).is_some(), "and the root no longer offers it");
         teardown(&ps);
     }
 

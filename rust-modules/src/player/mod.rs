@@ -1516,11 +1516,11 @@ pub(crate) fn set_audio_track(idx: i32) {
     SHARED.desired_audio_idx.store(idx, Relaxed);
 }
 /// request a re-transcode at the current position with the CURRENT audio + subtitle —
-/// used when a subtitle is (de)selected while already transcoding, so the server
-/// re-burns (or drops) it. No-op-ish if not transcoding (the caller gates on that).
+/// used when a subtitle is (de)selected while already transcoding, so the server delivers the
+/// new pick (or drops the old one). No-op-ish if not transcoding (the caller gates on that).
 pub(crate) fn request_transcode_refresh(ps: &crate::route::PlaybackSession) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
-    SHARED.sub_cues.lock().unwrap().clear(); // burned/absent in the fresh transcode
+    SHARED.sub_cues.lock().unwrap().clear(); // the old stream's cues; the fresh one brings its own
 }
 
 /// Restart the current stream at the current movie position so a fresh demux worker captures a

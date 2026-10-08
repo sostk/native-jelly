@@ -1,8 +1,9 @@
 # Native ASS and SSA subtitles
 
 Direct playback preserves the authored script: styles, positioned signs, overlapping dialogue,
-drawings, font attachments, movement and karaoke. Transcoded playback continues to burn the
-selected subtitle on the server. The simple caption size/wrapping rules apply to plain text;
+drawings, font attachments, movement and karaoke. A conversion delivers an ASS/SSA track as the
+server's extracted file, which the same renderer draws; the server burns it only when no soft
+delivery fits (`docs/jellyfin-playback.md` "Subtitles"). The simple caption size/wrapping rules apply to plain text;
 ASS/SSA retains its authored layout. The viewer's existing tone and timing controls still apply.
 
 `ci/build-libass.py` builds a pinned libass with private FreeType, FriBidi and HarfBuzz. The

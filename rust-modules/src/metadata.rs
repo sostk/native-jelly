@@ -772,7 +772,8 @@ pub(crate) struct Stream {
     pub(crate) default: bool, // the file's default track (drives the "Original:" audio label)
     /// external/sidecar stream (downloaded .srt etc. — NOT inside the container). The DEMUXER
     /// cannot reach it; on direct play a TEXT sidecar is fetched and drawn by `player::sidecar`
-    /// instead ([`Stream::sidecar_renderable`]), and a transcode burns it.
+    /// instead ([`Stream::sidecar_renderable`]); a conversion delivers it as the server's file for
+    /// the same renderer, or burns it when nothing soft fits (`route::adopt_subtitle_delivery`).
     pub(crate) external: bool,
     /// PMS `Stream.key` — the sidecar's delivery path (`/library/streams/{id}`). Empty for every
     /// embedded stream, which is exactly how `external` is derived.

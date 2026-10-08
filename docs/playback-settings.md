@@ -36,7 +36,9 @@ Audio **Original** clears the preferred language while enabling automatic select
 mode offers manual selection, "when audio isn't in the subtitle language", and always; **No preference** clears only the
 subtitle language. Existing PMS item selections take precedence, followed by explicit show
 preferences and then account defaults. That mode shows subtitles when the audio that will play is not in the subtitle language (`route/plan.rs` compares the two).
-Account defaults do not introduce subtitle burning when playback starts as a transcode.
+Account defaults also ride a playback that starts as a conversion: the server delivers the track
+as its own file or muxed into the stream, and burns it only when nothing soft fits
+(`docs/jellyfin-playback.md` "Subtitles").
 
 PMS can keep using an earlier account preference until its own copy updates. The UI explains
 this delay, and the resolver does not guess that an old-language selection was automatic.

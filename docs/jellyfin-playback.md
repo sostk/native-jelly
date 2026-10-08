@@ -42,6 +42,7 @@ jf::playback::negotiate
    SupportsDirectPlay && asked      → DirectPlay, /Videos/{id}/stream.{ext}?static=true
                                       &MediaSourceId&PlaySessionId&ApiKey
    else TranscodingUrl              → Transcode (lanes copied or encoded from TranscodeReasons)
+                                      + the subtitle's DeliveryMethod (see Subtitles below)
    else                             → Refused(NoDeliveryMethod)
    file PlaySessionId/MediaSourceId/indexes under the app's session key; log one line
    ▼
@@ -117,7 +118,7 @@ Built by `device_profile(&Capabilities, &ProfileAsk)`:
   the server may copy the video: an HDR stream for an SDR panel is tone-mapped rather than copied.
   HDR10 is read from `tv.model.supportHDR` in the same configd call that answers Dolby Vision.
 * `SubtitleProfiles`: `Embed` for formats the renderer draws (direct play) or bitmap formats
-  (conversion), `External` for text sidecars. An explicit burn sends none, which is how the server
+  (conversion), `External` for text sidecars (see Subtitles below). An explicit burn sends none, which is how the server
   is asked to `Encode`.
 * `MaxStaticBitrate`/`MaxStreamingBitrate`: unbounded (200 Mbit/s) unless the user picked a
   ceiling, which bounds both.
@@ -132,6 +133,36 @@ prints all of this once per process:
 ```
 jf: capabilities video=h264,hevc audio=aac,ac3,eac3 channels=- containers=mkv,mp4,m4v,mov max=3840x2176 bitrate=unbounded dv=… hdr10=yes hlg=yes hw_decode=yes passthrough=unknown table=measured
 ```
+
+## Subtitles
+
+Direct play draws the file's own track: the embedded renderer, or the sidecar file for an
+external one. A conversion asks for the same pick in `SubtitleStreamIndex` — else the sidecar the
+server has selected, else a retry's track — and never forces a burn
+(`AlwaysBurnInSubtitleWhenTranscoding` stays `false`). The answer's `MediaStream.DeliveryMethod`
+for that stream (`MediaInfoHelper.SetDeviceSpecificSubtitleInfo`, filled for every play method)
+becomes `jf::playback::SubtitleDelivery`, and `route::adopt_subtitle_delivery` points the client
+renderer at it wherever a conversion is installed (landing, rebuild for a track or quality change,
+seek, Original remux):
+
+| `DeliveryMethod` | Server (`StreamBuilder.GetSubtitleProfile`, `EncodingHelper`) | Client |
+|---|---|---|
+| `External` | text track extracted to `/Videos/{id}/{source}/Subtitles/{index}/0/Stream.{fmt}`; not in the `TranscodingUrl`, so the video stays copyable | the sidecar renderer fetches that path under the request header (the URL's `api_key` is dropped) |
+| `Embed` | bitmap track muxed into the progressive Matroska as its only subtitle stream (`GetMapArgs`) | embedded renderer at ordinal **0** of the output, not the source ordinal |
+| `Encode` | burned (bitmap on HLS, whose TS segments cannot carry it) | draws nothing (`route::client_renders_subtitle` is false) |
+| `Drop` | not delivered | nothing |
+
+Two answers are asked again with `AlwaysBurnInSubtitleWhenTranscoding: true`: an `External`
+delivery that is not a path on the server or not a format the renderer draws (a remote source's
+own subtitle URL), and `Hls`, which the profile never offers and the player does not read. A DVB
+subtitle answered `Embed` is treated as burned, because the server burns it while saying so
+(`NormalizeSubtitleEmbed`). A server that states no method is read from its URL: `SubtitleMethod`
+names it, and a `SubtitleStreamIndex` alone is a burn.
+
+The sidecar's cues are on the movie timeline on both paths: a conversion's `playpos_ns` is the
+display base plus the fed timestamps, and the server's file starts at 0 because the transcoding
+profile copies timestamps. A track switch during a conversion re-negotiates (a new encoder, the
+old one retired as for any rebuild) and adopts the new answer.
 
 ## PlayMethod
 
@@ -215,7 +246,8 @@ jf: playback item=<guid> source=<id> of <n> container=mkv protocol=File headers=
 ```
 
 `headers` lists the source's `RequiredHttpHeaders` names (`-` when none). `delivery` is the
-dashboard's vocabulary: `static`, `remux`, `audio-transcode`, `video-transcode`.
+dashboard's vocabulary: `static`, `remux`, `audio-transcode`, `video-transcode`. `subtitle` is
+`off`, or `#<index>` with the conversion's delivery appended (`:external`, `:embed`, `:burn`).
 Also logged: the capability line above (once), a source the answer lacked, a refusal's code, an
 `ActiveEncodings` failure or fallback. `route::plan` keeps its own `playbackinfo:` line with the
 lanes and ceiling.
@@ -241,6 +273,12 @@ Automated (host, `make check`; loopback Jellyfin in `route/decision_test_support
 | Audio by language / PlayDefaultAudioTrack | `plan_tests::the_users_audio_language_preference_picks_the_track` |
 | Smart direct play sibling track | `plan_tests::smart_direct_play_asks_for_the_ac3_sibling_of_a_truehd_default` |
 | SubtitleMode Always | `plan_tests::subtitle_mode_always_turns_on_the_preferred_language` |
+| Conversion carries the preferred text subtitle as the server's file, video copied | `plan_tests::a_conversion_carries_the_preferred_subtitle_as_the_servers_external_file` |
+| Muxed subtitle drawn at the output's ordinal 0 | `plan_tests::an_embedded_subtitle_is_drawn_from_the_converted_streams_own_ordering` |
+| `Encode` is the server's burn; nothing drawn | `plan_tests::an_encoded_subtitle_is_the_servers_burn_and_the_client_draws_nothing` |
+| Track switch during a conversion is soft, not a burn | `jf_session_tests::a_subtitle_picked_during_a_conversion_is_delivered_softly_not_burned` |
+| Undrawable external delivery asked again as a burn | `jf_session_tests::an_external_subtitle_outside_the_server_is_asked_again_as_a_burn` |
+| Every `DeliveryMethod`, and a server that states none | `jf::playback::tests::a_subtitle_delivery_is_read_from_the_answer` |
 | Re-encode / remux plans | `plan_tests::a_transcode_answer_…`, `a_direct_stream_answer_is_a_remux_…` |
 | Remux reports `Transcode` | `jf_session_tests::a_remux_reports_transcode_on_the_wire` |
 | Replaced encoder ended by DELETE, no Stopped | `jf_session_tests::retiring_a_replaced_encoder_…` |

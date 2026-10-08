@@ -147,6 +147,11 @@ pub struct MediaStream {
     pub is_external: bool,
     pub is_text_subtitle_stream: bool,
     pub supports_external_stream: bool,
+    /// How a PlaybackInfo answer delivers this subtitle to the playback it negotiated:
+    /// `Encode | Embed | External | Hls | Drop` (`SubtitleDeliveryMethod`).
+    pub delivery_method: Option<String>,
+    /// With `External`: where the file is, a server path with an `api_key`, or a remote
+    /// source's own URL.
     pub delivery_url: Option<String>,
     pub channels: Option<i64>,
     pub channel_layout: Option<String>,

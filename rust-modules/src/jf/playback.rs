@@ -116,6 +116,20 @@ pub struct Lane {
     pub copied: bool,
 }
 
+/// How a conversion delivers its selected subtitle, as the answer's `MediaStream.DeliveryMethod`
+/// states it (`MediaInfoHelper.SetDeviceSpecificSubtitleInfo`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SubtitleDelivery {
+    /// Muxed into the converted container. It is the only subtitle stream there
+    /// (`EncodingHelper.GetMapArgs` maps the selected one alone), so the renderer's ordinal 0.
+    Embedded,
+    /// A separate file on the server, fetched under the request header: its path with no
+    /// credential, and the format it is served in.
+    External { path: String, codec: String },
+    /// Burned into the picture by the server.
+    Burned,
+}
+
 /// What the server agreed to.
 #[derive(Clone, Debug, Default)]
 pub struct Negotiated {
@@ -127,6 +141,9 @@ pub struct Negotiated {
     /// The audio stream this playback carries (requested, else the source's default).
     pub audio_index: Option<i64>,
     pub subtitle_index: Option<i64>,
+    /// How a conversion delivers `subtitle_index`; `None` on direct play (the client draws the
+    /// file's own track) and when no subtitle is selected or delivered.
+    pub subtitle: Option<SubtitleDelivery>,
     pub media_source_id: String,
     pub play_session_id: String,
 }
@@ -501,6 +518,76 @@ fn with_play_session(path: &str, play_session_id: &str) -> String {
     format!("{path}{sep}PlaySessionId={}", crate::catalog::urlenc_str(play_session_id))
 }
 
+/// How the conversion at `url` delivers the subtitle at `index` of `src`, from the stream's
+/// `DeliveryMethod`; `Err` names a delivery this client cannot draw, which the caller asks again
+/// as a burn.
+///
+/// * `External` — a path on the server (`/Videos/{id}/{source}/Subtitles/{index}/0/Stream.{fmt}`,
+///   start 0 because the transcoding profile copies timestamps). The `api_key` the server appends
+///   is dropped: the sidecar fetch carries the request header. A remote source's own URL
+///   (`IsExternalUrl`) is not on the server, so it cannot be fetched that way.
+/// * `Embed` — muxed into the converted Matroska, except DVB, which the server burns instead
+///   (`EncodingHelper.NormalizeSubtitleEmbed`) while still answering `Embed`.
+/// * `Encode` — burned. `Drop` — not delivered.
+/// * `Hls` — a playlist rendition. The profile never offers it and the player reads none.
+///
+/// A server that states no method is read from the URL it built: `SubtitleMethod` names it, and
+/// a `SubtitleStreamIndex` without one is a burn (`StreamInfo.ToUrl`).
+fn subtitle_delivery(
+    src: &MediaSourceInfo,
+    index: Option<i64>,
+    url: &str,
+    burned: bool,
+) -> Result<Option<SubtitleDelivery>, &'static str> {
+    let Some(index) = index.filter(|i| *i >= 0) else { return Ok(None) };
+    if burned {
+        return Ok(Some(SubtitleDelivery::Burned));
+    }
+    let stream = src.media_streams.iter().find(|s| s.kind == "Subtitle" && s.index == index);
+    let Some(method) = stream.and_then(|s| s.delivery_method.as_deref()) else {
+        return Ok(match query_param(url, "SubtitleMethod") {
+            Some(m) if m.eq_ignore_ascii_case("Embed") => Some(SubtitleDelivery::Embedded),
+            Some(_) => Some(SubtitleDelivery::Burned),
+            None if query_param(url, "SubtitleStreamIndex").is_some() => Some(SubtitleDelivery::Burned),
+            None => None,
+        });
+    };
+    match method {
+        "External" => {
+            let path = stream.and_then(|s| s.delivery_url.as_deref()).unwrap_or("").split('?').next().unwrap_or("");
+            let codec = path.rsplit_once("/Stream.").map(|(_, ext)| convert::codec(ext)).unwrap_or_default();
+            let on_server = path.starts_with("/Videos/") && path.contains("/Subtitles/");
+            let drawable = crate::catalog::capabilities::SIDECAR_SUBTITLES.iter().any(|f| convert::codec(f) == codec);
+            if on_server && drawable {
+                Ok(Some(SubtitleDelivery::External { path: path.to_string(), codec }))
+            } else {
+                Err("an external subtitle the client cannot fetch from the server")
+            }
+        }
+        "Embed" => {
+            let dvb = stream
+                .and_then(|s| s.codec.as_deref())
+                .is_some_and(|c| c.eq_ignore_ascii_case("dvbsub") || c.eq_ignore_ascii_case("dvb_subtitle"));
+            Ok(Some(if dvb { SubtitleDelivery::Burned } else { SubtitleDelivery::Embedded }))
+        }
+        "Encode" => Ok(Some(SubtitleDelivery::Burned)),
+        "Drop" => Ok(None),
+        _ => Err("a subtitle delivery the client does not draw"),
+    }
+}
+
+/// The event log's name for a subtitle delivery.
+fn subtitle_label(index: Option<i64>, delivery: Option<&SubtitleDelivery>) -> String {
+    let Some(i) = index.filter(|i| *i >= 0) else { return "off".to_string() };
+    let how = match delivery {
+        None => "",
+        Some(SubtitleDelivery::Embedded) => ":embed",
+        Some(SubtitleDelivery::External { .. }) => ":external",
+        Some(SubtitleDelivery::Burned) => ":burn",
+    };
+    format!("#{i}{how}")
+}
+
 /// The answer's source for `want`, matched by id; without a match, the first — the server lists the
 /// queried item's own source first.
 fn select_source<'a>(sources: &'a [MediaSourceInfo], want: Option<&str>) -> Option<&'a MediaSourceInfo> {
@@ -672,6 +759,19 @@ impl Jf<'_> {
         } else {
             return refuse(Refusal::NoDeliveryMethod);
         };
+        // A direct play's subtitle is the file's own track, drawn by the client; a conversion's is
+        // whatever the server answered for it.
+        let subtitle = if method == PlayMethod::DirectPlay {
+            None
+        } else {
+            match subtitle_delivery(src, ask.subtitle_index, &path, ask.burn) {
+                Ok(subtitle) => subtitle,
+                Err(why) => {
+                    nj_base::eventlog::log(&format!("jf: subtitle #{} is {why}; asking for it burned", ask.subtitle_index.unwrap_or(-1)));
+                    return self.negotiate(&Ask { burn: true, ..*ask });
+                }
+            }
+        };
         // Ids, codecs and the server's reasons only: never the URL, which carries the token.
         nj_base::eventlog::log(&format!(
             "jf: playback item={guid} source={} of {} container={} protocol={} headers={} method={} delivery={} \
@@ -691,7 +791,7 @@ impl Jf<'_> {
             audio_index.map_or_else(|| "?".to_string(), |i| i.to_string()),
             audio.source,
             audio.output,
-            ask.subtitle_index.map_or_else(|| "off".to_string(), |i| format!("#{i}")),
+            subtitle_label(ask.subtitle_index, subtitle.as_ref()),
             ask.start_ticks / 10_000_000,
             if reasons.is_empty() { "-".to_string() } else { reasons.join(",") },
             if play_session_id.is_empty() { "-" } else { play_session_id.as_str() },
@@ -715,6 +815,7 @@ impl Jf<'_> {
             audio,
             audio_index,
             subtitle_index: ask.subtitle_index,
+            subtitle,
             media_source_id: src.id.clone(),
             play_session_id,
         })
@@ -742,7 +843,8 @@ impl Jf<'_> {
             session: spec.session,
             media_source_id: prior.as_ref().map(|p| p.media_source_id.as_str()).filter(|id| !id.is_empty()),
             audio_index: (spec.audio_stream_id > 0).then(|| ids::stream_index(spec.audio_stream_id)),
-            // A positive subtitle id on the spec IS the request to burn (see `TranscodeSpec`).
+            // The selected subtitle, not a burn: the answer says how it is delivered, and the
+            // server burns only what no soft delivery fits (`StreamBuilder.GetSubtitleProfile`).
             subtitle_index,
             start_ticks,
             ceiling: c.ceiling,
@@ -752,7 +854,7 @@ impl Jf<'_> {
             // player's HLS timeline is built from those durations, so an HLS rung is re-encoded.
             video_copy: hls_segment_secs.is_none() && (c.remux || !c.no_video_copy),
             forced: false,
-            burn: subtitle_index.is_some(),
+            burn: false,
             hls_segment_secs,
         });
         if let (Negotiation::Playable(_), Some(p)) = (&negotiation, prior) {
@@ -1184,6 +1286,40 @@ mod tests {
         assert_eq!(lane_codec(url, "AudioCodec", Some(&audio("flac", None)), false), "ac3", "unknown counts as six");
         assert_eq!(lane_codec("/x?AudioCodec=dts,ac3", "AudioCodec", Some(&audio("truehd", Some(6))), false), "ac3");
         assert_eq!(lane_codec("/x?AudioCodec=ac3,eac3", "AudioCodec", Some(&audio("opus", Some(2))), false), "ac3", "nothing to move to");
+    }
+
+    /// Each `DeliveryMethod` the server can answer, the cases the route tests do not reach, and a
+    /// server that states none (read from the URL it built, `StreamInfo.ToUrl`).
+    #[test]
+    fn a_subtitle_delivery_is_read_from_the_answer() {
+        let sub = |codec: &str, method: Option<&str>, url: Option<&str>| MediaSourceInfo {
+            media_streams: vec![MediaStream {
+                kind: "Subtitle".into(),
+                index: 2,
+                codec: Some(codec.into()),
+                delivery_method: method.map(str::to_string),
+                delivery_url: url.map(str::to_string),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let plain = "/videos/x/stream.mkv?VideoCodec=hevc";
+        assert_eq!(subtitle_delivery(&sub("subrip", Some("External"), None), None, plain, false), Ok(None), "no subtitle asked");
+        assert_eq!(
+            subtitle_delivery(&sub("subrip", Some("External"), Some("/Videos/a/b/Subtitles/2/0/Stream.subrip?api_key=t")), Some(2), plain, false),
+            Ok(Some(SubtitleDelivery::External { path: "/Videos/a/b/Subtitles/2/0/Stream.subrip".into(), codec: "srt".into() })),
+        );
+        assert!(subtitle_delivery(&sub("subrip", Some("External"), Some("/Videos/a/b/Subtitles/2/0/Stream.ttml")), Some(2), plain, false).is_err(), "a format the renderer cannot draw");
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", Some("Embed"), None), Some(2), plain, false), Ok(Some(SubtitleDelivery::Embedded)));
+        assert_eq!(subtitle_delivery(&sub("DVBSUB", Some("Embed"), None), Some(2), plain, false), Ok(Some(SubtitleDelivery::Burned)), "the server burns DVB it says it embeds");
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", Some("Encode"), None), Some(2), plain, false), Ok(Some(SubtitleDelivery::Burned)));
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", Some("Drop"), None), Some(2), plain, false), Ok(None));
+        assert!(subtitle_delivery(&sub("subrip", Some("Hls"), None), Some(2), plain, false).is_err());
+        assert_eq!(subtitle_delivery(&sub("subrip", Some("External"), None), Some(2), plain, true), Ok(Some(SubtitleDelivery::Burned)), "an asked burn");
+        // No method stated.
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", None, None), Some(2), "/x?SubtitleStreamIndex=2&SubtitleMethod=Embed", false), Ok(Some(SubtitleDelivery::Embedded)));
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", None, None), Some(2), "/x?SubtitleStreamIndex=2", false), Ok(Some(SubtitleDelivery::Burned)));
+        assert_eq!(subtitle_delivery(&sub("subrip", None, None), Some(2), plain, false), Ok(None));
     }
 
     #[test]

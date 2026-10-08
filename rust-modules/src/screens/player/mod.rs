@@ -1340,7 +1340,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
             crate::appkit::player_hud::draw_subtitle_message(message, subs_lift);
         }
         self.draw_subtitle_bitmap(subs_lift); // PGS/VobSub image subs
-        crate::appkit::player_hud::draw_subtitles(subs_lift, crate::route::is_transcoding(ps));
+        crate::appkit::player_hud::draw_subtitles(subs_lift, !crate::route::client_renders_subtitle(ps));
         // What a pointer can hit is registered AFTER the paint, by `record_stops`, from this
         // screen's own `Focusable` — the rects D-pad focus uses, in the z-order `groups` states.
         // `Hover::Ignore` on the transport's stops: the old pointer path never followed the mouse

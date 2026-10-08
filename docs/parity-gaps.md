@@ -238,7 +238,8 @@ Worth deciding *not* to build, rather than discovering mid-implementation:
   swaps fixed-rendition PMS encoders after a candidate segment passes complete end-to-end
   acquisition, raster and A/V-buffer gates. Progressive playback remains the path for Original and
   fixed qualities.
-- **Subtitle sync offset — free on direct play, impossible on transcode** (subs are burned in).
+- **Subtitle sync offset — free wherever the client draws the subtitle**: direct play, and a
+  conversion that delivers it softly. Only a burned subtitle (the server's `Encode`) has none.
 - **ASS/SSA styling now uses bundled libass** on a worker; it does not depend on a firmware or NDK copy. See `docs/ass-subtitles.md`.
 - **"Force Direct Play" is genuinely unsafe here** and must be gated or relabelled, not passed through.
 - **Frame step — no step primitive** in the buffer-feed seam (`src/starfish.c` exposes Play/Pause/flush).

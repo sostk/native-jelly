@@ -184,7 +184,9 @@ something.
   **An EXTERNAL text subtitle (the `.srt` beside the film) is a third producer, `sidecar.rs`:** the
   demuxer never sees it, so it is fetched whole from PMS, parsed, and looked up by time from its OWN
   store — not `SHARED.sub_cues`, which is a window the demuxer refills and a backward seek would
-  empty. It is silent while transcoding (the server burns the selection instead).
+  empty. On a conversion it draws the server's extracted file when the negotiation delivers the
+  subtitle `External`, and is silent when the conversion burns it (`route::client_renders_subtitle`;
+  `docs/jellyfin-playback.md` "Subtitles").
 - **A seek NEVER interrupts the demuxer.** The pump publishes the target in `seek_to_ns` and the
   demux thread — the only thread that touches the `AVFormatContext` — `av_seek_frame`s on it
   between two reads. Do not reintroduce an interrupt: the pump used to `shutdown(2)` the socket to

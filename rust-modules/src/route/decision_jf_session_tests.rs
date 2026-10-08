@@ -288,3 +288,91 @@ fn a_remote_source_needing_only_a_user_agent_still_plays_directly() {
     assert!(n.url.contains("static=true") && !n.url.contains("media.invalid"), "{}", n.url);
     assert_eq!(seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).count(), 1, "{seen:?}");
 }
+
+// ---- subtitles on a conversion (W1) ---------------------------------------------------------
+
+const HEVC_EAC3_SRT: &str = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"eac3","Index":1,"Channels":6},{"Type":"Subtitle","Codec":"subrip","Index":2,"Language":"eng","DeliveryMethod":"External","DeliveryUrl":"/Videos/0123456789abcdef0123456789abcdef/0123456789abcdef0123456789abcdef/Subtitles/2/0/Stream.srt?api_key=jf-token"}"#;
+
+/// A remux whose text subtitle the server delivers as its own extracted file.
+fn remux_with_external_subtitle_info() -> String {
+    let url = format!(
+        "/videos/{JF_GUID}/stream.mkv?VideoCodec=hevc&AudioCodec=eac3&TranscodeReasons=ContainerNotSupported&PlaySessionId=ps-loopback"
+    );
+    playback_info(false, "avi", HEVC_EAC3_SRT, Some(&url))
+}
+
+/// Picking a subtitle during a conversion re-negotiates WITHOUT forcing a burn: the server
+/// delivers the text track as a file, the video stays copied, the new encoder replaces the old,
+/// and the client draws the server's file.
+#[test]
+fn a_subtitle_picked_during_a_conversion_is_delivered_softly_not_burned() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    crate::player::reset_subtitle();
+    let lb = loopback(remux_with_external_subtitle_info());
+    let rk = jf_rk();
+    let contract = crate::catalog::EncodeContract { remux: true, ..Default::default() };
+    negotiate_jf_session(lb.sid, &rk, "jf-subs-old", contract);
+    super::test_support::apply_plan(&mut ps,
+        Plan {
+            sid: lb.sid,
+            sess: "jf-subs-logical".into(),
+            tsession: "jf-subs-old".into(),
+            url: format!("http://127.0.0.1/videos/{JF_GUID}/stream.mkv?PlaySessionId=ps-loopback"),
+            contract,
+            vcodec: "hevc".into(),
+            acodec: "eac3".into(),
+            ..Default::default()
+        },
+        &rk,
+    );
+    assert_eq!(cur_sub_sid(&ps), 0);
+
+    // The viewer picks the embedded English text track (stream index 2, app id 3).
+    commit_subtitle_selection(&mut ps, 0, 3, true);
+    let expected = worker_ticket();
+    assert!(retranscode_for(&mut ps, &expected, 90).is_some(), "the pick re-negotiates");
+    let seen = lb.finish();
+
+    let ask = seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).last().expect("asked").json();
+    assert_eq!(ask["SubtitleStreamIndex"], 2);
+    assert_eq!(ask["AlwaysBurnInSubtitleWhenTranscoding"], false, "a pick is not a burn");
+    assert_eq!(ask["AllowVideoStreamCopy"], true, "a soft subtitle keeps the video copyable");
+    assert_ne!(transcode_session(&ps), "jf-subs-old", "the new encoder replaces the old");
+    assert_eq!(
+        ps.cur_sub_delivery,
+        Some(crate::catalog::SubtitleDelivery::External {
+            path: format!("/Videos/{JF_GUID}/{JF_GUID}/Subtitles/2/0/Stream.srt"),
+            codec: "srt".into(),
+        }),
+    );
+    assert!(client_renders_subtitle(&ps));
+    assert!(crate::player::sidecar::selected());
+
+    crate::player::reset_subtitle();
+    reset_session(&mut ps);
+    install_active_encoder("");
+}
+
+/// An external delivery the client cannot fetch through the server (a remote source's own
+/// subtitle URL) is asked again as a burn, rather than selected and never drawn.
+#[test]
+fn an_external_subtitle_outside_the_server_is_asked_again_as_a_burn() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let streams = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"eac3","Index":1,"Channels":6},{"Type":"Subtitle","Codec":"subrip","Index":2,"IsExternal":true,"DeliveryMethod":"External","DeliveryUrl":"https://subs.example.invalid/film.srt","IsExternalUrl":true}"#;
+    let url = format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=hevc&AudioCodec=eac3&TranscodeReasons=ContainerNotSupported&PlaySessionId=ps-loopback");
+    let lb = loopback(playback_info(false, "avi", streams, Some(&url)));
+    let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
+    let rk = jf_rk();
+    let contract = crate::catalog::EncodeContract { remux: true, ..Default::default() };
+    let spec = transcode_spec(&rk, "jf-remote-sub", "jf-remote-sub", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract);
+    let n = client.transcode(&spec).playable().expect("playable");
+    let seen = lb.finish();
+
+    let asks: Vec<_> = seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).map(|r| r.json()).collect();
+    assert_eq!(asks.len(), 2, "{seen:?}");
+    assert_eq!(asks[0]["AlwaysBurnInSubtitleWhenTranscoding"], false);
+    assert_eq!(asks[1]["AlwaysBurnInSubtitleWhenTranscoding"], true);
+    assert_eq!(n.subtitle, Some(crate::catalog::SubtitleDelivery::Burned));
+}

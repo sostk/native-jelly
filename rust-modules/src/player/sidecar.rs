@@ -17,12 +17,14 @@
 //!
 //! # The clock
 //!
-//! A sidecar's timestamps are file time, and on DIRECT PLAY `playpos_ns` is file time too (the
-//! rebase keeps it so across seeks). On a TRANSCODE the server burns the selection into the
-//! picture instead, so [`active`] answers nothing while its caller says the session is
-//! transcoding — otherwise a direct play that becomes a transcode mid-film (a DTS audio pick)
-//! would show the line twice. The fact is PASSED IN rather than read: the playback session is
-//! the frame's publication, and the draw that calls this already holds it.
+//! A sidecar's timestamps are file time, and `playpos_ns` is movie time on every path: file time
+//! on DIRECT PLAY (the rebase keeps it so across seeks), and the display base plus the fed
+//! timestamps on a conversion. So the same file serves a conversion the server delivers it to as
+//! a separate file — the extracted `DeliveryUrl` path, which starts at 0 because the transcoding
+//! profile copies timestamps. When the conversion BURNS the selection instead, [`active`] answers
+//! nothing while its caller says so — otherwise the line would show twice. The fact is PASSED IN
+//! rather than read: the playback session is the frame's publication, and the draw that calls
+//! this already holds it (`route::client_renders_subtitle`).
 //!
 //! The draw asks on the SUBTITLE clock (`player::subtitle_clock_ns`, the playhead less the
 //! viewer's timing offset). Because the whole file is here, a sidecar is the one kind of track
@@ -221,9 +223,10 @@ pub(crate) fn reset() {
 }
 
 /// **Honour a sidecar the SERVER already has selected for this part** — picked here in an earlier
-/// session, or on another Plex client. The embedded twin is `route::pick_dp_subtitle`, which
+/// session, or on another client. The embedded twin is `route::pick_dp_subtitle`, which
 /// leaves an external selection off because nothing could render it; now something can.
-/// Direct play only (the caller's gate): a transcode start keeps subtitles off, as before.
+/// Direct play only (the caller's gate): a conversion asks for that sidecar in its negotiation
+/// and is pointed at the server's delivery instead (`route::adopt_subtitle_delivery`).
 pub(crate) fn restore_server_selection(server: crate::catalog::ServerId, meta: crate::metadata::MetadataView<'_>) -> Option<i64> {
     let item = meta.playing()?;
     if let Some(s) = crate::metadata::server_selected_sidecar(item) {
@@ -234,11 +237,12 @@ pub(crate) fn restore_server_selection(server: crate::catalog::ServerId, meta: c
     None
 }
 
-/// The line to draw at `now_ns`, if a sidecar is selected and this is a direct play.
-pub(crate) fn active(now_ns: i64, transcoding: bool) -> Option<String> {
+/// The line to draw at `now_ns`, if a sidecar is selected and the playing route has not burned
+/// the selection into the picture (`suppressed`).
+pub(crate) fn active(now_ns: i64, suppressed: bool) -> Option<String> {
     let st = state();
-    if transcoding {
-        return None; // a transcode BURNS the selection; drawing it too would double the line
+    if suppressed {
+        return None; // the conversion BURNS the selection; drawing it too would double the line
     }
     let want = st.want.as_ref()?;
     if let Some((source, why, at)) = &st.failed {
@@ -252,10 +256,11 @@ pub(crate) fn active(now_ns: i64, transcoding: bool) -> Option<String> {
     }
 }
 
-/// The selected styled script on a direct play. It is the same immutable source through seeks
-/// and Off→On; render requests carry the current clock, so no cue is lost on a backward seek.
-pub(crate) fn ass_source(transcoding: bool) -> Option<Arc<super::ass::Source>> {
-    if transcoding { return None; }
+/// The selected styled script, unless the playing route burned it (`suppressed`). It is the same
+/// immutable source through seeks and Off→On; render requests carry the current clock, so no cue
+/// is lost on a backward seek.
+pub(crate) fn ass_source(suppressed: bool) -> Option<Arc<super::ass::Source>> {
+    if suppressed { return None; }
     let mut st = state();
     let State { want, loaded, .. } = &mut *st;
     let want = want.as_ref()?;

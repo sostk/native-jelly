@@ -432,10 +432,12 @@ a dead source is **absent** from Home and states itself in its own library secti
 - **Track selection is server-side, via `PUT /library/parts/{id}`** (set the chosen audio/subtitle
   stream + subtitle burn), **not** query params on the stream URL. The server re-selects for the next
   decision; the client re-requests the part. See `[[audio-subtitle-track-switching]]`.
-- **Subtitles: assume client rendering, not the server.** WebVTT sidecars do **not** deliver on our
-  progressive-MKV pipeline (they come back empty / 501), so during a transcode the only server option
-  is **burn** — which is why direct-play + our own subtitle renderer (see `player/`) is the real
-  answer. Don't add a soft-subtitle path that only works on paper. See `[[soft-subs-during-transcode]]`.
+- **Subtitles: the client renders them, and a conversion burns only what it must.** Direct play
+  draws the file's own track. A conversion asks for the selected subtitle and the PlaybackInfo
+  answer says how it arrives (`MediaStream.DeliveryMethod` → `jf::playback::SubtitleDelivery`): a
+  text track as the server's extracted file (`External`, drawn by the sidecar renderer), a bitmap
+  track muxed into the converted Matroska (`Embed`, ordinal 0 of the output), or burned
+  (`Encode`). The ask never forces a burn. `docs/jellyfin-playback.md` "Subtitles" has the table.
 
 ## Where the bytes go next
 

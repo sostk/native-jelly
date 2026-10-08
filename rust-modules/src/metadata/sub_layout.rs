@@ -279,9 +279,9 @@ fn sub_tracks(
 ///
 /// `subs` is the playing item's FULL subtitle list; `offered` is the subset this route offers
 /// (sidecars only where they can be drawn or burned); `names` is the demuxer's own tag list;
-/// `yours` is "your languages" in PREFERENCE order; `show_timing` is `!is_transcoding` (a
-/// transcode burns captions server-side, so no client offset or style can reach them: Timing and
-/// Style are both omitted).
+/// `yours` is "your languages" in PREFERENCE order; `show_timing` is whether the client draws the
+/// subtitle (`route::client_renders_subtitle`: a conversion that burns it leaves no client offset
+/// or style to reach, so Timing and Style are both omitted).
 pub(crate) fn sub_sections(
     subs: &[Stream],
     offered: &[usize],
@@ -368,8 +368,8 @@ pub(crate) fn sub_sections(
     }
 
     // 4. A headerless section: Timing then Style — always a NEW section, never folded into
-    // whatever came before. Both follow the same availability: a transcode burns captions in
-    // server-side, so there is no client caption to offset or to style.
+    // whatever came before. Both follow the same availability: a conversion that burns captions
+    // in server-side leaves no client caption to offset or to style.
     if show_timing {
         sections.push(SubSection { header: SubHeader::Bare, rows: vec![SubRow::Timing, SubRow::Style] });
     }

@@ -20,7 +20,7 @@ pub(crate) struct AssSubtitles {
 
 impl AssSubtitles {
     pub(crate) fn update(&mut self, ps: &crate::route::PlaybackSession, now: u32) {
-        let source = if crate::route::is_transcoding(ps) || crate::player::loading(ps) {
+        let source = if !crate::route::client_renders_subtitle(ps) || crate::player::loading(ps) {
             None
         } else {
             sidecar::ass_source(false)

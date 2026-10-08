@@ -235,10 +235,9 @@ pub(crate) struct PlaybackSession {
     /// old accessor kept as a projection: `.map_or(0, |a| a.sid)`, so every existing caller that
     /// only ever wanted the wire id keeps compiling unchanged.
     cur_audio: Option<CarriedAudio>,
-    /// current subtitle selection (0 = none) — the picked Plex stream id, regardless of how it
-    /// renders: burned into any TRANSCODE (our client profile advertises no soft-sub support, so
-    /// Plex's decision is burn), or client-rendered from the demuxer on direct play
-    /// (`player::request_subtitle`).
+    /// current subtitle selection (0 = none) — the picked stream id, regardless of how it renders:
+    /// client-rendered on direct play (`player::request_subtitle`), and on a conversion however the
+    /// negotiation delivered it ([`Self::cur_sub_delivery`]: drawn by the client, or burned).
     cur_sub_sid: i64,
     /// Is [`Self::cur_sub_sid`] an external sidecar (`metadata::Stream::sidecar_renderable`) rather
     /// than an embedded (in-container) track? Meaningless when `cur_sub_sid == 0`. Issue #266 I6:
@@ -246,6 +245,11 @@ pub(crate) struct PlaybackSession {
     /// (unaffected by the audio enhancement's remux) apart from
     /// [`super::plan::SubtitleEffect::Embedded`] (needs a forced burn to survive one, M7).
     cur_sub_sidecar: bool,
+    /// How the playing CONVERSION delivers [`Self::cur_sub_sid`], as its negotiation answered
+    /// (`MediaStream.DeliveryMethod`). `None` on direct play — the client draws the file's own
+    /// track — and while no subtitle is on. It, not "is this a transcode", decides whether the
+    /// client renderer draws anything: see [`client_renders_subtitle`].
+    cur_sub_delivery: Option<crate::catalog::SubtitleDelivery>,
     /// The subtitle-language preference this play resolved under — the show's pref if it set one,
     /// else the account's — carried straight from [`super::plan::Plan::sub_pref_lang`] so the
     /// Subtitles menu's "yours" grouping (`metadata::sub_layout::sub_sections`) survives a reload.
@@ -403,6 +407,7 @@ impl PlaybackSession {
         cur_audio: None,
         cur_sub_sid: 0,
         cur_sub_sidecar: false,
+        cur_sub_delivery: None,
         cur_sub_pref_lang: None,
         sess: String::new(),
         machine_id: String::new(),
@@ -472,6 +477,7 @@ impl PlaybackSession {
             cur_audio,
             cur_sub_sid,
             cur_sub_sidecar,
+            cur_sub_delivery,
             cur_sub_pref_lang,
             sess,
             machine_id,
@@ -522,6 +528,7 @@ impl PlaybackSession {
             cur_audio: cur_audio.clone(),
             cur_sub_sid: *cur_sub_sid,
             cur_sub_sidecar: *cur_sub_sidecar,
+            cur_sub_delivery: cur_sub_delivery.clone(),
             cur_sub_pref_lang: cur_sub_pref_lang.clone(),
             sess: sess.clone(),
             machine_id: machine_id.clone(),
@@ -823,6 +830,7 @@ struct AppliedRouteProjection {
     audio: Option<CarriedAudio>,
     subtitle_sid: i64,
     subtitle_sidecar: bool,
+    subtitle_delivery: Option<crate::catalog::SubtitleDelivery>,
     stream_vcodec: String,
     stream_acodec: String,
     stream_fps: f64,
@@ -843,6 +851,7 @@ fn route_projection(ps: &PlaybackSession) -> AppliedRouteProjection {
         audio: s.cur_audio.clone(),
         subtitle_sid: s.cur_sub_sid,
         subtitle_sidecar: s.cur_sub_sidecar,
+        subtitle_delivery: s.cur_sub_delivery.clone(),
         stream_vcodec: s.stream_vcodec.clone(),
         stream_acodec: s.stream_acodec.clone(),
         stream_fps: s.stream_fps,
@@ -863,6 +872,7 @@ fn install_route_projection(ps: &mut PlaybackSession, projection: &AppliedRouteP
         s.cur_audio = projection.audio.clone();
         s.cur_sub_sid = projection.subtitle_sid;
         s.cur_sub_sidecar = projection.subtitle_sidecar;
+        s.cur_sub_delivery = projection.subtitle_delivery.clone();
         s.stream_vcodec = projection.stream_vcodec.clone();
         s.stream_acodec = projection.stream_acodec.clone();
         s.stream_fps = projection.stream_fps;
@@ -4324,14 +4334,57 @@ pub(crate) fn install_transcode_for_test(ps: &mut PlaybackSession, remux: bool, 
         crate::catalog::TranscodeDelivery::ProgressiveMkv
     };
 }
-/// select the subtitle to BURN into any transcode of the current item (0 = none). This
-/// is the transcode path; direct-play uses the client renderer (player::request_subtitle).
+/// Test-only: state how the installed conversion delivers its subtitle, as a negotiation would.
+#[cfg(test)]
+pub(crate) fn set_subtitle_delivery_for_test(ps: &mut PlaybackSession, delivery: Option<crate::catalog::SubtitleDelivery>) {
+    ps.cur_sub_delivery = delivery;
+}
+/// select the subtitle any conversion of the current item carries (0 = none); the negotiation
+/// decides how it is delivered. Direct play draws it through the client renderer
+/// (player::request_subtitle).
 pub(crate) fn set_subtitle(ps: &mut PlaybackSession, sid: i64) {
     { let s = &mut *ps; s.cur_sub_sid = sid }
 }
-/// the subtitle stream id currently burned into the transcode (0 = none).
+/// the selected subtitle stream id (0 = none), however the playing route delivers it.
 pub(crate) fn cur_sub_sid(ps: &PlaybackSession) -> i64 {
     ps.cur_sub_sid
+}
+/// Whether the client renderer may draw the selected subtitle: always on direct play, and on a
+/// conversion only when the server delivers it softly — muxed in or as its own file. A burned
+/// subtitle is already in the picture, and drawing it again would double the line.
+pub(crate) fn client_renders_subtitle(ps: &PlaybackSession) -> bool {
+    !is_transcoding(ps)
+        || matches!(
+            ps.cur_sub_delivery,
+            Some(crate::catalog::SubtitleDelivery::Embedded | crate::catalog::SubtitleDelivery::External { .. })
+        )
+}
+
+/// Point the client renderer at the subtitle the playing CONVERSION delivers
+/// ([`PlaybackSession::cur_sub_delivery`]). Called wherever a negotiated conversion is installed —
+/// the landing, a track switch's or quality change's rebuild, a seek — after the delivery is.
+///
+/// * Muxed in: it is the converted stream's only subtitle, so ordinal 0 — never the track's
+///   ordinal in the source, which names nothing in this output.
+/// * Its own file: the sidecar, fetched from the server's path.
+/// * Burned, or none: nothing for the client to draw.
+fn adopt_subtitle_delivery(ps: &mut PlaybackSession) {
+    if !is_transcoding(ps) {
+        return;
+    }
+    match ps.cur_sub_delivery.clone() {
+        Some(crate::catalog::SubtitleDelivery::Embedded) => {
+            crate::player::sidecar::deselect();
+            crate::player::request_subtitle(0);
+            ps.cur_sub_sidecar = false;
+        }
+        Some(crate::catalog::SubtitleDelivery::External { path, codec }) => {
+            crate::player::request_subtitle(-1);
+            crate::player::sidecar::select(cur_sid(ps), ps.cur_sub_sid, path, codec);
+            ps.cur_sub_sidecar = true;
+        }
+        Some(crate::catalog::SubtitleDelivery::Burned) | None => crate::player::request_subtitle(-1),
+    }
 }
 /// The subtitle-language preference this play resolved under (show pref, else account pref), as
 /// a BCP-47 code — `metadata::sub_layout::sub_sections`'s "yours" grouping reads this, never a Plex
@@ -5074,7 +5127,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         reject_preparation();
         return None;
     };
-    let url = negotiated.url;
+    let url = negotiated.url.clone();
     let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
         // This is a NEW PMS response. Carrying the old decoded raster would turn the previous
         // session's observation into a claim about bytes nobody has opened yet; the new demux
@@ -5091,10 +5144,12 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     { let s = &mut *ps; {
         s.tsession = replacement.clone();
         s.url = url.clone();
+        s.cur_sub_delivery = negotiated.subtitle.clone();
         if let Some((_, hls)) = live_hls.as_ref() {
             s.cur_contract.ceiling = Some(hls.rung.ceiling());
         }
     } };
+    adopt_subtitle_delivery(ps);
     publish_applied_route_projection(ps);
     if let Some(ticket) = route_start {
         if !prepare_route_start(ticket) {
@@ -5456,7 +5511,7 @@ pub(crate) fn restore_quality(q: Quality) {
 ///   "1080p · 20 Mbps" while direct-playing a 5 Mbit/s file must not start an encoder.
 /// * Otherwise the flavour on the wire is no longer the one this rung allows, so the session's
 ///   ceiling moves and the pump is asked for a fresh transcode at the current position. That is
-///   `request_transcode_refresh` — the identical path a subtitle-burn change already takes
+///   `request_transcode_refresh` — the identical path a subtitle change during a conversion already takes
 ///   (`commit_subtitle_selection`), gated in `player::pump` on a session that is actually
 ///   `Playing`, so it is inert during a pre-roll.
 ///
@@ -6708,6 +6763,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             // Negative = an external sidecar the client draws itself (`sub_render_ordinal`'s own
             // convention); `None` (Off) never sets `sub_sid` either, so this reads `false` for it.
             cur_sub_sidecar: plan.sub_render_ordinal.is_some_and(|ord| ord < 0),
+            cur_sub_delivery: plan.sub_delivery,
             cur_sub_pref_lang: plan.sub_pref_lang,
             sess: plan.sess,
             machine_id,
@@ -6766,6 +6822,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
         ));
         crate::player::request_subtitle(ord);
     }
+    adopt_subtitle_delivery(ps);
     // A retry or a remembered per-item correction carried its subtitle offset through the reset
     // (`reset_track_selection`); hold it to the range of the subtitle that actually landed, so an
     // advance never outlives its sidecar.
@@ -6863,6 +6920,7 @@ fn prepare_original_remux(
         }
     };
     let output_codecs = (negotiated.video.output.clone(), negotiated.audio.output.clone());
+    let subtitle = negotiated.subtitle.clone();
     let enhancement = if enhancement_refused || known_refused {
         EnhancementOutcome::Refused
     } else {
@@ -6885,7 +6943,9 @@ fn prepare_original_remux(
         s.stream_fps = 0.0;
         clear_output_dv(s);
         s.stream_immersive = false;
+        s.cur_sub_delivery = subtitle;
     } };
+    adopt_subtitle_delivery(ps);
     crate::player::log(&format!(
         "playbackinfo output: v={} a={}",
         output_codecs.0, output_codecs.1
@@ -7005,6 +7065,8 @@ struct AppliedRetranscode {
     acodec: String,
     contract: crate::catalog::EncodeContract,
     enhancement: EnhancementOutcome,
+    /// How the rebuilt conversion delivers the selected subtitle.
+    subtitle: Option<crate::catalog::SubtitleDelivery>,
     /// Returned by `replace_active_encoder_for`/`replace_active_hls_for` at the moment this
     /// worker actually committed the route. `take_ready_retranscode_claim` re-checks it against
     /// the CURRENT route before applying: the worker's own ticket check ran before this commit,
@@ -7070,6 +7132,7 @@ fn try_retranscode(
         }
     };
     let output_codecs = (negotiated.video.output, negotiated.audio.output);
+    let subtitle = negotiated.subtitle;
     let url = negotiated.url;
     let replacement_ticket = match (delivery, ceiling.and_then(crate::abr::Rung::from_ceiling)) {
         (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
@@ -7108,6 +7171,7 @@ fn try_retranscode(
         acodec: output_codecs.1,
         contract,
         enhancement,
+        subtitle,
         ticket: replacement_ticket,
         client: inputs.client,
         superseded,
@@ -7161,6 +7225,7 @@ fn apply_retranscode_outcome_to_projection(p: &mut AppliedRouteProjection, appli
     p.stream_dovi = crate::metadata::Dovi::NONE;
     p.stream_dv_decision = crate::metadata::DvDecision::NONE;
     p.stream_immersive = false;
+    p.subtitle_delivery = applied.subtitle.clone();
 }
 
 /// Install a successful attempt's session projection. Publishes `cur_contract` and
@@ -7171,6 +7236,7 @@ fn install_retranscode_outcome(ps: &mut PlaybackSession, applied: &AppliedRetran
     let mut projection = route_projection(ps);
     apply_retranscode_outcome_to_projection(&mut projection, applied);
     install_route_projection(ps, &projection);
+    adopt_subtitle_delivery(ps);
     let s = &*ps;
     // Logged HERE, where the outcome actually becomes the session's, and not in the worker: a
     // landing that goes stale before the drain must not print "enhancement: applied" for a route
@@ -8241,8 +8307,8 @@ pub(crate) fn apply_deferred_original_effects(ps: &mut PlaybackSession, mut effe
 }
 
 /// Commit a subtitle pick (`sub_idx` -1 = Off): gate the client-side renderer (direct-play path)
-/// and select the burn stream for any transcode of the item — refreshing a live transcode so the
-/// server re-burns (or drops) it. `client_renderable` = the client can draw this pick itself (an
+/// and select the stream any conversion of the item carries — refreshing a live conversion so the
+/// server delivers the new pick (or drops the old one), as `adopt_subtitle_delivery` then draws it. `client_renderable` = the client can draw this pick itself (an
 /// embedded ordinal or a sidecar), which is what lets the Original candidate carry it.
 ///
 /// Deliberately NOT deferred behind a pending Original trial: the subtitle is client-rendered on

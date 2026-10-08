@@ -471,3 +471,144 @@ fn a_preview_never_plays_a_conversion() {
         "a preview that never played reports no stop, which would rewrite the resume point: {requests:?}"
     );
 }
+
+// ---- subtitles on a conversion (W1) ---------------------------------------------------------
+// The server says how a conversion delivers the selected subtitle, per stream, in
+// `MediaStream.DeliveryMethod` (`MediaInfoHelper.SetDeviceSpecificSubtitleInfo`, for every play
+// method): `External` with a `DeliveryUrl` for a text track it extracts, `Embed` for a track it
+// muxes into the converted Matroska (the ONLY subtitle there — `EncodingHelper.GetMapArgs`), and
+// `Encode` when it burns it. A conversion used to ask with subtitles off, and every later pick
+// was sent as a forced burn.
+
+/// A TrueHD film: the panel cannot decode the audio, so it converts (a remux: video copied).
+fn truehd_remux_url() -> String {
+    format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=AudioCodecNotSupported&PlaySessionId=ps-loopback")
+}
+
+fn truehd_streams(subs: &str) -> String {
+    format!(r#"{{"Type":"Video","Codec":"hevc","Index":0}},{{"Type":"Audio","Codec":"truehd","Index":1,"Channels":8,"Language":"eng","IsDefault":true}},{subs}"#)
+}
+
+fn truehd_only() -> Vec<crate::metadata::Stream> {
+    vec![jf_track(1, "truehd", 8, "eng", true)]
+}
+
+/// [`resolve_jf`], then install the plan, with both checks run under the same serialization
+/// lock: `apply_plan` drives the process-wide renderer state the checks read.
+fn resolve_and_apply_jf(
+    info: String,
+    me: String,
+    audio: Vec<crate::metadata::Stream>,
+    subs: Vec<crate::metadata::Stream>,
+    planned: impl FnOnce(&Plan, &[JfRequest]),
+    applied: impl FnOnce(&PlaybackSession),
+) {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    crate::player::reset_subtitle();
+    let lb = JfLoopback::start(info, me);
+    let rk = jf_rk();
+    let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), lb.sid, &rk);
+    let acodec = audio.iter().find(|a| a.default).or(audio.first()).map(|a| a.codec.clone()).unwrap_or_default();
+    env.cached_item = Some(jf_item(lb.sid, audio, subs));
+    let plan = build_stream(&rk, &jf_part(), "hevc", &acodec, &env);
+    let requests = lb.finish();
+    planned(&plan, &requests);
+    apply_plan(&mut ps, plan, &rk);
+    applied(&ps);
+    crate::player::reset_subtitle();
+    reset_session(&mut ps);
+    install_active_encoder("");
+}
+
+/// The preferred text subtitle rides a conversion as the server's own extracted file: asked for,
+/// not burned, the video still copied, and the client draws it from `DeliveryUrl` — fetched under
+/// the request header, so the `api_key` the server put in the URL is not kept.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_carries_the_preferred_subtitle_as_the_servers_external_file() {
+    let delivery = format!("/Videos/{JF_GUID}/{JF_GUID}/Subtitles/2/0/Stream.srt?api_key=jf-token");
+    let subs = format!(r#"{{"Type":"Subtitle","Codec":"subrip","Index":2,"Language":"eng","DeliveryMethod":"External","DeliveryUrl":{delivery:?}}}"#);
+    resolve_and_apply_jf(
+        playback_info(false, "mkv", &truehd_streams(&subs), Some(&truehd_remux_url())),
+        user_config(None, true, Some("eng"), "Always"),
+        truehd_only(),
+        vec![jf_track(2, "srt", 0, "eng", false)],
+        |plan, requests| {
+            let body = playback_info_body(requests);
+            assert_eq!(body["SubtitleStreamIndex"], 2, "the preferred subtitle is asked for on a conversion");
+            assert_eq!(body["AlwaysBurnInSubtitleWhenTranscoding"], false);
+            assert_eq!(body["AllowVideoStreamCopy"], true);
+            assert!(plan.contract.remux, "the video is still copied");
+            assert_eq!(plan.sub_sid, 3);
+            assert_eq!(
+                plan.sub_delivery,
+                Some(crate::catalog::SubtitleDelivery::External {
+                    path: format!("/Videos/{JF_GUID}/{JF_GUID}/Subtitles/2/0/Stream.srt"),
+                    codec: "srt".into(),
+                }),
+            );
+        },
+        |ps| {
+            assert_eq!(cur_sub_sid(ps), 3);
+            assert!(client_renders_subtitle(ps), "a soft delivery is the client's to draw");
+            assert!(crate::player::sidecar::selected(), "the server's file is the sidecar");
+            assert_eq!(crate::player::desired_sub_idx(), -1, "no embedded track is drawn beside it");
+        },
+    );
+}
+
+/// A bitmap subtitle the server muxes into the converted Matroska is the ONLY subtitle stream of
+/// that output, so the renderer is pointed at ordinal 0 — not at the track's ordinal in the
+/// source, where an earlier text track puts it at 1.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn an_embedded_subtitle_is_drawn_from_the_converted_streams_own_ordering() {
+    let subs = r#"{"Type":"Subtitle","Codec":"subrip","Index":2,"Language":"eng"},{"Type":"Subtitle","Codec":"PGSSUB","Index":3,"Language":"fre","DeliveryMethod":"Embed"}"#;
+    resolve_and_apply_jf(
+        playback_info(false, "mkv", &truehd_streams(subs), Some(&truehd_remux_url())),
+        user_config(None, true, Some("fre"), "Always"),
+        truehd_only(),
+        vec![jf_track(2, "srt", 0, "eng", false), jf_track(3, "pgs", 0, "fre", false)],
+        |plan, requests| {
+            let body = playback_info_body(requests);
+            assert_eq!(body["SubtitleStreamIndex"], 3);
+            assert_eq!(body["AlwaysBurnInSubtitleWhenTranscoding"], false);
+            assert!(plan.contract.remux, "a muxed subtitle needs no re-encode");
+            assert_eq!(plan.sub_sid, 4);
+            assert_eq!(plan.sub_delivery, Some(crate::catalog::SubtitleDelivery::Embedded));
+        },
+        |ps| {
+            assert_eq!(cur_sub_sid(ps), 4);
+            assert!(client_renders_subtitle(ps));
+            assert_eq!(crate::player::desired_sub_idx(), 0, "the output's own ordering");
+            assert!(!crate::player::sidecar::selected());
+        },
+    );
+}
+
+/// Only the server's `Encode` is a burn — here a bitmap track on an HLS conversion, whose MPEG-TS
+/// segments cannot carry it. The ask itself never forces one; the client then draws nothing.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn an_encoded_subtitle_is_the_servers_burn_and_the_client_draws_nothing() {
+    let url = format!("/videos/{JF_GUID}/master.m3u8?VideoCodec=h264&AudioCodec=aac&SubtitleStreamIndex=3&SubtitleMethod=Encode&TranscodeReasons=AudioCodecNotSupported&PlaySessionId=ps-loopback");
+    let subs = r#"{"Type":"Subtitle","Codec":"PGSSUB","Index":3,"Language":"fre","DeliveryMethod":"Encode"}"#;
+    resolve_and_apply_jf(
+        playback_info(false, "mkv", &truehd_streams(subs), Some(&url)),
+        user_config(None, true, Some("fre"), "Always"),
+        truehd_only(),
+        vec![jf_track(3, "pgs", 0, "fre", false)],
+        |plan, requests| {
+            assert_eq!(playback_info_body(requests)["AlwaysBurnInSubtitleWhenTranscoding"], false, "the server chose the burn");
+            assert_eq!(plan.sub_sid, 4);
+            assert_eq!(plan.sub_delivery, Some(crate::catalog::SubtitleDelivery::Burned));
+        },
+        |ps| {
+            assert_eq!(cur_sub_sid(ps), 4, "the menu and the reports still name the burned track");
+            assert!(!client_renders_subtitle(ps), "the picture already carries it");
+            assert_eq!(crate::player::desired_sub_idx(), -1);
+        },
+    );
+}

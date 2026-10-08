@@ -520,9 +520,10 @@ pub(crate) fn commit_track(
             crate::route::commit_subtitle_selection(ps, render_ordinal, stream_id, client_renderable);
             // An EXTERNAL pick has no demuxer ordinal (`render_ordinal` is -1, so the embedded
             // renderer is off) — on direct play `player::sidecar` fetches and draws it instead.
-            // While transcoding the commit above already asked for a burn and the sidecar draw
-            // is silenced for as long as that is true, so selecting here is harmless and means
-            // the line survives the playback going BACK to direct play.
+            // While a conversion plays, the commit above re-negotiates it, and the landing points
+            // the sidecar at the server's own delivery of this track (or silences it if the
+            // server burns it — `route::adopt_subtitle_delivery`); selecting here also means the
+            // line survives the playback going BACK to direct play.
             match sidecar_key {
                 Some(key) => crate::player::sidecar::select(crate::route::cur_sid(ps), stream_id, key, sidecar_codec),
                 None => crate::player::sidecar::deselect(),

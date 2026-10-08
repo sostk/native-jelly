@@ -645,9 +645,9 @@ tracks (`movie_hevc_4k_pgs_subs`).
 The text case targets `movie_h264_ac3_1080p`, which has four text tracks
 `[RU-forced, RU, EN, EN-SDH]`, so it picks **row 3 = the English track** (row 0 is Off;
 `desired_sub_idx = row − 1`) and seeds a `viewOffset` of 843 s so playback lands in the dense
-opening monologue and cues appear within the run window. (For a transcode item, soft subs ride a
-WebVTT sidecar, which per project memory delivers 0 bytes on this pipeline — direct-play is the
-only reliable sub path.)
+opening monologue and cues appear within the run window. (On a conversion the text track arrives
+as the server's extracted file and is drawn by the sidecar renderer instead —
+`docs/jellyfin-playback.md` "Subtitles" — so this case exercises the embedded path on direct play.)
 
 ## Adding a case
 

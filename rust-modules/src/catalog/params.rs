@@ -207,8 +207,9 @@ pub struct TranscodeSpec<'a> {
     pub contract: EncodeContract,
     /// Source audio stream id to select (0 = server default).
     pub audio_stream_id: i64,
-    /// Subtitle stream id to BURN (0 = none). Burn is Plex's decision for our profile —
-    /// it advertises no soft-sub support (direct-play subs are client-rendered instead).
+    /// Subtitle stream id to carry (0 = none). Not a request to burn: the negotiation answers how
+    /// the conversion delivers it (`jf::playback::SubtitleDelivery`), and the server burns only a
+    /// track no soft delivery fits.
     pub subtitle_stream_id: i64,
     /// Restart at this exact content boundary, or omit `offset` for a fresh start.
     pub offset: TranscodeOffset,
