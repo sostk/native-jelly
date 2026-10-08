@@ -125,10 +125,14 @@ fn the_timeline_reaches_the_server_the_item_came_from_not_the_current_one() {
     );
     let lease_a = begin_timeline_reporting(&ps).expect("A timeline lease");
     assert!(report_timeline(&lease_a, crate::catalog::TimelineState::Stopped, 0, 2_000));
+    // A's playback stops before any report of its own, so its start is said first (W2).
     assert_eq!(
         reports(&server_a.seen()),
-        [("/Sessions/Playing/Stopped".to_string(), OTHER_GUID.to_string())],
-        "A hears its own report"
+        [
+            ("/Sessions/Playing".to_string(), OTHER_GUID.to_string()),
+            ("/Sessions/Playing/Stopped".to_string(), OTHER_GUID.to_string()),
+        ],
+        "A hears its own reports"
     );
 
     let heard_b = server_b.finish();
@@ -179,6 +183,7 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
     scrobble_stop(&mut ps,
         Some((rk_old.clone(), 11_000, 20_000)),
         Some(old_reporter),
+        true,
     );
 
     apply_plan(&mut ps,
@@ -213,10 +218,14 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
     let stopped = at(&old_server, "/Sessions/Playing/Stopped").expect("old stopped report never reached the server");
     let playing = at(&new_server, "/Sessions/Playing").expect("replacement playing report never reached the server");
     assert!(stopped <= playing, "replacement report arrived before stopped");
+    // The old playback stops before any report of its own, so its start is said first (W2).
     assert_eq!(
         reports(&old_server.seen()),
-        [("/Sessions/Playing/Stopped".to_string(), JF_GUID.to_string())],
-        "the old server hears exactly its stop"
+        [
+            ("/Sessions/Playing".to_string(), JF_GUID.to_string()),
+            ("/Sessions/Playing/Stopped".to_string(), JF_GUID.to_string()),
+        ],
+        "the old server hears exactly its start and stop"
     );
     assert_eq!(
         reports(&new_server.seen()),

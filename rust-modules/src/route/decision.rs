@@ -922,6 +922,10 @@ fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool
         timeline.audio_stream_id = audio_stream_id;
         timeline.subtitle_stream_id = subtitle_stream_id;
     }
+    drop(control);
+    // A track or quality edit that changed nothing physical is still one the server should hear
+    // now rather than at the next heartbeat.
+    crate::player::report_now();
 }
 
 /// Immutable main-thread projection consumed by the periodic timeline worker. `Session` itself is
@@ -4734,6 +4738,8 @@ struct ScrobbleWork {
     play_queue_item_id: String,
     audio_stream_id: i64,
     subtitle_stream_id: i64,
+    /// The playback put a picture on the panel (see `TimelineReport::presented`).
+    presented: bool,
     transcode_session: String,
     timeline_stop: Option<TimelineStopCompletion>,
 }
@@ -4761,6 +4767,7 @@ impl ScrobbleWork {
                         play_queue_item_id: &self.play_queue_item_id,
                         audio_stream_id: self.audio_stream_id,
                         subtitle_stream_id: self.subtitle_stream_id,
+                        presented: self.presented,
                     })
                 })
             };
@@ -4803,6 +4810,7 @@ pub(crate) fn scrobble_stop(
     ps: &mut PlaybackSession,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
+    presented: bool,
 ) {
     if preview_request(ps) {
         return;
@@ -4845,6 +4853,7 @@ pub(crate) fn scrobble_stop(
         play_queue_item_id: pqi,
         audio_stream_id: aud,
         subtitle_stream_id: sub,
+        presented,
         transcode_session: tsession,
         timeline_stop,
     })));
@@ -8455,24 +8464,50 @@ fn timeline_snapshot(
 /// fence captured by that lease, this serializes through `TIMELINE_EFFECT` and snapshots the
 /// server, item, PlayQueue and selected tracks together from [`PlayerControl`]; a stale Engine lease
 /// sends nothing. Final `Stopped` is emitted separately by [`ScrobbleWork`] from its owned teardown
-/// snapshot.
+/// snapshot. `true` when it posted; the reporter reads [`report_timeline_tick`], which says why it
+/// did not.
+#[cfg(test)]
 pub(crate) fn report_timeline(
     lease: &TimelineLease,
     state: crate::catalog::TimelineState,
     t_ms: i64,
     d_ms: i64,
 ) -> bool {
+    matches!(report_timeline_tick(lease, state, t_ms, d_ms), TimelineTick::Sent(_))
+}
+
+/// What one reporter tick did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TimelineTick {
+    /// Posted; whether the server took it.
+    Sent(bool),
+    /// The route is mid-transition (resolving, applying, starting): nothing was sampled, and the
+    /// reporter asks again. The first picture of a playback can arrive here, before the start
+    /// transaction completes, and its first report must not be lost to it.
+    Deferred,
+    /// The lease's Engine is gone: the reporter is done.
+    Retired,
+}
+
+/// [`report_timeline`], saying why nothing was posted.
+pub(crate) fn report_timeline_tick(
+    lease: &TimelineLease,
+    state: crate::catalog::TimelineState,
+    t_ms: i64,
+    d_ms: i64,
+) -> TimelineTick {
     // This lease belongs to a replacement Engine only after every stop synchronously announced
     // before its publication has joined the old reporter and attempted old `stopped`. Old leases
     // captured an earlier generation and never wait on the stop worker which is joining them.
     TIMELINE_STOP_FENCE.wait(lease.required_stop);
     let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
     let Some(report) = timeline_snapshot(lease, state, t_ms, d_ms) else {
-        return false;
+        let live = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner()).engine_epoch == lease.engine_epoch;
+        return if live { TimelineTick::Deferred } else { TimelineTick::Retired };
     };
     let c = match crate::catalog::client_for(report.sid) {
         Some(c) => c,
-        None => return true,
+        None => return TimelineTick::Sent(false),
     };
     let ok = c.timeline(&crate::catalog::TimelineReport {
         rating_key: &report.rating_key,
@@ -8484,6 +8519,8 @@ pub(crate) fn report_timeline(
         play_queue_item_id: &report.play_queue_item_id,
         audio_stream_id: report.audio_stream_id,
         subtitle_stream_id: report.subtitle_stream_id,
+        // The reporter reports only once a picture is on the panel.
+        presented: true,
     });
     // FAILURES ONLY. The reporter thread logs `timeline <state> t=…s/…s` for every tick whichever
     // way the POST went (`player::threads`), so a report the server never took looks exactly like
@@ -8497,7 +8534,7 @@ pub(crate) fn report_timeline(
             report.time_ms / 1000,
         ));
     }
-    true
+    TimelineTick::Sent(ok)
 }
 
 // ---------------------------------------------------------------------------------------

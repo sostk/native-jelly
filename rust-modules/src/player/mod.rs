@@ -481,6 +481,10 @@ pub(crate) fn frames() -> i32 {
 pub(crate) fn seen_frame() -> bool {
     SHARED.seen_frame.load(Relaxed)
 }
+/// Ask the playback reporter for a report now (see `threads::report_now`).
+pub(crate) fn report_now() {
+    threads::report_now();
+}
 pub(crate) fn duration_ns() -> i64 {
     SHARED.duration_ns.load(Relaxed)
 }
@@ -502,6 +506,8 @@ pub(crate) fn request_seek(ns: i64) {
     // Count the request even though the target it carries may be overwritten before the pump
     // ever sees it — that overwrite IS the coalescing, and this is the only place it's countable.
     TX.seek_reqs.fetch_add(1, Relaxed);
+    // The reporter waits out `seeking` and reports where the seek lands.
+    report_now();
 }
 /// **The seek was ABANDONED — put the playhead back on reality.**
 ///

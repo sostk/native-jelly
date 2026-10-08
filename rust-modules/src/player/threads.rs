@@ -102,49 +102,113 @@ const REPORT_INTERVAL_S: u64 = 10;
 /// set and exits, no matter what the next session does to `SHARED`. That is what lets the join
 /// move off the main thread.
 pub(crate) struct ReportStop {
-    flag: std::sync::Mutex<bool>,
+    state: std::sync::Mutex<Signal>,
     cv: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct Signal {
+    stopped: bool,
+    nudged: bool,
+}
+
+/// Why [`ReportStop::wait`] returned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Wake {
+    Stop,
+    Nudge,
+    Timeout,
 }
 
 impl ReportStop {
     pub(crate) fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(ReportStop {
-            flag: std::sync::Mutex::new(false),
-            cv: std::sync::Condvar::new(),
-        })
+        std::sync::Arc::new(ReportStop { state: Default::default(), cv: std::sync::Condvar::new() })
     }
-
     /// Tell this reporter to exit, and wake it so it notices now rather than up to 10 s from now.
     pub(crate) fn stop(&self) {
-        *self.flag.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).stopped = true;
+        self.cv.notify_all();
+    }
+    /// Ask for a report now. Several before the reporter wakes are one report.
+    fn nudge(&self) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).nudged = true;
         self.cv.notify_all();
     }
 
-    /// Wait up to `secs`, returning `true` as soon as [`stop`](Self::stop) has been called.
+    /// Wait up to `d` for a stop or a nudge, a stop first. A nudge is consumed by the wait that
+    /// reports it.
     ///
     /// The loop re-checks the predicate because `wait_timeout` may wake spuriously, and a spurious
     /// wake must not shorten the interval into an early extra POST.
-    fn wait_or_stop(&self, secs: u64) -> bool {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
-        let mut g = self.flag.lock().unwrap_or_else(|e| e.into_inner());
+    fn wait(&self, d: std::time::Duration) -> Wake {
+        let deadline = std::time::Instant::now() + d;
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
         loop {
-            if *g {
-                return true;
+            if g.stopped {
+                return Wake::Stop;
+            }
+            if std::mem::take(&mut g.nudged) {
+                return Wake::Nudge;
             }
             let now = std::time::Instant::now();
             if now >= deadline {
-                return false;
+                return Wake::Timeout;
             }
-            g = self
-                .cv
-                .wait_timeout(g, deadline - now)
-                .unwrap_or_else(|e| e.into_inner())
-                .0;
+            g = self.cv.wait_timeout(g, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
         }
     }
 }
 
-/// The ~10 s `/:/timeline` progress reporter.
+/// The reporter of the playback on screen, for [`report_now`]. Each reporter registers itself as
+/// it starts, so the newest Engine's wins; nudging one that is already stopping does nothing.
+static CURRENT: std::sync::Mutex<std::sync::Weak<ReportStop>> = std::sync::Mutex::new(std::sync::Weak::new());
+
+fn register(stop: &std::sync::Arc<ReportStop>) {
+    *CURRENT.lock().unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::downgrade(stop);
+}
+
+/// Ask the playing reporter for a report now — after the viewer pauses, resumes, seeks or changes
+/// a track, so the server hears it then rather than at the next heartbeat. Free when nothing is
+/// playing.
+pub(crate) fn report_now() {
+    if let Some(stop) = CURRENT.lock().unwrap_or_else(|e| e.into_inner()).upgrade() {
+        stop.nudge();
+    }
+}
+
+/// What the reporter knows when it wakes.
+#[derive(Clone, Copy, Debug, Default)]
+struct Due {
+    /// Nothing has been reported for this Engine yet.
+    first: bool,
+    /// A picture has been presented this session (`SHARED.seen_frame`).
+    presented: bool,
+    /// The duration is known.
+    duration_known: bool,
+    /// A seek is in flight; the position is the old one.
+    seeking: bool,
+    /// The viewer did something the server should hear about now.
+    nudged: bool,
+    /// The heartbeat interval has run out.
+    heartbeat: bool,
+}
+
+/// Whether to report now. Nothing until a picture is on the panel and the duration is known —
+/// there is no playback to report before that — and nothing while a seek is in flight, whose
+/// position is the one being left. Then: at once the first time (`/Sessions/Playing`), and after
+/// that on the heartbeat or a nudge.
+fn report_due(d: Due) -> bool {
+    d.presented && d.duration_known && !d.seeking && (d.first || d.nudged || d.heartbeat)
+}
+
+/// How often a reporter with something pending (its first report, a nudge waiting out a seek)
+/// looks again.
+const REPORT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The playback reporter: `/Sessions/Playing` the moment the first picture is on the panel, then
+/// `/Sessions/Playing/Progress` every [`REPORT_INTERVAL_S`] seconds and whenever [`report_now`]
+/// is asked — a pause, a resume, a landed seek, a track change. The heartbeat counts from the
+/// last report. The final `Stopped` is the stop's own (`route::ScrobbleWork`).
 ///
 /// The lease names one exact Engine. Route identity, server, PlayQueue and track projection are
 /// sampled together under `PlayerControl`; no field of the main-thread `Session` is touched here.
@@ -153,12 +217,33 @@ pub(crate) fn timeline_thread(
     stop: std::sync::Arc<ReportStop>,
 ) {
     use crate::catalog::TimelineState;
+    use crate::route::TimelineTick;
+    register(&stop);
+    let interval = std::time::Duration::from_secs(REPORT_INTERVAL_S);
+    let mut last: Option<std::time::Instant> = None;
+    let mut nudged = false;
     loop {
-        if stop.wait_or_stop(REPORT_INTERVAL_S) {
-            return;
+        // Something pending (the first report, a nudge waiting out a seek or a route transition)
+        // is looked at again shortly; otherwise sleep until the heartbeat.
+        let wait = match last {
+            Some(at) if !nudged => interval.saturating_sub(at.elapsed()),
+            _ => REPORT_POLL,
+        };
+        match stop.wait(wait) {
+            Wake::Stop => return,
+            Wake::Nudge => nudged = true,
+            Wake::Timeout => {}
         }
         let dur = SHARED.duration_ns.load(Ordering::Relaxed);
-        if dur <= 0 {
+        let due = report_due(Due {
+            first: last.is_none(),
+            presented: SHARED.seen_frame.load(Ordering::Relaxed),
+            duration_known: dur > 0,
+            seeking: SHARED.seeking.load(Ordering::Relaxed),
+            nudged,
+            heartbeat: last.is_some_and(|at| at.elapsed() >= interval),
+        });
+        if !due {
             continue;
         }
         let t = SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000;
@@ -168,14 +253,61 @@ pub(crate) fn timeline_thread(
         } else {
             TimelineState::Playing
         };
-        if !crate::route::report_timeline(&lease, state, t, d) {
-            return;
+        match crate::route::report_timeline_tick(&lease, state, t, d) {
+            TimelineTick::Retired => return,
+            // Pending, not lost: poll until the route settles.
+            TimelineTick::Deferred => {
+                nudged = true;
+                continue;
+            }
+            TimelineTick::Sent(_) => {}
         }
+        last = Some(std::time::Instant::now());
+        nudged = false;
         super::log(&format!(
             "timeline {} t={}s/{}s",
             state.as_str(),
             t / 1000,
             d / 1000
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first report goes the moment a picture is on the panel — not ten seconds later, which
+    /// left a short playback with a `Stopped` and no start. After it, the heartbeat or the viewer.
+    #[test]
+    fn the_first_report_goes_with_the_first_picture() {
+        let at_start = Due { first: true, presented: true, duration_known: true, ..Default::default() };
+        assert!(report_due(at_start), "no ten-second wait for the start");
+        assert!(!report_due(Due { presented: false, ..at_start }), "nothing played yet");
+        assert!(!report_due(Due { duration_known: false, ..at_start }));
+        let playing = Due { first: false, ..at_start };
+        assert!(!report_due(playing), "between heartbeats, nothing");
+        assert!(report_due(Due { heartbeat: true, ..playing }));
+        assert!(report_due(Due { nudged: true, ..playing }), "a pause, resume or track change goes now");
+        assert!(!report_due(Due { nudged: true, seeking: true, ..playing }), "a seek reports where it lands");
+        assert!(!report_due(Due { heartbeat: true, seeking: true, ..playing }));
+    }
+
+    /// A nudge wakes the reporter of the playback on screen at once; a stop still wins.
+    #[test]
+    fn a_nudge_wakes_the_current_reporter_at_once() {
+        let _g = nj_base::testlock::serial();
+        let stop = ReportStop::new();
+        register(&stop);
+        let waiting = stop.clone();
+        let started = std::time::Instant::now();
+        let h = std::thread::spawn(move || waiting.wait(std::time::Duration::from_secs(30)));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        report_now();
+        assert_eq!(h.join().unwrap(), Wake::Nudge);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        stop.stop();
+        report_now();
+        assert_eq!(stop.wait(std::time::Duration::from_secs(1)), Wake::Stop, "a stop outranks a nudge");
     }
 }

@@ -947,7 +947,21 @@ impl Jf<'_> {
             .map(str::to_string);
         let paused = r.state == TimelineState::Paused;
         match r.state {
+            // A playback that never put a picture on the panel is no playback: end its encoder and
+            // report nothing — its stop's position (0, or wherever the load stopped) would
+            // otherwise overwrite the resume point.
+            TimelineState::Stopped if !s.started && !r.presented => {
+                let ended = self.transcode_stop(r.session);
+                drop_session(r.session);
+                ended
+            }
             TimelineState::Stopped => {
+                // A playback stopped before its first report was ever taken still STARTED as far
+                // as the server is concerned: say so first, or the stop arrives for a session it
+                // never saw begin.
+                if !s.started {
+                    s.started = self.report("/Sessions/Playing", &s, r.time_ms, paused, playlist_item_id.clone(), false);
+                }
                 drop_session(r.session);
                 self.report("/Sessions/Playing/Stopped", &s, r.time_ms, paused, playlist_item_id, false)
             }

@@ -1679,7 +1679,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // returning here used to leak the candidate forever while the reducer remained Failed.
     if !pa.is_live() {
         if !for_reload {
-            crate::route::scrobble_stop(ps, None, None);
+            crate::route::scrobble_stop(ps, None, None, false);
             crate::route::begin_engine_teardown(false);
             crate::route::drop_original_recovery(ps);
             crate::route::clear_url(ps);
@@ -1728,6 +1728,8 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
             SHARED.duration_ns.load(Ordering::Relaxed),
         );
     }
+    // Read before teardown clears it with the session, like the position below.
+    let presented = SHARED.seen_frame.load(Ordering::Relaxed);
     let final_report = if for_reload {
         None
     } else {
@@ -1815,7 +1817,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // `TimelineLease`, samples only SHARED clock state, and the route reducer revalidates the lease
     // before each network effect.
     if !for_reload {
-        crate::route::scrobble_stop(ps, final_report, eng.report_th.take());
+        crate::route::scrobble_stop(ps, final_report, eng.report_th.take(), presented);
     }
     // 3. Release the native object (see `release_native_object` for the proof chain), unless its
     // Load is still in flight — then hand it, its thread and its payload to the adapter.

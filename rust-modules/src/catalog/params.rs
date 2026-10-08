@@ -304,6 +304,10 @@ pub struct TimelineReport<'a> {
     pub play_queue_item_id: &'a str,
     pub audio_stream_id: i64,
     pub subtitle_stream_id: i64,
+    /// This playback put a picture on the panel. A `Stopped` for one that never did ends its
+    /// encoder and reports nothing: there was no playback to start or to stop, and its position
+    /// would overwrite the resume point.
+    pub presented: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

@@ -177,7 +177,7 @@ fn live_playback_decisions_reports_and_watched_state() {
     assert!(r.status == 206 || r.status == 200, "direct play answered {}", r.status);
 
     for (t, state) in [(1000, TimelineState::Playing), (6000, TimelineState::Paused), (9000, TimelineState::Stopped)] {
-        let ok = c.timeline(&TimelineReport { rating_key: &rk, state, time_ms: t, duration_ms: d.duration, session,
+        let ok = c.timeline(&TimelineReport { rating_key: &rk, state, time_ms: t, duration_ms: d.duration, session, presented: true,
             play_queue_id: "", play_queue_item_id: "", audio_stream_id: 0, subtitle_stream_id: 0 });
         assert!(ok, "{} report", state.as_str());
     }

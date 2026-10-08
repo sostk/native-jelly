@@ -64,6 +64,7 @@ fn report(lb: &JfLoopback, session: &str, state: crate::catalog::TimelineState, 
         play_queue_item_id: "",
         audio_stream_id: 2,
         subtitle_stream_id: 0,
+        presented: true,
     }));
 }
 
@@ -375,4 +376,65 @@ fn an_external_subtitle_outside_the_server_is_asked_again_as_a_burn() {
     assert_eq!(asks[0]["AlwaysBurnInSubtitleWhenTranscoding"], false);
     assert_eq!(asks[1]["AlwaysBurnInSubtitleWhenTranscoding"], true);
     assert_eq!(n.subtitle, Some(crate::catalog::SubtitleDelivery::Burned));
+}
+
+// ---- start and stop ordering (W2) -----------------------------------------------------------
+
+/// The final stop of `session`, as `ScrobbleWork` sends it.
+fn stop(lb: &JfLoopback, session: &str, time_ms: i64, presented: bool) {
+    let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
+    let rk = jf_rk();
+    let _ = client.timeline(&crate::catalog::TimelineReport {
+        rating_key: &rk,
+        state: crate::catalog::TimelineState::Stopped,
+        time_ms,
+        duration_ms: 7_200_000,
+        session,
+        play_queue_id: "",
+        play_queue_item_id: "",
+        audio_stream_id: 2,
+        subtitle_stream_id: 0,
+        presented,
+    });
+}
+
+/// A playback stopped before the reporter's first report is still a playback the server has to
+/// hear START: a `Stopped` for a session it never saw begin leaves no "now playing" entry and no
+/// activity record, only a position. Start, then stop, in that order.
+#[test]
+fn a_short_playback_reports_its_start_before_its_stop() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let lb = loopback(remux_info());
+    let contract = crate::catalog::EncodeContract { remux: true, ..Default::default() };
+    encode(&lb, "jf-short", "", 0, contract);
+    stop(&lb, "jf-short", 3_000, true);
+    let seen = lb.finish();
+
+    let reports: Vec<&str> = seen
+        .iter()
+        .filter(|r| r.line.starts_with("POST /Sessions/Playing"))
+        .map(|r| r.line.split_whitespace().nth(1).unwrap_or(""))
+        .collect();
+    assert_eq!(reports, ["/Sessions/Playing", "/Sessions/Playing/Stopped"], "{seen:?}");
+    let stopped = posts(&seen, "/Sessions/Playing/Stopped")[0].json();
+    assert_eq!(stopped["PositionTicks"], 30_000_000_i64);
+}
+
+/// A playback that never put a picture on the panel (a load that failed, a BACK during loading)
+/// is no playback: it reports neither a start nor a stop — whose position would overwrite the
+/// resume point — and only its encoder is ended.
+#[test]
+fn a_playback_that_never_showed_a_picture_reports_nothing_and_ends_its_encoder() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let lb = loopback(video_transcode_info());
+    let contract = crate::catalog::EncodeContract { no_video_copy: true, ..Default::default() };
+    encode(&lb, "jf-unseen", "", 0, contract);
+    stop(&lb, "jf-unseen", 0, false);
+    let seen = lb.finish();
+
+    assert!(!seen.iter().any(|r| r.line.starts_with("POST /Sessions/Playing")), "{seen:?}");
+    let delete = seen.iter().find(|r| r.line.starts_with("DELETE /Videos/ActiveEncodings?")).expect("encoder ended");
+    assert_eq!(query_param(&delete.line, "playSessionId"), Some("ps-loopback"));
 }

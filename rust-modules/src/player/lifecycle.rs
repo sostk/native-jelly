@@ -85,11 +85,16 @@ pub(crate) fn set_transport_paused(
     if paused() == value {
         return true;
     }
-    if value {
+    let accepted = if value {
         crate::player::pause(pa)
     } else {
         crate::player::resume(pa)
+    };
+    if accepted {
+        // The server hears `IsPaused` now, not at the next heartbeat.
+        crate::player::report_now();
     }
+    accepted
 }
 
 /// Resume if a seek landed while paused — the twin of `commit_seek`, which is the

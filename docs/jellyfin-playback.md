@@ -52,7 +52,8 @@ apply_plan (main thread) ─► player opens URL ─► VideoSink
    HLS: the master lists the film from zero and carries no StartTimeTicks (segments refuse it);
    the player opens the segment covering the offset and moves its display base onto its start
    ▼
-timeline reporter (every 10 s) ─► Client::timeline ─► /Sessions/Playing, then /Progress
+timeline reporter ─► Client::timeline ─► /Sessions/Playing at the first picture, then /Progress
+   every 10 s and at once on pause, resume, a landed seek or a track change
 stop ─► ScrobbleWork: join reporter, /Sessions/Playing/Stopped with the real position
 ```
 
@@ -191,6 +192,18 @@ resumed conversion re-negotiate under a new `PlaySessionId` (web does the same i
 * The first timeline report sends `/Sessions/Playing` and stamps `PlaybackStartTimeTicks`; later
   ones send `/Progress` with the same stamp, `IsPaused`, positions in ticks, the indexes,
   `PlaylistItemId` when the queue has one.
+* When the reporter reports (`player::threads::timeline_thread`): `/Sessions/Playing` as soon as
+  the Engine has presented its first picture (`SHARED.seen_frame`) and knows the duration — not
+  after a first 10-second wait. Then a heartbeat every 10 s counted from the last report, and a
+  report at once when `player::report_now` is asked: the viewer's pause and resume
+  (`lifecycle::set_transport_paused`), a seek (`player::request_seek`; the reporter waits out
+  `seeking` and reports where it lands), and an in-place track change
+  (`route::commit_in_place_route_projection`). A track change or seek that reloads the Engine gets
+  its report from the new Engine's reporter at its first picture. Nudges that arrive together are
+  one report. A report the route cannot take yet (resolving, applying, starting) is retried, not
+  dropped (`route::TimelineTick::Deferred`).
+* No `EventName` is sent: the 12.0 `PlaybackProgressInfo` has no such field
+  (`docs/jf-api/jellyfin-openapi-12.0.json`); `IsPaused` carries the transport state.
 * A replacement (`transcode(spec)` with `spec.continues` = the session the playback reports under)
   inherits `MediaSourceId`, `started` and the start stamp, so it reports `/Progress` — a second
   `/Sessions/Playing` would increment the server's play count (`OnPlaybackStart`).
@@ -201,7 +214,11 @@ resumed conversion re-negotiate under a new `PlaySessionId` (web does the same i
   position 0: the server writes a stop's position into the user's resume point (`UpdatePlayState`),
   which is how every resumed conversion used to rewind "Continue Watching" to the start.
 * The final stop is the timeline's `Stopped` with the real position, after the reporter thread is
-  joined (`ScrobbleWork`). The server's `ReportPlaybackStopped` kills that playback's jobs first.
+  joined (`ScrobbleWork`). The server's `ReportPlaybackStopped` kills that playback's jobs first. A
+  playback stopped before any report was taken sends `/Sessions/Playing` first, so the server
+  never sees a stop for a session it did not see start. One that never presented a picture (a
+  failed load, BACK while loading — `TimelineReport::presented`) reports neither: only its encoder
+  is ended, because its stop's position would overwrite the resume point.
 * `IsMuted`/`VolumeLevel` are the television's: the player renders at full level, so the set's
   volume is what the viewer hears. Each progress report nudges one long-lived worker to read
   `luna://com.webos.service.audio/getVolume`, and the report carries the last answer. While
@@ -293,6 +310,10 @@ Automated (host, `make check`; loopback Jellyfin in `route/decision_test_support
 | Session table eviction | `jf::playback::tests::a_long_run_of_encoders_never_evicts_the_playing_session` |
 | Capabilities, offered ⊆ rendered subtitles | `catalog::capabilities::tests::*` |
 | Report ordering, server attribution | `route::decision::timeline_tests::*` |
+| First report at the first picture; heartbeat, nudge, seek waits | `player::threads::tests::the_first_report_goes_with_the_first_picture` |
+| A nudge wakes the playing reporter at once | `player::threads::tests::a_nudge_wakes_the_current_reporter_at_once` |
+| A short playback reports its start before its stop | `jf_session_tests::a_short_playback_reports_its_start_before_its_stop` |
+| No picture, no report; encoder ended | `jf_session_tests::a_playback_that_never_showed_a_picture_reports_nothing_and_ends_its_encoder` |
 
 Live (`jf::live_tests`, `--ignored`, needs a test server): negotiation, ranged direct-play GET,
 Playing/Paused/Stopped reports, a 30 s-offset re-encode and its stop, and an HLS rung at a 60 s
