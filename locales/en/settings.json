@@ -1151,5 +1151,20 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.account.switch_user": {
+    "value": "Switch user",
+    "description": "Account menu row: show the screen of everyone signed in to Jellyfin on this TV and switch to one of them"
+  },
+  "settings.account.add_user": {
+    "value": "Add user",
+    "description": "Account menu row and Who's watching tile: sign another person in to the same Jellyfin server"
+  },
+  "settings.account.sign_out_of": {
+    "value": "Sign out of {name}",
+    "description": "Account menu row: sign this one user out of Jellyfin on this TV; others stay signed in. {name} is the user's own name",
+    "args": {
+      "name": "str"
+    }
   }
 }

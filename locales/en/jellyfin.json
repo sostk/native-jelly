@@ -156,5 +156,49 @@
   "jellyfin.login.qc_step_code": {
     "value": "Enter the code shown here. This TV signs in on its own.",
     "description": "Jellyfin sign-in: Quick Connect instruction 3 of 3"
+  },
+  "jellyfin.login.step_add_user": {
+    "value": "Add a user",
+    "description": "Jellyfin sign-in: small heading above the title while another person is being added to this TV"
+  },
+  "jellyfin.login.title_pick_user": {
+    "value": "Who's signing in?",
+    "description": "Jellyfin sign-in: title over the list of people on the server, while adding a user"
+  },
+  "jellyfin.login.pick_user_intro": {
+    "value": "Choose yourself from the people on {server}. Not listed? Choose Other user and type your username.",
+    "description": "Jellyfin sign-in: text under 'Who's signing in?'; {server} is the server's own name, such as Living Room",
+    "args": {
+      "server": "str"
+    }
+  },
+  "jellyfin.login.other_user": {
+    "value": "Other user",
+    "description": "Jellyfin sign-in: tile for a person not shown in the server's list; leads to typing a username"
+  },
+  "jellyfin.login.on_this_tv": {
+    "value": "On this TV",
+    "description": "Jellyfin sign-in: caption under a person who is already signed in on this TV"
+  },
+  "jellyfin.login.title_sign_in_as": {
+    "value": "Sign in as {name}",
+    "description": "Jellyfin sign-in: title while a chosen person's password is asked for; {name} is their own name",
+    "args": {
+      "name": "str"
+    }
+  },
+  "jellyfin.login.sign_in_as_intro": {
+    "value": "Enter {name}'s Jellyfin password once. After that, {name} is one press away on the Who's watching screen.",
+    "description": "Jellyfin sign-in: text under 'Sign in as {name}'",
+    "args": {
+      "name": "str"
+    }
+  },
+  "jellyfin.login.not_user": {
+    "value": "Not {name}?",
+    "description": "Jellyfin sign-in: button beside the chosen person; goes back to the list of people. {name} is their own name",
+    "args": {
+      "name": "str"
+    }
   }
 }

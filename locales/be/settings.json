@@ -288,5 +288,8 @@
   "settings.consent.placeholder.random_id": "выпадковы id",
   "settings.consent.placeholder.project_key": "ключ праекта",
   "settings.consent.placeholder.app_version": "версія праграмы",
-  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS"
+  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS",
+  "settings.account.switch_user": "Змяніць карыстальніка",
+  "settings.account.add_user": "Дадаць карыстальніка",
+  "settings.account.sign_out_of": "Выйсці: {name}"
 }

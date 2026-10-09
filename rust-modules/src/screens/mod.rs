@@ -31,6 +31,7 @@ pub(crate) mod search;
 pub(crate) mod family;
 pub(crate) mod legal;
 pub(crate) mod jf_login;
+pub(crate) mod jf_users;
 pub(crate) mod onboard;
 pub(crate) mod clock_readout;
 pub(crate) mod plaintext_question;

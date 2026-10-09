@@ -87,6 +87,8 @@ pub(crate) enum JfAuthCmd {
         reply: std::sync::mpsc::Sender<JfAuthReply>,
     },
     Adopt { origin: crate::catalog::Origin, signed_in: crate::jf::auth::SignedIn },
+    /// *Add a user*: the people the server lists on its sign-in screen (`GET /Users/Public`).
+    PublicUsers { origin: crate::catalog::Origin, reply: std::sync::mpsc::Sender<JfAuthReply> },
 }
 
 pub(crate) enum JfAuthReply {
@@ -94,6 +96,7 @@ pub(crate) enum JfAuthReply {
     SignedIn(Result<crate::jf::auth::SignedIn, crate::jf::auth::AuthError>),
     QuickConnect(Result<crate::jf::auth::QuickConnect, crate::jf::auth::AuthError>),
     Polled(Result<Option<crate::jf::auth::SignedIn>, crate::jf::auth::AuthError>),
+    People(Result<Vec<crate::jf::auth::PublicUser>, crate::jf::auth::AuthError>),
 }
 
 /// A private live receipt. Requests contain account credentials and are intentionally unsupported
@@ -1176,6 +1179,14 @@ pub(crate) enum LoopReq {
     /// Lab builds only, and it changes no route: the tester stays where they were and the toast
     /// says what happened.
     AccountSendDiagnostics,
+    /// **Jellyfin: Switch user** — the who's-watching screen over the users kept on this TV.
+    AccountSwitchUser,
+    /// **Jellyfin: Add user** — the sign-in screen, at "who's signing in?" on the active server.
+    AccountAddUser,
+    /// **Jellyfin: the who's-watching pick** — the kept user at this position of the roster the
+    /// screen was showing (`jf::store::roster().users`). The loop reads the roster again and
+    /// ignores a position that is no longer there; it never trusts a screen with a token.
+    PickJellyfinUser(u8),
 }
 
 /// Any host that carries this bundle. The screens under `screens/` are written against it, so the
@@ -1729,6 +1740,9 @@ pub(crate) struct DetailSeed {
 #[derive(Default)]
 pub(crate) struct AppMounter {
     pub(crate) seed: Option<DetailSeed>,
+    /// The NEXT sign-in page opens as *Add a user* on the active server rather than as a first
+    /// sign-in — stamped by the account menu's *Add user* and spent by that mount.
+    pub(crate) login_adds_user: bool,
     /// **Where the NEXT player instance returns to** — the entry that was on top when the push was
     /// asked for, stamped at the press and consumed by the mount exactly as `player_hud_ms` is.
     ///
@@ -1849,10 +1863,15 @@ where
             // failure) or an unanswered persistence warning keeps the Session owner's screen. A
             // saved Jellyfin server that failed at boot, and every other sign-in, is Jellyfin's.
             AppArg::Login => {
-                Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
+                if std::mem::take(&mut self.login_adds_user) {
+                    Box::new(crate::screens::jf_login::JfLoginScreen::adding_user(entry, id))
+                } else {
+                    Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
+                }
             }
+            // Who's watching? over the Jellyfin users kept on this television.
             AppArg::Profiles => {
-                Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
+                Box::new(crate::screens::jf_users::JfUsersScreen::new(entry))
             }
             AppArg::Home => {
                 let mut page = crate::screens::home::HomeScreen::new(entry, id);
@@ -2061,6 +2080,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
     crate::screens::versions::SHAPE[1],
     crate::screens::track_choice::SHAPE[0],
     crate::screens::track_choice::SHAPE[1],
+    crate::screens::jf_users::SHAPE,
 ];
 
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
@@ -2168,7 +2188,10 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // gains `Versions`; the previous pin was 0xe44c_06bc_cecb_7c50.
 // The Detail page's *Audio & Subtitles* chooser: `screens::track_choice::SHAPE` joins the
 // inventory and `AppArg` gains `TrackChoice`; the previous pin was 0x43a6_f222_5edc_87aa.
-const SCREEN_SHAPES_PIN: u64 = 0x6dfe_4a98_8543_1a82;
+// Multi-user profiles: `screens::jf_users::SHAPE` (Who's watching? over the Jellyfin roster)
+// joins the inventory and `screens::jf_login::SHAPE` gains the *Add a user* step; the previous
+// pin was 0x6dfe_4a98_8543_1a82.
+const SCREEN_SHAPES_PIN: u64 = 0x359f_add9_3c35_dc69;
 
 #[cfg(test)]
 mod arg_tests {

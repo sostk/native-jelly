@@ -231,6 +231,8 @@ pub enum Icon {
     Server,
     /// A phone — Quick Connect, approved from a phone or computer (`screens::jf_login`).
     Phone,
+    /// A plus — the who's-watching screen's *Add user* tile (`screens::jf_users`).
+    Plus,
 }
 
 /// **Where a mark's INK sits inside its 24-unit viewBox**, as `(left, right)` fractions — and
@@ -319,6 +321,7 @@ fn src(id: Icon) -> &'static str {
         Icon::WifiSlash => include_str!("../../../assets/icons/wifi-slash.svg"),
         Icon::Server => include_str!("../../../assets/icons/server.svg"),
         Icon::Phone => include_str!("../../../assets/icons/phone.svg"),
+        Icon::Plus => include_str!("../../../assets/icons/plus.svg"),
     }
 }
 

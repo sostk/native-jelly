@@ -1234,7 +1234,9 @@ impl RootPage {
         let signed_in = sess.account(crate::catalog::session::current().as_ref()).signed_in;
         let auto_sign_in = self.pending_auto.as_ref().map_or_else(|| sess.auto_sign_in(), |(value, _)| *value);
         let trailer_autoplay = self.pending_trailer.as_ref().map_or_else(|| sess.trailer_autoplay(), |(value, _)| *value);
-        let multi_user = sess.home_users.len() > 1;
+        // Several Plex Home profiles, or several Jellyfin users kept on this television: either
+        // way there is a who's-watching screen for Automatically Sign In to skip.
+        let multi_user = sess.home_users.len() > 1 || crate::jf::store::roster().users.len() > 1;
         self.state.auto_sign_in = auto_sign_in;
         self.state.trailer_autoplay = trailer_autoplay;
         self.state.language = nj_platform::i18n::saved_preference();

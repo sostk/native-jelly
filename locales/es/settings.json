@@ -285,5 +285,8 @@
   "settings.consent.placeholder.random_id": "id aleatorio",
   "settings.consent.placeholder.project_key": "clave del proyecto",
   "settings.consent.placeholder.app_version": "versión de la app",
-  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS"
+  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS",
+  "settings.account.switch_user": "Cambiar de usuario",
+  "settings.account.add_user": "Añadir usuario",
+  "settings.account.sign_out_of": "Cerrar sesión de {name}"
 }

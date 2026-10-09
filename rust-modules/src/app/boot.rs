@@ -1221,7 +1221,14 @@ pub(crate) unsafe fn construct(
         // sources answer walked Onboard → Home and was never asked at all.
         BootTo::Home => {
             owes_consent_question = true;
-            if ask_first_run() {
+            // More than one Jellyfin user kept: ask who is watching, signed in as the last one
+            // underneath so choosing them again costs nothing — unless Automatically Sign In is
+            // on, which enters as the last user exactly as a single-user television does.
+            let kept = crate::jf::store::roster().users.len();
+            if jf_stored.is_some() && kept > 1 && !session.auto_sign_in() {
+                log(&format!("boot: {kept} Jellyfin users kept — asking who's watching"));
+                AppArg::Profiles
+            } else if ask_first_run() {
                 log("boot: asking which sources feed Home");
                 // No `enter()`: the first-run editor is an OWNED screen, and naming the route is
                 // the whole of mounting it — `bridge`'s mounter builds `OnboardScreen::first_run`

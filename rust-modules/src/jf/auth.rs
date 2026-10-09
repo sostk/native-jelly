@@ -169,6 +169,40 @@ pub fn quick_connect_poll(origin: &Origin, client_id: &str, qc: &QuickConnect) -
     finish(&qc.info, a, "").map(Some)
 }
 
+/// Someone a server lists on its sign-in screen (`GET /Users/Public`): who they are and whether
+/// signing in as them asks for a password. Never a token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicUser {
+    pub id: String,
+    pub name: String,
+    pub has_password: bool,
+}
+
+/// `GET /Users/Public` — the people the server shows on its own sign-in screen. Anonymous. An
+/// administrator can hide users from it, so an empty list is an ordinary answer: the caller asks
+/// for a username instead.
+pub fn public_users(origin: &Origin, client_id: &str) -> Result<Vec<PublicUser>, AuthError> {
+    let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
+    let j = Jf::for_sign_in(&c, "");
+    let auth = j.auth_header();
+    let r = c
+        .jf_send("/Users/Public", Method::Get, &[crate::http::ACCEPT_JSON, auth.as_str()], None)
+        .ok_or(AuthError::Unreachable)?;
+    if !r.ok() {
+        return Err(AuthError::Refused(r.status));
+    }
+    parse_public_users(&r.body)
+}
+
+fn parse_public_users(body: &[u8]) -> Result<Vec<PublicUser>, AuthError> {
+    let users: Vec<UserDto> = serde_json::from_slice(body).map_err(|_| AuthError::Malformed)?;
+    Ok(users
+        .into_iter()
+        .filter(|u| !u.id.is_empty() && !u.name.trim().is_empty())
+        .map(|u| PublicUser { id: u.id, name: u.name, has_password: u.has_password })
+        .collect())
+}
+
 /// Probe each of `candidates` in turn ([`super::address::candidates`]) and answer with the first
 /// that is a Jellyfin server. When none is, the most telling failure wins: a server that is not set
 /// up says more than one that is not Jellyfin, which says more than silence.
@@ -213,6 +247,21 @@ pub fn sign_out(c: &crate::catalog::Client) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The server's own list: names and whether a password is asked, entries without an id or a
+    /// name dropped, and anything that is not that list a malformed answer.
+    #[test]
+    fn a_public_user_list_reads_names_and_password_flags() {
+        let body = br#"[{"Name":"Alex","Id":"a1","HasPassword":true},{"Name":"Kids","Id":"k2","HasPassword":false},
+            {"Name":"","Id":"x"},{"Name":"Ghost"}]"#;
+        let users = parse_public_users(body).unwrap();
+        assert_eq!(users, vec![
+            PublicUser { id: "a1".into(), name: "Alex".into(), has_password: true },
+            PublicUser { id: "k2".into(), name: "Kids".into(), has_password: false },
+        ]);
+        assert_eq!(parse_public_users(b"[]").unwrap(), vec![]);
+        assert_eq!(parse_public_users(b"{}"), Err(AuthError::Malformed));
+    }
 
     #[test]
     fn a_sign_in_becomes_the_seat_its_client_reads() {

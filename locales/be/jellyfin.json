@@ -36,5 +36,13 @@
   "jellyfin.login.or": "або",
   "jellyfin.login.qc_step_open": "Адкрыйце Jellyfin на тэлефоне або камп’ютары, дзе вы ўжо ўвайшлі.",
   "jellyfin.login.qc_step_profile": "Перайдзіце ў профіль і выберыце Quick Connect.",
-  "jellyfin.login.qc_step_code": "Увядзіце код, паказаны тут. Тэлевізар увойдзе сам."
+  "jellyfin.login.qc_step_code": "Увядзіце код, паказаны тут. Тэлевізар увойдзе сам.",
+  "jellyfin.login.step_add_user": "Дадаць карыстальніка",
+  "jellyfin.login.title_pick_user": "Хто ўваходзіць?",
+  "jellyfin.login.pick_user_intro": "Выберыце сябе сярод карыстальнікаў сервера {server}. Вас няма ў спісе? Выберыце «Іншы карыстальнік» і ўвядзіце сваё імя карыстальніка.",
+  "jellyfin.login.other_user": "Іншы карыстальнік",
+  "jellyfin.login.on_this_tv": "На гэтым тэлевізары",
+  "jellyfin.login.title_sign_in_as": "Увайсці як {name}",
+  "jellyfin.login.sign_in_as_intro": "Увядзіце пароль Jellyfin для {name} адзін раз. Пасля гэтага {name} будзе даступны адным націскам на экране «Хто глядзіць?».",
+  "jellyfin.login.not_user": "Не {name}?"
 }

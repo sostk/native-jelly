@@ -1,6 +1,8 @@
 //! The **profile menu** — a registered `Style::Sheet` surface on the shared `ModalStack`, opened
 //! from the top-left profile chip. Switch Plex Home profile ("Change profile" → who's-watching),
-//! "Sign out", "Sign in", Settings, and — in a lab build — "Send diagnostics".
+//! "Sign out", "Sign in", Settings, and — in a lab build — "Send diagnostics". Signed in to
+//! Jellyfin it is that user's menu instead: headed "name · server", with *Switch user* (when
+//! someone else is kept on this television), *Add user* and *Sign out of name*.
 //!
 //! **Navigation owns its lifetime, its phase, its input scope and its dim.** It was
 //! `ui/account_menu.rs` — a `Popover` plus three `static mut`s (`POP`, `TABLE`, `ROWS`) driven by
@@ -66,6 +68,10 @@ pub(crate) enum Action {
     /// (`docs/lab-diagnostics.md` §7). Never offered in any other build —
     /// [`nj_platform::labcfg::menu_row_enabled`] is `false` at compile time.
     SendDiagnostics,
+    /// **Jellyfin: Switch user** — the who's-watching screen. Offered when another user is kept.
+    SwitchUser,
+    /// **Jellyfin: Add user** — sign another person in to the same server.
+    AddUser,
 }
 
 /// A row's identity IS its action. Its focus key is hand-assigned, never the enum's discriminant,
@@ -78,6 +84,8 @@ impl FormId for Action {
             Action::SignOut => 3,
             Action::Settings => 4,
             Action::SendDiagnostics => 5,
+            Action::SwitchUser => 6,
+            Action::AddUser => 7,
         })
     }
 }
@@ -108,6 +116,32 @@ struct AccountInputs {
     /// The lab-only *Send diagnostics* row ([`nj_platform::labcfg::menu_row_enabled`], compile-time `false`
     /// outside lab builds).
     lab: bool,
+    /// Signed in to Jellyfin: whose menu this is. Plex's account rows give way to its own.
+    jellyfin: Option<JfAccount>,
+}
+
+/// The active Jellyfin user, as the menu speaks of them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JfAccount {
+    /// Their own name on the server (server text).
+    name: String,
+    /// The server's own name (server text).
+    server: String,
+    /// Someone else is kept on this television, so there is someone to switch to.
+    others: bool,
+}
+
+impl JfAccount {
+    /// The live Jellyfin user, read off `jf::store` (memory only, never storage).
+    fn live() -> Option<Self> {
+        let roster = crate::jf::store::roster();
+        let me = roster.current()?;
+        Some(Self {
+            name: if me.user_name.is_empty() { me.server_name.clone() } else { me.user_name.clone() },
+            server: me.server_name.clone(),
+            others: roster.users.len() > 1,
+        })
+    }
 }
 
 impl AccountInputs {
@@ -120,12 +154,13 @@ impl AccountInputs {
     /// one. The row is hidden then, the same way a server-only session's is — it would open #132's
     /// read-out and nothing else. No verdict (never asked, plex.tv unreachable) keeps the row,
     /// because the row is what asks.
-    fn of(acc: &Account, switch_refused: bool) -> Self {
+    fn of(acc: &Account, switch_refused: bool, jellyfin: Option<JfAccount>) -> Self {
         Self {
             name: acc.name.clone(),
-            signed_in: acc.signed_in,
+            signed_in: acc.signed_in || jellyfin.is_some(),
             can_switch: acc.can_switch && !switch_refused,
             lab: nj_platform::labcfg::menu_row_enabled(),
+            jellyfin,
         }
     }
 }
@@ -161,6 +196,8 @@ fn label(a: Action) -> &'static str {
         Action::SignOut => nj_platform::i18n::msg::settings_account_sign_out(),
         Action::Settings => nj_platform::i18n::msg::settings_account_settings(),
         Action::SendDiagnostics => nj_platform::i18n::msg::settings_account_diagnostics(),
+        Action::SwitchUser => nj_platform::i18n::msg::settings_account_switch_user(),
+        Action::AddUser => nj_platform::i18n::msg::settings_account_add_user(),
     }
 }
 
@@ -169,6 +206,9 @@ fn label(a: Action) -> &'static str {
 /// profile or the roster owner), so it is a `server_header`; the fallback "Account" label is this
 /// app's own word for a nameless signed-in account. **Reordering the menu is moving a line.**
 fn account_form(inputs: &AccountInputs) -> (String, Form<Action, Action, Infallible>) {
+    if let Some(jf) = &inputs.jellyfin {
+        return jellyfin_form(jf, inputs.lab);
+    }
     let header = inputs
         .name
         .clone()
@@ -192,6 +232,29 @@ fn account_form(inputs: &AccountInputs) -> (String, Form<Action, Action, Infalli
     (header, Form::new().section(sec))
 }
 
+/// A Jellyfin user's menu: "name · server" (both server text), then what that user can do.
+/// *Sign out* names who it signs out, because the others kept on this television stay.
+fn jellyfin_form(jf: &JfAccount, lab: bool) -> (String, Form<Action, Action, Infallible>) {
+    let header = if jf.server.is_empty() || jf.server == jf.name { jf.name.clone() } else { format!("{} · {}", jf.name, jf.server) };
+    let mut sec = FormSection::from_head(Section::new(header.clone()).server_header());
+    let rows = [
+        (Action::SwitchUser, jf.others),
+        (Action::AddUser, true),
+        (Action::SignOut, true),
+        (Action::Settings, true),
+        (Action::SendDiagnostics, lab),
+    ];
+    for (action, offered) in rows {
+        let row = if action == Action::SignOut {
+            Row::new(nj_platform::i18n::msg::settings_account_sign_out_of(&jf.name)).server_label().destructive(true)
+        } else {
+            action_row(action)
+        };
+        sec = sec.item_if(offered, action, RowKind::Button, action, row);
+    }
+    (header, Form::new().section(sec))
+}
+
 /// One action's row. Rows that leave for another screen carry the drill-in chevron ("Sign out"
 /// acts in place); rows whose action ends something in place are destructive and so never where
 /// the menu's focus starts ([`crate::ui::table::TableView::opening_row`]): with *Change profile*
@@ -199,7 +262,7 @@ fn account_form(inputs: &AccountInputs) -> (String, Form<Action, Action, Infalli
 /// anyone out.
 fn action_row(a: Action) -> Row {
     Row::new(label(a))
-        .chevron(matches!(a, Action::ChangeProfile | Action::SignIn | Action::Settings))
+        .chevron(matches!(a, Action::ChangeProfile | Action::SignIn | Action::Settings | Action::SwitchUser | Action::AddUser))
         .destructive(matches!(a, Action::SignOut))
 }
 
@@ -264,7 +327,7 @@ impl AccountMenuScreen {
         let cur = crate::catalog::session::current();
         let acc = sess.account(cur.as_ref());
         self.switch_refused = switch_refused;
-        let (header, form) = account_form(&AccountInputs::of(&acc, switch_refused));
+        let (header, form) = account_form(&AccountInputs::of(&acc, switch_refused, JfAccount::live()));
         self.header = header;
         // small one-word action list — BODY labels, not menu-size HEADLINE bold
         self.form.table.compact = true;
@@ -299,6 +362,8 @@ impl AccountMenuScreen {
             Action::SignOut => LoopReq::AccountSignOut,
             Action::Settings => LoopReq::AccountSettings,
             Action::SendDiagnostics => LoopReq::AccountSendDiagnostics,
+            Action::SwitchUser => LoopReq::AccountSwitchUser,
+            Action::AddUser => LoopReq::AccountAddUser,
         });
         if let Some(req) = req {
             fx.push(Fx::App(AppFx::Loop(req)));
@@ -506,7 +571,7 @@ mod tests {
         (0..t.table.n_rows() as usize).filter_map(|i| t.id_at(i).copied()).collect()
     }
     fn rows_of(acc: &Account, switch_refused: bool) -> Vec<Action> {
-        ids(account_form(&AccountInputs::of(acc, switch_refused)).1)
+        ids(account_form(&AccountInputs::of(acc, switch_refused, None)).1)
     }
     fn menu_rows(menu: &AccountMenuScreen) -> Vec<Action> {
         (0..menu.form.table.n_rows() as usize).filter_map(|i| menu.form.id_at(i).copied()).collect()
@@ -916,6 +981,49 @@ mod tests {
             "a reversed menu still never opens on the destructive row");
     }
 
+    fn jf(others: bool) -> JfAccount {
+        JfAccount { name: "Sam".into(), server: "Living Room".into(), others }
+    }
+
+    /// Signed in to Jellyfin the menu is that user's: headed "name · server", *Switch user* only
+    /// when someone else is kept to switch to, *Add user*, then *Sign out of name* (never where focus
+    /// opens), Settings. Plex's *Change profile* and *Sign in* are never offered.
+    #[test]
+    fn a_jellyfin_user_gets_their_own_menu() {
+        let (header, form) = jellyfin_form(&jf(true), false);
+        assert_eq!(header, "Sam \u{b7} Living Room");
+        assert_eq!(ids(form), [Action::SwitchUser, Action::AddUser, Action::SignOut, Action::Settings]);
+        let (_, form) = jellyfin_form(&jf(false), false);
+        let mut t = FormTable::<Action, Action, Infallible>::new(crate::screens::registry::BAND);
+        t.set(form, None);
+        let rows: Vec<Action> = (0..t.table.n_rows() as usize).filter_map(|i| t.id_at(i).copied()).collect();
+        assert_eq!(rows, [Action::AddUser, Action::SignOut, Action::Settings], "nobody else to switch to");
+        let sign_out = t.index_of_key(Action::SignOut.key()).unwrap();
+        let label = t.table.sections.iter().flat_map(|s| s.rows.iter()).nth(sign_out).map(|r| r.label.clone());
+        assert_eq!(label.as_deref(), Some("Sign out of Sam"));
+        assert_eq!(t.opening_key(), Some(Action::AddUser.key()));
+
+        let acc = Session::default().account(None);
+        let inputs = AccountInputs::of(&acc, false, Some(jf(true)));
+        assert!(inputs.signed_in, "a Jellyfin user is signed in whatever the Plex session says");
+        assert!(!ids(account_form(&inputs).1).contains(&Action::ChangeProfile));
+    }
+
+    /// The Jellyfin rows ask the loop for the multi-user moves.
+    #[test]
+    fn the_jellyfin_rows_are_loop_requests() {
+        let mut menu = AccountMenuScreen::new(EntryId(0));
+        menu.form.set(jellyfin_form(&jf(true), false).1, None);
+        for (action, want) in [(Action::SwitchUser, LoopReq::AccountSwitchUser), (Action::AddUser, LoopReq::AccountAddUser)] {
+            let mut out = Vec::new();
+            let mut present = nj_machine::present::Present::new();
+            let mut fx = Effects::<MenuHost>::new(&mut out, nj_machine::machine::MachineId::Session, &mut present);
+            menu.activate(action.key().0, &mut fx);
+            drop(fx);
+            assert!(out.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Loop(req)) if *req == want)), "{action:?}");
+        }
+    }
+
     /// **Every app-owned run of the account menu fits its panel, in every shipped language.** Built
     /// through the real [`account_form`] over every action the menu can ever offer (the lab-only
     /// diagnostics row included), for a named account (the header is the user's own name, exempt)
@@ -934,7 +1042,7 @@ mod tests {
                 // the two account states between them offer every row the menu can (the lab-only
                 // diagnostics row included), so every label is judged
                 let (_, form) = account_form(&AccountInputs {
-                    name: name.map(str::to_string), signed_in, can_switch: true, lab: true,
+                    name: name.map(str::to_string), signed_in, can_switch: true, lab: true, jellyfin: None,
                 });
                 let mut form_table = FormTable::<Action, Action, Infallible>::new(crate::screens::registry::BAND);
                 form_table.table.compact = true;
@@ -949,6 +1057,15 @@ mod tests {
                 out.extend(table.app_fit_failures(crate::ui::table::MENU_MAX_W, &what));
                 out.extend(table.app_fit_failures_hugged(&what));
             }
+            // A Jellyfin user's menu: the switch and add rows are app text; the sign-out row and
+            // the header carry the user's and the server's own names.
+            let (_, form) = jellyfin_form(&JfAccount { name: "A".into(), server: "S".into(), others: true }, true);
+            let mut form_table = FormTable::<Action, Action, Infallible>::new(crate::screens::registry::BAND);
+            form_table.table.compact = true;
+            form_table.set(form, None);
+            let what = format!("{} jellyfin", language.tag());
+            out.extend(form_table.table.app_fit_failures(crate::ui::table::MENU_MAX_W, &what));
+            out.extend(form_table.table.app_fit_failures_hugged(&what));
         }
         crate::ui::table::assert_no_fit_failures(&out);
     }
