@@ -44,5 +44,6 @@
   "jellyfin.login.on_this_tv": "На гэтым тэлевізары",
   "jellyfin.login.title_sign_in_as": "Увайсці як {name}",
   "jellyfin.login.sign_in_as_intro": "Увядзіце пароль Jellyfin для {name} адзін раз. Пасля гэтага {name} будзе даступны адным націскам на экране «Хто глядзіць?».",
-  "jellyfin.login.not_user": "Не {name}?"
+  "jellyfin.login.not_user": "Не {name}?",
+  "jellyfin.login.error_expired": "Тэрмін уваходу скончыўся. Увядзіце пароль яшчэ раз."
 }

@@ -6,12 +6,17 @@
 //! and wears the focus rim, the names under them, and the server they belong to along the bottom.
 //! Each person is their initial on a disc in their own tone (`widgets::avatar_disc`).
 //!
-//! The screen never handles a token. A pick is the user's POSITION in the roster it showed
-//! (`LoopReq::PickJellyfinUser`); the loop reads the roster again, and either carries on as the
-//! user already signed in or switches to the one picked (`app::jf_login::pick_user`). BACK carries
-//! on as the signed-in user when there is one — this screen is a question, not a gate.
+//! The screen never handles a token. A pick is the user's POSITION in the roster it showed. It
+//! first asks the app whether the server still honours that user (`JfAuthCmd::CheckKept`, the
+//! app reads the token): a refusal — the sign-in was revoked or has expired — asks for their
+//! password again (`LoopReq::ReauthJellyfinUser`) instead of switching onto a server that would
+//! answer every request with 401. Anything else is `LoopReq::PickJellyfinUser`: the loop reads the
+//! roster again, and either carries on as the user already signed in or switches to the one picked
+//! (`app::jf_login::pick_user`); a server that cannot be reached says so on the page it lands on.
+//! BACK carries on as the signed-in user when there is one — this screen is a question, not a gate.
 
 use std::borrow::Cow;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::frame::Budget;
@@ -24,7 +29,7 @@ use crate::ui::screen::{
 };
 use crate::ui::text_view::TextView;
 use crate::ui::widgets::CtlPop;
-use crate::ui::{theme, Painter, Rect};
+use crate::ui::{theme, Painter, Rect, View};
 use nj_machine::machine::{
     Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
     LogicalState, Machine, Measure,
@@ -32,9 +37,9 @@ use nj_machine::machine::{
 use nj_machine::present::Provenance;
 use nj_platform::i18n::msg;
 
-use super::registry::{word, AppFx, AppLike, LoopReq};
+use super::registry::{word, AppFx, AppLike, JfAuthCmd, JfAuthReply, LoopReq};
 
-pub(crate) const SHAPE: &str = "JfUsersScreen{entry:u32,users:u32,active:Option<u32>}";
+pub(crate) const SHAPE: &str = "JfUsersScreen{entry:u32,users:u32,active:Option<u32>,checking:Option<u32>}";
 
 /// The *Add user* tile's element; a person's element is their position in the roster.
 const ADD: u32 = 1000;
@@ -81,6 +86,10 @@ pub(crate) struct JfUsersScreen {
     server: String,
     pop: CtlPop<TILES>,
     ground: RouteGround,
+    /// The pick being checked with the server, and where its answer comes back.
+    checking: Option<(u8, Receiver<JfAuthReply>)>,
+    spin: nj_machine::motion::Phase,
+    spin_ms: f32,
 }
 
 impl JfUsersScreen {
@@ -106,7 +115,17 @@ impl JfUsersScreen {
                 }
             })
             .unwrap_or_default();
-        Self { entry, people, active: roster.active, server, pop: CtlPop::new(), ground: RouteGround::new() }
+        Self {
+            entry,
+            people,
+            active: roster.active,
+            server,
+            pop: CtlPop::new(),
+            ground: RouteGround::new(),
+            checking: None,
+            spin: nj_machine::motion::Phase::default(),
+            spin_ms: 0.0,
+        }
     }
 
     fn key(&self, elem: u32) -> FocusKey<u32> {
@@ -174,11 +193,41 @@ impl JfUsersScreen {
     }
 
     fn activate<H: AppLike>(&mut self, elem: u32, fx: &mut Effects<'_, H>) {
+        if self.checking.is_some() {
+            return;
+        }
         match self.tile_of(elem) {
             Some(i) if i == self.people.len() => fx.push(Fx::App(AppFx::Loop(LoopReq::AccountAddUser))),
-            Some(i) => fx.push(Fx::App(AppFx::Loop(LoopReq::PickJellyfinUser(i as u8)))),
+            Some(i) => {
+                let (tx, rx) = mpsc::channel();
+                let index = i as u8;
+                self.checking = Some((index, rx));
+                fx.push(Fx::App(AppFx::JfAuth(JfAuthCmd::CheckKept { index, reply: tx })));
+                fx.invalidate(Provenance::Input);
+            }
             None => {}
         }
+    }
+
+    /// The server's answer about the person picked: refused means sign in again, anything else
+    /// goes ahead (an unreachable server is said on the page it lands on).
+    fn drain<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        let Some((index, rx)) = &self.checking else { return };
+        let index = *index;
+        let verdict = match rx.try_recv() {
+            Ok(JfAuthReply::Checked(answered, verdict)) if answered == index => verdict,
+            // Not this pick's answer: keep waiting for it.
+            Ok(_) => return,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => Err(crate::jf::auth::AuthError::Unreachable),
+        };
+        self.checking = None;
+        let req = match verdict {
+            Err(crate::jf::auth::AuthError::BadCredentials) => LoopReq::ReauthJellyfinUser(index),
+            _ => LoopReq::PickJellyfinUser(index),
+        };
+        fx.push(Fx::App(AppFx::Loop(req)));
+        fx.invalidate(Provenance::Input);
     }
 
     /// BACK: carry on as the user signed in underneath, or hand the screen to the television when
@@ -231,6 +280,13 @@ impl JfUsersScreen {
         let g = self.grid();
         let name_w = g.avatar + g.gap - 12.0;
         view.draw(p, Rect::new(rest.cx() - name_w * 0.5, r.y + r.h + NAME_GAP, name_w, NAME_H));
+        if self.checking.as_ref().is_some_and(|(index, _)| usize::from(*index) == i) {
+            let gutter = crate::ui::widgets::Spinner::inline_gutter();
+            crate::ui::widgets::Spinner::leading(rest.cx() - gutter * 0.5, r.y + r.h + NAME_GAP + NAME_H + 24.0)
+                .phase(self.spin_ms as u32)
+                .tint(theme::TEXT_SECONDARY)
+                .draw(&crate::ui::Env::inert(), p);
+        }
     }
 
     fn draw_footer(&self, p: Painter, measure: &dyn Measure) {
@@ -298,9 +354,14 @@ impl<H: AppLike> Machine<H> for JfUsersScreen {
         match ev {
             ScreenEvent::Mount => self.reseat(self.first(), fx),
             ScreenEvent::Tick(t) => {
+                self.drain(fx);
+                if self.checking.is_some() {
+                    self.spin_ms = self.spin.advance(*t, &mut fx.present());
+                }
                 let focused = cx.focus.current.filter(|k| k.entry == self.entry).and_then(|k| self.tile_of(k.elem));
                 self.pop.step(focused, t.dt());
             }
+            ScreenEvent::Unmount => self.checking = None,
             ScreenEvent::Activate(elem) => self.activate(*elem, fx),
             ScreenEvent::FocusMoved { .. } => fx.invalidate(Provenance::Input),
             ScreenEvent::Input(input) => match input.kind {
@@ -373,6 +434,9 @@ impl LogicalState for JfUsersScreen {
         c.u32(self.entry.0).u32(self.people.len() as u32);
         c.option(self.active, |c, i| {
             c.u32(i as u32);
+        });
+        c.option(self.checking.as_ref().map(|(i, _)| *i), |c, i| {
+            c.u32(u32::from(i));
         });
     }
     fn probe(&self, out: &mut String) {
@@ -458,16 +522,35 @@ mod tests {
         assert_eq!(s.step_from(8, Dir::Down), None);
     }
 
-    /// OK on a person asks the loop for that position; OK on *Add user* asks for the add flow;
-    /// BACK resumes the user signed in underneath, or hands the screen back when nobody is.
+    /// OK on a person checks them with the server first, then asks the loop for that position — or,
+    /// refused, for their password again; OK on *Add user* asks for the add flow; BACK resumes the
+    /// user signed in underneath, or hands the screen back when nobody is.
     #[test]
     fn picks_and_back_are_requests_the_loop_performs() {
         let mut s = screen(&["Alex", "Sam"], Some(0));
-        assert_eq!(requests(&mut s, |s, fx| s.activate(1, fx)), [LoopReq::PickJellyfinUser(1)]);
         assert_eq!(requests(&mut s, |s, fx| s.activate(ADD, fx)), [LoopReq::AccountAddUser]);
         assert_eq!(requests(&mut s, |s, fx| s.activate(7, fx)), [], "no such person");
         assert_eq!(requests(&mut s, |s, fx| s.back(fx)), [LoopReq::PickJellyfinUser(0)]);
         s.active = None;
         assert_eq!(requests(&mut s, |s, fx| s.back(fx)), [LoopReq::BackAtRoot]);
+
+        use crate::jf::auth::AuthError;
+        for (verdict, want) in [
+            (Ok(()), LoopReq::PickJellyfinUser(1)),
+            (Err(AuthError::BadCredentials), LoopReq::ReauthJellyfinUser(1)),
+            (Err(AuthError::Unreachable), LoopReq::PickJellyfinUser(1)),
+        ] {
+            assert_eq!(requests(&mut s, |s, fx| s.activate(1, fx)), [], "a pick asks the server first");
+            assert_eq!(requests(&mut s, |s, fx| s.activate(0, fx)), [], "one pick at a time");
+            // Stand in for the app's worker, which holds the sender while it asks.
+            let (tx, rx) = mpsc::channel();
+            assert_eq!(s.checking.replace((1, rx)).map(|(i, _)| i), Some(1), "checking Sam");
+            assert_eq!(requests(&mut s, |s, fx| s.drain(fx)), [], "no answer yet");
+            tx.send(JfAuthReply::Checked(0, Ok(()))).unwrap();
+            assert_eq!(requests(&mut s, |s, fx| s.drain(fx)), [], "another pick's answer is not this one's");
+            tx.send(JfAuthReply::Checked(1, verdict)).unwrap();
+            assert_eq!(requests(&mut s, |s, fx| s.drain(fx)), [want]);
+            assert!(s.checking.is_none());
+        }
     }
 }

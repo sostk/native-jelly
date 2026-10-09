@@ -89,6 +89,9 @@ pub(crate) enum JfAuthCmd {
     Adopt { origin: crate::catalog::Origin, signed_in: crate::jf::auth::SignedIn },
     /// *Add a user*: the people the server lists on its sign-in screen (`GET /Users/Public`).
     PublicUsers { origin: crate::catalog::Origin, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    /// Who's watching?: does the server still honour the kept user at this roster position? The
+    /// app reads the token; the screen never holds one.
+    CheckKept { index: u8, reply: std::sync::mpsc::Sender<JfAuthReply> },
 }
 
 pub(crate) enum JfAuthReply {
@@ -97,6 +100,7 @@ pub(crate) enum JfAuthReply {
     QuickConnect(Result<crate::jf::auth::QuickConnect, crate::jf::auth::AuthError>),
     Polled(Result<Option<crate::jf::auth::SignedIn>, crate::jf::auth::AuthError>),
     People(Result<Vec<crate::jf::auth::PublicUser>, crate::jf::auth::AuthError>),
+    Checked(u8, Result<(), crate::jf::auth::AuthError>),
 }
 
 /// A private live receipt. Requests contain account credentials and are intentionally unsupported
@@ -1187,6 +1191,9 @@ pub(crate) enum LoopReq {
     /// screen was showing (`jf::store::roster().users`). The loop reads the roster again and
     /// ignores a position that is no longer there; it never trusts a screen with a token.
     PickJellyfinUser(u8),
+    /// **Jellyfin: that kept user's sign-in was refused** — forget it and ask for their password
+    /// again (*Sign in as name*, on the add-a-user screen).
+    ReauthJellyfinUser(u8),
 }
 
 /// Any host that carries this bundle. The screens under `screens/` are written against it, so the
@@ -1740,9 +1747,10 @@ pub(crate) struct DetailSeed {
 #[derive(Default)]
 pub(crate) struct AppMounter {
     pub(crate) seed: Option<DetailSeed>,
-    /// The NEXT sign-in page opens as *Add a user* on the active server rather than as a first
-    /// sign-in — stamped by the account menu's *Add user* and spent by that mount.
-    pub(crate) login_adds_user: bool,
+    /// How the NEXT sign-in page opens, when not as a first sign-in: *Add a user* on the active
+    /// server, or straight at one person's password after their sign-in was refused. Stamped by
+    /// the loop and spent by that mount.
+    pub(crate) login_opening: Option<crate::screens::jf_login::Opening>,
     /// **Where the NEXT player instance returns to** — the entry that was on top when the push was
     /// asked for, stamped at the press and consumed by the mount exactly as `player_hud_ms` is.
     ///
@@ -1863,8 +1871,8 @@ where
             // failure) or an unanswered persistence warning keeps the Session owner's screen. A
             // saved Jellyfin server that failed at boot, and every other sign-in, is Jellyfin's.
             AppArg::Login => {
-                if std::mem::take(&mut self.login_adds_user) {
-                    Box::new(crate::screens::jf_login::JfLoginScreen::adding_user(entry, id))
+                if let Some(opening) = self.login_opening.take() {
+                    Box::new(crate::screens::jf_login::JfLoginScreen::adding_user(entry, id, opening))
                 } else {
                     Box::new(crate::screens::jf_login::JfLoginScreen::new(entry, id))
                 }
@@ -2191,7 +2199,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // Multi-user profiles: `screens::jf_users::SHAPE` (Who's watching? over the Jellyfin roster)
 // joins the inventory and `screens::jf_login::SHAPE` gains the *Add a user* step; the previous
 // pin was 0x6dfe_4a98_8543_1a82.
-const SCREEN_SHAPES_PIN: u64 = 0x359f_add9_3c35_dc69;
+const SCREEN_SHAPES_PIN: u64 = 0x4a03_df99_a613_4199;
 
 #[cfg(test)]
 mod arg_tests {

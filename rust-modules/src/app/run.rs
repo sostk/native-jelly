@@ -1980,6 +1980,9 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::PickJellyfinUser(index) => {
                 super::jf_login::pick_user(&mut app.pages, &mut app.bridge, usize::from(index));
             }
+            crate::screens::registry::LoopReq::ReauthJellyfinUser(index) => {
+                super::jf_login::reauth_user(&mut app.pages, &mut app.bridge, usize::from(index));
+            }
             // The host route does NOT move: Settings is a surface presented over the same page,
             // and its Privacy, Legal and Favourite-libraries children are pages of that surface's
             // own inner stack. The account sheet's dismissal and this presentation are two parked

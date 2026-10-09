@@ -227,6 +227,19 @@ pub fn probe_first(candidates: &[Origin], client_id: &str) -> Result<(Origin, Pu
     Err(worst.unwrap_or(AuthError::Unreachable))
 }
 
+/// Does the server still honour `token` (minted under `device_user`)? `GET /Users/Me`: a refusal
+/// (401/403) is [`AuthError::BadCredentials`] — the sign-in was revoked or has expired — and
+/// silence is [`AuthError::Unreachable`]. The who's-watching screen asks before switching, so a
+/// revoked user is asked to sign in again rather than shown a server that "cannot be reached".
+pub fn check_token(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> Result<(), AuthError> {
+    let c = crate::catalog::unregistered_client(origin.clone(), token, client_id);
+    match Jf::for_sign_in(&c, device_user).status("/Users/Me", Method::Get, None) {
+        None => Err(AuthError::Unreachable),
+        Some(s) if (200..300).contains(&s) => Ok(()),
+        Some(s) => Err(status_error(s)),
+    }
+}
+
 /// [`sign_out`] for a token no registered client holds any more — a sign-out revokes the registry
 /// before this worker gets to send. `device_user` is the basis the token was minted under.
 pub fn sign_out_detached(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> bool {

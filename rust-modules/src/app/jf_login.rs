@@ -36,6 +36,19 @@ pub(super) fn execute(bridge: &mut super::bridge::Bridge, command: JfAuthCmd) {
         JfAuthCmd::PublicUsers { origin, reply } => answer("jf public users", reply, move || {
             JfAuthReply::People(crate::jf::auth::public_users(&origin, &client_id))
         }),
+        JfAuthCmd::CheckKept { index, reply } => {
+            let Some(user) = crate::jf::store::roster().users.get(usize::from(index)).cloned() else {
+                let _ = reply.send(JfAuthReply::Checked(index, Err(crate::jf::auth::AuthError::Malformed)));
+                return;
+            };
+            let Some(origin) = user.origin() else {
+                let _ = reply.send(JfAuthReply::Checked(index, Err(crate::jf::auth::AuthError::Malformed)));
+                return;
+            };
+            answer("jf check user", reply, move || {
+                JfAuthReply::Checked(index, crate::jf::auth::check_token(&origin, &client_id, &user.token, &user.device_user))
+            })
+        }
     }
 }
 
@@ -90,6 +103,21 @@ pub(super) fn pick_user(pages: &mut crate::ui::dispatch::Dispatcher<super::bridg
     crate::jf::seat::register_with(&origin, user.seat());
     log(&format!("jf: switching user at {} — installing the server", origin.log_form()));
     bridge.hand_off_jf(ready_creds(&origin, user.token));
+}
+
+/// **The kept user at `index` was refused by the server** (their token was revoked, or expired):
+/// forget them here, and ask for their password again — the add-a-user screen, open at
+/// *Sign in as name* with a line saying why. Whoever is signed in underneath stays.
+pub(super) fn reauth_user(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge, index: usize) {
+    let Some(user) = crate::jf::store::roster().users.get(index).cloned() else { return };
+    crate::jf::store::forget_user(&user.server, &user.user_id);
+    let roster = crate::jf::store::roster();
+    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+    log("jf: who's watching — the server refused that user's sign-in; asking for it again");
+    let name = if user.user_name.is_empty() { user.user_id.clone() } else { user.user_name.clone() };
+    super::bridge::open_login_as(pages, bridge, crate::screens::jf_login::Opening::SignInAgain {
+        server: user.server, server_name: user.server_name, id: user.user_id, name });
 }
 
 /// The signed-in user leaves the who's-watching screen as themselves: on to their Home, or their

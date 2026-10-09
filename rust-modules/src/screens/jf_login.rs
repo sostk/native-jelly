@@ -126,6 +126,16 @@ enum Stage {
     Pick,
 }
 
+/// How the sign-in page opens when it is not a first sign-in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Opening {
+    /// *Add a user* on the active server, at *Who's signing in?*.
+    AddUser,
+    /// One kept user's sign-in was refused: straight to *Sign in as name* on their server, with a
+    /// line saying why.
+    SignInAgain { server: String, server_name: String, id: String, name: String },
+}
+
 /// Someone the server lists on its sign-in screen, as *Add a user* shows them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Person {
@@ -199,10 +209,23 @@ pub(crate) struct JfLoginScreen {
 
 impl JfLoginScreen {
     /// **Add a user**: open at *Who's signing in?* on the server the active user is signed in to
-    /// (or, with nobody active, the one signed in to last). With no server known it is an ordinary
-    /// sign-in.
-    pub(crate) fn adding_user(entry: EntryId, instance: InstanceId) -> Self {
+    /// (or, with nobody active, the one signed in to last) — or, for a user whose sign-in was
+    /// refused, straight at *Sign in as name* with the reason in the status band. With no server
+    /// known it is an ordinary sign-in.
+    pub(crate) fn adding_user(entry: EntryId, instance: InstanceId, opening: Opening) -> Self {
         let mut s = Self::new(entry, instance);
+        if let Opening::SignInAgain { server, server_name, id, name } = opening {
+            if let Some(origin) = Origin::parse(&server) {
+                s.server_name = if server_name.trim().is_empty() { origin.host().to_owned() } else { server_name };
+                s.origin = Some(origin);
+                s.adding = true;
+                s.stage = Stage::Credentials;
+                s.user = TextBuffer::new(name.clone(), name.len());
+                s.picked = Some(Person { id, name, has_password: true, on_tv: None });
+                s.error = Some(msg::jellyfin_login_error_expired().to_owned());
+            }
+            return s;
+        }
         let server = crate::jf::store::current()
             .map(|u| (u.origin(), u.server_name))
             .or_else(|| crate::jf::store::recent_server().map(|r| (r.origin(), r.server_name)));
@@ -372,8 +395,12 @@ impl JfLoginScreen {
             Stage::Credentials if self.picked.is_some() => PASS,
             Stage::Credentials => USER,
             Stage::QuickConnect => USE_PASSWORD,
-            Stage::Pick if self.shown().is_empty() => OTHER,
-            Stage::Pick => PERSON,
+            // The first person not already on this TV: they are who is being added.
+            Stage::Pick => self
+                .shown()
+                .iter()
+                .position(|p| p.on_tv.is_none())
+                .map_or(OTHER, |i| PERSON + i as u32),
         }
     }
 
@@ -587,6 +614,8 @@ impl JfLoginScreen {
             | JfAuthReply::QuickConnect(Err(e))
             | JfAuthReply::Polled(Err(e))
             | JfAuthReply::People(Err(e)) => self.fail(e),
+            // Asked by the who's-watching screen, never by this one.
+            JfAuthReply::Checked(..) => {}
         }
         fx.invalidate(Provenance::Input);
     }
@@ -616,7 +645,13 @@ impl JfLoginScreen {
             return;
         }
         match elem {
-            CHANGE if self.adding => return self.go(Stage::Pick, fx),
+            CHANGE if self.adding => {
+                self.go(Stage::Pick, fx);
+                if self.people.is_none() {
+                    self.load_people(fx);
+                }
+                return;
+            }
             CHANGE => return self.go(Stage::Server, fx),
             USE_PASSWORD => {
                 let origin = self.origin.clone();
@@ -652,6 +687,13 @@ impl JfLoginScreen {
                     self.pick(person, fx);
                 }
             }
+        }
+    }
+
+    /// *Add a user*: ask the server who it lists.
+    fn load_people<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        if let Some(origin) = self.origin.clone() {
+            self.request(Busy::Connecting, fx, |reply| JfAuthCmd::PublicUsers { origin, reply });
         }
     }
 
@@ -1475,9 +1517,7 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
             ScreenEvent::Mount => {
                 self.reseat(self.first(), fx);
                 if self.stage == Stage::Pick && self.people.is_none() {
-                    if let Some(origin) = self.origin.clone() {
-                        self.request(Busy::Connecting, fx, |reply| JfAuthCmd::PublicUsers { origin, reply });
-                    }
+                    self.load_people(fx);
                 }
             }
             ScreenEvent::Unmount => {
@@ -1850,7 +1890,7 @@ mod tests {
         let people = vec![person("Alex", true, Some(0)), person("Sam", true, None), person("Kids", false, None)];
         let mut s = adding(people);
         assert_eq!(s.order(), [PERSON, PERSON + 1, PERSON + 2, OTHER, QUICK]);
-        assert_eq!(s.first(), PERSON);
+        assert_eq!(s.first(), PERSON + 1, "focus starts on the first person not on this TV");
         assert_eq!(s.grid_step(PERSON, Dir::Right), Some(PERSON + 1));
         assert_eq!(s.grid_step(PERSON + 1, Dir::Down), Some(QUICK), "one row, then Quick Connect");
         assert_eq!(s.grid_step(QUICK, Dir::Up), Some(OTHER));

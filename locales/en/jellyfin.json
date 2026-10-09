@@ -200,5 +200,9 @@
     "args": {
       "name": "str"
     }
+  },
+  "jellyfin.login.error_expired": {
+    "value": "This sign-in has expired. Enter the password again.",
+    "description": "Jellyfin sign-in: shown when a person kept on this TV picks themselves but the server no longer accepts their sign-in (revoked or expired); their password is asked for again"
   }
 }

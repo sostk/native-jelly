@@ -2830,7 +2830,12 @@ pub(crate) fn nav_cancel(d: &mut Dispatcher<AppHost>) -> bool {
 /// **Add a user**: the sign-in page, opened at "Who's signing in?" on the active server. The user
 /// who asked stays installed underneath until the new one is signed in.
 pub(crate) fn open_add_user(d: &mut Dispatcher<AppHost>, bridge: &mut Bridge) {
-    bridge.mounter.login_adds_user = true;
+    open_login_as(d, bridge, crate::screens::jf_login::Opening::AddUser);
+}
+
+/// The sign-in page, opened as `opening` rather than as a first sign-in.
+pub(crate) fn open_login_as(d: &mut Dispatcher<AppHost>, bridge: &mut Bridge, opening: crate::screens::jf_login::Opening) {
+    bridge.mounter.login_opening = Some(opening);
     nav_root(d, AppArg::Login);
 }
 

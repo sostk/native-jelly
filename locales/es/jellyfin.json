@@ -44,5 +44,6 @@
   "jellyfin.login.on_this_tv": "En este televisor",
   "jellyfin.login.title_sign_in_as": "Inicia sesión como {name}",
   "jellyfin.login.sign_in_as_intro": "Escribe la contraseña de Jellyfin de {name} una sola vez. Después, {name} estará a un solo clic en la pantalla ¿Quién está viendo?",
-  "jellyfin.login.not_user": "¿No eres {name}?"
+  "jellyfin.login.not_user": "¿No eres {name}?",
+  "jellyfin.login.error_expired": "Este inicio de sesión ha caducado. Vuelve a escribir la contraseña."
 }
