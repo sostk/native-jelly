@@ -769,6 +769,10 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 /// [`crate::ui::route_screen::RouteGround`] uses that instead.
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
+/// **A caution that is not an error** — a server reached without encryption, marked where it is
+/// named (the sign-in's server card). Amber, the palette's one warm signal, distinct in lightness
+/// from `DANGER`'s red so the two never rely on hue alone.
+pub const CAUTION: [f32; 4] = AMBER_300;
 /// **A person's avatar disc** (who's watching, *Add a user*): the person's initial on one of these,
 /// chosen by their id so one person keeps one colour on every screen. Drawn from the pre-Home
 /// atmosphere those screens stand on, so a disc reads as part of that ground rather than a badge.

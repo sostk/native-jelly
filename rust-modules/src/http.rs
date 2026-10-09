@@ -352,6 +352,9 @@ fn request_with(
 /// as a whole parameter NAME, so a path segment that merely contains the letters cannot trip it.
 fn carries_credential(path: &str, headers: &[&str]) -> bool {
     crate::jf::url::has_api_key(path)
+        // A Jellyfin sign-in carries the password (or the Quick Connect secret) in its BODY: it is
+        // a credential whatever its headers say.
+        || path.to_ascii_lowercase().starts_with("/users/authenticate")
         || path.to_ascii_lowercase().contains("x-plex-token=")
         || headers.iter().any(|header| {
             header.split_once(':').is_some_and(|(name, _)| {
@@ -1039,6 +1042,19 @@ mod tests {
             "a consented send after a refusal is a different outcome"
         );
         assert_eq!(plaintext_credential_report(&seen, store, true), None);
+    }
+
+    /// A Jellyfin sign-in is a credential by its path alone: its password rides the body, so a
+    /// request with no Authorization header at all must still be held to the policy.
+    #[test]
+    fn a_jellyfin_sign_in_is_a_credential_whatever_its_headers() {
+        let origin = Origin::parse("http://192.168.1.20:8096").unwrap();
+        for path in ["/Users/AuthenticateByName", "/Users/AuthenticateWithQuickConnect", "/users/authenticatebyname"] {
+            assert!(carries_credential(path, &[ACCEPT_JSON]), "{path}");
+            assert!(!credential_transport_allowed_by_policy(&origin, path, &[ACCEPT_JSON], CredentialPolicy::HttpsOnly));
+        }
+        assert!(!carries_credential("/System/Info/Public", &[ACCEPT_JSON]), "the anonymous probe carries nothing");
+        assert!(!carries_credential("/Users/Public", &[ACCEPT_JSON]));
     }
 
     #[test]

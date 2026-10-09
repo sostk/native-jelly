@@ -130,6 +130,20 @@ impl RecentServer {
     }
 }
 
+/// **The person's answer about connecting to one Jellyfin server without encryption** — by the
+/// server's own id (normalized) AND the exact plaintext origin they were asked about, so the same
+/// server at another address, or another server at this one, is asked again. No user, no token:
+/// it outlives every sign-out, and only Delete all local data (or Settings) removes it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlaintextAllow {
+    pub server_id: String,
+    /// `Origin::base()` of the plaintext origin.
+    pub server: String,
+    #[serde(default)]
+    pub server_name: String,
+    pub allowed: bool,
+}
+
 /// **Every Jellyfin user this television keeps a sign-in for**, which one is active, and the
 /// server signed in to last.
 ///
@@ -141,6 +155,8 @@ pub struct Roster {
     pub users: Vec<Stored>,
     pub active: Option<usize>,
     pub recent: Option<RecentServer>,
+    /// The person's answers about unencrypted connections, one per (server, origin).
+    pub plaintext: Vec<PlaintextAllow>,
 }
 
 impl Roster {
@@ -196,8 +212,20 @@ impl Roster {
     /// sign-in. `None` when there is nothing at all to keep.
     fn to_value(&self) -> Option<serde_json::Value> {
         let recent = self.recent.as_ref().map(serde_json::to_value).transpose().ok()?;
+        let plaintext = (!self.plaintext.is_empty()).then(|| serde_json::to_value(&self.plaintext).ok()).flatten();
         if self.users.is_empty() {
-            return Some(serde_json::json!({ "version": VERSION, "recent_server": recent? }));
+            if recent.is_none() && plaintext.is_none() {
+                return None;
+            }
+            let mut value = serde_json::json!({ "version": VERSION });
+            let object = value.as_object_mut()?;
+            if let Some(recent) = recent {
+                object.insert("recent_server".into(), recent);
+            }
+            if let Some(plaintext) = plaintext {
+                object.insert("plaintext".into(), plaintext);
+            }
+            return Some(value);
         }
         let top = self.current().cloned().unwrap_or_default();
         let mut value = serde_json::to_value(Stored { version: VERSION, ..top }).ok()?;
@@ -206,6 +234,9 @@ impl Roster {
         object.insert("users".into(), serde_json::to_value(users).ok()?);
         if let Some(recent) = recent {
             object.insert("recent_server".into(), recent);
+        }
+        if let Some(plaintext) = plaintext {
+            object.insert("plaintext".into(), plaintext);
         }
         Some(value)
     }
@@ -229,14 +260,21 @@ impl Roster {
             .and_then(|r| serde_json::from_value::<RecentServer>(r.clone()).ok())
             .filter(|r| r.origin().is_some())
             .or_else(|| active.or(if users.is_empty() { None } else { Some(0) }).map(|i| RecentServer::of(&users[i])));
-        if users.is_empty() && recent.is_none() {
+        let plaintext: Vec<PlaintextAllow> = value
+            .get("plaintext")
+            .and_then(|p| serde_json::from_value::<Vec<PlaintextAllow>>(p.clone()).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| !p.server_id.is_empty() && Origin::parse(&p.server).is_some())
+            .collect();
+        if users.is_empty() && recent.is_none() && plaintext.is_empty() {
             return None;
         }
-        Some(Roster { users, active, recent })
+        Some(Roster { users, active, recent, plaintext })
     }
 }
 
-static ROSTER: Mutex<Roster> = Mutex::new(Roster { users: Vec::new(), active: None, recent: None });
+static ROSTER: Mutex<Roster> = Mutex::new(Roster { users: Vec::new(), active: None, recent: None, plaintext: Vec::new() });
 
 /// Every change to the live roster goes through here, so the profile key the rest of the app
 /// files history under (`session::current_profile_key`) always names the active user.
@@ -266,6 +304,26 @@ pub fn forget_everything() {
 /// The server signed in to last, kept through a sign-out for the sign-in screen's *Recent* row.
 pub fn recent_server() -> Option<RecentServer> {
     with_roster(|r| r.recent.clone())
+}
+
+/// The person's answer about the server `server_id` (normalized) at `origin`, if they gave one.
+pub fn plaintext_choice(server_id: &str, origin: &Origin) -> Option<bool> {
+    let base = origin.base();
+    with_roster(|r| r.plaintext.iter().find(|p| p.server_id == server_id && p.server == base).map(|p| p.allowed))
+}
+
+/// Record the person's answer about `server_id` at `origin`. Memory only; [`persist`] writes it.
+pub fn set_plaintext(server_id: &str, server_name: &str, origin: &Origin, allowed: bool) {
+    let base = origin.base();
+    with_roster(|r| {
+        r.plaintext.retain(|p| !(p.server_id == server_id && p.server == base));
+        r.plaintext.push(PlaintextAllow { server_id: server_id.to_owned(), server: base, server_name: server_name.to_owned(), allowed });
+    });
+}
+
+/// Every answer given, for Settings' *Unencrypted connections*.
+pub fn plaintext_answers() -> Vec<PlaintextAllow> {
+    with_roster(|r| r.plaintext.clone())
 }
 
 /// Keep `s` beside the users already kept and make it the active one. Memory only.
@@ -584,6 +642,36 @@ mod tests {
         assert!(back.users.is_empty() && back.current().is_none());
         assert_eq!(back.recent, Some(RecentServer {
             server: "http://10.0.0.2:8096".into(), server_id: "AB-CD".into(), server_name: "Home".into() }));
+    }
+
+    /// The answers about unencrypted connections are kept per (server, address), outlive every
+    /// sign-out in a record with no user and no token, and go with Delete all local data.
+    #[test]
+    fn plaintext_answers_outlive_a_sign_out_and_go_with_everything() {
+        let mut r = Roster::default();
+        r.remember(user("alex", "ta"));
+        r.plaintext.push(PlaintextAllow { server_id: "abcd".into(), server: "http://10.0.0.2:8096".into(),
+            server_name: "Home".into(), allowed: true });
+        r.sign_out_all();
+        let value = r.to_value().unwrap();
+        assert!(value.get("token").is_none() && value.get("users").is_none(), "{value}");
+        let back = Roster::from_value(&value).unwrap();
+        assert_eq!(back.plaintext, r.plaintext);
+        let mut only = Roster::default();
+        only.plaintext = r.plaintext.clone();
+        assert!(Roster::from_value(&only.to_value().unwrap()).is_some(), "an answer alone is kept");
+
+        let _g = nj_base::testlock::serial();
+        forget_everything();
+        let origin = Origin::parse("http://10.0.0.2:8096").unwrap();
+        assert_eq!(plaintext_choice("abcd", &origin), None);
+        set_plaintext("abcd", "Home", &origin, true);
+        set_plaintext("abcd", "Home", &origin, false);
+        assert_eq!(plaintext_choice("abcd", &origin), Some(false), "one answer per server and address");
+        assert_eq!(plaintext_choice("abcd", &Origin::parse("http://10.0.0.3:8096").unwrap()), None, "another address is asked again");
+        assert_eq!(plaintext_answers().len(), 1);
+        forget_everything();
+        assert!(plaintext_answers().is_empty());
     }
 
     /// A record written before `recent_server` existed still offers its server as *Recent*.

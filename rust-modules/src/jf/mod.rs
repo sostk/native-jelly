@@ -25,6 +25,7 @@ pub mod ids;
 pub mod images;
 pub mod models;
 pub(crate) mod playback;
+pub mod plaintext;
 pub mod seat;
 pub mod store;
 pub mod ticks;

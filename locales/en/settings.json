@@ -978,7 +978,7 @@
   },
   "settings.legal.privacy.plaintext_body": {
     "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
-    "value": "When you enter an address without http:// or https://, Native Jelly tries plain http first for an address on your home network and https first for a domain name, and falls back to the other if the first does not answer. Over http, your password, access token and everything Native Jelly exchanges with the server travel over the network without encryption. Enter the full https:// address for a server you reach over the internet."
+    "value": "When you enter an address without http:// or https://, Native Jelly tries plain http first for an address on your home network and https first for a domain name, and falls back to the other if the first does not answer. Over http, your password, access token and everything Native Jelly exchanges with the server travel over the network without encryption. Enter the full https:// address for a server you reach over the internet. Native Jelly sends nothing that signs you in over plain http until you allow it for that server. It asks once; the answer covers that server at that address only. Each time it connects, it first checks that the same server answers there. The answers are kept when you sign out; Settings › Unencrypted connections turns each one off, and Delete all local data removes them."
   },
   "settings.legal.privacy.signin_body": {
     "description": "In-app privacy disclosure, aligned with PRIVACY.md.",

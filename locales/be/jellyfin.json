@@ -45,5 +45,13 @@
   "jellyfin.login.title_sign_in_as": "Увайсці як {name}",
   "jellyfin.login.sign_in_as_intro": "Увядзіце пароль Jellyfin для {name} адзін раз. Пасля гэтага {name} будзе даступны адным націскам на экране «Хто глядзіць?».",
   "jellyfin.login.not_user": "Не {name}?",
-  "jellyfin.login.error_expired": "Тэрмін уваходу скончыўся. Увядзіце пароль яшчэ раз."
+  "jellyfin.login.error_expired": "Тэрмін уваходу скончыўся. Увядзіце пароль яшчэ раз.",
+  "jellyfin.login.consent_home": "{server} адказаў па звычайным http — гэта звычайна для хатняга сервера. Без шыфравання любая іншая прылада ў гэтай сетцы можа ўбачыць ваш пароль і тое, што вы глядзіце.",
+  "jellyfin.login.consent_internet": "{server} знаходзіцца ў інтэрнэце і адказаў па звычайным http. Без шыфравання ваш пароль і тое, што вы глядзіце, ідуць праз інтэрнэт, дзе іх могуць убачыць іншыя. Калі ў сервера ёсць адрас https://, выкарыстайце яго.",
+  "jellyfin.login.consent_only_server": "Толькі для гэтага сервера і па гэтым адрасе.",
+  "jellyfin.login.consent_checks": "Native Jelly кожны раз правярае, што гэта той самы сервер, перш чым нешта адправіць.",
+  "jellyfin.login.consent_settings": "Выключыць гэта можна ў любы час у Наладах › Злучэнні без шыфравання.",
+  "jellyfin.login.consent_allow": "Падключыцца без шыфравання",
+  "jellyfin.login.not_encrypted": "Без шыфравання",
+  "jellyfin.login.error_needs_consent": "Гэты сервер не выкарыстоўвае абароненае злучэнне. Падключыцеся да яго зноў, каб дазволіць гэта."
 }

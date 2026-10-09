@@ -17,6 +17,13 @@
 //! the server card's *Change server* pill and Quick Connect's centred pair. Focus walks the panel
 //! top to bottom ([`JfLoginScreen::order`]); Quick Connect's pair is a row.
 //!
+//! **Without encryption** (approved design "Unencrypted connection consent"): a server that
+//! answers only over plain http, in a build that never sends a credential there on its own, is
+//! asked about once — *Connect without encryption?*, between the address and the sign-in — with
+//! a stronger warning when the address is on the internet. The answer is the server's (its own id)
+//! at that exact address (`jf::plaintext`); the server card marks the connection *Not encrypted*
+//! from then on.
+//!
 //! **Add a user** ([`JfLoginScreen::adding_user`], approved design "Multi-user profiles", boards 3
 //! and 3b): the same two columns on the server already signed in to, opening at *Who's signing
 //! in?* — the people the server lists (`GET /Users/Public`) as avatars, *Other user* to type a
@@ -51,7 +58,7 @@ use nj_platform::i18n::msg;
 
 use super::registry::{word, AppFx, AppLike, JfAuthCmd, JfAuthReply, LoopReq};
 
-pub(crate) const SHAPE: &str = "JfLoginScreen{entry:u32,instance:u32,step:server|credentials|quick_connect|pick,server_len:u32,user_len:u32,pass_len:u32,editing:Option<u32>,busy:Option<connecting|signing_in|starting|adopting>,waiting:bool,error:bool,origin:bool,adding:bool,people:u32,picked:bool}";
+pub(crate) const SHAPE: &str = "JfLoginScreen{entry:u32,instance:u32,step:server|credentials|quick_connect|pick|consent,server_len:u32,user_len:u32,pass_len:u32,editing:Option<u32>,busy:Option<connecting|signing_in|starting|adopting>,waiting:bool,error:bool,origin:bool,adding:bool,people:u32,picked:bool,consent:Option<internet:bool>}";
 
 const SERVER: u32 = 1;
 const CONNECT: u32 = 2;
@@ -63,6 +70,12 @@ const CHANGE: u32 = 7;
 const USE_PASSWORD: u32 = 8;
 /// *Add a user*: someone not in the server's list types their username.
 const OTHER: u32 = 10;
+/// *Connect without encryption?*: allow it, or go back to the address.
+const ALLOW: u32 = 11;
+const NOT_NOW: u32 = 12;
+/// One line of what allowing means: its mark and its sentence.
+const BULLET_H: f32 = 92.0;
+const BULLET_MARK: f32 = 30.0;
 /// *Add a user*: the person at position `i` of the server's list is `PERSON + i`.
 const PERSON: u32 = 100;
 /// The most people the list shows (the server's own sign-in screen pages a longer list); anyone
@@ -124,6 +137,17 @@ enum Stage {
     QuickConnect,
     /// *Add a user*: who's signing in?
     Pick,
+    /// *Connect without encryption?*
+    Consent,
+}
+
+/// What the consent step is asking about.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Consent {
+    /// The server's own id, normalized: the answer is about this server.
+    server_id: String,
+    /// The address is on the internet, not a home network: the stronger warning.
+    internet: bool,
 }
 
 /// How the sign-in page opens when it is not a first sign-in.
@@ -172,6 +196,8 @@ struct Form {
     code: Option<Rect>,
     code_caption: Option<Rect>,
     status: Rect,
+    /// *Connect without encryption?*'s three lines.
+    bullets: Vec<Rect>,
     or_rule: Option<Rect>,
     recent_caption: Option<Rect>,
     buttons: Vec<(u32, Rect)>,
@@ -205,6 +231,8 @@ pub(crate) struct JfLoginScreen {
     people: Option<Vec<Person>>,
     /// *Add a user*: who was picked, so the password step names them.
     picked: Option<Person>,
+    /// *Connect without encryption?*: what is being asked.
+    consent: Option<Consent>,
 }
 
 impl JfLoginScreen {
@@ -277,6 +305,7 @@ impl JfLoginScreen {
             adding: false,
             people: None,
             picked: None,
+            consent: None,
         }
     }
 
@@ -290,7 +319,7 @@ impl JfLoginScreen {
             // The person picked from the server's list has their name already: only the password.
             Stage::Credentials if self.picked.is_some() => &[PASS],
             Stage::Credentials => &[USER, PASS],
-            Stage::QuickConnect | Stage::Pick => &[],
+            Stage::QuickConnect | Stage::Pick | Stage::Consent => &[],
         }
     }
 
@@ -301,6 +330,7 @@ impl JfLoginScreen {
             Stage::Credentials => &[SIGN_IN, QUICK, CHANGE],
             Stage::QuickConnect => &[USE_PASSWORD, CHANGE],
             Stage::Pick => &[OTHER, QUICK],
+            Stage::Consent => &[ALLOW, NOT_NOW],
         }
     }
 
@@ -347,6 +377,7 @@ impl JfLoginScreen {
                 v.extend([OTHER, QUICK]);
                 v
             }
+            Stage::Consent => vec![ALLOW, NOT_NOW],
         }
     }
 
@@ -395,6 +426,7 @@ impl JfLoginScreen {
             Stage::Credentials if self.picked.is_some() => PASS,
             Stage::Credentials => USER,
             Stage::QuickConnect => USE_PASSWORD,
+            Stage::Consent => ALLOW,
             // The first person not already on this TV: they are who is being added.
             Stage::Pick => self
                 .shown()
@@ -478,6 +510,7 @@ impl JfLoginScreen {
         self.error = None;
         if stage == Stage::Server {
             self.origin = None;
+            self.consent = None;
         }
         if stage == Stage::Pick {
             self.picked = None;
@@ -616,6 +649,19 @@ impl JfLoginScreen {
             | JfAuthReply::People(Err(e)) => self.fail(e),
             // Asked by the who's-watching screen, never by this one.
             JfAuthReply::Checked(..) => {}
+            JfAuthReply::Consent { origin, info, internet } => {
+                self.server_name = if info.server_name.trim().is_empty() { origin.host().to_owned() } else { info.server_name };
+                let server_id = crate::jf::ids::normalize(&info.id);
+                self.go(Stage::Consent, fx);
+                self.origin = Some(origin);
+                self.consent = Some(Consent { server_id, internet });
+            }
+            JfAuthReply::Allowed(Ok(())) => {
+                let origin = self.origin.clone();
+                self.go(Stage::Credentials, fx);
+                self.origin = origin;
+            }
+            JfAuthReply::Allowed(Err(e)) => self.fail(e),
         }
         fx.invalidate(Provenance::Input);
     }
@@ -653,6 +699,7 @@ impl JfLoginScreen {
                 return;
             }
             CHANGE => return self.go(Stage::Server, fx),
+            NOT_NOW => return self.go(Stage::Server, fx),
             USE_PASSWORD => {
                 let origin = self.origin.clone();
                 self.go(Stage::Credentials, fx);
@@ -677,6 +724,7 @@ impl JfLoginScreen {
             }
             SIGN_IN => self.sign_in(fx),
             QUICK => self.start_quick_connect(fx),
+            ALLOW => self.allow(fx),
             OTHER => {
                 self.picked = None;
                 self.user = TextBuffer::new(String::new(), 0);
@@ -688,6 +736,21 @@ impl JfLoginScreen {
                 }
             }
         }
+    }
+
+    /// *Connect without encryption*: the app records the answer, proves the server again and lets
+    /// credentials through; the sign-in step follows.
+    fn allow<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        let (Some(origin), Some(consent)) = (self.origin.clone(), self.consent.clone()) else { return };
+        let server_name = self.server_name.clone();
+        self.request(Busy::Connecting, fx, |reply| JfAuthCmd::AllowPlaintext {
+            origin, server_id: consent.server_id, server_name, reply,
+        });
+    }
+
+    /// The connection to this server is plain http: its card says so.
+    fn unencrypted(&self) -> bool {
+        self.origin.as_ref().is_some_and(|o| !o.is_tls())
     }
 
     /// *Add a user*: ask the server who it lists.
@@ -755,6 +818,7 @@ impl JfLoginScreen {
                 self.origin = origin;
             }
             Stage::Pick => fx.push(Fx::App(AppFx::Loop(LoopReq::BackAtRoot))),
+            Stage::Consent => self.go(Stage::Server, fx),
         }
     }
 
@@ -797,6 +861,7 @@ impl JfLoginScreen {
             code: None,
             code_caption: None,
             status: Rect::new(x, 0.0, w, STATUS_H),
+            bullets: Vec::new(),
             or_rule: None,
             recent_caption: None,
             buttons: Vec::new(),
@@ -874,6 +939,22 @@ impl JfLoginScreen {
                 }
                 y += PAIR_H;
             }
+            Stage::Consent => {
+                form.card = Some(Rect::new(x, y, w, CARD_H));
+                y += CARD_H + theme::space::MD;
+                form.or_rule = Some(Rect::new(x, y, w, 1.0));
+                y += 1.0 + theme::space::MD;
+                for _ in 0..3 {
+                    form.bullets.push(Rect::new(x, y, w, BULLET_H));
+                    y += BULLET_H;
+                }
+                form.status.y = y;
+                y += STATUS_H;
+                form.buttons.push((ALLOW, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H + theme::space::MD;
+                form.buttons.push((NOT_NOW, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H;
+            }
             Stage::Pick => {
                 form.card = Some(Rect::new(x, y, w, LABEL_H));
                 y += LABEL_H + theme::space::LG;
@@ -901,6 +982,7 @@ impl JfLoginScreen {
         form.panel = Rect::new(px, top, pw, h);
         let mv = |r: &mut Rect| r.y += top;
         form.card.as_mut().map(mv);
+        form.bullets.iter_mut().for_each(mv);
         form.hint.as_mut().map(mv);
         form.code.as_mut().map(mv);
         form.code_caption.as_mut().map(mv);
@@ -938,7 +1020,7 @@ impl JfLoginScreen {
             && match self.stage {
                 Stage::Server => field == SERVER,
                 Stage::Credentials => field == PASS,
-                Stage::QuickConnect | Stage::Pick => false,
+                Stage::QuickConnect | Stage::Pick | Stage::Consent => false,
             }
     }
 
@@ -1148,9 +1230,38 @@ impl JfLoginScreen {
             .draw(p, Rect::new(tx, rect.y + 2.0, tw, rect.h * 0.5));
         if let Some(origin) = &self.origin {
             let address = format!("{}:{}", origin.host(), origin.port());
-            TextView::new(&address, theme::size::CAPTION, theme::TEXT_TERTIARY)
-                .max_lines(1)
-                .draw(p, Rect::new(tx, rect.y + rect.h * 0.5 + 4.0, tw, rect.h * 0.5));
+            let line = Rect::new(tx, rect.y + rect.h * 0.5 + 4.0, tw, rect.h * 0.5);
+            if self.unencrypted() {
+                // *Not encrypted*: amber at home, red for an address on the internet.
+                let ink = if self.consent.as_ref().is_some_and(|c| c.internet) { theme::DANGER } else { theme::CAUTION };
+                let mark = 22.0;
+                crate::ui::icons::draw(p, crate::ui::icons::Icon::LockOpen,
+                    Rect::new(line.x, line.y + 2.0, mark, mark), ink);
+                let text = format!("{} \u{b7} {address}", msg::jellyfin_login_not_encrypted());
+                TextView::new(&text, theme::size::CAPTION, ink)
+                    .max_lines(1)
+                    .draw(p, Rect::new(line.x + mark + theme::space::XS, line.y, line.w - mark - theme::space::XS, line.h));
+            } else {
+                TextView::new(&address, theme::size::CAPTION, theme::TEXT_TERTIARY).max_lines(1).draw(p, line);
+            }
+        }
+    }
+
+    /// *Connect without encryption?*'s three lines: what the permission covers, how the server is
+    /// checked, and where to take it back.
+    fn draw_bullets(&self, p: Painter, rects: &[Rect], measure: &dyn Measure) {
+        let lines: [(crate::ui::icons::Icon, &str); 3] = [
+            (crate::ui::icons::Icon::Server, msg::jellyfin_login_consent_only_server()),
+            (crate::ui::icons::Icon::Check, msg::jellyfin_login_consent_checks()),
+            (crate::ui::icons::Icon::Info, msg::jellyfin_login_consent_settings()),
+        ];
+        for (&rect, (icon, text)) in rects.iter().zip(lines) {
+            crate::ui::icons::draw(p, icon, Rect::new(rect.x, rect.y + 4.0, BULLET_MARK, BULLET_MARK), theme::TEXT_SECONDARY);
+            let tx = rect.x + BULLET_MARK + theme::space::MD;
+            TextView::new(text, theme::size::LABEL, theme::TEXT_READING)
+                .with_measure(measure)
+                .max_lines(2)
+                .draw(p, Rect::new(tx, rect.y, rect.w - (tx - rect.x), rect.h));
         }
     }
 
@@ -1247,10 +1358,11 @@ impl JfLoginScreen {
         let eyebrow = match self.stage {
             Stage::QuickConnect => msg::jellyfin_login_step_quick_connect(),
             _ if self.adding => msg::jellyfin_login_step_add_user(),
-            Stage::Server => msg::jellyfin_login_step_server(),
+            Stage::Server | Stage::Consent => msg::jellyfin_login_step_server(),
             Stage::Credentials | Stage::Pick => msg::jellyfin_login_step_sign_in(),
         };
         let title = match (self.stage, &self.picked) {
+            (Stage::Consent, _) => msg::settings_plaintext_question().to_owned(),
             (Stage::Pick, _) => msg::jellyfin_login_title_pick_user().to_owned(),
             (Stage::Credentials, Some(person)) => msg::jellyfin_login_title_sign_in_as(&person.name),
             (Stage::Server, _) => msg::jellyfin_login_title_server().to_owned(),
@@ -1261,6 +1373,10 @@ impl JfLoginScreen {
             (Stage::QuickConnect, _) => msg::jellyfin_login_title_quick_connect().to_owned(),
         };
         let copy = match (self.stage, &self.picked) {
+            (Stage::Consent, _) if self.consent.as_ref().is_some_and(|c| c.internet) => {
+                msg::jellyfin_login_consent_internet(&self.server_name)
+            }
+            (Stage::Consent, _) => msg::jellyfin_login_consent_home(&self.server_name),
             (Stage::Pick, _) => msg::jellyfin_login_pick_user_intro(&self.server_name),
             (Stage::Credentials, Some(person)) => msg::jellyfin_login_sign_in_as_intro(&person.name),
             (Stage::Server, _) => msg::jellyfin_login_server_intro().to_owned(),
@@ -1331,7 +1447,8 @@ impl JfLoginScreen {
     /// with what it settled (the server's name and address), a step still to come an outline.
     fn draw_tracker(&self, p: Painter, x: f32, y: f32, w: f32) {
         let rows: [(&CStr, bool, bool); 2] = [
-            (msg::jellyfin_login_server_row_c(), self.stage == Stage::Server, self.stage != Stage::Server),
+            (msg::jellyfin_login_server_row_c(), matches!(self.stage, Stage::Server | Stage::Consent),
+                !matches!(self.stage, Stage::Server | Stage::Consent)),
             (msg::jellyfin_login_sign_in_c(), self.stage == Stage::Credentials, false),
         ];
         for (i, &(label, current, done)) in rows.iter().enumerate() {
@@ -1406,6 +1523,8 @@ fn button_label(button: u32) -> &'static CStr {
         SIGN_IN => msg::jellyfin_login_sign_in_c(),
         QUICK => msg::jellyfin_login_use_quick_connect_c(),
         USE_PASSWORD => msg::jellyfin_login_use_password_c(),
+        ALLOW => msg::jellyfin_login_consent_allow_c(),
+        NOT_NOW => msg::settings_plaintext_not_now_c(),
         _ => msg::jellyfin_login_change_server_c(),
     }
 }
@@ -1428,6 +1547,7 @@ fn message(error: &AuthError) -> String {
         AuthError::QuickConnectDisabled => msg::jellyfin_login_error_quick_connect_off().to_owned(),
         AuthError::Refused(status) => msg::jellyfin_login_error_refused(*status as i64),
         AuthError::Malformed => msg::jellyfin_login_error_malformed().to_owned(),
+        AuthError::NeedsConsent => msg::jellyfin_login_error_needs_consent().to_owned(),
     }
 }
 
@@ -1622,6 +1742,7 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 _ => self.draw_card(p, rect, change_x),
             }
         }
+        self.draw_bullets(p, &form.bullets, f.measure);
         for &(field, rect) in &form.labels {
             Label::new(field_label(field).as_ptr(), theme::size::CAPTION, theme::TEXT_SECONDARY)
                 .v(VAlign::Middle)
@@ -1703,6 +1824,7 @@ impl LogicalState for JfLoginScreen {
             Stage::Credentials => 1,
             Stage::QuickConnect => 2,
             Stage::Pick => 3,
+            Stage::Consent => 4,
         });
         c.u32(self.server.text().len() as u32)
             .u32(self.user.text().len() as u32)
@@ -1715,6 +1837,9 @@ impl LogicalState for JfLoginScreen {
         });
         c.bool(self.waiting()).bool(self.error.is_some()).bool(self.origin.is_some());
         c.bool(self.adding).u32(self.shown().len() as u32).bool(self.picked.is_some());
+        c.option(self.consent.as_ref().map(|c| c.internet), |c, internet| {
+            c.bool(internet);
+        });
     }
     fn probe(&self, out: &mut String) {
         out.push_str(&format!(
@@ -1861,6 +1986,7 @@ mod tests {
                 Fx::App(AppFx::JfAuth(JfAuthCmd::Password { username, .. })) => auth.push(format!("password:{username}")),
                 Fx::App(AppFx::JfAuth(JfAuthCmd::PublicUsers { .. })) => auth.push("people".into()),
                 Fx::App(AppFx::JfAuth(JfAuthCmd::QuickConnectStart { .. })) => auth.push("quick-connect".into()),
+                Fx::App(AppFx::JfAuth(JfAuthCmd::AllowPlaintext { server_id, .. })) => auth.push(format!("allow:{server_id}")),
                 _ => {}
             }
         }
@@ -1955,6 +2081,46 @@ mod tests {
         assert_eq!(loops, [LoopReq::AccountSwitchUser]);
     }
 
+    /// A server that answers only over plain http, not yet allowed, is asked about between the
+    /// address and the sign-in: *Connect without encryption* records the answer for that server and
+    /// goes on to the sign-in once the app has let it through; *Not now* and BACK return to the
+    /// address. The server card says *Not encrypted* from then on.
+    #[test]
+    fn a_plaintext_server_is_asked_about_once_before_the_sign_in() {
+        let mut s = JfLoginScreen::new(EntryId(1), InstanceId(0));
+        s.recent = None;
+        let deliver = |s: &mut JfLoginScreen, reply: JfAuthReply| {
+            let (tx, rx) = mpsc::channel();
+            s.rx = Some(rx);
+            tx.send(reply).unwrap();
+            effects(s, |s, fx| s.drain(fx))
+        };
+        let origin = Origin::parse("http://192.168.1.20:8096").unwrap();
+        let info = crate::jf::models::PublicSystemInfo { server_name: "Living Room".into(), id: "AB-CD".into(), ..Default::default() };
+        deliver(&mut s, JfAuthReply::Consent { origin: origin.clone(), info: info.clone(), internet: false });
+        assert_eq!(s.stage, Stage::Consent);
+        assert_eq!(s.order(), [ALLOW, NOT_NOW]);
+        assert_eq!(s.first(), ALLOW);
+        assert!(s.unencrypted());
+        assert_eq!(s.consent, Some(Consent { server_id: "abcd".into(), internet: false }));
+
+        let (_, auth) = effects(&mut s, |s, fx| s.activate(ALLOW, fx));
+        assert_eq!(auth, ["allow:abcd"], "the answer is about this server");
+        assert_eq!(s.busy, Some(Busy::Connecting));
+        deliver(&mut s, JfAuthReply::Allowed(Ok(())));
+        assert_eq!(s.stage, Stage::Credentials);
+        assert_eq!(s.origin, Some(origin.clone()), "on to the sign-in at the same address");
+        assert!(s.unencrypted());
+
+        deliver(&mut s, JfAuthReply::Consent { origin: origin.clone(), info: info.clone(), internet: true });
+        effects(&mut s, |s, fx| s.activate(NOT_NOW, fx));
+        assert_eq!((s.stage, s.origin.is_none(), s.consent.is_none()), (Stage::Server, true, true));
+        deliver(&mut s, JfAuthReply::Consent { origin, info, internet: true });
+        effects(&mut s, |s, fx| s.back(fx));
+        assert_eq!(s.stage, Stage::Server);
+        assert!(!message(&AuthError::NeedsConsent).is_empty());
+    }
+
     #[test]
     fn every_error_has_a_sentence() {
         for e in [
@@ -1965,6 +2131,7 @@ mod tests {
             AuthError::QuickConnectDisabled,
             AuthError::Refused(503),
             AuthError::Malformed,
+            AuthError::NeedsConsent,
         ] {
             assert!(!message(&e).is_empty());
         }

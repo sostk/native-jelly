@@ -786,6 +786,15 @@ pub(crate) unsafe fn construct(
     if let Some((origin, stored)) = &jf_stored {
         crate::jf::seat::register_with(origin, stored.seat());
         log(&format!("boot: stored Jellyfin sign-in at {}", origin.log_form()));
+        // A server reached without encryption gets its token only after it has answered, here and
+        // now, as the server the person allowed (`jf::plaintext`). Asked before anything is
+        // installed: a token registered at an origin it may not travel to is blanked on the spot.
+        if crate::jf::plaintext::needs_consent(origin) {
+            match crate::jf::plaintext::admit(origin, &crate::jf::ids::normalize(&stored.server_id)) {
+                Ok(()) => log("boot: the Jellyfin server answered as itself — its unencrypted connection is allowed"),
+                Err(e) => log(&format!("boot: the Jellyfin server's unencrypted connection is not allowed yet ({e:?})")),
+            }
+        }
         // History an earlier build kept under no profile (one Jellyfin user, empty key) becomes
         // the active user's, before anything reads it: their pins must not look "never asked".
         let key = stored.profile_key();
