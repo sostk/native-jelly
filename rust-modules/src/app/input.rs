@@ -1395,6 +1395,6 @@ pub(crate) fn back_at_root() {
 /// The SURFACE is dismissed by the caller, not here: the screen under it is going, and there is no
 /// host left for a fade to run over (what `settings::hide()` used to say).
 pub(crate) fn delete_all_local_data_and_sign_out(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
-    super::jf_login::sign_out();
+    super::jf_login::sign_out_and_forget_server();
     super::bridge::execute_session_command(pages, crate::auth::SessionCmd::EraseLocal);
 }

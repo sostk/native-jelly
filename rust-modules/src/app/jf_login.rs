@@ -62,12 +62,39 @@ pub(super) fn ready_creds(origin: &crate::catalog::Origin, token: String) -> cra
 }
 
 /// **Sign out of the live Jellyfin sign-in**, if there is one: forget it here at once, tell the
-/// server on a worker, and drop every registered client. `false` when no Jellyfin sign-in is live
-/// (the caller signs out of plex.tv instead).
+/// server on a worker, and drop every registered client. The server's address and name stay
+/// behind for the sign-in screen's *Recent* row. `false` when no Jellyfin sign-in is live (the
+/// caller signs out of plex.tv instead).
 pub(super) fn sign_out() -> bool {
-    let Some(stored) = crate::jf::store::current() else { return false };
-    crate::jf::store::set_live(None);
-    let _ = nj_base::storage_worker::submit_retained(crate::jf::store::erase);
+    sign_out_with(Keep::Server)
+}
+
+/// [`sign_out`] for Delete all local data: the server goes too, and every stored copy with it.
+/// Nothing is written back — the session file is about to be deleted, and a write queued behind
+/// that delete would bring it back.
+pub(super) fn sign_out_and_forget_server() -> bool {
+    sign_out_with(Keep::Nothing)
+}
+
+enum Keep {
+    Server,
+    Nothing,
+}
+
+fn sign_out_with(keep: Keep) -> bool {
+    let live = crate::jf::store::current();
+    match keep {
+        Keep::Server => {
+            crate::jf::store::set_live(None);
+            let roster = crate::jf::store::roster();
+            let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+        }
+        Keep::Nothing => {
+            crate::jf::store::forget_everything();
+            let _ = nj_base::storage_worker::submit_retained(crate::jf::store::erase);
+        }
+    }
+    let Some(stored) = live else { return false };
     if let Some(origin) = stored.origin() {
         crate::jf::seat::forget(&origin);
         let client_id = crate::catalog::session::peek().client_id.clone();

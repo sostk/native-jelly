@@ -60,7 +60,7 @@ const GROUP: GroupId = GroupId(0);
 /// Quick Connect is polled, not pushed; the web client asks every five seconds, a television that
 /// is being looked at can afford twice that.
 const POLL_MS: u32 = 2_500;
-/// The *Recent* row: the server this television is still signed in to, one press from reconnecting.
+/// The *Recent* row: the server this television signed in to last, one press from reconnecting.
 const RECENT: u32 = 9;
 const LABEL_H: f32 = 32.0;
 const FIELD_H: f32 = 84.0;
@@ -112,7 +112,7 @@ enum Busy {
     Adopting,
 }
 
-/// The server this television is still signed in to, offered as the *Recent* row.
+/// The server this television signed in to last, offered as the *Recent* row.
 #[derive(Clone, Debug, PartialEq)]
 struct Recent {
     name: String,
@@ -161,9 +161,10 @@ pub(crate) struct JfLoginScreen {
 
 impl JfLoginScreen {
     pub(crate) fn new(entry: EntryId, instance: InstanceId) -> Self {
-        // Still signed in means the saved server failed to come up: offer it again, as the
-        // *Recent* row, one press from reconnecting; the field stays free for another address.
-        let recent = crate::jf::store::current().and_then(|stored| {
+        // The server signed in to last — kept through a sign-out, and still there when the saved
+        // server failed to come up — offered as the *Recent* row, one press from reconnecting;
+        // the field stays free for another address.
+        let recent = crate::jf::store::recent_server().and_then(|stored| {
             let origin = stored.origin()?;
             let host = origin.host();
             let address =
@@ -1379,6 +1380,32 @@ mod tests {
         s.stage = Stage::QuickConnect;
         assert_eq!(s.elems().collect::<Vec<_>>(), [USE_PASSWORD, CHANGE]);
         assert_eq!(s.first(), USE_PASSWORD);
+    }
+
+    /// After a sign-out the sign-in screen still offers the server signed in to last as *Recent*,
+    /// and seats focus on it; Delete all local data leaves nothing to offer.
+    #[test]
+    fn a_signed_out_television_offers_its_last_server_as_recent() {
+        use crate::jf::auth::SignedIn;
+        use crate::jf::store::{self, Stored};
+        let _g = nj_base::testlock::serial();
+        let origin = crate::catalog::Origin::parse("http://192.168.1.20:8096").unwrap();
+        let signed_in = SignedIn {
+            token: "tok".into(),
+            user_id: "u1".into(),
+            user_name: "Sam".into(),
+            server_id: "AB-CD".into(),
+            server_name: "Living Room".into(),
+            server_version: "10.11.0".into(),
+            device_user: "sam".into(),
+        };
+        store::set_live(Some(Stored::new(&origin, &signed_in)));
+        store::set_live(None);
+        let s = JfLoginScreen::new(EntryId(0), InstanceId(0));
+        assert_eq!(s.recent, Some(Recent { name: "Living Room".into(), address: "192.168.1.20:8096".into() }));
+        assert_eq!(s.first(), RECENT);
+        store::forget_everything();
+        assert_eq!(JfLoginScreen::new(EntryId(0), InstanceId(0)).recent, None);
     }
 
     #[test]
