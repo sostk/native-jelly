@@ -105,5 +105,56 @@
   "jellyfin.login.error_address": {
     "value": "That does not look like a server address.",
     "description": "Jellyfin sign-in error: the typed server address cannot be parsed"
+  },
+  "jellyfin.login.step_server": {
+    "value": "Step 1 of 2",
+    "description": "Jellyfin sign-in: small step label above the title while the server address is asked for"
+  },
+  "jellyfin.login.step_sign_in": {
+    "value": "Step 2 of 2",
+    "description": "Jellyfin sign-in: small step label above the title while the username and password are asked for"
+  },
+  "jellyfin.login.step_quick_connect": {
+    "value": "Step 2 of 2 · Quick Connect",
+    "description": "Jellyfin sign-in: small step label above the title while a Quick Connect code is shown (Quick Connect is Jellyfin's feature name)"
+  },
+  "jellyfin.login.title_server": {
+    "value": "Connect to your server",
+    "description": "Jellyfin sign-in: title while the server address is asked for"
+  },
+  "jellyfin.login.title_sign_in": {
+    "value": "Sign in to {server}",
+    "description": "Jellyfin sign-in: title while the username and password are asked for; {server} is the server's own name, such as Living Room",
+    "args": {
+      "server": "str"
+    }
+  },
+  "jellyfin.login.title_quick_connect": {
+    "value": "Approve this TV",
+    "description": "Jellyfin sign-in: title while a Quick Connect code waits to be approved from another device"
+  },
+  "jellyfin.login.port_hint": {
+    "value": "Include the port. Jellyfin uses 8096 unless it was changed.",
+    "description": "Jellyfin sign-in: hint under the server address field"
+  },
+  "jellyfin.login.recent": {
+    "value": "Recent",
+    "description": "Jellyfin sign-in: small heading over the server this TV was last signed in to"
+  },
+  "jellyfin.login.or": {
+    "value": "or",
+    "description": "Jellyfin sign-in: the word on the divider between signing in with a password and signing in with Quick Connect"
+  },
+  "jellyfin.login.qc_step_open": {
+    "value": "Open Jellyfin on a phone or computer that is already signed in.",
+    "description": "Jellyfin sign-in: Quick Connect instruction 1 of 3"
+  },
+  "jellyfin.login.qc_step_profile": {
+    "value": "Go to your profile and choose Quick Connect.",
+    "description": "Jellyfin sign-in: Quick Connect instruction 2 of 3 (Quick Connect is Jellyfin's feature name)"
+  },
+  "jellyfin.login.qc_step_code": {
+    "value": "Enter the code shown here. This TV signs in on its own.",
+    "description": "Jellyfin sign-in: Quick Connect instruction 3 of 3"
   }
 }

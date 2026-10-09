@@ -8,6 +8,14 @@
 //!
 //! The password never reaches the logical state, the probe or the log: the canon carries field
 //! lengths only.
+//!
+//! **Layout** (approved redesign, 2026-10-09): two columns, each vertically centred on the screen.
+//! The left one is the narrative — a step eyebrow, a title that names the step, its explanation
+//! (on Quick Connect, three numbered instructions) and, on the first two steps, a two-row
+//! *Server → Sign in* tracker. The right one is ONE panel on the shared panel ground
+//! (`widgets::panel_ground`) holding the step's form; every control in it is full width except
+//! the server card's *Change server* pill and Quick Connect's centred pair. Focus walks the panel
+//! top to bottom ([`JfLoginScreen::order`]); Quick Connect's pair is a row.
 
 use std::ffi::{CStr, CString};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -52,15 +60,38 @@ const GROUP: GroupId = GroupId(0);
 /// Quick Connect is polled, not pushed; the web client asks every five seconds, a television that
 /// is being looked at can afford twice that.
 const POLL_MS: u32 = 2_500;
+/// The *Recent* row: the server this television is still signed in to, one press from reconnecting.
+const RECENT: u32 = 9;
 const LABEL_H: f32 = 32.0;
 const FIELD_H: f32 = 84.0;
 const FIELD_R: f32 = 20.0;
 const FIELD_PAD: f32 = 28.0;
-const SERVER_ROW_H: f32 = 76.0;
-const CODE_H: f32 = 132.0;
-const CODE_CELL: f32 = 76.0;
-const STATUS_H: f32 = 80.0;
-const CTRL_H: f32 = 60.0;
+/// The panel the form stands in: its corner and its inner padding.
+const PANEL_R: f32 = 28.0;
+const PANEL_PAD: f32 = 48.0;
+/// A full-width primary control (Connect, Sign in, Quick Connect).
+const WIDE_H: f32 = 76.0;
+/// The server card on the sign-in step: a disc, the name and the address, and *Change server*.
+const CARD_H: f32 = 72.0;
+const CARD_DISC: f32 = 56.0;
+const CHANGE_H: f32 = 56.0;
+/// The *Recent* row and its disc.
+const RECENT_H: f32 = 96.0;
+const RECENT_DISC: f32 = 52.0;
+/// The status band (spinner line, or the error box): reserved whether or not it is drawn, so a
+/// landing answer never moves a control the viewer is standing on.
+const STATUS_H: f32 = 128.0;
+/// Quick Connect's code: one cell per character.
+const CODE_CELL_W: f32 = 96.0;
+const CODE_CELL_H: f32 = 128.0;
+const CODE_GAP: f32 = 14.0;
+const CODE_R: f32 = 18.0;
+/// The QC step's pair of buttons.
+const PAIR_H: f32 = 68.0;
+/// The narrative's step tracker.
+const STEP_DISC: f32 = 44.0;
+const STEP_ROW_H: f32 = 76.0;
+const EYEBROW_H: f32 = 30.0;
 const FIELD_SZ: i32 = theme::size::HEADLINE;
 const BUTTON_SZ: i32 = theme::size::BODY;
 const CARET_W: f32 = 3.0;
@@ -81,12 +112,26 @@ enum Busy {
     Adopting,
 }
 
+/// The server this television is still signed in to, offered as the *Recent* row.
+#[derive(Clone, Debug, PartialEq)]
+struct Recent {
+    name: String,
+    /// What the address field would hold: `host:port`.
+    address: String,
+}
+
+/// Every rect the panel draws, in screen space.
 struct Form {
-    server_row: Option<Rect>,
+    panel: Rect,
+    card: Option<Rect>,
     labels: Vec<(u32, Rect)>,
     fields: Vec<(u32, Rect)>,
+    hint: Option<Rect>,
     code: Option<Rect>,
+    code_caption: Option<Rect>,
     status: Rect,
+    or_rule: Option<Rect>,
+    recent_caption: Option<Rect>,
     buttons: Vec<(u32, Rect)>,
 }
 
@@ -111,19 +156,23 @@ pub(crate) struct JfLoginScreen {
     spin_ms: f32,
     pop: CtlPop<3>,
     ground: RouteGround,
+    recent: Option<Recent>,
 }
 
 impl JfLoginScreen {
     pub(crate) fn new(entry: EntryId, instance: InstanceId) -> Self {
-        // Still signed in means the saved server failed to come up: offer it again.
-        let server = crate::jf::store::current()
-            .and_then(|stored| stored.origin())
-            .map(|origin| {
-                let host = origin.host();
-                if host.contains(':') { format!("[{host}]:{}", origin.port()) } else { format!("{host}:{}", origin.port()) }
-            })
-            .unwrap_or_default();
-        let caret = server.len();
+        // Still signed in means the saved server failed to come up: offer it again, as the
+        // *Recent* row, one press from reconnecting; the field stays free for another address.
+        let recent = crate::jf::store::current().and_then(|stored| {
+            let origin = stored.origin()?;
+            let host = origin.host();
+            let address =
+                if host.contains(':') { format!("[{host}]:{}", origin.port()) } else { format!("{host}:{}", origin.port()) };
+            let name = if stored.server_name.trim().is_empty() { address.clone() } else { stored.server_name.clone() };
+            Some(Recent { name, address })
+        });
+        let server = String::new();
+        let caret = 0;
         Self {
             entry,
             instance,
@@ -145,6 +194,7 @@ impl JfLoginScreen {
             spin_ms: 0.0,
             pop: CtlPop::new(),
             ground: RouteGround::new(),
+            recent,
         }
     }
 
@@ -162,18 +212,46 @@ impl JfLoginScreen {
 
     fn buttons(&self) -> &'static [u32] {
         match self.stage {
-            Stage::Server => &[CONNECT],
+            Stage::Server => &[CONNECT, RECENT],
             Stage::Credentials => &[SIGN_IN, QUICK, CHANGE],
             Stage::QuickConnect => &[USE_PASSWORD, CHANGE],
         }
     }
 
-    fn elems(&self) -> impl Iterator<Item = u32> + '_ {
-        self.fields().iter().chain(self.buttons()).copied()
+    /// Every focusable element, in the order focus walks it: down the panel, or along Quick
+    /// Connect's row.
+    fn order(&self) -> Vec<u32> {
+        match self.stage {
+            Stage::Server => {
+                let mut v = vec![SERVER, CONNECT];
+                if self.recent.is_some() {
+                    v.push(RECENT);
+                }
+                v
+            }
+            Stage::Credentials => vec![CHANGE, USER, PASS, SIGN_IN, QUICK],
+            Stage::QuickConnect => vec![USE_PASSWORD, CHANGE],
+        }
     }
 
+    /// Quick Connect's two buttons are a row; every other step is a column.
+    fn is_row(&self) -> bool {
+        self.stage == Stage::QuickConnect
+    }
+
+    fn elems(&self) -> impl Iterator<Item = u32> {
+        self.order().into_iter()
+    }
+
+    /// Where a step seats focus: the Recent server when there is one (one press to reconnect), the
+    /// username, or the way back to the password.
     fn first(&self) -> u32 {
-        self.elems().next().unwrap_or(CONNECT)
+        match self.stage {
+            Stage::Server if self.recent.is_some() => RECENT,
+            Stage::Server => SERVER,
+            Stage::Credentials => USER,
+            Stage::QuickConnect => USE_PASSWORD,
+        }
     }
 
     fn buffer(&self, elem: u32) -> &TextBuffer {
@@ -403,6 +481,14 @@ impl JfLoginScreen {
         match elem {
             SERVER | USER | PASS => self.open(elem, fx),
             CONNECT => self.connect(fx),
+            RECENT => {
+                if let Some(recent) = &self.recent {
+                    let address = recent.address.clone();
+                    let caret = address.len();
+                    self.server = TextBuffer::new(address, caret);
+                    self.connect(fx);
+                }
+            }
             SIGN_IN => self.sign_in(fx),
             QUICK => self.start_quick_connect(fx),
             _ => {}
@@ -447,46 +533,111 @@ impl JfLoginScreen {
         }
     }
 
+    /// The panel's rects for this step. Built top-down from 0, then the whole panel is centred
+    /// vertically on the screen and every rect moved with it.
     fn form(&self, measure: &dyn Measure) -> Form {
         let layout = RouteLayout::screen();
-        let x = layout.content.x;
-        let w = layout.content.w;
-        let mut y = layout.narrative_top(false);
+        let px = layout.content.x;
+        let pw = layout.content.w;
+        let x = px + PANEL_PAD;
+        let w = pw - 2.0 * PANEL_PAD;
+        let mut y = PANEL_PAD;
         let mut form = Form {
-            server_row: None,
+            panel: Rect::new(px, 0.0, pw, 0.0),
+            card: None,
             labels: Vec::new(),
             fields: Vec::new(),
+            hint: None,
             code: None,
+            code_caption: None,
             status: Rect::new(x, 0.0, w, STATUS_H),
+            or_rule: None,
+            recent_caption: None,
             buttons: Vec::new(),
         };
-        if self.stage != Stage::Server {
-            form.server_row = Some(Rect::new(x, y, w, SERVER_ROW_H));
-            y += SERVER_ROW_H + theme::space::MD;
-        }
-        if self.stage == Stage::QuickConnect {
-            form.labels.push((0, Rect::new(x, y, w, LABEL_H)));
-            y += LABEL_H + theme::space::XS;
-            form.code = Some(Rect::new(x, y, w, CODE_H));
-            y += CODE_H + theme::space::MD;
-        }
-        for &field in self.fields() {
-            form.labels.push((field, Rect::new(x, y, w, LABEL_H)));
-            y += LABEL_H + theme::space::XS;
-            form.fields.push((field, Rect::new(x, y, w, FIELD_H)));
-            y += FIELD_H + theme::space::MD;
-        }
-        form.status.y = y;
-        y += STATUS_H + theme::space::SM;
-        let mut cx = x;
-        for &button in self.buttons() {
-            let bw = Button::pill_w_measured(button_label(button), BUTTON_SZ, false, false, measure);
-            if cx > x && cx + bw > x + w {
-                cx = x;
-                y += CTRL_H + CONTROL_GAP;
+        let field = |form: &mut Form, y: &mut f32, field: u32| {
+            form.labels.push((field, Rect::new(x, *y, w, LABEL_H)));
+            *y += LABEL_H + theme::space::XS;
+            form.fields.push((field, Rect::new(x, *y, w, FIELD_H)));
+            *y += FIELD_H;
+        };
+        match self.stage {
+            Stage::Server => {
+                field(&mut form, &mut y, SERVER);
+                y += theme::space::XS;
+                form.hint = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::XS;
+                form.status.y = y;
+                y += STATUS_H;
+                form.buttons.push((CONNECT, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H;
+                if self.recent.is_some() {
+                    y += theme::space::LG;
+                    form.or_rule = Some(Rect::new(x, y, w, 1.0));
+                    y += 1.0 + theme::space::MD;
+                    form.recent_caption = Some(Rect::new(x, y, w, LABEL_H));
+                    y += LABEL_H + theme::space::SM;
+                    form.buttons.push((RECENT, Rect::new(x, y, w, RECENT_H)));
+                    y += RECENT_H;
+                }
             }
-            form.buttons.push((button, Rect::new(cx, y, bw, CTRL_H)));
-            cx += bw + CONTROL_GAP;
+            Stage::Credentials => {
+                let card = Rect::new(x, y, w, CARD_H);
+                form.card = Some(card);
+                let cw = Button::pill_w_measured(button_label(CHANGE), BUTTON_SZ, false, false, measure);
+                form.buttons.push((CHANGE, Rect::new(x + w - cw, card.cy() - CHANGE_H * 0.5, cw, CHANGE_H)));
+                y += CARD_H + theme::space::MD;
+                form.or_rule = Some(Rect::new(x, y, w, 1.0));
+                y += 1.0 + theme::space::MD;
+                field(&mut form, &mut y, USER);
+                y += theme::space::MD;
+                field(&mut form, &mut y, PASS);
+                y += theme::space::XS;
+                form.status.y = y;
+                y += STATUS_H;
+                form.buttons.push((SIGN_IN, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H + theme::space::MD;
+                form.recent_caption = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::MD;
+                form.buttons.push((QUICK, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H;
+            }
+            Stage::QuickConnect => {
+                form.card = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::LG;
+                form.code_caption = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::SM;
+                form.code = Some(Rect::new(x, y, w, CODE_CELL_H));
+                y += CODE_CELL_H + theme::space::SM;
+                form.status.y = y;
+                y += STATUS_H;
+                let ws: Vec<f32> = [USE_PASSWORD, CHANGE]
+                    .iter()
+                    .map(|&b| Button::pill_w_measured(button_label(b), BUTTON_SZ, false, false, measure))
+                    .collect();
+                let total = ws.iter().sum::<f32>() + CONTROL_GAP;
+                let mut bx = x + ((w - total) * 0.5).max(0.0);
+                for (&b, bw) in [USE_PASSWORD, CHANGE].iter().zip(ws) {
+                    form.buttons.push((b, Rect::new(bx, y, bw, PAIR_H)));
+                    bx += bw + CONTROL_GAP;
+                }
+                y += PAIR_H;
+            }
+        }
+        let h = y + PANEL_PAD;
+        let safe = crate::ui::consts::SAFE;
+        let top = (safe.y + (safe.h - h) * 0.5).max(layout.content.y.min(safe.y));
+        form.panel = Rect::new(px, top, pw, h);
+        let mv = |r: &mut Rect| r.y += top;
+        form.card.as_mut().map(mv);
+        form.hint.as_mut().map(mv);
+        form.code.as_mut().map(mv);
+        form.code_caption.as_mut().map(mv);
+        form.or_rule.as_mut().map(mv);
+        form.recent_caption.as_mut().map(mv);
+        mv(&mut form.status);
+        for (_, r) in form.labels.iter_mut().chain(form.fields.iter_mut()).chain(form.buttons.iter_mut()) {
+            mv(r);
         }
         form
     }
@@ -500,12 +651,25 @@ impl JfLoginScreen {
             .map(|(_, r)| *r)
     }
 
+    /// Which field an error is about, for its red rim: the address, or the password.
+    fn faulted(&self, field: u32) -> bool {
+        self.error.is_some()
+            && self.busy.is_none()
+            && match self.stage {
+                Stage::Server => field == SERVER,
+                Stage::Credentials => field == PASS,
+                Stage::QuickConnect => false,
+            }
+    }
+
     fn draw_field(&self, p: Painter, field: u32, rect: Rect, focused: bool, measure: &dyn Measure) {
         let editing = self.editing == Some(field);
         let fill = if focused { theme::with_a(theme::TEXT_PRIMARY, 0.14) } else { theme::CONTROL_IDLE_FILL };
         p.rrect(rect, FIELD_R, FIELD_R, fill);
         if focused {
             p.rring(rect, FIELD_R, 3.0, theme::ACCENT);
+        } else if self.faulted(field) {
+            p.rring(rect, FIELD_R, 2.0, theme::DANGER);
         } else {
             p.rring(rect, FIELD_R, 1.5, theme::HAIRLINE);
         }
@@ -540,24 +704,33 @@ impl JfLoginScreen {
         }
     }
 
+    /// One inset cell per character of the Quick Connect code, centred in `rect`.
     fn draw_code(&self, p: Painter, rect: Rect) {
-        p.rrect(rect, 24.0, 24.0, theme::SURFACE_PANEL);
         let Some(qc) = &self.qc else {
             return;
         };
-        let n = qc.code.chars().count().max(1) as f32;
-        let x0 = rect.x + (rect.w - n * CODE_CELL).max(0.0) * 0.5;
+        let n = qc.code.chars().count();
+        if n == 0 {
+            return;
+        }
+        let total = n as f32 * CODE_CELL_W + (n - 1) as f32 * CODE_GAP;
+        let cell_w = if total > rect.w { (rect.w - (n - 1) as f32 * CODE_GAP) / n as f32 } else { CODE_CELL_W };
+        let total = n as f32 * cell_w + (n - 1) as f32 * CODE_GAP;
+        let x0 = rect.x + (rect.w - total) * 0.5;
         for (i, ch) in qc.code.chars().enumerate() {
+            let cell = Rect::new(x0 + i as f32 * (cell_w + CODE_GAP), rect.y, cell_w, rect.h);
+            p.rrect(cell, CODE_R, CODE_R, theme::scrim(0.40));
+            p.rring(cell, CODE_R, 1.0, theme::HAIRLINE);
             let glyph = cstring(&ch.to_string());
-            let cell = Rect::new(x0 + i as f32 * CODE_CELL, rect.y, CODE_CELL, rect.h);
             Label::new(glyph.as_ptr(), theme::size::HERO, theme::TEXT_PRIMARY)
                 .bold()
                 .h(HAlign::Center)
+                .v(VAlign::Middle)
                 .draw(p, cell);
         }
     }
 
-    fn draw_status(&self, p: Painter, rect: Rect, measure: &dyn Measure) {
+    fn draw_status(&self, p: Painter, rect: Rect, centred: bool, measure: &dyn Measure) {
         if self.spinning() {
             let line = match self.busy {
                 Some(Busy::Connecting) => msg::jellyfin_login_connecting_c(),
@@ -565,35 +738,297 @@ impl JfLoginScreen {
                 Some(Busy::Starting) => msg::jellyfin_login_connecting_c(),
                 None => msg::jellyfin_login_waiting_c(),
             };
-            let row = Rect::new(rect.x, rect.y, rect.w, LABEL_H + theme::space::XS);
-            Spinner::leading(rect.x, row.cy())
+            let gutter = Spinner::inline_gutter();
+            let text_w = measure.width(line, theme::size::BODY, false);
+            let x = if centred { rect.x + ((rect.w - gutter - text_w) * 0.5).max(0.0) } else { rect.x };
+            let row = Rect::new(x, rect.y, rect.w - (x - rect.x), rect.h);
+            Spinner::leading(row.x, row.cy())
                 .phase(self.spin_ms as u32)
                 .tint(theme::TEXT_SECONDARY)
                 .draw(&Env::inert(), p);
-            let gutter = Spinner::inline_gutter();
             Label::new(line.as_ptr(), theme::size::BODY, theme::TEXT_SECONDARY)
+                .v(VAlign::Middle)
                 .draw(p, Rect::new(row.x + gutter, row.y, row.w - gutter, row.h));
         } else if let Some(error) = &self.error {
-            TextView::new(error, theme::size::BODY, theme::DANGER)
+            // Sized to its sentence and hung from the top of the band, so the band's remainder is
+            // always air between the box and the control below it — a focused control's pop
+            // included.
+            let mark = 28.0;
+            let pad = theme::space::SM;
+            let mx = rect.x + pad;
+            let tx = mx + mark + pad;
+            let tw = rect.x + rect.w - pad - tx;
+            let view = TextView::new(error, theme::size::LABEL, theme::TEXT_PRIMARY)
                 .with_measure(measure)
-                .max_lines(2)
-                .draw(p, rect);
+                .max_lines(2);
+            let th = view.measure_h(tw);
+            let boxed = Rect::new(rect.x, rect.y + theme::space::XS, rect.w, th + 2.0 * pad);
+            p.rrect(boxed, 16.0, 16.0, theme::with_a(theme::DANGER, theme::DANGER_IDLE_TINT));
+            crate::ui::icons::draw(
+                p,
+                crate::ui::icons::Icon::Alert,
+                Rect::new(mx, boxed.cy() - mark * 0.5, mark, mark),
+                theme::DANGER,
+            );
+            view.draw(p, Rect::new(tx, boxed.y + pad, tw, th));
         }
     }
 
-    fn draw_server_row(&self, p: Painter, rect: Rect, measure: &dyn Measure) {
-        let caption = Rect::new(rect.x, rect.y, rect.w, LABEL_H);
-        Label::new(msg::jellyfin_login_server_row_c().as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
-            .draw(p, caption);
-        let line = Rect::new(rect.x, rect.y + LABEL_H, rect.w, rect.h - LABEL_H);
-        let name = cstring(&self.server_name);
-        let name_w = Label::new(name.as_ptr(), theme::size::BODY, theme::TEXT_PRIMARY).bold().draw(p, line);
+    /// A disc holding a mark: the server card's, the Recent row's and the step tracker's.
+    fn disc(p: Painter, center_x: f32, center_y: f32, d: f32, fill: [f32; 4]) -> Rect {
+        let r = Rect::new(center_x - d * 0.5, center_y - d * 0.5, d, d);
+        p.rrect(r, d * 0.5, d * 0.5, fill);
+        r
+    }
+
+    /// The server card: the server's mark, its name and its address, *Change server* beside them.
+    fn draw_card(&self, p: Painter, rect: Rect, change_x: f32) {
+        let disc = Self::disc(p, rect.x + CARD_DISC * 0.5, rect.cy(), CARD_DISC, theme::CONTROL_IDLE_FILL_UNKEYED);
+        let mark = CARD_DISC * 0.5;
+        crate::ui::icons::draw(
+            p,
+            crate::ui::icons::Icon::Server,
+            Rect::new(disc.cx() - mark * 0.5, disc.cy() - mark * 0.5, mark, mark),
+            theme::TEXT_PRIMARY,
+        );
+        let tx = disc.x + disc.w + theme::space::MD;
+        let tw = (change_x - theme::space::MD - tx).max(0.0);
+        TextView::new(&self.server_name, theme::size::BODY, theme::TEXT_PRIMARY)
+            .bold()
+            .max_lines(1)
+            .draw(p, Rect::new(tx, rect.y + 2.0, tw, rect.h * 0.5));
         if let Some(origin) = &self.origin {
-            let address = cstring(&format!("{}:{}", origin.host(), origin.port()));
-            let gap = theme::space::SM;
-            if name_w + gap + width(&format!("{}:{}", origin.host(), origin.port()), measure) <= rect.w {
-                Label::new(address.as_ptr(), theme::size::BODY, theme::TEXT_TERTIARY)
-                    .draw(p, Rect::new(line.x + name_w + gap, line.y, line.w - name_w - gap, line.h));
+            let address = format!("{}:{}", origin.host(), origin.port());
+            TextView::new(&address, theme::size::CAPTION, theme::TEXT_TERTIARY)
+                .max_lines(1)
+                .draw(p, Rect::new(tx, rect.y + rect.h * 0.5 + 4.0, tw, rect.h * 0.5));
+        }
+    }
+
+    /// Quick Connect's one-line server reminder, centred over the code.
+    fn draw_server_line(&self, p: Painter, rect: Rect, measure: &dyn Measure) {
+        let line = match &self.origin {
+            Some(origin) => format!("{} \u{b7} {}:{}", self.server_name, origin.host(), origin.port()),
+            None => self.server_name.clone(),
+        };
+        let mark = 26.0;
+        let gap = theme::space::SM;
+        let tw = measure.width_str(&line, theme::size::CAPTION, false).min(rect.w - mark - gap);
+        let x = rect.x + ((rect.w - mark - gap - tw) * 0.5).max(0.0);
+        crate::ui::icons::draw(
+            p,
+            crate::ui::icons::Icon::Server,
+            Rect::new(x, rect.cy() - mark * 0.5, mark, mark),
+            theme::TEXT_SECONDARY,
+        );
+        TextView::new(&line, theme::size::CAPTION, theme::TEXT_SECONDARY)
+            .max_lines(1)
+            .draw(p, Rect::new(x + mark + gap, rect.y + 2.0, tw + 1.0, rect.h));
+    }
+
+    /// The *Recent* row: a full-width row that wears the focus fill like a table row.
+    fn draw_recent(&self, p: Painter, rect: Rect, focused: bool, scale: f32) {
+        let Some(recent) = &self.recent else { return };
+        let r = Rect::new(
+            rect.cx() - rect.w * scale * 0.5,
+            rect.cy() - rect.h * scale * 0.5,
+            rect.w * scale,
+            rect.h * scale,
+        );
+        let (fill, ink, sub) = if focused {
+            (theme::ACCENT, theme::INK_ON_ACCENT, theme::with_a(theme::INK_ON_ACCENT, 0.62))
+        } else {
+            (theme::CONTROL_IDLE_FILL, theme::TEXT_PRIMARY, theme::TEXT_TERTIARY)
+        };
+        p.rrect(r, FIELD_R, FIELD_R, fill);
+        let disc_fill = if focused { theme::with_a(theme::INK_ON_ACCENT, 0.10) } else { theme::CONTROL_IDLE_FILL_UNKEYED };
+        let disc = Self::disc(p, r.x + theme::space::MD + RECENT_DISC * 0.5, r.cy(), RECENT_DISC, disc_fill);
+        let mark = RECENT_DISC * 0.5;
+        crate::ui::icons::draw(
+            p,
+            crate::ui::icons::Icon::Server,
+            Rect::new(disc.cx() - mark * 0.5, disc.cy() - mark * 0.5, mark, mark),
+            ink,
+        );
+        let tx = disc.x + disc.w + theme::space::MD;
+        let tw = (r.x + r.w - theme::space::MD - tx).max(0.0);
+        TextView::new(&recent.name, theme::size::BODY, ink)
+            .bold()
+            .max_lines(1)
+            .draw(p, Rect::new(tx, r.y + 16.0, tw, r.h * 0.5));
+        TextView::new(&recent.address, theme::size::CAPTION, sub)
+            .max_lines(1)
+            .draw(p, Rect::new(tx, r.y + r.h * 0.5 + 6.0, tw, r.h * 0.5));
+    }
+
+    /// A small upper-case heading in the panel ("RECENT", "YOUR CODE").
+    fn draw_caption(p: Painter, text: &str, rect: Rect, centred: bool) {
+        let up = cstring(&text.to_uppercase());
+        let label = Label::new(up.as_ptr(), theme::size::MICRO, theme::TEXT_TERTIARY).bold().v(VAlign::Middle);
+        if centred { label.h(HAlign::Center).draw(p, rect) } else { label.draw(p, rect) };
+    }
+
+    /// The thin rule between two parts of the panel; with a word, the word sits in a gap at its
+    /// centre ("or").
+    fn draw_rule(p: Painter, rect: Rect, word: Option<&CStr>, measure: &dyn Measure) {
+        match word {
+            None => p.rrect(Rect::new(rect.x, rect.y, rect.w, 1.0), 0.0, 0.0, theme::HAIRLINE),
+            Some(word) => {
+                let ww = measure.width(word, theme::size::CAPTION, false);
+                let gap = theme::space::MD;
+                let side = ((rect.w - ww) * 0.5 - gap).max(0.0);
+                let y = rect.cy();
+                p.rrect(Rect::new(rect.x, y, side, 1.0), 0.0, 0.0, theme::HAIRLINE);
+                p.rrect(Rect::new(rect.x + rect.w - side, y, side, 1.0), 0.0, 0.0, theme::HAIRLINE);
+                Label::new(word.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+                    .h(HAlign::Center)
+                    .v(VAlign::Middle)
+                    .draw(p, rect);
+            }
+        }
+    }
+
+    /// The narrative column, vertically centred: the step eyebrow, the title, then the copy (on
+    /// Quick Connect, three numbered instructions) and, on the first two steps, the tracker.
+    fn draw_narrative(&self, p: Painter, measure: &dyn Measure) {
+        let layout = RouteLayout::screen();
+        let x = layout.narrative.x;
+        let w = layout.narrative.w;
+        let eyebrow = match self.stage {
+            Stage::Server => msg::jellyfin_login_step_server(),
+            Stage::Credentials => msg::jellyfin_login_step_sign_in(),
+            Stage::QuickConnect => msg::jellyfin_login_step_quick_connect(),
+        };
+        let title = match self.stage {
+            Stage::Server => msg::jellyfin_login_title_server().to_owned(),
+            Stage::Credentials if !self.server_name.trim().is_empty() => {
+                msg::jellyfin_login_title_sign_in(&self.server_name)
+            }
+            Stage::Credentials => msg::jellyfin_login_title().to_owned(),
+            Stage::QuickConnect => msg::jellyfin_login_title_quick_connect().to_owned(),
+        };
+        let title_view = RouteLayout::narrative_title(&title).with_measure(measure);
+        let title_h = title_view.measure_h(w);
+        let copy_size = theme::size::LABEL;
+        let copy_lead = copy_size as f32 + theme::space::XS;
+        let steps: [&str; 3] = [
+            msg::jellyfin_login_qc_step_open(),
+            msg::jellyfin_login_qc_step_profile(),
+            msg::jellyfin_login_qc_step_code(),
+        ];
+        let step_text_x = STEP_DISC + theme::space::MD;
+        let copy_h = match self.stage {
+            Stage::QuickConnect => steps
+                .iter()
+                .map(|s| {
+                    TextView::new(s, copy_size, theme::TEXT_READING)
+                        .with_measure(measure)
+                        .leading(copy_lead)
+                        .measure_h(w - step_text_x)
+                        .max(STEP_DISC)
+                })
+                .sum::<f32>()
+                + 2.0 * theme::space::MD,
+            _ => {
+                let copy = match self.stage {
+                    Stage::Server => msg::jellyfin_login_server_intro(),
+                    _ => msg::jellyfin_login_credentials_intro(),
+                };
+                TextView::new(copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead).measure_h(w)
+            }
+        };
+        let tracker_h = if self.stage == Stage::QuickConnect { 0.0 } else { theme::space::LG + 2.0 * STEP_ROW_H };
+        let total = EYEBROW_H + theme::space::SM + title_h + theme::space::MD + copy_h + tracker_h;
+        let safe = crate::ui::consts::SAFE;
+        let mut y = (safe.y + (safe.h - total) * 0.5).max(layout.narrative.y);
+
+        Self::draw_caption(p, eyebrow, Rect::new(x, y, w, EYEBROW_H), false);
+        y += EYEBROW_H + theme::space::SM;
+        title_view.draw(p, Rect::new(x, y, w, title_h));
+        y += title_h + theme::space::MD;
+        match self.stage {
+            Stage::QuickConnect => {
+                for (i, s) in steps.iter().enumerate() {
+                    let view = TextView::new(s, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead);
+                    let h = view.measure_h(w - step_text_x).max(STEP_DISC);
+                    let disc = Self::disc(p, x + STEP_DISC * 0.5, y + STEP_DISC * 0.5, STEP_DISC, theme::CONTROL_IDLE_FILL_UNKEYED);
+                    let n = cstring(&(i + 1).to_string());
+                    Label::new(n.as_ptr(), theme::size::CAPTION, theme::TEXT_PRIMARY)
+                        .bold()
+                        .h(HAlign::Center)
+                        .v(VAlign::Middle)
+                        .draw(p, disc);
+                    view.draw(p, Rect::new(x + step_text_x, y + 4.0, w - step_text_x, h));
+                    y += h + theme::space::MD;
+                }
+            }
+            _ => {
+                let copy = match self.stage {
+                    Stage::Server => msg::jellyfin_login_server_intro(),
+                    _ => msg::jellyfin_login_credentials_intro(),
+                };
+                let view = TextView::new(copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead);
+                view.draw(p, Rect::new(x, y, w, copy_h));
+                y += copy_h + theme::space::LG;
+                self.draw_tracker(p, x, y, w);
+            }
+        }
+    }
+
+    /// *Server → Sign in*: the current step a filled disc with its number, a finished one a tick
+    /// with what it settled (the server's name and address), a step still to come an outline.
+    fn draw_tracker(&self, p: Painter, x: f32, y: f32, w: f32) {
+        let rows: [(&CStr, bool, bool); 2] = [
+            (msg::jellyfin_login_server_row_c(), self.stage == Stage::Server, self.stage != Stage::Server),
+            (msg::jellyfin_login_sign_in_c(), self.stage == Stage::Credentials, false),
+        ];
+        for (i, &(label, current, done)) in rows.iter().enumerate() {
+            let row = Rect::new(x, y + i as f32 * STEP_ROW_H, w, STEP_ROW_H);
+            let cx = x + STEP_DISC * 0.5;
+            let tx = x + STEP_DISC + theme::space::MD;
+            let tw = w - (tx - x);
+            if current {
+                let disc = Self::disc(p, cx, row.cy(), STEP_DISC, theme::ACCENT);
+                let n = cstring(&(i + 1).to_string());
+                Label::new(n.as_ptr(), theme::size::CAPTION, theme::INK_ON_ACCENT)
+                    .bold()
+                    .h(HAlign::Center)
+                    .v(VAlign::Middle)
+                    .draw(p, disc);
+                Label::new(label.as_ptr(), theme::size::BODY, theme::TEXT_PRIMARY)
+                    .bold()
+                    .v(VAlign::Middle)
+                    .draw(p, Rect::new(tx, row.y, tw, row.h));
+            } else if done {
+                let disc = Self::disc(p, cx, row.cy(), STEP_DISC, theme::CONTROL_IDLE_FILL_UNKEYED);
+                let mark = STEP_DISC * 0.5;
+                crate::ui::icons::draw(
+                    p,
+                    crate::ui::icons::Icon::Check,
+                    Rect::new(disc.cx() - mark * 0.5, disc.cy() - mark * 0.5, mark, mark),
+                    theme::TEXT_PRIMARY,
+                );
+                Label::new(label.as_ptr(), theme::size::BODY, theme::TEXT_SECONDARY)
+                    .draw(p, Rect::new(tx, row.y + 2.0, tw, row.h * 0.5));
+                let settled = match &self.origin {
+                    Some(origin) => format!("{} \u{b7} {}:{}", self.server_name, origin.host(), origin.port()),
+                    None => self.server_name.clone(),
+                };
+                TextView::new(&settled, theme::size::CAPTION, theme::TEXT_TERTIARY)
+                    .max_lines(1)
+                    .draw(p, Rect::new(tx, row.y + row.h * 0.5 + 2.0, tw, row.h * 0.5));
+            } else {
+                let disc = Rect::new(cx - STEP_DISC * 0.5, row.cy() - STEP_DISC * 0.5, STEP_DISC, STEP_DISC);
+                p.rring(disc, STEP_DISC * 0.5, 2.0, theme::CONTROL_RIM_IDLE_UNKEYED);
+                let n = cstring(&(i + 1).to_string());
+                Label::new(n.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+                    .bold()
+                    .h(HAlign::Center)
+                    .v(VAlign::Middle)
+                    .draw(p, disc);
+                Label::new(label.as_ptr(), theme::size::BODY, theme::TEXT_TERTIARY)
+                    .v(VAlign::Middle)
+                    .draw(p, Rect::new(tx, row.y, tw, row.h));
             }
         }
     }
@@ -688,24 +1123,16 @@ impl<H: AppLike> Focusable<H> for JfLoginScreen {
     fn group_of(&self, key: &u32, _cx: &Cx<'_, H>) -> Option<GroupId> {
         self.elems().any(|e| e == *key).then_some(GROUP)
     }
-    /// Fields stack: UP/DOWN walk them and DOWN off the last lands on the first button. The buttons
-    /// are a row: LEFT/RIGHT walk it and UP returns to the last field.
+    /// The panel is a column: UP/DOWN walk [`JfLoginScreen::order`]. Quick Connect's two buttons
+    /// are a row: LEFT/RIGHT walk them. Everything else is an edge.
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, _cx: &Cx<'_, H>) -> Step<u32> {
-        let fields = self.fields();
-        let buttons = self.buttons();
-        let next = if let Some(i) = fields.iter().position(|&f| f == key.elem) {
-            match dir {
-                Dir::Up => i.checked_sub(1).map(|j| fields[j]),
-                Dir::Down => fields.get(i + 1).or(buttons.first()).copied(),
-                Dir::Left | Dir::Right => None,
-            }
-        } else if let Some(i) = buttons.iter().position(|&b| b == key.elem) {
-            match dir {
-                Dir::Left => i.checked_sub(1).map(|j| buttons[j]),
-                Dir::Right => buttons.get(i + 1).copied(),
-                Dir::Up => fields.last().copied(),
-                Dir::Down => None,
-            }
+        let order = self.order();
+        let Some(i) = order.iter().position(|&e| e == key.elem) else { return Step::Edge };
+        let (back, ahead) = if self.is_row() { (Dir::Left, Dir::Right) } else { (Dir::Up, Dir::Down) };
+        let next = if dir == back {
+            i.checked_sub(1).map(|j| order[j])
+        } else if dir == ahead {
+            order.get(i + 1).copied()
         } else {
             None
         };
@@ -822,18 +1249,19 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>) {
         let p = f.painter;
         self.ground.draw_default(Painter::root());
-        let layout = RouteLayout::screen();
-        let intro = match self.stage {
-            Stage::Server => msg::jellyfin_login_server_intro(),
-            Stage::Credentials => msg::jellyfin_login_credentials_intro(),
-            Stage::QuickConnect => msg::jellyfin_login_quick_connect_intro(),
-        };
-        layout.draw_narrative(p, None, msg::jellyfin_login_title(), intro, theme::size::LABEL, f.measure);
+        self.draw_narrative(p, f.measure);
 
         let form = self.form(f.measure);
         let focus = f.focus.current.filter(|k| k.entry == self.entry).map(|k| k.elem);
-        if let Some(rect) = form.server_row {
-            self.draw_server_row(p, rect, f.measure);
+        crate::ui::widgets::panel_ground(p, form.panel, PANEL_R, f.underlay);
+        if let Some(rect) = form.card {
+            match self.stage {
+                Stage::QuickConnect => self.draw_server_line(p, rect, f.measure),
+                _ => {
+                    let change_x = form.buttons.iter().find(|(b, _)| *b == CHANGE).map_or(rect.x + rect.w, |(_, r)| r.x);
+                    self.draw_card(p, rect, change_x);
+                }
+            }
         }
         for &(field, rect) in &form.labels {
             Label::new(field_label(field).as_ptr(), theme::size::CAPTION, theme::TEXT_SECONDARY)
@@ -843,15 +1271,44 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
         for &(field, rect) in &form.fields {
             self.draw_field(p, field, rect, focus == Some(field), f.measure);
         }
+        if let Some(rect) = form.hint {
+            TextView::new(msg::jellyfin_login_port_hint(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+                .max_lines(1)
+                .draw(p, Rect::new(rect.x, rect.y + 2.0, rect.w, rect.h));
+        }
+        if let Some(rect) = form.code_caption {
+            Self::draw_caption(p, msg::jellyfin_login_code_label(), rect, true);
+        }
         if let Some(rect) = form.code {
             self.draw_code(p, rect);
         }
-        self.draw_status(p, form.status, f.measure);
-        for (i, &(button, rect)) in form.buttons.iter().enumerate() {
-            Button::new(button_label(button).as_ptr(), BUTTON_SZ, rect)
+        self.draw_status(p, form.status, self.stage == Stage::QuickConnect, f.measure);
+        if let Some(rect) = form.or_rule {
+            Self::draw_rule(p, rect, None, f.measure);
+        }
+        if let Some(rect) = form.recent_caption {
+            match self.stage {
+                Stage::Credentials => Self::draw_rule(p, rect, Some(msg::jellyfin_login_or_c()), f.measure),
+                _ => Self::draw_caption(p, msg::jellyfin_login_recent(), rect, false),
+            }
+        }
+        let buttons = self.buttons();
+        for &(button, rect) in &form.buttons {
+            let scale = buttons
+                .iter()
+                .position(|&b| b == button)
+                .map_or(1.0, |i| self.pop.scale_with(i, f.press.scale));
+            if button == RECENT {
+                self.draw_recent(p, rect, focus == Some(button), scale);
+                continue;
+            }
+            let mut b = Button::new(button_label(button).as_ptr(), BUTTON_SZ, rect)
                 .focused(focus == Some(button))
-                .scale(self.pop.scale_with(i, f.press.scale))
-                .draw(&Env::inert(), p);
+                .scale(scale);
+            if button == QUICK {
+                b = b.icon(crate::ui::icons::Icon::Phone);
+            }
+            b.draw(&Env::inert(), p);
         }
         if f.records_stops() {
             for &(elem, rect) in form.fields.iter().chain(form.buttons.iter()) {
@@ -910,11 +1367,18 @@ mod tests {
     #[test]
     fn each_stage_walks_its_own_elements_and_nothing_else() {
         let mut s = JfLoginScreen::new(EntryId(0), InstanceId(0));
+        s.recent = None;
         assert_eq!(s.elems().collect::<Vec<_>>(), [SERVER, CONNECT]);
+        assert_eq!(s.first(), SERVER);
+        s.recent = Some(Recent { name: "Living Room".into(), address: "192.168.1.20:8096".into() });
+        assert_eq!(s.elems().collect::<Vec<_>>(), [SERVER, CONNECT, RECENT]);
+        assert_eq!(s.first(), RECENT, "a saved server is one press from reconnecting");
         s.stage = Stage::Credentials;
-        assert_eq!(s.elems().collect::<Vec<_>>(), [USER, PASS, SIGN_IN, QUICK, CHANGE]);
+        assert_eq!(s.elems().collect::<Vec<_>>(), [CHANGE, USER, PASS, SIGN_IN, QUICK]);
+        assert_eq!(s.first(), USER);
         s.stage = Stage::QuickConnect;
         assert_eq!(s.elems().collect::<Vec<_>>(), [USE_PASSWORD, CHANGE]);
+        assert_eq!(s.first(), USE_PASSWORD);
     }
 
     #[test]
@@ -928,6 +1392,51 @@ mod tests {
         let a = s.hash();
         s.pass = TextBuffer::new("hunter3".into(), 7);
         assert_eq!(a, s.hash(), "same length, same state: the password itself is never hashed");
+    }
+
+    /// The status band is tall enough for the error box at its largest (two lines of `LABEL`,
+    /// padded) with air left before the control under it.
+    #[test]
+    fn the_status_band_holds_a_two_line_error_with_air_to_spare() {
+        let two_lines = 2.0 * (theme::size::LABEL as f32 + theme::space::XS);
+        let boxed = theme::space::XS + two_lines + 2.0 * theme::space::SM;
+        assert!(boxed + theme::space::SM <= STATUS_H, "{boxed} in {STATUS_H}");
+    }
+
+    /// The two marks the panel adds rasterize at the sizes it draws them, full ink inside and none
+    /// on the border.
+    #[test]
+    fn the_server_and_phone_marks_rasterize_clean() {
+        use crate::ui::icons::Icon;
+        for (id, svg) in [
+            (Icon::Server, include_str!("../../../assets/icons/server.svg")),
+            (Icon::Phone, include_str!("../../../assets/icons/phone.svg")),
+        ] {
+            for px in [26, 28, 32] {
+                let rgba = nj_gfx::svg::rasterize(svg, px, px).unwrap_or_else(|| panic!("{id:?} at {px}px"));
+                let alpha = |x: i32, y: i32| rgba[((y * px + x) * 4 + 3) as usize];
+                let max = (0..px).flat_map(|y| (0..px).map(move |x| alpha(x, y))).max().unwrap();
+                assert_eq!(max, 255, "{id:?} never reaches full ink at {px}px");
+                for i in 0..px {
+                    for (x, y) in [(i, 0), (i, px - 1), (0, i), (px - 1, i)] {
+                        assert_eq!(alpha(x, y), 0, "{id:?} inks the border at {px}px ({x},{y})");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The stages walk as drawn: a column, except Quick Connect's pair, which is a row.
+    #[test]
+    fn focus_walks_the_panel_as_it_is_drawn() {
+        let mut s = JfLoginScreen::new(EntryId(1), InstanceId(0));
+        s.recent = None;
+        s.stage = Stage::Credentials;
+        let order = s.order();
+        assert_eq!(order, [CHANGE, USER, PASS, SIGN_IN, QUICK]);
+        assert!(!s.is_row());
+        s.stage = Stage::QuickConnect;
+        assert!(s.is_row());
     }
 
     #[test]
