@@ -24,5 +24,17 @@
   "jellyfin.login.error_quick_connect_off": "Quick Connect está desactivado en este servidor. Inicia sesión con tu contraseña.",
   "jellyfin.login.error_refused": "El servidor rechazó la solicitud (error {status}).",
   "jellyfin.login.error_malformed": "El servidor envió una respuesta que esta aplicación no entiende.",
-  "jellyfin.login.error_address": "Eso no parece la dirección de un servidor."
+  "jellyfin.login.error_address": "Eso no parece la dirección de un servidor.",
+  "jellyfin.login.step_server": "Paso 1 de 2",
+  "jellyfin.login.step_sign_in": "Paso 2 de 2",
+  "jellyfin.login.step_quick_connect": "Paso 2 de 2 · Quick Connect",
+  "jellyfin.login.title_server": "Conéctate a tu servidor",
+  "jellyfin.login.title_sign_in": "Inicia sesión en {server}",
+  "jellyfin.login.title_quick_connect": "Aprueba este televisor",
+  "jellyfin.login.port_hint": "Incluye el puerto. Jellyfin usa el 8096 salvo que se haya cambiado.",
+  "jellyfin.login.recent": "Reciente",
+  "jellyfin.login.or": "o",
+  "jellyfin.login.qc_step_open": "Abre Jellyfin en un teléfono u ordenador que ya tenga la sesión iniciada.",
+  "jellyfin.login.qc_step_profile": "Ve a tu perfil y elige Quick Connect.",
+  "jellyfin.login.qc_step_code": "Escribe el código que aparece aquí. Este televisor iniciará sesión solo."
 }

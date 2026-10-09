@@ -24,5 +24,17 @@
   "jellyfin.login.error_quick_connect_off": "На гэтым серверы Quick Connect выключаны. Увайдзіце з паролем.",
   "jellyfin.login.error_refused": "Сервер адхіліў запыт (памылка {status}).",
   "jellyfin.login.error_malformed": "Сервер даслаў адказ, які гэта праграма не разумее.",
-  "jellyfin.login.error_address": "Гэта не падобна на адрас сервера."
+  "jellyfin.login.error_address": "Гэта не падобна на адрас сервера.",
+  "jellyfin.login.step_server": "Крок 1 з 2",
+  "jellyfin.login.step_sign_in": "Крок 2 з 2",
+  "jellyfin.login.step_quick_connect": "Крок 2 з 2 · Quick Connect",
+  "jellyfin.login.title_server": "Падключыцеся да сервера",
+  "jellyfin.login.title_sign_in": "Увайсці ў {server}",
+  "jellyfin.login.title_quick_connect": "Пацвердзіце гэты тэлевізар",
+  "jellyfin.login.port_hint": "Укажыце порт. Jellyfin выкарыстоўвае 8096, калі яго не змянялі.",
+  "jellyfin.login.recent": "Нядаўні",
+  "jellyfin.login.or": "або",
+  "jellyfin.login.qc_step_open": "Адкрыйце Jellyfin на тэлефоне або камп’ютары, дзе вы ўжо ўвайшлі.",
+  "jellyfin.login.qc_step_profile": "Перайдзіце ў профіль і выберыце Quick Connect.",
+  "jellyfin.login.qc_step_code": "Увядзіце код, паказаны тут. Тэлевізар увойдзе сам."
 }

@@ -226,6 +226,11 @@ pub enum Icon {
     ServerBadgeXmark,
     /// A crossed-out wifi arc — no internet to even reach plex.tv (`IncidentKind::PinCreate`).
     WifiSlash,
+    /// A server, no badge — the server a sign-in is talking to (`screens::jf_login`'s server card
+    /// and its Recent row).
+    Server,
+    /// A phone — Quick Connect, approved from a phone or computer (`screens::jf_login`).
+    Phone,
 }
 
 /// **Where a mark's INK sits inside its 24-unit viewBox**, as `(left, right)` fractions — and
@@ -312,6 +317,8 @@ fn src(id: Icon) -> &'static str {
         Icon::ServerBadgePlus => include_str!("../../../assets/icons/server-badge-plus.svg"),
         Icon::ServerBadgeXmark => include_str!("../../../assets/icons/server-badge-xmark.svg"),
         Icon::WifiSlash => include_str!("../../../assets/icons/wifi-slash.svg"),
+        Icon::Server => include_str!("../../../assets/icons/server.svg"),
+        Icon::Phone => include_str!("../../../assets/icons/phone.svg"),
     }
 }
 
