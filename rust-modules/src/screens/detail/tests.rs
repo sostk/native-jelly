@@ -780,6 +780,60 @@ fn the_version_pill_opens_the_chooser_and_a_choice_swaps_the_page() {
     clear();
 }
 
+/// **The *Audio & Subtitles* pill is there while the leaf has a track choice to make**, opens the
+/// chooser, a choice for THIS page's item lands in the store (one for another item is ignored), and
+/// Play then carries it. A show page, whose lists are borrowed from an episode, offers no pill.
+#[test]
+fn the_tracks_pill_opens_the_chooser_and_play_carries_the_choice() {
+    let sid = ServerId::from_raw(1);
+    let audio = |id: i64, codec: &str| crate::metadata::Stream { id, index: id - 1, codec: codec.into(), channels: 6, ..Default::default() };
+    let guard = install(Detail {
+        sid,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        part: "/p/0".into(),
+        vcodec: "hevc".into(),
+        audio: vec![audio(2, "eac3"), audio(3, "ac3")],
+        ..Default::default()
+    });
+    let mut screen = bare(&guard, sid, "movie");
+    assert!(screen.hero_set(test_store().view()).tracks);
+
+    let (_, opened) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_TRACKS), None);
+    assert!(
+        opened.iter().any(|e| matches!(&e.fx, Fx::App(AppFx::Content(ContentReq::Panel(ContentPanel::TrackChoice { .. }))))),
+        "the pill opens the chooser"
+    );
+
+    let choice = crate::metadata::TrackChoice { audio: Some(3), subtitle: Some(0) };
+    let elsewhere = AppMsg::TracksChosen { sid, rk: "other".into(), part: "/p/0".into(), choice };
+    let (_, ignored) = step(&mut screen, &ScreenEvent::App(elsewhere), None);
+    assert!(ignored.iter().all(|e| !matches!(&e.fx, Fx::App(AppFx::Store(..)))));
+
+    let chosen = AppMsg::TracksChosen { sid, rk: "movie".into(), part: "/p/0".into(), choice };
+    let (_, stored) = step(&mut screen, &ScreenEvent::App(chosen), None);
+    apply_metadata_effects(&stored);
+    assert_eq!(test_store().view().current().map(|d| d.tracks), Some(choice));
+
+    let (_, played) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_PLAY), Some(hero::ELEM_PLAY));
+    let tracks = played.iter().find_map(|e| match &e.fx {
+        Fx::App(AppFx::Content(ContentReq::Play { tracks, .. })) => Some(*tracks),
+        _ => None,
+    });
+    assert_eq!(tracks, Some(Some(choice)), "Play starts on the chosen tracks");
+
+    crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
+        sid,
+        rk: "movie".into(),
+        kind: "show".into(),
+        is_show: true,
+        audio: vec![audio(2, "eac3"), audio(3, "ac3")],
+        ..Default::default()
+    }));
+    assert!(!screen.hero_set(test_store().view()).tracks, "a show container has no file to choose in");
+    clear();
+}
+
 #[test]
 fn the_episode_text_highlight_fits_the_block_the_flow_already_reserves() {
     let d = detail(ServerId::UNSET, "show");
@@ -945,6 +999,7 @@ fn hero_focus_survives_a_control_appearing_in_the_middle_of_the_row() {
         restart: true,
         trailer: false,
         version: false,
+        tracks: false,
         alt: false,
         mark: PosterMark::None,
     };
@@ -1108,6 +1163,7 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
         restart: true,
         trailer: false,
         version: false,
+        tracks: false,
         alt: false,
         mark: PosterMark::InProgress,
     };
@@ -1118,6 +1174,7 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
         let widths = hero::HeroWidths {
             pill: 230.0,
             version: 0.0,
+            tracks: 0.0,
             alt: 0.0,
             disc,
         };
@@ -2247,7 +2304,7 @@ fn trailer_extra() -> crate::metadata::Extra {
 
 fn play_item(effects: &[nj_machine::machine::Stamped<TestHost>]) -> Option<(&PlayIntent, i64)> {
     effects.iter().find_map(|effect| match &effect.fx {
-        Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns })) => Some((play, *resume_ns)),
+        Fx::App(AppFx::Content(ContentReq::Play { play, resume_ns, .. })) => Some((play, *resume_ns)),
         _ => None,
     })
 }

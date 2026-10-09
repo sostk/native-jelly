@@ -1954,6 +1954,23 @@ impl<H: ContentLike + crate::screens::registry::MetadataLike> Machine<H> for Det
                 }
                 Handled::Yes
             }
+            // The *Audio & Subtitles* surface committed a row. The store keeps the choice on the
+            // item for the version it names; Play reads it back (`play_hero`).
+            ScreenEvent::App(AppMsg::TracksChosen { sid, rk, part, choice }) => {
+                if *sid == self.sid && *rk == self.rk {
+                    fx.push(Fx::App(AppFx::Store(
+                        StoreId::Metadata,
+                        StoreCmd::Metadata(MetadataCmd::SelectTracks {
+                            sid: *sid,
+                            rk: rk.clone(),
+                            part: part.clone(),
+                            choice: *choice,
+                        }),
+                    )));
+                    fx.invalidate(Provenance::Input);
+                }
+                Handled::Yes
+            }
             ScreenEvent::WillLeave(Leave::ForGood) | ScreenEvent::Unmount => {
                 self.pending_season = None;
                 self.season_settle = 0.0;
@@ -2605,11 +2622,11 @@ impl DetailScreen {
                 .ground(ground)
                 .scale(scale)
                 .draw(&Env::inert(), p),
-                hero::HeroCtl::Alt | hero::HeroCtl::Version => {
-                    let label = if ctl == hero::HeroCtl::Alt {
-                        hero::alt_label()
-                    } else {
-                        hero::version_label()
+                hero::HeroCtl::Alt | hero::HeroCtl::Version | hero::HeroCtl::Tracks => {
+                    let label = match ctl {
+                        hero::HeroCtl::Alt => hero::alt_label(),
+                        hero::HeroCtl::Version => hero::version_label(),
+                        _ => hero::tracks_label(),
                     };
                     Button::new(label.as_ptr(), theme::size::BODY, rect)
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
@@ -3603,16 +3620,17 @@ impl DetailScreen {
     }
 
     fn hero_set(&self, meta: crate::metadata::MetadataView<'_>) -> hero::HeroSet {
-        let (restart, mark, version) = self
+        let (restart, mark, version, tracks) = self
             .detail(meta)
             .map(|d| {
                 (
                     hero::has_restart(hero::hero_resume_ns(d)),
                     hero::hero_mark(d),
                     d.versions.len() > 1,
+                    d.has_track_choice(),
                 )
             })
-            .unwrap_or((false, PosterMark::None, false));
+            .unwrap_or((false, PosterMark::None, false, false));
         // The preview path replaced the disc. Play Trailer stays in the item menu. (Confirmed as
         // the shipped decision by `screens::detail::tests` — see
         // `a_movie_trailer_disc_plays_the_extra_from_the_start` et al., which explicitly assert
@@ -3622,6 +3640,7 @@ impl DetailScreen {
             restart,
             trailer: false,
             version,
+            tracks,
             alt: self.alt_available(meta),
             mark,
         }
@@ -3715,7 +3734,7 @@ impl DetailScreen {
             Some(Located::Extras(_)) => {
                 let Some(d) = self.detail(meta) else { return };
                 let Some(play) = extras::play(d, local) else { return };
-                self.content(fx, ContentReq::Play { play, resume_ns: 0 });
+                self.content(fx, ContentReq::Play { play, resume_ns: 0, tracks: None });
             }
             Some(Located::Cast(_)) => {
                 let action = self
@@ -3782,9 +3801,9 @@ impl DetailScreen {
                     title: title.to_string(),
                     context: crate::metadata::TRAILER_CONTEXT.into(),
                 };
-                self.content(fx, ContentReq::Play { play, resume_ns: 0 });
+                self.content(fx, ContentReq::Play { play, resume_ns: 0, tracks: None });
             }
-            hero::HeroCtl::Alt | hero::HeroCtl::Version => {
+            hero::HeroCtl::Alt | hero::HeroCtl::Version | hero::HeroCtl::Tracks => {
                 let set = self.hero_set(meta);
                 if let Some(i) = hero::index_of(set, ctl) {
                     let widths = hero::hero_widths(
@@ -3799,10 +3818,10 @@ impl DetailScreen {
                     // The ANCHOR travels on the argument, bit for bit, so the surface places
                     // itself off the pill without the page or a static holding a `Rect` for it.
                     let anchor = [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits);
-                    let panel = if ctl == hero::HeroCtl::Alt {
-                        ContentPanel::AltSources { anchor }
-                    } else {
-                        ContentPanel::Versions { anchor }
+                    let panel = match ctl {
+                        hero::HeroCtl::Alt => ContentPanel::AltSources { anchor },
+                        hero::HeroCtl::Version => ContentPanel::Versions { anchor },
+                        _ => ContentPanel::TrackChoice { anchor },
                     };
                     self.content(fx, ContentReq::Panel(panel));
                 }
@@ -3873,7 +3892,9 @@ impl DetailScreen {
                 },
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
-            self.content(fx, ContentReq::Play { play, resume_ns });
+            // The tracks chosen on this page (`track_choice`), for the version it describes.
+            let tracks = Some(d.tracks).filter(|t| !t.is_unset());
+            self.content(fx, ContentReq::Play { play, resume_ns, tracks });
             true
         }
     }
@@ -3946,7 +3967,7 @@ impl DetailScreen {
             title,
             context,
         };
-        self.content(fx, ContentReq::Play { play, resume_ns });
+        self.content(fx, ContentReq::Play { play, resume_ns, tracks: None });
         true
     }
 

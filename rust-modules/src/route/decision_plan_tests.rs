@@ -245,6 +245,70 @@ fn smart_direct_play_asks_for_the_ac3_sibling_of_a_truehd_default() {
     assert_eq!(plan.audio.as_ref().map(|a| a.sid), Some(3));
 }
 
+/// **The Detail page's pre-play audio choice is the track that plays.** A chosen track the panel
+/// can decode direct-plays on that track, ahead of the file's default and the user's preference.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_chosen_audio_track_that_direct_plays_is_the_one_played() {
+    let streams = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"ac3","Index":1,"Channels":6},{"Type":"Audio","Codec":"aac","Index":2,"Channels":2}"#;
+    let audio = vec![jf_track(1, "ac3", 6, "eng", true), jf_track(2, "aac", 2, "fra", false)];
+    let (plan, requests) = resolve_jf(playback_info(true, "mkv", streams, None), default_user(), audio, Vec::new(), |env| {
+        env.audio_sid = 3;
+        env.audio_explicit = true;
+    });
+    assert_eq!(playback_info_body(&requests)["AudioStreamIndex"], 2);
+    assert_eq!(plan.acodec, "aac");
+    assert_eq!(plan.audio.as_ref().map(|a| a.sid), Some(3));
+}
+
+/// **A chosen track the panel cannot decode is CONVERTED, not swapped.** Smart direct play would
+/// take the AC-3 sibling of a TrueHD default (the test above this one); a viewer who chose the
+/// TrueHD track gets that track, from the server's conversion — as a pick in the player's own
+/// track menu does. Without the explicit flag (a retry's carried id) the sibling still wins.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_chosen_audio_track_that_cannot_direct_play_is_converted_not_swapped() {
+    let streams = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"truehd","Index":1,"Channels":8},{"Type":"Audio","Codec":"ac3","Index":2,"Channels":6}"#;
+    let audio = || vec![jf_track(1, "truehd", 8, "eng", true), jf_track(2, "ac3", 6, "eng", false)];
+    let url = format!(
+        "/videos/{JF_GUID}/stream.mkv?VideoCodec=hevc&AudioCodec=eac3&AudioStreamIndex=1&TranscodeReasons=AudioCodecNotSupported&PlaySessionId=ps-loopback"
+    );
+    let (plan, requests) = resolve_jf(playback_info(false, "mkv", streams, Some(&url)), default_user(), audio(), Vec::new(), |env| {
+        env.audio_sid = 2;
+        env.audio_explicit = true;
+    });
+    let body = playback_info_body(&requests);
+    assert_eq!(body["EnableDirectPlay"], false, "the chosen track rules out direct play: {body}");
+    assert_eq!(body["AudioStreamIndex"], 1, "the chosen TrueHD track, not its AC-3 sibling");
+    assert!(!plan.tsession.is_empty(), "a conversion: {}", plan.url);
+    assert_eq!(plan.audio.as_ref().map(|a| a.sid), Some(2));
+
+    let (plan, requests) = resolve_jf(playback_info(true, "mkv", streams, None), default_user(), audio(), Vec::new(), |env| {
+        env.audio_sid = 2;
+    });
+    assert_eq!(playback_info_body(&requests)["AudioStreamIndex"], 2, "a carried id still yields to smart direct play");
+    assert_eq!(plan.acodec, "ac3");
+}
+
+/// **A chosen Off beats a subtitle the user's preferences would turn on** (`SubtitleMode::Always`
+/// with a matching track).
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_chosen_subtitle_off_beats_the_users_automatic_subtitle() {
+    let streams = r#"{"Type":"Video","Codec":"hevc","Index":0},{"Type":"Audio","Codec":"eac3","Index":1,"Channels":6},{"Type":"Subtitle","Codec":"subrip","Index":2,"Language":"eng"}"#;
+    let subs = || {
+        vec![crate::metadata::Stream { id: 3, index: 2, lang_code: "eng".into(), codec: "srt".into(), ..Default::default() }]
+    };
+    let me = user_config(None, true, Some("eng"), "Always");
+    let (plan, _) = resolve_jf(playback_info(true, "mkv", streams, None), me.clone(), eac3_only(), subs(), |_| {});
+    assert_eq!(plan.sub_sid, 3, "the preference turns the English track on");
+    let (plan, _) = resolve_jf(playback_info(true, "mkv", streams, None), me, eac3_only(), subs(), |env| {
+        env.sub_sid = 0;
+        env.subtitle_override = Some(0);
+    });
+    assert_eq!(plan.sub_sid, 0, "the viewer chose Off");
+}
+
 #[test]
 #[cfg(feature = "devtriggers")]
 fn a_transcode_answer_plays_the_transcoding_url_in_its_output_codecs() {

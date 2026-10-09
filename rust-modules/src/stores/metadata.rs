@@ -64,6 +64,8 @@
 //!   view-state write, answers whether it actually changed anything.
 //! - `SelectVersion{sid, rk, part}` → `Detail::select_version` on the loaded item — the version
 //!   chooser; answers whether the page now describes a different version.
+//! - `SelectTracks{sid, rk, part, choice}` → `Detail::select_tracks` on the loaded item — the
+//!   pre-play audio/subtitle chooser; answers whether the choice changed.
 //! - `InstallPlaying(Option<PlayingItem>)` → `metadata::install_playing` — the playback plan's leaf
 //!   (`route.rs`).
 //! - `MarkSkipped(Marker)` → `metadata::mark_skipped`.
@@ -172,6 +174,9 @@ pub(crate) enum MetadataCmd {
     /// The version chooser: describe and play the version of the loaded `(sid, rk)` whose part is
     /// `part` (`Detail::select_version`).
     SelectVersion { sid: ServerId, rk: String, part: String },
+    /// The pre-play track chooser: start the loaded `(sid, rk)` on `choice` while it describes the
+    /// version whose part is `part` (`Detail::select_tracks`).
+    SelectTracks { sid: ServerId, rk: String, part: String, choice: crate::metadata::TrackChoice },
     /// The playback plan's leaf (`route.rs`).
     InstallPlaying(Option<crate::metadata::PlayingItem>),
     MarkSkipped(crate::metadata::Marker),

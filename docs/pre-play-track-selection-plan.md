@@ -1,7 +1,24 @@
 # Pre-play audio & subtitle selection on the Detail page — implementation plan
 
-Status: **proposal** (2026-10-09). Nothing here is built yet. File/line references are against
-`main` at `adfcb01`.
+Status: **v1 built** (2026-10-09) for movie and episode pages; show pages (§7) and the follow-ups
+(§9) are not. File/line references are against `main` at `adfcb01`.
+
+**What v1 settled** (§3's open decisions and where the build differs from §4):
+
+- **Placement — option A.** One *Audio & Subtitles* pill after *Version*, shown while
+  `Detail::has_track_choice` (a file of its own, and more than one audio track or any subtitle).
+  The hero facts line does not carry a track summary; the popover's ticks are the read-out.
+- **One list, two sections** (Audio, Subtitles) in the *Version* surface's popover
+  (`screens/track_choice.rs`), not two tabs. Each section opens with **Automatic**, which leaves
+  that half to the user's Jellyfin preferences and the file's flags; Subtitles also has **Off**.
+  OK commits and the panel stays open so both halves can be chosen in one visit; BACK closes.
+- **An explicit audio pick wins** (`ResolveEnv::audio_explicit`): a track the TV cannot decode is
+  converted, not swapped for a direct-playable sibling, and its row says *Converts*. Under
+  *Direct Play: Forced* such a pick is refused with the existing forced-audio verdict.
+- **Lifetime:** `Detail::tracks`, per item and version — kept across a same-item refresh, cleared
+  by a version change, dropped on leaving the item. Not persisted.
+- The hero's *Direct Play / Remux / Converts* answer (`route::playback_preview`) follows the chosen
+  audio track.
 
 ## 1. Goal
 

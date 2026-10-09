@@ -181,6 +181,7 @@ fn content_request(request: &crate::screens::registry::ContentReq) -> Result<Val
         ContentReq::Panel(panel) => json!({"panel":match panel {
             ContentPanel::AltSources { anchor } => json!({"alt_sources":anchor}),
             ContentPanel::Versions { anchor } => json!({"versions":anchor}),
+            ContentPanel::TrackChoice { anchor } => json!({"track_choice":anchor}),
             ContentPanel::Tracks { page } => json!({"tracks":page}),
             ContentPanel::About => json!("about"),
             ContentPanel::Bio => json!("bio"),

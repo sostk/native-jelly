@@ -811,6 +811,11 @@ pub(crate) struct ResolveEnv {
     pub sub_sid: i64,
     /// A retry carries the viewer's explicit Off as well as a positive subtitle id.
     pub subtitle_override: Option<i64>,
+    /// `audio_sid` is the VIEWER's pick (the Detail page's track chooser), not a session or retry
+    /// carry: a track that cannot direct-play is then converted rather than swapped for a
+    /// direct-playable sibling, as a pick in the player's own track menu is
+    /// (`decision::commit_audio_selection`).
+    pub audio_explicit: bool,
     /// the loaded detail's streams when it IS this item — saves the worker a GET
     pub cached_item: Option<crate::metadata::PlayingItem>,
     /// The user's pick off the quality ladder, captured at the press like everything else here.
@@ -1170,7 +1175,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         tracks.iter().enumerate().find(|(_, t)| t.id == env.audio_sid
             && audio_direct_plays(env.direct_play_mode, &t.codec, t.channels))
             .map(|(i, t)| (i as i32, t.codec.to_lowercase(), t.id))
-            .or_else(|| (!forced).then(|| pick_dp_audio_pref(tracks, acodec, audio_prefs)).flatten())
+            .or_else(|| (!forced && !env.audio_explicit).then(|| pick_dp_audio_pref(tracks, acodec, audio_prefs)).flatten())
     } else if rk.is_empty() {
         None
     } else {

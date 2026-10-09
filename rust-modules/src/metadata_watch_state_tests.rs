@@ -393,6 +393,35 @@ fn a_refreshed_page_keeps_the_chosen_version() {
     clear(test_state(), test_adapter());
 }
 
+/// The pre-play track choice is kept on the item for the version it names: an id the version does
+/// not list is dropped, a report for another version is refused, a version change clears it, and a
+/// refetch of the same item keeps it.
+#[test]
+fn a_track_choice_belongs_to_one_version_and_survives_a_refresh() {
+    let _serial = nj_base::testlock::serial();
+    set_current_for_test(test_state(), Some(two_versions()));
+    let choose = |part: &str, audio: Option<i64>, subtitle: Option<i64>| crate::stores::metadata::MetadataCmd::SelectTracks {
+        sid: SRV_A,
+        rk: "42".into(),
+        part: part.into(),
+        choice: TrackChoice { audio, subtitle },
+    };
+    assert!(run(test_state(), test_adapter(), choose("/p/0", Some(1), Some(0))));
+    assert_eq!(current(test_state()).unwrap().tracks, TrackChoice { audio: Some(1), subtitle: Some(0) });
+    assert!(!run(test_state(), test_adapter(), choose("/p/1", Some(2), None)), "another version's report");
+    assert!(run(test_state(), test_adapter(), choose("/p/0", Some(9), Some(7))));
+    assert_eq!(current(test_state()).unwrap().tracks, TrackChoice::default(), "ids the version does not list");
+
+    assert!(run(test_state(), test_adapter(), choose("/p/0", Some(1), Some(0))));
+    assert!(install_landed_detail(test_state(), test_adapter(), Some(two_versions())));
+    assert_eq!(current(test_state()).unwrap().tracks, TrackChoice { audio: Some(1), subtitle: Some(0) }, "a refresh keeps it");
+
+    let select = crate::stores::metadata::MetadataCmd::SelectVersion { sid: SRV_A, rk: "42".into(), part: "/p/1".into() };
+    assert!(run(test_state(), test_adapter(), select));
+    assert!(current(test_state()).unwrap().tracks.is_unset(), "a version change clears it");
+    clear(test_state(), test_adapter());
+}
+
 /// The season-scope watched rule. Pure (no crate global, so no `testlock` here) and worth its
 /// own test because two very different call sites depend on it — the season tab draws a tick
 /// off it, and "Mark Season Watched" will decide which way to scrobble off it. The counts are
