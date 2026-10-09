@@ -1063,6 +1063,10 @@ fn path_without_query(path: &str) -> &str {
 }
 
 #[cfg(test)]
+#[path = "hls_live_tests.rs"]
+mod live_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
