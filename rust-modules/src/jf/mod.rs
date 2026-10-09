@@ -33,4 +33,4 @@ pub(crate) mod url;
 pub use api::{Jf, JfPage, JfSearch, JfShelf, SEARCH_GROUPS};
 
 #[cfg(test)]
-mod live_tests;
+pub(crate) mod live_tests;

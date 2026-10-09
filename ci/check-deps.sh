@@ -504,17 +504,17 @@ fi
 # allowlist: any free process-wide selector or module-level dispatcher reconnects those owners and
 # lets an unaddressed reset or landing cross the Bridge boundary — exactly the pre-port shape
 # `crate::stores::hubs::apply`/`apply_with_directory`/`controlled`/`controlled_with_directory` had,
-# each a free function reading/writing process-wide `pms.rs` statics instead of one owner's
+# each a free function reading/writing process-wide `catalog_fetch.rs` (then `pms.rs`) statics instead of one owner's
 # `PmsState`/`Arc<PmsAdapter>` pair. `hubs_snapshot`/`run`/`run_with_directory`/
 # `land_with_directory`/`tick_with_directory`/`controlled_work`/`controlled_work_with_directory`
-# are deliberately NOT listed: `pms.rs` keeps the current explicit-parameter architecture, taking
+# are deliberately NOT listed: `catalog_fetch.rs` keeps the current explicit-parameter architecture, taking
 # `state`/`adapter` in, exactly like search's own `reset(state, adapter)`.
 hubs_facades='apply|apply_with_directory|controlled|controlled_with_directory'
 hubs_selectors='RESULTS|NEXT_REQUEST|HUB_GEN|CATALOG_GEN|LAST_SECTIONS_GEN|ACTIVE|OWNER|LEGACY_ADAPTER'
 hubs_owner_matches=$({
   owner_declarations "$hubs_facades" "$hubs_selectors" \
     'PmsState|PmsAdapter|HubsStore|Landing|Src|SourceBuild' \
-    "$SRC/pms.rs" "$SRC/pms/initial.rs" "$SRC/stores/hubs.rs"
+    "$SRC/catalog_fetch.rs" "$SRC/catalog_fetch/initial.rs" "$SRC/stores/hubs.rs"
   grep_code_owner "(crate::catalog_fetch|crate::stores::hubs|stores::hubs)::($hubs_facades)\("
 } | sort -u)
 if [ -z "$hubs_owner_matches" ]; then
@@ -646,7 +646,7 @@ if [ "$mut_bad" -eq 0 ]; then ok "mutators"; else fail "mutators: $mut_bad line(
 # No other exceptions: `pms::reset` (once tracked as an open item — `app/bridge.rs` and
 # `app/recorder.rs` still called it directly from their own `#[cfg(test)] mod`s) is closed, routed
 # through `HubsStore::run`/`run_with_directory` (the variant and `pms::run`'s arm both already
-# existed) and narrowed to private like every other `pms.rs` mutator.
+# existed) and narrowed to private like every other `pms.rs` (now `catalog_fetch.rs`) mutator.
 # One "<file>|<space-separated fn list>" entry per store — a plain array, not `declare -A`: the
 # script's own shebang is `env bash` and the dev Mac's `/bin/bash` is 3.2 (Apple ships nothing
 # newer over the GPLv3 boundary), which has no associative arrays at all.
@@ -654,7 +654,7 @@ MUT_FNS_TABLE=(
   "browse/mod.rs|set_cur note_library_choice kick_letters kick_genres want save_cursor set_sort_by_key set_sort set_unwatched set_genre_by_id set_genre retry_cur_source retry_source recheck_shares apply_pins toggle_pin record_pins retry_discovery reset set_watched_local"
   "browse/section_hubs.rs|kick commit_staged invalidate_all invalidate set_watched_local left_the_deck"
   "metadata.rs|request_detail clear load_season load_season_now set_now_playing set_watched_local install_playing mark_skipped retire_playing retire_playing_item alt_install alt_restamp_owners alt_prune_inactive"
-  "pms.rs|request_refetch_hubs request_retry edit_item apply_landing reset"
+  "catalog_fetch.rs|request_refetch_hubs request_retry edit_item apply_landing reset"
   "search.rs|set_query reset set_watched_local"
   "person.rs|open close reset set_watched_local"
   "viewstate.rs|request reset"
@@ -671,6 +671,12 @@ for entry in "${MUT_FNS_TABLE[@]}"; do
   relf="${entry%%|*}"
   fns="${entry#*|}"
   f="$SRC/$relf"
+  # A renamed store must not turn this gate into a silent pass over a file that is gone.
+  if [ ! -f "$f" ]; then
+    echo "    $relf: listed in MUT_FNS_TABLE but missing — update the table to the store's new path"
+    vis_bad=$((vis_bad+1))
+    continue
+  fi
   for fn in $fns; do
     hit=$(grep -nE "^[[:space:]]*pub(\(crate\))?[[:space:]]+fn[[:space:]]+${fn}\b" "$f" 2>/dev/null || true)
     if [ -n "$hit" ] && ! store_seamed "$relf" "$fn"; then
