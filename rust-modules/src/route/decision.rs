@@ -103,6 +103,12 @@ pub(crate) struct PlaybackSession {
     /// The encoder the landing negotiated at a resume, and the whole second it starts at. Keyed by
     /// encoder so a replaced one never matches; consumed by [`take_encoder_start`].
     encoder_start: Option<(String, i64)>,
+    /// The playing item's whole length, nanoseconds, as the negotiation stated it (`RunTimeTicks`);
+    /// `0` when unknown. A fact about the ITEM, so it outlives every encoder replacement: a seek,
+    /// a track switch or a quality change restarts the encode at `&offset`, and the total the
+    /// viewer is shown is still the film's. Read by the Engine start and handed to the demuxer,
+    /// which publishes it when the container cannot say ([`crate::ff::open_duration_ns`]).
+    runtime_ns: i64,
     /// The PRE-FLIGHT refusal for the last resolve, or None.
     ///
     /// `Some(_)` means this playback never got a URL, decided BEFORE a byte of video moved: the
@@ -391,6 +397,7 @@ impl PlaybackSession {
         url: String::new(),
         tsession: String::new(),
         encoder_start: None,
+        runtime_ns: 0,
         play_verdict: None,
         resolve_failed: false,
         cur_contract: crate::catalog::EncodeContract::original(false, crate::catalog::AudioEnhancements::NONE),
@@ -461,6 +468,7 @@ impl PlaybackSession {
             url,
             tsession,
             encoder_start,
+            runtime_ns,
             play_verdict,
             resolve_failed,
             cur_contract,
@@ -512,6 +520,7 @@ impl PlaybackSession {
             url: url.clone(),
             tsession: tsession.clone(),
             encoder_start: encoder_start.clone(),
+            runtime_ns: *runtime_ns,
             play_verdict: play_verdict.clone(),
             resolve_failed: *resolve_failed,
             cur_contract: *cur_contract,
@@ -4454,6 +4463,11 @@ pub(crate) fn stream_vcodec(ps: &PlaybackSession) -> String {
 pub(crate) fn stream_acodec(ps: &PlaybackSession) -> String {
     ps.stream_acodec.clone()
 }
+/// The playing item's whole length, nanoseconds, from the negotiation; `0` when unknown. See the
+/// `runtime_ns` field.
+pub(crate) fn runtime_ns(ps: &PlaybackSession) -> i64 {
+    ps.runtime_ns
+}
 /// direct-play source video fps for the Load esInfo (0 = unknown/transcode → omit)
 pub(crate) fn stream_fps(ps: &PlaybackSession) -> f64 {
     ps.stream_fps
@@ -4632,6 +4646,9 @@ fn set_stream_declaration_with_capability(
         s.stream_dovi = dovi;
         s.stream_dv_decision = decision;
         s.stream_immersive = immersive;
+        // A declared URL has no library item behind it, so no negotiated length: a stop leaves
+        // the last film's standing, and the demuxer must not publish it for this stream.
+        s.runtime_ns = 0;
     } }
     true
 }
@@ -6806,6 +6823,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             url: plan.url,
             encoder_start: (plan.encoder_start_secs > 0 && !plan.tsession.is_empty())
                 .then(|| (plan.tsession.clone(), plan.encoder_start_secs)),
+            runtime_ns: plan.runtime_ns,
             tsession: plan.tsession,
             // Installed on EVERY landing, not only a refusing one: a plan that resolved is itself
             // the statement that the last refusal is over, and assigning unconditionally is what

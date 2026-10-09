@@ -26,6 +26,14 @@ pub fn to_secs(ticks: i64) -> i64 {
     ticks.max(0) / TICKS_PER_SECOND
 }
 
+/// Nanoseconds in one tick.
+const NS_PER_TICK: i64 = 100;
+
+/// Ticks → nanoseconds (the player clock), saturating; negative input is 0.
+pub fn to_ns(ticks: i64) -> i64 {
+    ticks.max(0).saturating_mul(NS_PER_TICK)
+}
+
 /// Ticks from .NET's epoch (0001-01-01T00:00:00Z) to the Unix one (1970-01-01T00:00:00Z).
 ///
 /// `PlaybackStartTimeTicks` is a `DateTime.UtcNow.Ticks`, which counts from the year 1 — not from
@@ -51,6 +59,7 @@ mod tests {
     fn the_measured_runtime_is_eight_thousand_seconds_not_eight_hundred() {
         assert_eq!(to_secs(81_772_160_000), 8177);
         assert_eq!(to_ms(81_772_160_000), 8_177_216);
+        assert_eq!(to_ns(81_772_160_000), 8_177_216_000_000);
     }
 
     #[test]
@@ -66,6 +75,8 @@ mod tests {
         assert_eq!(to_ms(-1), 0);
         assert_eq!(from_ms(-5), 0);
         assert_eq!(from_ms(i64::MAX), i64::MAX);
+        assert_eq!(to_ns(-1), 0);
+        assert_eq!(to_ns(i64::MAX), i64::MAX);
     }
 
     #[test]

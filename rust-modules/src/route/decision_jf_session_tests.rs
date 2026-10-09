@@ -222,6 +222,54 @@ fn an_hls_contract_asks_for_hls_and_keeps_the_masters_own_url() {
     assert_eq!(t["MinSegments"], 1, "{t}");
 }
 
+/// `info` with the media source's `RunTimeTicks` — the measured 2 h 16 min film (`jf/ticks.rs`).
+fn with_runtime(info: String) -> String {
+    info.replacen(r#""Protocol":"File""#, r#""Protocol":"File","RunTimeTicks":81772160000"#, 1)
+}
+
+/// **Regression: a transcode showed no total length.** The progressive conversion cannot carry its
+/// own Segment Duration (Matroska written to a pipe), so the negotiation is the only place the
+/// item's length is known. It rides out on `Negotiated` for a conversion and a direct play alike,
+/// and an answer that does not state it says 0, never a guess.
+#[test]
+fn the_negotiation_carries_the_sources_runtime() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+
+    let converted = transcode_at(with_runtime(video_transcode_info()), 600);
+    assert_eq!(converted.method, crate::catalog::PlayMethod::Transcode);
+    assert_eq!(converted.runtime_ns, 8_177_216_000_000, "the whole film, though the encode starts at 600 s");
+
+    let lb = loopback(with_runtime(playback_info(true, "mkv", HEVC_EAC3, None)));
+    let direct = negotiate_direct(&lb);
+    let _ = lb.finish();
+    assert_eq!(direct.method, crate::catalog::PlayMethod::DirectPlay);
+    assert_eq!(direct.runtime_ns, 8_177_216_000_000);
+
+    assert_eq!(transcode_at(video_transcode_info(), 0).runtime_ns, 0, "no RunTimeTicks, no runtime");
+}
+
+/// One video conversion of the loopback item against `info`, starting `offset_secs` in.
+fn transcode_at(info: String, offset_secs: i64) -> crate::catalog::Negotiated {
+    let lb = loopback(info);
+    let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
+    let rk = jf_rk();
+    let contract = crate::catalog::EncodeContract { no_video_copy: true, ..Default::default() };
+    let spec = transcode_spec(
+        &rk,
+        "jf-runtime",
+        "jf-runtime",
+        "",
+        crate::catalog::TranscodeOffset::from_seconds(offset_secs),
+        2,
+        0,
+        contract,
+    );
+    let n = client.transcode(&spec).playable().expect("the loopback negotiates");
+    let _ = lb.finish();
+    n
+}
+
 /// `info` for a remote Http source whose fetch needs `headers` (`RequiredHttpHeaders`).
 fn remote_info(headers: &str, direct: bool, url: Option<&str>) -> String {
     playback_info(direct, "mkv", HEVC_EAC3, url).replacen(

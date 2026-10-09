@@ -947,6 +947,9 @@ pub(crate) struct Plan {
     /// for a conversion from the start). The landing's resume compares against it before it
     /// replaces the encoder.
     pub encoder_start_secs: i64,
+    /// The item's whole length as the negotiation stated it (`Negotiated::runtime_ns`),
+    /// nanoseconds; `0` when unknown. Installed as `Session::runtime_ns`.
+    pub runtime_ns: i64,
     pub sess: String,
     pub pq_id: String,
     pub pq_item_id: String,
@@ -1332,6 +1335,9 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         ceiling.map_or_else(|| "none".to_string(), |c| format!("{}kbps", c.max_kbps)),
     ));
     let direct = n.method == crate::catalog::PlayMethod::DirectPlay;
+    // The item's length rides the route for both branches: a conversion's progressive stream has
+    // no container duration to read, and a direct play whose header lacks one is no better off.
+    plan.runtime_ns = n.runtime_ns;
     if forced && !direct {
         let _ = client.transcode_stop(&session);
         plan.verdict = Some(PlayVerdict::Forced(ForcedFailure::Unauthorized));

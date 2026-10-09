@@ -201,6 +201,21 @@ fn report_due(d: Due) -> bool {
     d.presented && d.duration_known && !d.seeking && (d.first || d.nudged || d.heartbeat)
 }
 
+/// What the reporter reads off the shared clock when it wakes: the [`Due`] facts and the duration
+/// it would report, ns. `first`, `nudged` and `heartbeat` are the reporter's own.
+fn sample_due(first: bool, nudged: bool, heartbeat: bool) -> (Due, i64) {
+    let dur = SHARED.duration_ns.load(Ordering::Relaxed);
+    let due = Due {
+        first,
+        presented: SHARED.seen_frame.load(Ordering::Relaxed),
+        duration_known: dur > 0,
+        seeking: SHARED.seeking.load(Ordering::Relaxed),
+        nudged,
+        heartbeat,
+    };
+    (due, dur)
+}
+
 /// How often a reporter with something pending (its first report, a nudge waiting out a seek)
 /// looks again.
 const REPORT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
@@ -234,16 +249,12 @@ pub(crate) fn timeline_thread(
             Wake::Nudge => nudged = true,
             Wake::Timeout => {}
         }
-        let dur = SHARED.duration_ns.load(Ordering::Relaxed);
-        let due = report_due(Due {
-            first: last.is_none(),
-            presented: SHARED.seen_frame.load(Ordering::Relaxed),
-            duration_known: dur > 0,
-            seeking: SHARED.seeking.load(Ordering::Relaxed),
+        let (due, dur) = sample_due(
+            last.is_none(),
             nudged,
-            heartbeat: last.is_some_and(|at| at.elapsed() >= interval),
-        });
-        if !due {
+            last.is_some_and(|at| at.elapsed() >= interval),
+        );
+        if !report_due(due) {
             continue;
         }
         let t = SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000;
@@ -291,6 +302,27 @@ mod tests {
         assert!(report_due(Due { nudged: true, ..playing }), "a pause, resume or track change goes now");
         assert!(!report_due(Due { nudged: true, seeking: true, ..playing }), "a seek reports where it lands");
         assert!(!report_due(Due { heartbeat: true, seeking: true, ..playing }));
+    }
+
+    /// **Regression: a transcode sent no `/Sessions/Playing` and no `/Progress` at all.** A live
+    /// progressive conversion has no container duration, so `duration_known` was false for the
+    /// whole playback and the reporter never found a report due. The open now publishes the
+    /// item's runtime from the negotiation, and the reporter reports it.
+    #[test]
+    fn a_transcode_with_no_container_duration_still_reports() {
+        const FILM_NS: i64 = 8_177_216_000_000;
+        let _g = nj_base::testlock::serial();
+        SHARED.reset_session();
+        // What the progressive demuxer's open does for a pipe-written Matroska: no Duration.
+        let _ = crate::ff::publish_open_duration(0, FILM_NS);
+        SHARED.seen_frame.store(true, Ordering::Relaxed);
+        let (first, dur) = sample_due(true, false, false);
+        let (heartbeat, _) = sample_due(false, false, true);
+        SHARED.reset_session();
+
+        assert!(report_due(first), "/Sessions/Playing goes with the first picture: {first:?}");
+        assert!(report_due(heartbeat), "/Progress goes on the heartbeat: {heartbeat:?}");
+        assert_eq!(dur / 1_000_000, 8_177_216, "the reported duration is the film's, in ms");
     }
 
     /// A nudge wakes the reporter of the playback on screen at once; a stop still wins.

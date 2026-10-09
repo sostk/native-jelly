@@ -194,7 +194,11 @@ resumed conversion re-negotiate under a new `PlaySessionId` (web does the same i
   `PlaylistItemId` when the queue has one.
 * When the reporter reports (`player::threads::timeline_thread`): `/Sessions/Playing` as soon as
   the Engine has presented its first picture (`SHARED.seen_frame`) and knows the duration — not
-  after a first 10-second wait. Then a heartbeat every 10 s counted from the last report, and a
+  after a first 10-second wait. A direct play reads the duration from the file and an HLS
+  conversion from its playlist; the progressive Matroska conversion is written to a pipe and
+  carries none, so its open publishes the media source's `RunTimeTicks`, which the negotiation
+  carries on `Negotiated::runtime_ns` and the route on to the demuxer (`ff::open_duration_ns`). It
+  is the whole item's length, also for an encode restarted at an offset. Then a heartbeat every 10 s counted from the last report, and a
   report at once when `player::report_now` is asked: the viewer's pause and resume
   (`lifecycle::set_transport_paused`), a seek (`player::request_seek`; the reporter waits out
   `seeking` and reports where it lands), and an in-place track change
@@ -302,6 +306,8 @@ Automated (host, `make check`; loopback Jellyfin in `route/decision_test_support
 | Replacement reports Progress with the same start | `jf_session_tests::a_replacement_encoder_continues_…` |
 | Replacement names the MediaSourceId | `jf_session_tests::a_replacement_names_the_media_source_…` |
 | Seek replaces and retires the encoder | `quality_recovery_tests::a_transcode_seek_swaps_…` |
+| Source `RunTimeTicks` rides the negotiation and the route | `jf_session_tests::the_negotiation_carries_the_sources_runtime`, `plan_tests::a_conversion_carries_the_items_runtime_onto_the_route` |
+| Progressive conversion's total and reports | `ff::open_duration_tests::*`, `player::threads::tests::a_transcode_with_no_container_duration_still_reports` |
 | Preview conversion ended without a Stopped | `plan_tests::a_preview_never_plays_a_conversion` |
 | Typed refusals, no raw code shown | `plan_tests::a_playback_info_error_code_…`, `every_playback_error_code_is_a_typed_refusal` |
 | Fixed quality / remote Auto bounds | `plan_tests::a_fixed_quality_bounds_…`, `remote_auto_measures_…` |

@@ -1295,10 +1295,13 @@ fn start_bufferfeed_inner(
             // `teardown(true) + start_bufferfeed()` (reload_at / reload_transcode /
             // switch_audio_native), which respawns this thread with the new value.
             let acodec = crate::route::stream_acodec(ps);
+            // The item's whole length from the negotiation, by value for the same reason: the
+            // total the open publishes when the stream itself cannot say (`ff::open_duration_ns`).
+            let runtime_ns = crate::route::runtime_ns(ps);
             let abr = crate::route::hls_abr_control(ps);
             let auto_original = crate::route::auto_original_watch(ps);
             stream_th = nj_base::task::spawn("demux", move || {
-                crate::ff::demux(origin, path, acodec, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(origin, path, acodec, runtime_ns, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 // Nothing will ever fill the AU queues, so there is no session to start. `hs` is

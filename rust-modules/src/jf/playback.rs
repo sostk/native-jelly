@@ -146,6 +146,10 @@ pub struct Negotiated {
     pub subtitle: Option<SubtitleDelivery>,
     pub media_source_id: String,
     pub play_session_id: String,
+    /// The played media source's whole length (`MediaSourceInfo.RunTimeTicks`), nanoseconds; `0`
+    /// when the server did not say. A live progressive conversion is Matroska written to a pipe,
+    /// which cannot carry its own Segment Duration, so this is the only total that playback has.
+    pub runtime_ns: i64,
 }
 
 /// Why the server answered and still offered nothing to play.
@@ -818,6 +822,7 @@ impl Jf<'_> {
             subtitle,
             media_source_id: src.id.clone(),
             play_session_id,
+            runtime_ns: ticks::to_ns(src.run_time_ticks.unwrap_or(0)),
         })
     }
 
