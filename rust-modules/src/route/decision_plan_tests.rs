@@ -347,6 +347,39 @@ fn resume_jf_conversion(start_ns: i64, resume_ns: i64) -> Vec<JfRequest> {
     lb.finish()
 }
 
+/// **Regression: a transcode showed no total length.** The item's runtime from the negotiation is
+/// the only total a progressive conversion has, so the resolve carries it onto the route, where
+/// the Engine start hands it to the demuxer. It is the WHOLE film's, and a resume — which restarts
+/// the encode at `&offset` — does not shorten it.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_carries_the_items_runtime_onto_the_route() {
+    let url = format!(
+        "/videos/{JF_GUID}/stream.mkv?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=VideoCodecNotSupported&PlaySessionId=ps-loopback"
+    );
+    let info = playback_info(false, "mkv", HEVC_EAC3, Some(&url))
+        .replacen(r#""Protocol":"File""#, r#""Protocol":"File","RunTimeTicks":81772160000"#, 1);
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    assert!(nj_net::net::global_init() && crate::curlio::available());
+    restore_quality(Quality::Original);
+    let lb = JfLoopback::start(info, default_user());
+    let rk = jf_rk();
+    let mut env = ResolveEnv::snapshot(&ps, crate::stores::metadata::MetadataStore::default().view(), lb.sid, &rk);
+    env.cached_item = Some(jf_item(lb.sid, eac3_only(), Vec::new()));
+    let plan = build_stream(&rk, &jf_part(), "hevc", "eac3", &env);
+    assert!(!plan.tsession.is_empty(), "the loopback converts: {}", plan.url);
+    assert_eq!(plan.runtime_ns, 8_177_216_000_000);
+    apply_plan(&mut ps, plan, &rk);
+    let installed = crate::route::runtime_ns(&ps);
+    let resumed = crate::player::resume_at(&mut ps, 4_000_000_000_000);
+    let after_resume = crate::route::runtime_ns(&ps);
+    let _ = lb.finish();
+    assert_eq!(installed, 8_177_216_000_000, "the route carries the film's runtime");
+    assert_eq!(resumed, crate::player::ResumeOutcome::Prepared);
+    assert_eq!(after_resume, 8_177_216_000_000, "a resumed encode is still the whole film");
+}
+
 /// A resumed conversion asks the server once. The press knows the resume before the resolve
 /// starts, so the first PlaybackInfo already starts the encoder there, and the landing's resume
 /// finds it in place instead of negotiating a second encoder and ending the first.

@@ -125,6 +125,40 @@ unsafe fn fmt_duration(fmt: *const AVFormatContext) -> i64 {
     *((fmt as *const u8).add(OFF_FMT_DURATION) as *const i64)
 }
 
+/// The total a progressive open publishes, ns, from the container's `duration` (µs, as
+/// [`fmt_duration`] reads it) and the item's runtime from the negotiation (ns, `0` = unknown).
+/// `None` publishes nothing, which leaves a reload's kept total (`reset_session_for_reload`) in
+/// place and a fresh session's honest 0.
+///
+/// **The container wins when it knows.** A direct-played file's header carries the real length
+/// and always has; the HLS cursor publishes its playlist's total on its own path.
+///
+/// **Otherwise the item's runtime.** Jellyfin's default conversion is a live progressive Matroska
+/// over http (`Content-Length: -1`): ffmpeg writes it to a pipe, cannot seek back to fill in
+/// Segment/Duration, and libavformat answers 0 or `AV_NOPTS_VALUE`. With no total the playbar had
+/// no length, the reporter never sent `/Sessions/Playing` or `/Progress`, the stop sent no
+/// `Stopped` (so no resume point), the film could not be marked watched, a scrub had no end cap
+/// and a transcode seek was refused outright. The runtime is the WHOLE item's — never the
+/// remainder of an encode restarted at `&offset` — because the clock is content time: the
+/// display base carries the offset (`engine::resume_at`, `reload_transcode_start`).
+pub(crate) fn open_duration_ns(container_us: i64, runtime_ns: i64) -> Option<i64> {
+    if container_us > 0 {
+        Some(container_us.saturating_mul(1000))
+    } else if runtime_ns > 0 {
+        Some(runtime_ns)
+    } else {
+        None
+    }
+}
+
+/// Publish what [`open_duration_ns`] decides into `SHARED.duration_ns`; the demux thread's one
+/// writer of the progressive total. Returns what it published.
+pub(crate) fn publish_open_duration(container_us: i64, runtime_ns: i64) -> Option<i64> {
+    let ns = open_duration_ns(container_us, runtime_ns)?;
+    SHARED.duration_ns.store(ns, Ordering::Relaxed);
+    Some(ns)
+}
+
 // ---- structs (exact n3.3 field order; 32-bit ARM/AAPCS sizes) ----
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -7729,6 +7763,7 @@ pub(crate) fn demux(
     origin: crate::catalog::Origin,
     path: String,
     acodec: String,
+    runtime_ns: i64,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
     auto_original: Option<crate::route::AutoOriginalWatch>,
     aq: SendPtr<AuQueue>,
@@ -8096,11 +8131,11 @@ pub(crate) fn demux(
                         "ff: AAC → ADTS reframing on (freq_idx={fi} ch={ch})"
                     ));
                 }
-                let dur = fmt_duration(fmt);
-                if dur > 0 {
-                    SHARED
-                        .duration_ns
-                        .store(dur.saturating_mul(1000), Ordering::Relaxed);
+                let container_us = fmt_duration(fmt);
+                let published = publish_open_duration(container_us, runtime_ns);
+                if container_us <= 0 && published.is_some() {
+                    // The `dur_ns=` on the line below is then the server's, not the container's.
+                    crate::player::log("ff: no container duration; the item's runtime stands in");
                 }
                 // The NAME as well as the id, and the name is what anything downstream should grade.
                 // A raw AV_CODEC_ID is an FFmpeg enum, and that enum RENUMBERS between majors — H264
@@ -8651,3 +8686,7 @@ mod image_subtitle_tests;
 #[cfg(test)]
 #[path = "ff_redirect_tests.rs"]
 mod redirect_tests;
+
+#[cfg(test)]
+#[path = "ff_open_duration_tests.rs"]
+mod open_duration_tests;
