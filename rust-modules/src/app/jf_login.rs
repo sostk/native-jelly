@@ -39,8 +39,11 @@ pub(super) fn execute(bridge: &mut super::bridge::Bridge, command: JfAuthCmd) {
 fn adopt(bridge: &mut super::bridge::Bridge, origin: crate::catalog::Origin, signed_in: crate::jf::auth::SignedIn) {
     crate::jf::seat::register_with(&origin, signed_in.seat());
     let stored = Stored::new(&origin, &signed_in);
-    crate::jf::store::set_live(Some(stored.clone()));
-    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&stored));
+    crate::jf::store::set_live(Some(stored));
+    // Persist the whole roster: this sign-in is now the active user, and anyone signed in on this
+    // TV before stays remembered beside it.
+    let roster = crate::jf::store::roster();
+    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
     log(&format!("jf: signed in at {} — installing the server", origin.log_form()));
     bridge.hand_off_jf(ready_creds(&origin, signed_in.token));
 }
