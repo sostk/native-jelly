@@ -289,3 +289,16 @@ being refused (`replay: REFUSED — invalid or incompatible recording`, all thre
 all three were re-recorded with `tools/nativejelly-rec rerecord` against shape
 `10119451143357529556` and replayed SAME in both modes (`tests/replay_fixtures.py`, three
 consecutive runs) with zero difference counters. None of the three drives the player.
+
+The Native Jelly rebrand (`a07eaeb`) edited the three anchors IN PLACE — its rename turned the
+recorded dev-trigger names `plxnative-*` into `nativejelly-*` inside each manifest's hashed initial
+input without re-recording, so `Initial::decode` refused every one (`initial hash mismatch`, the
+host test `committed_replay_initials_remain_canonical_and_hash_bound`). The state shape had also
+moved since (`10119451143357529556` -> `4072208413546603830`). They were observed being refused
+(`replay: REFUSED — invalid or incompatible recording`, all three, both modes), then all three were
+re-recorded with `tools/nativejelly-rec rerecord` against shape `4072208413546603830` and replayed
+SAME in both modes (`tests/replay_fixtures.py`) with zero difference counters. These were recorded
+and replayed on the LINUX simulator (`--features hostsim`, Xvfb); the macOS Simulator CI job is the
+first macOS replay of them. The alphabet's six `PlxNative` interface literals were renamed to the
+catalogue's current `Native Jelly` wording, and `Audio & Subtitles` and `Version`
+(`browse.detail.tracks`, `browse.detail.version`) were added, all source-backed in `locales/en`.

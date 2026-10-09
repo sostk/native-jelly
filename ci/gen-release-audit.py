@@ -83,7 +83,9 @@ DEV_WITNESSES = (
 # `/home/users`, and it is applied per PATH rather than per line so that FFmpeg's single
 # configure blob cannot have one allowed token vouch for a forbidden one beside it.
 HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]+)")
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")
+# `/Users/Me` is Jellyfin's signed-in-user endpoint, not a home directory; see the same allowance
+# and its reason in `ci/check-package.py`.
+ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/Me(?:/|$)")
 
 HOSTNAME = re.compile(rb"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.){1,4}(?:tv|com|org|net|io|dev))\b")
 RUNTIME_PATH = re.compile(rb"(/(?:tmp|media|etc|var|proc|dev)/[A-Za-z0-9_.%/-]{2,60})")

@@ -5817,7 +5817,9 @@ impl PersonOwnerGateFixture {
         # two callers: 42 + 2 = 44. Step L15 moved all 44 behind the `tv` interfaces and the port:
         # 44 - 44 = 0.
         "layers.txt": 0,
-        "libm.txt": 6,  # widgets.rs's existing test helper moved to widgets_test_support.rs
+        # widgets.rs's existing test helper moved to widgets_test_support.rs (6); then
+        # jf/blurhash.rs's BlurHash DCT decode, real float maths for the ambient colours (7).
+        "libm.txt": 7,
         "mutators.txt": 0,
         "nav.txt": 0,
         "sibling-migration.txt": 0,

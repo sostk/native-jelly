@@ -2938,8 +2938,8 @@ mod tests {
     #[test]
     fn an_audio_only_stream_is_blamed_on_whoever_sent_it() {
         use crate::catalog::serverinfo::Subscription as Sub;
-        // transcode on a known-free server: the Pass appears as a parenthetical fact on the
-        // panel, as the capsule flag for the read-out…
+        // transcode on a known-free server: the Pass survives only as the capsule flag for the
+        // read-out…
         let e = error_shape(true, true, Sub::No, None, RuntimeFailure::Unknown);
         assert!(
             e.caption
@@ -2954,7 +2954,9 @@ mod tests {
             "{}",
             e.panel
         );
-        assert!(e.panel.contains("server has no Plex Pass"), "{}", e.panel);
+        // Jellyfin has no subscription tier: the panel's no-Pass variant reads exactly as the
+        // neutral one (`widgets.panel.audio_only_no_pass`), so no Pass words reach the panel.
+        assert!(!e.panel.contains("Plex Pass"), "{}", e.panel);
         assert!(e.no_pass, "the read-out draws the capsule from this flag");
         // …and never as a cause — h264 encoding is free everywhere (audit row 1). The read-out
         // reason carries no Pass words at all: the capsule line states the fact separately.
@@ -3273,8 +3275,8 @@ mod tests {
         );
         assert!(e.no_pass, "so the read-out draws the capsule…");
         assert!(
-            e.panel.contains("server has no Plex Pass"),
-            "…and the panel states the fact: {}",
+            e.panel.contains("server sent audio only") && !e.panel.contains("Plex Pass"),
+            "…and the panel states the audio-only fact, naming no subscription: {}",
             e.panel
         );
 

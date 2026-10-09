@@ -1018,7 +1018,13 @@ HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]
 # The NDK's own location cannot be removed — `--cross-prefix` must be absolute (the wrapper gcc
 # dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
 # identical on every CI runner, which is the reason releases must be BUILT by CI.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")
+#
+# `/Users/Me` is Jellyfin's "the signed-in user" endpoint (`catalog/mod.rs`), not a home
+# directory. Rust string literals are packed into the binary with no separator, so whether it is
+# FOLLOWED by more path-like bytes depends on what the linker happens to place after it: #10's new
+# strings put `/library/sections…` there, and an unchanged literal suddenly read as a Mac home
+# path. Exactly `/Users/Me` then `/` or the end is allowed; `/Users/Megan/…` is still a build path.
+ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/Me(?:/|$)")
 
 # A missing payload directory is a HARD failure, not an empty loop. `check` only ever prints for
 # something it was given, so an absent stage used to print nothing at all here — no ok, no FAIL —
