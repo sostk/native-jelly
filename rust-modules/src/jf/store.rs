@@ -16,6 +16,11 @@
 //! active user's own fields stay at the top level, exactly where a version-1 record kept them,
 //! and the whole list rides beside them under `users` — a field an older build ignores. A
 //! version-1 record reads back as a roster of one.
+//!
+//! **The server survives a sign-out** ([`RecentServer`]): its address, name and id — never a
+//! token or a user — stay behind when the last user signs out, so the sign-in screen can offer
+//! it as *Recent*. Only Delete all local data ([`forget_everything`] + [`erase`]) removes it. A
+//! record holding nothing else carries no top-level sign-in fields, so no build reads it as one.
 use super::auth::SignedIn;
 use super::seat::Seat;
 use crate::catalog::session::Session;
@@ -98,14 +103,39 @@ impl Stored {
     }
 }
 
-/// **Every Jellyfin user this television keeps a sign-in for**, and which one is active.
+/// **The server this television last signed in to**: what names it and reaches it, nothing that
+/// signs anyone in. Kept after a sign-out for the sign-in screen's *Recent* row.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentServer {
+    /// `Origin::base()` of the server.
+    pub server: String,
+    #[serde(default)]
+    pub server_id: String,
+    #[serde(default)]
+    pub server_name: String,
+}
+
+impl RecentServer {
+    fn of(s: &Stored) -> Self {
+        Self { server: s.server.clone(), server_id: s.server_id.clone(), server_name: s.server_name.clone() }
+    }
+
+    pub fn origin(&self) -> Option<Origin> {
+        Origin::parse(&self.server)
+    }
+}
+
+/// **Every Jellyfin user this television keeps a sign-in for**, which one is active, and the
+/// server signed in to last.
 ///
 /// Ordered most recently signed in first; `active` indexes `users` and is `None` while nobody is
 /// signed in (a roster of users kept for the who's-watching picker, with none of them chosen yet).
+/// `recent` outlives the users: signing everyone out leaves it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Roster {
     pub users: Vec<Stored>,
     pub active: Option<usize>,
+    pub recent: Option<RecentServer>,
 }
 
 impl Roster {
@@ -118,6 +148,7 @@ impl Roster {
     /// token) and moves to the front. Past [`MAX_USERS`] the user at the back is dropped.
     pub fn remember(&mut self, s: Stored) {
         self.users.retain(|u| !u.same_user(&s));
+        self.recent = Some(RecentServer::of(&s));
         self.users.insert(0, s);
         self.users.truncate(MAX_USERS);
         self.active = Some(0);
@@ -148,22 +179,36 @@ impl Roster {
         true
     }
 
+    /// Sign every user out and keep only the server signed in to last.
+    pub fn sign_out_all(&mut self) {
+        self.users.clear();
+        self.active = None;
+    }
+
     /// The record this roster is kept as: the active user's fields at the top (where a version-1
-    /// reader looks), the whole list under `users`. `None` for an empty roster — nothing to keep.
+    /// reader looks), the whole list under `users`, the last server under `recent_server`. With no
+    /// users it is `version` and `recent_server` alone — no field an older build reads as a
+    /// sign-in. `None` when there is nothing at all to keep.
     fn to_value(&self) -> Option<serde_json::Value> {
+        let recent = self.recent.as_ref().map(serde_json::to_value).transpose().ok()?;
         if self.users.is_empty() {
-            return None;
+            return Some(serde_json::json!({ "version": VERSION, "recent_server": recent? }));
         }
         let top = self.current().cloned().unwrap_or_default();
         let mut value = serde_json::to_value(Stored { version: VERSION, ..top }).ok()?;
         let users: Vec<Stored> = self.users.iter().map(|u| Stored { version: VERSION, ..u.clone() }).collect();
-        value.as_object_mut()?.insert("users".into(), serde_json::to_value(users).ok()?);
+        let object = value.as_object_mut()?;
+        object.insert("users".into(), serde_json::to_value(users).ok()?);
+        if let Some(recent) = recent {
+            object.insert("recent_server".into(), recent);
+        }
         Some(value)
     }
 
     /// Read a kept record of either version. A version-1 record is a roster of one, active; in a
     /// version-2 record the active user is the one whose fields sit at the top. Entries without a
-    /// token or a server are not anyone and are dropped.
+    /// token or a server are not anyone and are dropped. A record without `recent_server` (one
+    /// written before it existed) takes the active user's server, else the newest user's.
     fn from_value(value: &serde_json::Value) -> Option<Roster> {
         let top = serde_json::from_value::<Stored>(value.clone()).ok();
         let listed = value
@@ -173,27 +218,43 @@ impl Roster {
         let mut users: Vec<Stored> = if listed.is_empty() { top.iter().cloned().collect() } else { listed };
         users.retain(Stored::usable);
         users.truncate(MAX_USERS);
-        if users.is_empty() {
+        let active = top.filter(Stored::usable).and_then(|t| users.iter().position(|u| u.same_user(&t)));
+        let recent = value
+            .get("recent_server")
+            .and_then(|r| serde_json::from_value::<RecentServer>(r.clone()).ok())
+            .filter(|r| r.origin().is_some())
+            .or_else(|| active.or(if users.is_empty() { None } else { Some(0) }).map(|i| RecentServer::of(&users[i])));
+        if users.is_empty() && recent.is_none() {
             return None;
         }
-        let active = top.filter(Stored::usable).and_then(|t| users.iter().position(|u| u.same_user(&t)));
-        Some(Roster { users, active })
+        Some(Roster { users, active, recent })
     }
 }
 
-static ROSTER: Mutex<Roster> = Mutex::new(Roster { users: Vec::new(), active: None });
+static ROSTER: Mutex<Roster> = Mutex::new(Roster { users: Vec::new(), active: None, recent: None });
 
 fn with_roster<T>(f: impl FnOnce(&mut Roster) -> T) -> T {
     f(&mut ROSTER.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// Make `s` the sign-in this process runs on, keeping it in the roster (`None`: nobody is signed
-/// in, and no user is kept). Memory only.
+/// in and no user is kept; the server signed in to last stays, for *Recent*). Memory only.
 pub fn set_live(s: Option<Stored>) {
     with_roster(|r| match s {
         Some(s) => r.remember(s),
-        None => *r = Roster::default(),
+        None => r.sign_out_all(),
     });
+}
+
+/// Forget every user AND the server signed in to last — Delete all local data. Memory only; the
+/// caller removes the stored copies ([`erase`]).
+pub fn forget_everything() {
+    with_roster(|r| *r = Roster::default());
+}
+
+/// The server signed in to last, kept through a sign-out for the sign-in screen's *Recent* row.
+pub fn recent_server() -> Option<RecentServer> {
+    with_roster(|r| r.recent.clone())
 }
 
 /// Keep `s` beside the users already kept and make it the active one. Memory only.
@@ -239,8 +300,8 @@ pub fn load(session: &Session) -> Option<Stored> {
     active
 }
 
-/// Keep `roster` in the session record, else in the first file candidate that takes it; an empty
-/// roster removes every copy ([`erase`]). `false` when neither held it: the sign-ins still hold
+/// Keep `roster` in the session record, else in the first file candidate that takes it; a roster
+/// with nothing to keep, not even a recent server, removes every copy ([`erase`]). `false` when neither held it: the sign-ins still hold
 /// for this run, they just will not survive a restart.
 pub fn persist(roster: &Roster) -> bool {
     let Some(value) = roster.to_value() else {
@@ -457,7 +518,10 @@ mod tests {
         assert_eq!(r.users.len(), 1);
         assert!(r.activate("http://10.0.0.2:8096", "sam"));
         assert!(r.forget("http://10.0.0.2:8096", "sam"));
-        assert!(r.to_value().is_none(), "an empty roster keeps nothing");
+        let value = r.to_value().unwrap();
+        assert!(value.get("users").is_none() && value.get("token").is_none(), "no user is kept: {value}");
+        assert_eq!(value["recent_server"]["server"], "http://10.0.0.2:8096", "only the server is");
+        assert!(Roster::default().to_value().is_none(), "an empty roster keeps nothing");
     }
 
     /// A kept user with no token is not anyone, in either version of the record.
@@ -472,11 +536,12 @@ mod tests {
     }
 
     /// The live roster: a sign-in is kept beside the others, `set_live(None)` (today's sign-out)
-    /// still forgets everyone.
+    /// still forgets every user — but not the server, which only `forget_everything` drops.
     #[test]
     fn the_live_roster_keeps_every_sign_in_until_a_sign_out() {
         let _g = nj_base::testlock::serial();
-        set_live(None);
+        forget_everything();
+        assert!(recent_server().is_none());
         set_live(Some(user("alex", "ta")));
         remember(user("sam", "ts"));
         assert_eq!(current().unwrap().user_id, "sam");
@@ -487,6 +552,36 @@ mod tests {
         assert_eq!(roster().users.len(), 1);
         set_live(None);
         assert!(current().is_none() && roster().users.is_empty());
+        assert_eq!(recent_server().unwrap().server, "http://10.0.0.2:8096");
+        forget_everything();
+        assert!(recent_server().is_none());
+    }
+
+    /// After everyone signs out the record keeps the server and nothing that signs anyone in: no
+    /// token, no user, and no top-level field an older build would read as a sign-in.
+    #[test]
+    fn signing_everyone_out_keeps_only_the_server() {
+        let mut r = Roster::default();
+        r.remember(user("alex", "ta"));
+        r.remember(user("sam", "ts"));
+        r.sign_out_all();
+        let value = r.to_value().unwrap();
+        let text = value.to_string();
+        assert!(!text.contains("\"ta\"") && !text.contains("\"ts\"") && !text.contains("alex"), "{text}");
+        assert!(serde_json::from_value::<Stored>(value.clone()).is_err(), "an older build sees no sign-in");
+        let back = Roster::from_value(&value).unwrap();
+        assert!(back.users.is_empty() && back.current().is_none());
+        assert_eq!(back.recent, Some(RecentServer {
+            server: "http://10.0.0.2:8096".into(), server_id: "AB-CD".into(), server_name: "Home".into() }));
+    }
+
+    /// A record written before `recent_server` existed still offers its server as *Recent*.
+    #[test]
+    fn an_earlier_record_offers_its_server_as_recent() {
+        let v1 = serde_json::json!({"version":1,"server":"http://10.0.0.2:8096","token":"tok","user_id":"u1",
+            "server_name":"Home"});
+        let r = Roster::from_value(&v1).unwrap();
+        assert_eq!(r.recent.unwrap().server_name, "Home");
     }
 
     #[test]
