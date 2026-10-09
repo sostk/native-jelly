@@ -36,6 +36,9 @@ struct PlaybackRequest {
     /// Background hero preview. No PlayQueue, no timeline, no scrobble, resume at 0, and the
     /// caller must not push the player route.
     preview: bool,
+    /// The audio/subtitle the viewer chose on the Detail page before pressing Play
+    /// ([`request_play_with`]); `None` for every other way into playback.
+    tracks: Option<crate::metadata::TrackChoice>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5900,6 +5903,7 @@ impl ResolveEnv {
             audio_sid: cur_audio_sid(ps),
             sub_sid: cur_sub_sid(ps),
             subtitle_override: None,
+            audio_explicit: false,
             cached_item: meta.cached_playing(sid, rk, ""),
             quality: quality(),
             direct_play_mode: direct_play_mode(),
@@ -5938,10 +5942,19 @@ fn playback_preview_with_capability(
         None => d.dovi.presentation_now(vcodec.eq_ignore_ascii_case("hevc")),
     };
     let mode = direct_play_mode();
+    // An audio track the viewer chose on this page is the only one Play may carry
+    // (`ResolveEnv::audio_explicit`), so the answer is about that track alone.
+    let chosen: Vec<crate::metadata::Stream> = d
+        .tracks
+        .audio
+        .and_then(|id| d.audio.iter().find(|a| a.id == id).cloned())
+        .into_iter()
+        .collect();
+    let audio = if chosen.is_empty() { &d.audio[..] } else { &chosen[..] };
     if mode == DirectPlayMode::Forced {
         return (!part.is_empty() && part_is_streamable(part)
             && video_feed_supported(vcodec, presentation)
-            && d.audio.iter().any(|a| audio_direct_plays(mode, &a.codec, a.channels)))
+            && audio.iter().any(|a| audio_direct_plays(mode, &a.codec, a.channels)))
             .then_some(Preview::DirectPlay);
     }
     let p = playback_preview_of(
@@ -5950,7 +5963,7 @@ fn playback_preview_with_capability(
         d.width,
         d.height,
         presentation,
-        &d.audio,
+        audio,
     )?;
     // The user's quality ceiling is the LAST gate `build_stream` applies, so it is the last one
     // here too — and it can only ever downgrade, never promote. Without this the facts row would
@@ -6111,6 +6124,27 @@ pub(crate) fn request_play(
     ctx: &str,
     resume_ns: i64,
 ) -> bool {
+    request_play_with(ps, meta, sid, rk, part, vcodec, acodec, title, ctx, resume_ns, None)
+}
+
+/// [`request_play`] starting on the audio/subtitle the viewer chose before pressing Play — the
+/// Detail page's track chooser (`metadata::TrackChoice`). An unset half follows the automatic pick.
+/// A chosen audio track the television cannot decode is CONVERTED, not swapped for a sibling
+/// (`ResolveEnv::audio_explicit`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn request_play_with(
+    ps: &mut PlaybackSession,
+    meta: &mut crate::stores::metadata::MetadataStore,
+    sid: ServerId,
+    rk: &str,
+    part: &str,
+    vcodec: &str,
+    acodec: &str,
+    title: &str,
+    ctx: &str,
+    resume_ns: i64,
+    tracks: Option<crate::metadata::TrackChoice>,
+) -> bool {
     request_play_inner(
         ps,
         meta,
@@ -6123,6 +6157,7 @@ pub(crate) fn request_play(
             title: title.to_owned(),
             ctx: ctx.to_owned(),
             preview: false,
+            tracks: tracks.filter(|t| !t.is_unset()),
         },
         resume_ns,
         None,
@@ -6155,6 +6190,7 @@ pub(crate) fn request_preview(
             title: title.to_owned(),
             ctx: crate::metadata::TRAILER_CONTEXT.to_owned(),
             preview: true,
+            tracks: None,
         },
         0,
         None,
@@ -6260,6 +6296,27 @@ fn request_play_inner(
         env.audio_sid = retry.audio_sid;
         env.sub_sid = retry.sub_sid;
         env.subtitle_override = Some(retry.sub_sid);
+    }
+    // The viewer's pre-play choice. A retry already carries the selection the first attempt
+    // installed (which is this choice), so it applies only to a fresh request.
+    if let (None, Some(choice)) = (retry, request.tracks) {
+        if let Some(audio) = choice.audio {
+            env.audio_sid = audio;
+            env.audio_explicit = true;
+        }
+        if let Some(subtitle) = choice.subtitle {
+            env.sub_sid = subtitle;
+            env.subtitle_override = Some(subtitle);
+        }
+        crate::player::log(&format!(
+            "route: viewer chose before play audio={} subtitle={}",
+            choice.audio.map_or_else(|| "auto".to_string(), |a| a.to_string()),
+            match choice.subtitle {
+                None => "auto".to_string(),
+                Some(0) => "off".to_string(),
+                Some(s) => s.to_string(),
+            },
+        ));
     }
     let gen = PLAY_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     if resume_ns > 0 {
@@ -6478,6 +6535,19 @@ fn retry_context_with(ps: &PlaybackSession, resume_ns: i64, direct_play: Option<
 /// (`app::playback::movie_ctx`) because the runtime string is `ui::fmt`'s and `route` sits below
 /// `ui`.
 pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, m: &PmsMovie, ctx: &str, resume_ns: i64) -> bool {
+    request_play_movie_with(ps, meta, m, ctx, resume_ns, None)
+}
+
+/// [`request_play_movie`] starting on the Detail page's pre-play track choice
+/// ([`request_play_with`]).
+pub(crate) fn request_play_movie_with(
+    ps: &mut PlaybackSession,
+    meta: &mut crate::stores::metadata::MetadataStore,
+    m: &PmsMovie,
+    ctx: &str,
+    resume_ns: i64,
+    tracks: Option<crate::metadata::TrackChoice>,
+) -> bool {
     if m.part.is_empty() {
         return false;
     }
@@ -6491,7 +6561,7 @@ pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::sto
     //
     // `surface_sid()` stays as the fallback for a row with no server on it: rows built by host
     // tests, and any row parsed before a registry existed, carry `UNSET`.
-    request_play(
+    request_play_with(
         ps,
         meta,
         item_sid(m.sid),
@@ -6502,6 +6572,7 @@ pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::sto
         &m.title,
         ctx,
         resume_ns,
+        tracks,
     )
 }
 
