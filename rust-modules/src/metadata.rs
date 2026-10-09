@@ -1558,6 +1558,38 @@ pub(crate) struct Detail {
     /// so a recorded `Detail` from before the field still round-trips canonically.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) versions: Vec<Version>,
+    /// The viewer's pre-play audio/subtitle choice for the version [`Self::part`] names
+    /// ([`Self::select_tracks`]); unset means Play follows the automatic pick. Kept off the wire
+    /// when unset, like `versions`, so a recording from before the field still round-trips.
+    #[serde(default, skip_serializing_if = "TrackChoice::is_unset")]
+    pub(crate) tracks: TrackChoice,
+}
+
+/// **The audio and subtitle a viewer chose on the Detail page before pressing Play.** Each half is
+/// `None` while the viewer has not chosen it, which leaves that half to the automatic pick (the
+/// user's Jellyfin preferences and the file's flags, `route::build_stream`). The ids are
+/// [`Stream::id`]s of ONE version — Jellyfin numbers streams per media source — so a version
+/// change clears the choice ([`Detail::select_version`]).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TrackChoice {
+    /// The audio track to play (`> 0`).
+    pub(crate) audio: Option<i64>,
+    /// `Some(0)` is an explicit Off; `Some(id)` a subtitle track.
+    pub(crate) subtitle: Option<i64>,
+}
+
+impl TrackChoice {
+    pub(crate) fn is_unset(&self) -> bool {
+        self.audio.is_none() && self.subtitle.is_none()
+    }
+
+    /// The choice with every id `d` does not list dropped. PURE.
+    pub(crate) fn valid_for(self, audio: &[Stream], subs: &[Stream]) -> TrackChoice {
+        TrackChoice {
+            audio: self.audio.filter(|&id| id > 0 && audio.iter().any(|s| s.id == id)),
+            subtitle: self.subtitle.filter(|&id| id == 0 || (id > 0 && subs.iter().any(|s| s.id == id))),
+        }
+    }
 }
 
 /// One version of a leaf: the server's name for it and everything that differs between versions.
@@ -1652,6 +1684,23 @@ impl Detail {
         self.vcodec = f.vcodec.clone();
         self.acodec = f.acodec.clone();
         self.apply_technicals(&f);
+        // The ids named another version's streams.
+        self.tracks = TrackChoice::default();
+        true
+    }
+
+    /// Make `choice` the tracks Play starts on, for the version whose part is `part`. `false` when
+    /// the page now describes another version (a stale report) or nothing changed. Ids the version
+    /// does not list are dropped rather than stored.
+    pub(crate) fn select_tracks(&mut self, part: &str, choice: TrackChoice) -> bool {
+        if self.part != part {
+            return false;
+        }
+        let next = choice.valid_for(&self.audio, &self.subs);
+        if next == self.tracks {
+            return false;
+        }
+        self.tracks = next;
         true
     }
 
@@ -1671,6 +1720,13 @@ impl Detail {
     /// Detail's seven layout reads asked before the page's own item had landed.
     pub(crate) fn has_own_file(&self) -> bool {
         !self.part.is_empty()
+    }
+
+    /// **Is there a track choice to make before Play?** — a file of its own ([`Self::has_own_file`],
+    /// so never a show container, whose lists are borrowed from an episode), and more than one
+    /// audio track or any subtitle. The rule behind the Detail hero's *Audio & Subtitles* pill.
+    pub(crate) fn has_track_choice(&self) -> bool {
+        self.has_own_file() && (self.audio.len() > 1 || !self.subs.is_empty())
     }
 
     /// The extras row whose rating key is `rk`, if this detail carries it.
@@ -2139,6 +2195,7 @@ fn fetch_detail(sid: crate::catalog::ServerId, rk: &str) -> Option<(Detail, Stri
         } else {
             Vec::new()
         },
+        tracks: TrackChoice::default(),
     };
     // audio/subtitle streams (movies carry Media/Part/Stream; a show does not — its
     // episodes do, so load_detail backfills a show's streams from its first episode).
@@ -3547,6 +3604,11 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
             .as_mut()
             .filter(|d| crate::catalog::same_item((d.sid, &d.rk), (sid, &rk)))
             .is_some_and(|d| d.select_version(&part)),
+        MetadataCmd::SelectTracks { sid, rk, part, choice } => state
+            .current
+            .as_mut()
+            .filter(|d| crate::catalog::same_item((d.sid, &d.rk), (sid, &rk)))
+            .is_some_and(|d| d.select_tracks(&part, choice)),
         MetadataCmd::InstallPlaying(p) => {
             install_playing(state, p);
             true
@@ -3641,6 +3703,9 @@ fn install_landed_detail(state: &mut MetadataState, adapter: &std::sync::Arc<Met
     // viewer chose, while the server still lists it.
     if let Some(held) = state.current.as_ref().filter(|c| crate::catalog::same_item((c.sid, &c.rk), (d.sid, &d.rk))) {
         d.select_version(&held.part);
+        // …and the tracks chosen for it, while that version still lists them.
+        let part = d.part.clone();
+        d.select_tracks(&part, held.tracks);
     }
     state.current = Some(d);
     // if this load is a playing leaf (episode/movie), refresh the Info card's descriptor from it

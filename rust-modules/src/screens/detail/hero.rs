@@ -41,6 +41,7 @@ pub(crate) const ELEM_MARK_WATCHED: u32 = 3;
 pub(crate) const ELEM_MARK_UNWATCHED: u32 = 4;
 pub(crate) const ELEM_TRAILER: u32 = 5;
 pub(crate) const ELEM_VERSION: u32 = 6;
+pub(crate) const ELEM_TRACKS: u32 = 7;
 
 /// The hero's one focus group. Local to this screen — nothing outside `screens::detail` ever names
 /// it — so, like `screens::profiles`'s `ROSTER_GROUP`/`FOOTER_GROUP`, any small integer would do;
@@ -78,6 +79,7 @@ const HERO_ICON_GAP: f32 = 12.0;
 
 pub(crate) fn alt_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_also_available_c() }
 pub(crate) fn version_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_version_c() }
+pub(crate) fn tracks_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_tracks_c() }
 
 fn mark_watched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_watched_c() }
 fn mark_unwatched_label() -> &'static CStr { nj_platform::i18n::msg::browse_detail_mark_unwatched_c() }
@@ -98,6 +100,9 @@ pub(crate) enum HeroCtl {
     Trailer,
     /// the *Version* pill, present only while the item has more than one version
     Version,
+    /// the *Audio & Subtitles* pill, present only while the leaf has a track choice to make
+    /// (`Detail::has_track_choice`)
+    Tracks,
     /// the *Also available* pill, present only while a second pinned source holds this item
     Alt,
     /// the ✓ face of the watched TOGGLE — worn while the item is not watched (part-watched
@@ -115,6 +120,7 @@ impl HeroCtl {
             HeroCtl::Restart => ELEM_RESTART,
             HeroCtl::Trailer => ELEM_TRAILER,
             HeroCtl::Version => ELEM_VERSION,
+            HeroCtl::Tracks => ELEM_TRACKS,
             HeroCtl::Alt => ELEM_ALT,
             HeroCtl::MarkWatched => ELEM_MARK_WATCHED,
             HeroCtl::MarkUnwatched => ELEM_MARK_UNWATCHED,
@@ -129,6 +135,7 @@ impl HeroCtl {
             ELEM_RESTART => Some(HeroCtl::Restart),
             ELEM_TRAILER => Some(HeroCtl::Trailer),
             ELEM_VERSION => Some(HeroCtl::Version),
+            ELEM_TRACKS => Some(HeroCtl::Tracks),
             ELEM_ALT => Some(HeroCtl::Alt),
             ELEM_MARK_WATCHED => Some(HeroCtl::MarkWatched),
             ELEM_MARK_UNWATCHED => Some(HeroCtl::MarkUnwatched),
@@ -149,15 +156,17 @@ pub(crate) struct HeroSet {
     pub(crate) restart: bool,
     pub(crate) trailer: bool,
     pub(crate) version: bool,
+    /// the *Audio & Subtitles* pill
+    pub(crate) tracks: bool,
     pub(crate) alt: bool,
     pub(crate) mark: PosterMark,
 }
 
-/// The row's controls, in drawn order, for a given set. A fixed 6-slot array (Play + Restart +
-/// Trailer + Version + Alt + one watch face is the widest the row ever gets) plus a live count, so
-/// no per-frame allocation.
-pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 6], usize) {
-    let mut v = [HeroCtl::Play; 6];
+/// The row's controls, in drawn order, for a given set. A fixed 7-slot array (Play + Restart +
+/// Trailer + Version + Audio & Subtitles + Alt + one watch face is the widest the row ever gets)
+/// plus a live count, so no per-frame allocation.
+pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 7], usize) {
+    let mut v = [HeroCtl::Play; 7];
     let mut n = 1;
     if set.restart {
         v[n] = HeroCtl::Restart;
@@ -169,6 +178,10 @@ pub(crate) fn hero_ctls(set: HeroSet) -> ([HeroCtl; 6], usize) {
     }
     if set.version {
         v[n] = HeroCtl::Version;
+        n += 1;
+    }
+    if set.tracks {
+        v[n] = HeroCtl::Tracks;
         n += 1;
     }
     if set.alt {
@@ -213,12 +226,12 @@ pub(crate) fn focusable(ctl: HeroCtl, full_trailer: bool) -> bool {
 /// presentation mode. Every call site that enumerates the row for focus/hit-testing extent must go
 /// through this rather than `hero_ctls` directly, or the two can disagree about which controls
 /// exist right now.
-pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 6], usize) {
+pub(crate) fn visible_ctls(set: HeroSet, full_trailer: bool) -> ([HeroCtl; 7], usize) {
     let (all, n) = hero_ctls(set);
     if !full_trailer {
         return (all, n);
     }
-    let mut v = [HeroCtl::Play; 6];
+    let mut v = [HeroCtl::Play; 7];
     let mut count = 0;
     for &c in &all[..n] {
         if focusable(c, full_trailer) {
@@ -378,12 +391,17 @@ pub(crate) fn version_pill_w(measure: &dyn Measure) -> f32 {
     pill_w(measure, version_label(), theme::size::BODY, false, true)
 }
 
+pub(crate) fn tracks_pill_w(measure: &dyn Measure) -> f32 {
+    pill_w(measure, tracks_label(), theme::size::BODY, false, true)
+}
+
 /// Every measured width the row's accumulation needs, as one value — ported verbatim from
 /// `ui/detail.rs::HeroWidths`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HeroWidths {
     pub(crate) pill: f32,
     pub(crate) version: f32,
+    pub(crate) tracks: f32,
     pub(crate) alt: f32,
     /// the three discs, in [`disc_verb`]'s slot order, each already unfurled
     pub(crate) disc: [f32; 3],
@@ -399,6 +417,7 @@ pub(crate) fn hero_btn_rect_at(set: HeroSet, i: usize, y: f32, cw: HeroWidths) -
         w = match c {
             HeroCtl::Play => cw.pill,
             HeroCtl::Version => cw.version,
+            HeroCtl::Tracks => cw.tracks,
             HeroCtl::Alt => cw.alt,
             HeroCtl::Restart => cw.disc[0],
             HeroCtl::Trailer => cw.disc[1],
@@ -432,16 +451,19 @@ pub(crate) fn disc_caps(
             label_w[slot] = measure.width(label, theme::size::BODY, true);
         }
     }
-    disc_caps_at(
+    disc_caps_with(
         set,
         hero_pill_w(measure, set.restart),
         alt_pill_w(measure),
         version_pill_w(measure),
+        tracks_pill_w(measure),
         unfurl,
         label_w,
     )
 }
 
+/// [`disc_caps_with`] for a row without the *Audio & Subtitles* pill.
+#[cfg(test)]
 pub(super) fn disc_caps_at(
     set: HeroSet,
     pill: f32,
@@ -450,10 +472,23 @@ pub(super) fn disc_caps_at(
     unfurl: [f32; 3],
     label_w: [f32; 3],
 ) -> [f32; 3] {
+    disc_caps_with(set, pill, alt, version, 0.0, unfurl, label_w)
+}
+
+pub(super) fn disc_caps_with(
+    set: HeroSet,
+    pill: f32,
+    alt: f32,
+    version: f32,
+    tracks: f32,
+    unfurl: [f32; 3],
+    label_w: [f32; 3],
+) -> [f32; 3] {
     let (_, n) = hero_ctls(set);
     let closed = HeroWidths {
         pill,
         version,
+        tracks,
         alt,
         disc: [CD; 3],
     };
@@ -474,6 +509,7 @@ pub(super) fn disc_caps_at(
         HeroWidths {
             pill,
             version,
+            tracks,
             alt,
             disc: open,
         },
@@ -497,6 +533,7 @@ pub(crate) fn hero_widths(
     HeroWidths {
         pill: hero_pill_w(measure, has_restart),
         version: version_pill_w(measure),
+        tracks: tracks_pill_w(measure),
         alt: alt_pill_w(measure),
         disc: disc_caps(measure, set, unfurl, named_show),
     }
@@ -868,6 +905,7 @@ mod tests {
             restart,
             trailer,
             version: false,
+            tracks: false,
             alt,
             mark,
         }
@@ -1051,6 +1089,7 @@ mod tests {
         let cw = HeroWidths {
             pill: 200.0,
             version: 0.0,
+            tracks: 0.0,
             alt: 260.0,
             disc: [CD, CD, CD],
         };
@@ -1280,6 +1319,7 @@ mod tests {
             restart: true,
             trailer: false,
             version: false,
+            tracks: false,
             alt: false,
             mark: PosterMark::Watched,
         };
@@ -1296,6 +1336,7 @@ mod tests {
             restart: false,
             trailer: false,
             version: false,
+            tracks: false,
             alt: false,
             mark: PosterMark::None,
         };
@@ -1308,26 +1349,34 @@ mod tests {
     }
 
     #[test]
+    /// The row carries no track INFORMATION control (that lives in the About footer's Languages
+    /// column), and its one track control — the *Audio & Subtitles* pill — appears only while the
+    /// item offers a track choice.
     fn the_hero_row_carries_no_track_information_disc() {
         for alt in [false, true] {
             for trailer in [false, true] {
-                let set = HeroSet {
-                    restart: true,
-                    trailer,
-                    version: false,
-                    alt,
-                    mark: PosterMark::InProgress,
-                };
-                let (controls, n) = hero_ctls(set);
-                assert!(controls[..n].iter().all(|ctl| matches!(
-                    ctl,
-                    HeroCtl::Play
-                        | HeroCtl::Restart
-                        | HeroCtl::Trailer
-                        | HeroCtl::Alt
-                        | HeroCtl::MarkWatched
-                        | HeroCtl::MarkUnwatched
-                )));
+                for tracks in [false, true] {
+                    let set = HeroSet {
+                        restart: true,
+                        trailer,
+                        version: false,
+                        tracks,
+                        alt,
+                        mark: PosterMark::InProgress,
+                    };
+                    let (controls, n) = hero_ctls(set);
+                    assert!(controls[..n].iter().all(|ctl| matches!(
+                        ctl,
+                        HeroCtl::Play
+                            | HeroCtl::Restart
+                            | HeroCtl::Trailer
+                            | HeroCtl::Tracks
+                            | HeroCtl::Alt
+                            | HeroCtl::MarkWatched
+                            | HeroCtl::MarkUnwatched
+                    )));
+                    assert_eq!(controls[..n].contains(&HeroCtl::Tracks), tracks);
+                }
             }
         }
     }
@@ -1436,6 +1485,7 @@ mod tests {
             restart: false,
             trailer: false,
             version: false,
+            tracks: false,
             alt: false,
             mark: PosterMark::None,
         };
@@ -1443,6 +1493,7 @@ mod tests {
             restart: true,
             trailer: false,
             version: false,
+            tracks: false,
             alt: true,
             mark: PosterMark::None,
         };
@@ -1457,12 +1508,14 @@ mod tests {
             restart: true,
             trailer: false,
             version: false,
+            tracks: false,
             alt: true,
             mark: PosterMark::None,
         };
         let widths = HeroWidths {
             pill: 210.0,
             version: 0.0,
+            tracks: 0.0,
             alt: 300.0,
             disc: [90.0, 120.0, 120.0],
         };
@@ -1513,6 +1566,7 @@ mod tests {
                                         HeroWidths {
                                             pill: PW + 62.0,
                                             version: 0.0,
+                                            tracks: 0.0,
                                             alt: 340.0,
                                             disc,
                                         },
@@ -1536,6 +1590,7 @@ mod tests {
             restart: true,
             trailer: true,
             version: false,
+            tracks: false,
             alt: true,
             mark: PosterMark::Watched,
         };
@@ -1548,6 +1603,7 @@ mod tests {
             HeroWidths {
                 pill: hero_pill_w(&measure, true),
                 version: 0.0,
+                tracks: 0.0,
                 alt: alt_pill_w(&measure),
                 disc: caps,
             },
@@ -1561,6 +1617,7 @@ mod tests {
             restart: false,
             trailer: true,
             version: false,
+            tracks: false,
             alt: false,
             mark: PosterMark::Watched,
         };
@@ -1588,6 +1645,7 @@ mod tests {
             restart: true,
             trailer: true,
             version: false,
+            tracks: false,
             alt: true,
             mark: PosterMark::Watched,
         };
@@ -1628,6 +1686,7 @@ mod tests {
             restart: true,
             trailer: true,
             version: false,
+            tracks: false,
             alt: true,
             mark: PosterMark::InProgress,
         };
@@ -1639,6 +1698,7 @@ mod tests {
             HeroWidths {
                 pill: PW + 62.0,
                 version: 0.0,
+                tracks: 0.0,
                 alt: 340.0,
                 disc: [CD; 3],
             },

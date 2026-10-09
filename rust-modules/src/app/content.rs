@@ -37,6 +37,8 @@ struct HeldFeature {
     /// item-menu-initiated play, which never carried one — see [`hold_feature`].
     ret: Option<ReturnState<u32, PageMemory>>,
     hud_ms: u32,
+    /// The Detail page's pre-play track choice, carried through the hold.
+    tracks: Option<crate::metadata::TrackChoice>,
 }
 
 std::thread_local! {
@@ -109,11 +111,22 @@ pub(super) fn hold_feature(
     resume_ns: i64,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
+    hold_feature_with(play, resume_ns, ret, None);
+}
+
+/// [`hold_feature`] carrying the Detail page's pre-play track choice.
+fn hold_feature_with(
+    play: crate::screens::registry::PlayIntent,
+    resume_ns: i64,
+    ret: Option<ReturnState<u32, PageMemory>>,
+    tracks: Option<crate::metadata::TrackChoice>,
+) {
     HELD_FEATURE.with(|slot| {
         *slot.borrow_mut() = Some(HeldFeature {
             play,
             resume_ns,
             ret,
+            tracks,
             hud_ms: if crate::dev::scenarios::detailplay_forces_headless_hud() {
                 HUD_HEADLESS_MS
             } else {
@@ -140,12 +153,23 @@ pub(super) fn request_play_intent(
     play: &crate::screens::registry::PlayIntent,
     resume_ns: i64,
 ) -> bool {
+    request_play_intent_with(session, meta, play, resume_ns, None)
+}
+
+/// [`request_play_intent`] starting on the Detail page's pre-play track choice.
+fn request_play_intent_with(
+    session: &mut crate::route::PlaybackSession,
+    meta: &mut crate::stores::metadata::MetadataStore,
+    play: &crate::screens::registry::PlayIntent,
+    resume_ns: i64,
+    tracks: Option<crate::metadata::TrackChoice>,
+) -> bool {
     match play {
         crate::screens::registry::PlayIntent::Item {
             sid, rk, part, vcodec, acodec, title, context,
         } => {
-            let ok = crate::route::request_play(
-                session, meta, *sid, rk, part, vcodec, acodec, title, context, resume_ns,
+            let ok = crate::route::request_play_with(
+                session, meta, *sid, rk, part, vcodec, acodec, title, context, resume_ns, tracks,
             );
             if ok {
                 note_extra_now_playing(meta, *sid, rk, context);
@@ -153,7 +177,7 @@ pub(super) fn request_play_intent(
             ok
         }
         crate::screens::registry::PlayIntent::Movie(m) =>
-            crate::route::request_play_movie(session, meta, m, &super::playback::movie_ctx(m), resume_ns),
+            crate::route::request_play_movie_with(session, meta, m, &super::playback::movie_ctx(m), resume_ns, tracks),
     }
 }
 
@@ -221,7 +245,7 @@ fn drain_held_feature(app: &mut App) {
     }
     let held = HELD_FEATURE.with(|slot| slot.borrow_mut().take());
     let Some(held) = held else { return };
-    if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &held.play, held.resume_ns) {
+    if !request_play_intent_with(&mut app.player.session, app.bridge.metadata_mut(), &held.play, held.resume_ns, held.tracks) {
         return;
     }
     start_playback(
@@ -530,10 +554,10 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
             // The chrome question (`Nav::Back { bar }`) is not asked here any more: the container
             // answers it itself, over the entry a `Pop` would reveal (`NavStack::continuous_for`).
             ContentReq::Back => bridge::nav_pop_with_return(&mut app.pages, ret),
-            ContentReq::Play { play, resume_ns } => {
+            ContentReq::Play { play, resume_ns, tracks } => {
                 let mounted = bridge::player(&app.pages).is_some();
                 if !clear_engine_for_play(&mut app.player.session, &mut app.adapters.player, mounted) {
-                    hold_feature(play, resume_ns, Some(ret));
+                    hold_feature_with(play, resume_ns, Some(ret), tracks);
                     continue;
                 }
                 // The PAGE decided which item; the LOOP performs the request, because
@@ -543,7 +567,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 // is what the page's own discarded `started` bool used to decide.
                 // Held-feature drain uses this same helper: a trailer Play pressed while a
                 // preview still occupies must install the Info-card descriptor too.
-                if !request_play_intent(&mut app.player.session, app.bridge.metadata_mut(), &play, resume_ns) { continue; }
+                if !request_play_intent_with(&mut app.player.session, app.bridge.metadata_mut(), &play, resume_ns, tracks) { continue; }
                 // The page's own `ReturnState` rides the push, so BACK out of the playback finds
                 // the spot the Play was pressed from. It was `Trail::set_top_spot` plus a
                 // second, hand-written `NavOp::Push` after the fact.

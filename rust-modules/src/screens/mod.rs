@@ -17,6 +17,7 @@ pub(crate) mod account_menu;
 pub(crate) mod alt_sources;
 pub(crate) mod tracks_panel;
 pub(crate) mod versions;
+pub(crate) mod track_choice;
 pub(crate) mod consent;
 pub(crate) mod collection;
 pub(crate) mod detail;

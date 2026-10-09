@@ -1409,6 +1409,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
         title: "Episode".into(),
         ctx: "S01 E02".into(),
         preview: false,
+        tracks: None,
     };
     { let s = &mut ps; {
         s.request = Some(request.clone());
@@ -1653,6 +1654,30 @@ fn the_preview_tells_a_container_remux_apart_from_a_re_encode() {
     );
     // nothing playable loaded (a show still resolving its episode) answers nothing at all
     assert_eq!(playback_preview(&item("h264", "", "aac")), None);
+}
+
+/// **The page's "how this plays" answer follows the audio chosen on it.** With an AAC sibling the
+/// file direct-plays; once the viewer chooses the TrueHD track, which Play will carry rather than
+/// swap, the answer is the conversion that track needs.
+#[test]
+fn the_preview_answers_for_the_audio_track_the_viewer_chose() {
+    let mut ps = crate::route::PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    restore_quality(Quality::Original);
+    let track = |id: i64, codec: &str| crate::metadata::Stream { id, codec: codec.to_string(), ..Default::default() };
+    let mut d = crate::metadata::Detail {
+        vcodec: "h264".to_string(),
+        part: "/library/parts/1/2/file.mkv".to_string(),
+        width: 1920,
+        height: 1080,
+        audio: vec![track(2, "truehd"), track(3, "aac")],
+        ..Default::default()
+    };
+    assert_eq!(playback_preview(&d), Some(Preview::DirectPlay), "the AAC sibling direct-plays");
+    d.tracks.audio = Some(2);
+    assert_eq!(playback_preview(&d), Some(Preview::Remux), "the chosen TrueHD track is converted");
+    d.tracks.audio = Some(3);
+    assert_eq!(playback_preview(&d), Some(Preview::DirectPlay));
 }
 
 #[test]

@@ -336,6 +336,7 @@ fn a_session_resolved_for_a_preview_never_reports_a_timeline() {
         title: "Trailer".into(),
         ctx: crate::metadata::TRAILER_CONTEXT.into(),
         preview: true,
+        tracks: None,
     });
     apply_plan(
         &mut ps,
