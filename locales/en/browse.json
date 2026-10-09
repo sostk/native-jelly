@@ -135,6 +135,18 @@
     "value": "Version",
     "description": "browse detail version: the hero pill that opens the list of an item's versions (4K, 1080p, ...)"
   },
+  "browse.detail.tracks": {
+    "value": "Audio & Subtitles",
+    "description": "browse detail tracks: the hero pill that opens the list of an item's audio and subtitle tracks, to choose which ones Play starts with"
+  },
+  "browse.detail.tracks_converts": {
+    "value": "Converts",
+    "description": "browse detail tracks_converts: a short note on an audio track in the audio and subtitle chooser, saying the server will convert it because the TV cannot play it directly"
+  },
+  "browse.detail.tracks_automatic": {
+    "value": "Automatic",
+    "description": "browse detail tracks_automatic: the row in the audio and subtitle chooser that leaves the choice to the user's playback preferences and the file's own defaults"
+  },
   "browse.detail.mark_watched": {
     "value": "Mark as Watched",
     "description": "browse detail mark_watched"

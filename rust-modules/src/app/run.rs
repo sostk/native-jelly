@@ -2570,6 +2570,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 | AppArg::PlayerOverlay(_)
                 | AppArg::AltSources(_)
                 | AppArg::Versions(_)
+                | AppArg::TrackChoice(_)
                 | AppArg::TracksPanel(_)
                 | AppArg::AboutPanel
                 | AppArg::PersonBio
