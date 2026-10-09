@@ -204,5 +204,43 @@
   "jellyfin.login.error_expired": {
     "value": "This sign-in has expired. Enter the password again.",
     "description": "Jellyfin sign-in: shown when a person kept on this TV picks themselves but the server no longer accepts their sign-in (revoked or expired); their password is asked for again"
+  },
+  "jellyfin.login.consent_home": {
+    "value": "{server} answered over plain http, which is normal for a server at home. Without encryption, anyone else on this network could see your password and what you watch.",
+    "description": "Jellyfin sign-in: why connecting needs consent, for a server on the home network; {server} is the server's own name",
+    "args": {
+      "server": "str"
+    }
+  },
+  "jellyfin.login.consent_internet": {
+    "value": "{server} is on the internet and answered over plain http. Without encryption, your password and what you watch cross the internet where others along the way could see them. Use its https:// address if it has one.",
+    "description": "Jellyfin sign-in: why connecting needs consent, for a server reached over the internet; {server} is the server's own name",
+    "args": {
+      "server": "str"
+    }
+  },
+  "jellyfin.login.consent_only_server": {
+    "value": "Only for this server, at this address.",
+    "description": "Jellyfin sign-in consent: what the permission covers"
+  },
+  "jellyfin.login.consent_checks": {
+    "value": "Native Jelly checks it's the same server every time before sending anything.",
+    "description": "Jellyfin sign-in consent: how the server is checked"
+  },
+  "jellyfin.login.consent_settings": {
+    "value": "Turn it off any time in Settings › Unencrypted connections.",
+    "description": "Jellyfin sign-in consent: where to change the answer later; must name the Settings section exactly as it is shown"
+  },
+  "jellyfin.login.consent_allow": {
+    "value": "Connect without encryption",
+    "description": "Jellyfin sign-in consent: button that allows sending the sign-in without encryption to this server"
+  },
+  "jellyfin.login.not_encrypted": {
+    "value": "Not encrypted",
+    "description": "Jellyfin sign-in: short mark beside a server reached over plain http"
+  },
+  "jellyfin.login.error_needs_consent": {
+    "value": "This server isn't using a secure connection. Connect to it again to allow that.",
+    "description": "Jellyfin sign-in error: the server speaks only plain http and connecting without encryption has not been allowed"
   }
 }

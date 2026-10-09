@@ -233,6 +233,8 @@ pub enum Icon {
     Phone,
     /// A plus — the who's-watching screen's *Add user* tile (`screens::jf_users`).
     Plus,
+    /// An open padlock — a server reached without encryption (`screens::jf_login`).
+    LockOpen,
 }
 
 /// **Where a mark's INK sits inside its 24-unit viewBox**, as `(left, right)` fractions — and
@@ -322,6 +324,7 @@ fn src(id: Icon) -> &'static str {
         Icon::Server => include_str!("../../../assets/icons/server.svg"),
         Icon::Phone => include_str!("../../../assets/icons/phone.svg"),
         Icon::Plus => include_str!("../../../assets/icons/plus.svg"),
+        Icon::LockOpen => include_str!("../../../assets/icons/lock-open.svg"),
     }
 }
 

@@ -2245,6 +2245,9 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // verifies. Route-unconditional — the upgrade is owed whatever is on screen.
         let upgrades = app.plaintext_upgrade.due(fr.now);
         super::bridge::execute_endpoint_outcomes(&mut app.pages, upgrades);
+        // …and a Jellyfin server reached without encryption is proved again whenever its grant
+        // has ended (`jf::plaintext`).
+        super::jf_login::step_plaintext(fr.now);
         app.bridge.person_pump();
         app.bridge.collection_pump();
         if let Some(target) = app.bridge.take_detail_refresh() {

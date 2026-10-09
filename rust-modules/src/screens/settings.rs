@@ -1049,6 +1049,17 @@ impl LogicalState for RootState {
     }
 }
 
+/// A Jellyfin answer's row identity: its server and its address, in a namespace no Plex
+/// `machineIdentifier` can take.
+fn jellyfin_row(server_id: &str, server: &str) -> String {
+    format!("jfplain:{server_id}@{server}")
+}
+
+/// `host:port` of an origin's base, for a row's name.
+fn address_of(base: &str) -> String {
+    crate::catalog::Origin::parse(base).map_or_else(|| base.to_owned(), |o| format!("{}:{}", o.host(), o.port()))
+}
+
 /// One unencrypted-connection switch's plain data — see [`RootPage::plaintext_inputs`] for how
 /// this is gathered and [`root_form`] for how it becomes a row.
 struct PlaintextRowInput {
@@ -1287,11 +1298,37 @@ impl RootPage {
                 None => {}
             }
         }
+        // A Jellyfin server's answer is the Jellyfin record's (`jf::plaintext`), one per (server, address).
+        let jellyfin = crate::jf::store::plaintext_answers();
+        for answer in &jellyfin {
+            let key = jellyfin_row(&answer.server_id, &answer.server);
+            let on = match &self.pending_plaintext {
+                Some((pending, on)) if *pending == key => *on,
+                _ => answer.allowed,
+            };
+            rows.push((key, on));
+        }
+        if let Some((machine, on)) = &self.pending_plaintext {
+            if jellyfin.iter().any(|a| jellyfin_row(&a.server_id, &a.server) == *machine && a.allowed == *on) {
+                self.pending_plaintext = None;
+            }
+        }
         self.plaintext_rows = rows.clone();
         self.state.plaintext = rows.iter().map(|(_, on)| *on).collect();
         let offers = crate::catalog::grant::offers();
         rows.into_iter()
             .map(|(machine, on)| {
+                if let Some(answer) = jellyfin.iter().find(|a| jellyfin_row(&a.server_id, &a.server) == machine) {
+                    let named = !answer.server_name.trim().is_empty();
+                    let name = if named {
+                        format!("{} \u{b7} {}", answer.server_name, address_of(&answer.server))
+                    } else {
+                        address_of(&answer.server)
+                    };
+                    let connected = on && crate::catalog::grant::granted_origin(&crate::catalog::grant::jellyfin_machine(&answer.server_id))
+                        .is_some_and(|o| o.base() == answer.server);
+                    return PlaintextRowInput { machine: ServerMachineId(machine), name, named: true, on, connected };
+                }
                 // An offered server was never reached, so the session file does not know it yet:
                 // the name discovery settled with comes first.
                 let real_name = offers
@@ -1353,6 +1390,25 @@ impl RootPage {
                 let Some(on) = self.plaintext_rows.iter().find(|(m, _)| *m == machine).map(|(_, on)| *on) else {
                     return;
                 };
+                // A Jellyfin server: off withdraws its grant at once; on lets the app prove the
+                // server again and reconnect (`app::jf_login::step_plaintext`), with no question —
+                // turning the switch on IS the answer.
+                if let Some(answer) = crate::jf::store::plaintext_answers().into_iter()
+                    .find(|a| jellyfin_row(&a.server_id, &a.server) == machine) {
+                    let Some(origin) = crate::catalog::Origin::parse(&answer.server) else { return };
+                    crate::jf::store::set_plaintext(&answer.server_id, &answer.server_name, &origin, !on);
+                    if on {
+                        crate::jf::plaintext::withdraw(&answer.server_id);
+                        nj_base::eventlog::log("settings: unencrypted connections turned off for one Jellyfin server");
+                    } else {
+                        nj_base::eventlog::log("settings: unencrypted connections turned on for one Jellyfin server");
+                    }
+                    let roster = crate::jf::store::roster();
+                    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+                    self.pending_plaintext = Some((machine, !on));
+                    self.rebuild(directory);
+                    return;
+                }
                 if !on {
                     // ON asks first — the same question the sign-in and the failure read-outs
                     // put, seated on *Not now*; only its *Connect* allows (`alert_answer`).

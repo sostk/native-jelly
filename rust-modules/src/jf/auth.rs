@@ -25,6 +25,15 @@ pub enum AuthError {
     /// Any other HTTP status.
     Refused(i32),
     Malformed,
+    /// The server speaks only plain http and the person has not allowed sending a credential over
+    /// it (`super::plaintext`). Nothing was sent.
+    NeedsConsent,
+}
+
+/// Refuse, before anything is sent, a credential-bearing request this build would refuse at the
+/// transport anyway — so the person is told why, rather than that nothing answered.
+fn credential_may_go(origin: &Origin) -> Result<(), AuthError> {
+    if crate::catalog::grant::credential_allowed(origin) { Ok(()) } else { Err(AuthError::NeedsConsent) }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -96,6 +105,7 @@ fn status_error(status: i32) -> AuthError {
 
 /// `POST /Users/AuthenticateByName` — username and password in the body.
 pub fn sign_in_with_password(origin: &Origin, client_id: &str, username: &str, password: &str) -> Result<SignedIn, AuthError> {
+    credential_may_go(origin)?;
     let info = probe(origin, client_id)?;
     let device_user = username.trim().to_lowercase();
     let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
@@ -123,6 +133,7 @@ pub struct QuickConnect {
 
 /// `GET /QuickConnect/Enabled` then `POST /QuickConnect/Initiate`.
 pub fn quick_connect_start(origin: &Origin, client_id: &str) -> Result<QuickConnect, AuthError> {
+    credential_may_go(origin)?;
     let info = probe(origin, client_id)?;
     let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, "");
@@ -145,6 +156,7 @@ pub fn quick_connect_start(origin: &Origin, client_id: &str) -> Result<QuickConn
 
 /// One poll: `Ok(None)` while the code is not yet approved, `Ok(Some)` once it is.
 pub fn quick_connect_poll(origin: &Origin, client_id: &str, qc: &QuickConnect) -> Result<Option<SignedIn>, AuthError> {
+    credential_may_go(origin)?;
     let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, "");
     let auth = j.auth_header();
@@ -182,6 +194,7 @@ pub struct PublicUser {
 /// administrator can hide users from it, so an empty list is an ordinary answer: the caller asks
 /// for a username instead.
 pub fn public_users(origin: &Origin, client_id: &str) -> Result<Vec<PublicUser>, AuthError> {
+    credential_may_go(origin)?;
     let c = crate::catalog::unregistered_client(origin.clone(), "", client_id);
     let j = Jf::for_sign_in(&c, "");
     let auth = j.auth_header();
@@ -232,6 +245,7 @@ pub fn probe_first(candidates: &[Origin], client_id: &str) -> Result<(Origin, Pu
 /// silence is [`AuthError::Unreachable`]. The who's-watching screen asks before switching, so a
 /// revoked user is asked to sign in again rather than shown a server that "cannot be reached".
 pub fn check_token(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> Result<(), AuthError> {
+    credential_may_go(origin)?;
     let c = crate::catalog::unregistered_client(origin.clone(), token, client_id);
     match Jf::for_sign_in(&c, device_user).status("/Users/Me", Method::Get, None) {
         None => Err(AuthError::Unreachable),

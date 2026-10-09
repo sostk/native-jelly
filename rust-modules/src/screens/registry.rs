@@ -92,6 +92,14 @@ pub(crate) enum JfAuthCmd {
     /// Who's watching?: does the server still honour the kept user at this roster position? The
     /// app reads the token; the screen never holds one.
     CheckKept { index: u8, reply: std::sync::mpsc::Sender<JfAuthReply> },
+    /// The person allowed connecting to this server (its own id) at this plaintext origin without
+    /// encryption: record it, prove the server again, and let credentials through.
+    AllowPlaintext {
+        origin: crate::catalog::Origin,
+        server_id: String,
+        server_name: String,
+        reply: std::sync::mpsc::Sender<JfAuthReply>,
+    },
 }
 
 pub(crate) enum JfAuthReply {
@@ -101,6 +109,11 @@ pub(crate) enum JfAuthReply {
     Polled(Result<Option<crate::jf::auth::SignedIn>, crate::jf::auth::AuthError>),
     People(Result<Vec<crate::jf::auth::PublicUser>, crate::jf::auth::AuthError>),
     Checked(u8, Result<(), crate::jf::auth::AuthError>),
+    /// The server answered over plain http and the person has not (yet) allowed that: ask them.
+    /// `internet`: the address is not on a home network (the stronger warning).
+    Consent { origin: crate::catalog::Origin, info: crate::jf::models::PublicSystemInfo, internet: bool },
+    /// [`JfAuthCmd::AllowPlaintext`]'s answer.
+    Allowed(Result<(), crate::jf::auth::AuthError>),
 }
 
 /// A private live receipt. Requests contain account credentials and are intentionally unsupported
@@ -2199,7 +2212,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // Multi-user profiles: `screens::jf_users::SHAPE` (Who's watching? over the Jellyfin roster)
 // joins the inventory and `screens::jf_login::SHAPE` gains the *Add a user* step; the previous
 // pin was 0x6dfe_4a98_8543_1a82.
-const SCREEN_SHAPES_PIN: u64 = 0x4a03_df99_a613_4199;
+// Unencrypted connection consent: `screens::jf_login::SHAPE` gains the *Connect without
+// encryption?* step; the previous pin was 0x4a03_df99_a613_4199.
+const SCREEN_SHAPES_PIN: u64 = 0xc8e2_ec7c_baec_7537;
 
 #[cfg(test)]
 mod arg_tests {

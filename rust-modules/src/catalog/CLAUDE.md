@@ -205,7 +205,9 @@ grant. Nothing else
 asks `CredentialPolicy::may_carry_credential` or `Origin::is_tls` for a credential decision —
 `grep -rn may_carry_credential src/` finds only `grant.rs` (plus doc links). `probe::candidates`
 stamps the policy half at synthesis, and `auth::settle_plaintext` adds the grant half after the
-race. A grant is minted only by discovery, from a FRESH verdict `InsecureEvidence::
+race. A Plex grant is minted only by discovery (a Jellyfin server's by `jf::plaintext`, after the person
+allowed it and the server's anonymous `/System/Info/Public` named it at that origin — `grant`'s
+*Jellyfin grants*), from a FRESH verdict `InsecureEvidence::
 plaintext_eligibility` calls eligible, when the person's recorded answer (`Session::
 plaintext_consent`, captured at the spawn site as `grant::PlaintextAsk`) allows it; it is bound to
 {identity generation, network generation, machine, exact numeric origin}, never persisted, dies on

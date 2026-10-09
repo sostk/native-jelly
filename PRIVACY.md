@@ -23,6 +23,14 @@ the first does not answer. Over http, your password, access token and everything
 exchanges with the server travel over the network without encryption. Enter the full `https://`
 address for a server you reach over the internet.
 
+Native Jelly sends nothing that signs you in over plain http until you allow it for that server.
+It asks once, naming the server and saying whether its address is on your home network or the
+internet. The answer covers that server at that address only. Each time Native Jelly connects —
+when it starts and when it returns to the screen — it first checks, without sending anything that
+signs you in, that the same server answers there. The answers are stored on this television without
+any user name or token. They are kept when you sign out. Settings › Unencrypted connections lists
+them and turns each one off, and Delete all local data removes them.
+
 ## Data stored on this television
 
 Native Jelly has a developer-only input/frame recorder used to reproduce and test bugs. It is not

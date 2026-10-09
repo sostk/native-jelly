@@ -20,8 +20,32 @@ fn answer(what: &str, reply: Sender<JfAuthReply>, work: impl FnOnce() -> JfAuthR
 pub(super) fn execute(bridge: &mut super::bridge::Bridge, command: JfAuthCmd) {
     let client_id = crate::catalog::session::peek().client_id.clone();
     match command {
+        // A server that answers only over plain http, in a build that will not send a credential
+        // there on its own, is admitted at once when the person already allowed it (the probe has
+        // just proved which server answers), and otherwise asked about.
         JfAuthCmd::Probe { candidates, reply } => answer("jf probe", reply, move || {
-            JfAuthReply::Probed(crate::jf::auth::probe_first(&candidates, &client_id))
+            let scope = crate::catalog::grant::scope();
+            match crate::jf::auth::probe_first(&candidates, &client_id) {
+                Ok((origin, info)) if crate::jf::plaintext::needs_consent(&origin) => {
+                    let server_id = crate::jf::ids::normalize(&info.id);
+                    match crate::jf::plaintext::admit_proved(scope, &origin, &server_id) {
+                        Ok(()) => JfAuthReply::Probed(Ok((origin, info))),
+                        Err(_) => {
+                            let internet = crate::jf::plaintext::on_internet(&origin);
+                            log(&format!("jf: {} answers only without encryption — asking", origin.log_form()));
+                            JfAuthReply::Consent { origin, info, internet }
+                        }
+                    }
+                }
+                other => JfAuthReply::Probed(other),
+            }
+        }),
+        JfAuthCmd::AllowPlaintext { origin, server_id, server_name, reply } => answer("jf allow plaintext", reply, move || {
+            crate::jf::store::set_plaintext(&server_id, &server_name, &origin, true);
+            let roster = crate::jf::store::roster();
+            let _ = crate::jf::store::persist(&roster);
+            log(&format!("jf: unencrypted connections allowed for the server at {}", origin.log_form()));
+            JfAuthReply::Allowed(crate::jf::plaintext::admit(&origin, &server_id))
         }),
         JfAuthCmd::Password { origin, username, password, reply } => answer("jf sign-in", reply, move || {
             JfAuthReply::SignedIn(crate::jf::auth::sign_in_with_password(&origin, &client_id, &username, &password))
@@ -98,8 +122,11 @@ pub(super) fn pick_user(pages: &mut crate::ui::dispatch::Dispatcher<super::bridg
     let roster = crate::jf::store::roster();
     let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
     // The previous user's clients go; the server is installed again under this user's token and
-    // their own DeviceId, exactly as after a sign-in.
+    // their own DeviceId, exactly as after a sign-in. Revoking ends every unencrypted-connection
+    // grant with the identity; the server was proved on this network already, so it is minted
+    // again before the install asks for it.
     crate::catalog::revoke_all();
+    crate::jf::plaintext::remint();
     crate::jf::seat::register_with(&origin, user.seat());
     log(&format!("jf: switching user at {} — installing the server", origin.log_form()));
     bridge.hand_off_jf(ready_creds(&origin, user.token));
@@ -152,8 +179,12 @@ pub(super) fn sign_out() -> SignedOut {
     let roster = crate::jf::store::roster();
     let left = if roster.users.is_empty() { SignedOut::Nobody } else { SignedOut::OthersRemain };
     let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
-    revoke(live);
     crate::catalog::revoke_all();
+    // Revoking ends every unencrypted-connection grant with the identity. The server was proved on
+    // this network already: mint again, so the sign-out below reaches it, and whoever is still
+    // kept picks themselves next over the same connection.
+    crate::jf::plaintext::remint();
+    revoke(live, false);
     left
 }
 
@@ -162,22 +193,89 @@ pub(super) fn sign_out() -> SignedOut {
 /// session file is about to be deleted, and a write queued behind that delete would bring it back.
 pub(super) fn sign_out_and_forget_server() {
     let users = crate::jf::store::roster().users;
+    // Each sign-out below may need the answer this erases (a server reached without encryption):
+    // read it first, and let each worker prove its server once more for that last request.
+    let allowed: Vec<bool> = users
+        .iter()
+        .map(|u| u.origin().is_some_and(|o| {
+            crate::jf::store::plaintext_choice(&crate::jf::ids::normalize(&u.server_id), &o) == Some(true)
+        }))
+        .collect();
     crate::jf::store::forget_everything();
     let _ = nj_base::storage_worker::submit_retained(crate::jf::store::erase);
-    for user in users {
-        revoke(user);
-    }
     crate::catalog::revoke_all();
+    for (user, allowed) in users.into_iter().zip(allowed) {
+        revoke(user, allowed);
+    }
 }
 
 /// Tell the server to revoke `stored`'s token, on a worker, and forget its seat here.
-fn revoke(stored: Stored) {
+/// `last_allowed`: the person's (now erased) answer for a server reached without encryption —
+/// Delete all local data's last request to it; the grant it needs is withdrawn again after.
+fn revoke(stored: Stored, last_allowed: bool) {
     let Some(origin) = stored.origin() else { return };
     crate::jf::seat::forget(&origin);
     let client_id = crate::catalog::session::peek().client_id.clone();
     nj_base::task::spawn_small("jf sign-out", move || {
+        let server_id = crate::jf::ids::normalize(&stored.server_id);
+        if last_allowed {
+            let _ = crate::jf::plaintext::admit_for_sign_out(&origin, &server_id, true);
+        }
         let revoked = crate::jf::auth::sign_out_detached(&origin, &client_id, &stored.token, &stored.device_user);
+        if last_allowed {
+            crate::jf::plaintext::withdraw(&server_id);
+        }
         log(if revoked { "jf: signed out — the server revoked this device's token" }
             else { "jf: signed out — the server could not be told (the token stays valid there)" });
+    });
+}
+
+/// The re-admission of a server reached without encryption: one attempt in flight at most, the
+/// next one not before `due` (frame ms).
+struct Readmit {
+    in_flight: bool,
+    due: u32,
+    attempt: u32,
+}
+
+static READMIT: std::sync::Mutex<Readmit> = std::sync::Mutex::new(Readmit { in_flight: false, due: 0, attempt: 0 });
+
+/// **Keep the active user's unencrypted connection admitted**, once per frame. Its grant dies with
+/// the network (the app returning to the foreground) and is never minted when the server could not
+/// be proved (it was off at boot), and Settings can turn it back on; in each case the server is
+/// proved again here on a worker — never by asking the person again — and the token the registry
+/// blanked is put back. Backs off from 5 s to a minute between attempts; costs one lock when there
+/// is nothing to do.
+pub(super) fn step_plaintext(now: u32) {
+    let Some(user) = crate::jf::store::current() else { return };
+    let Some(origin) = user.origin() else { return };
+    if !crate::jf::plaintext::needs_consent(&origin) || crate::jf::plaintext::granted(&origin) {
+        return;
+    }
+    let server_id = crate::jf::ids::normalize(&user.server_id);
+    if crate::jf::store::plaintext_choice(&server_id, &origin) != Some(true) {
+        return;
+    }
+    {
+        let mut r = READMIT.lock().unwrap_or_else(|e| e.into_inner());
+        if r.in_flight || now.wrapping_sub(r.due) > u32::MAX / 2 {
+            return;
+        }
+        r.in_flight = true;
+    }
+    nj_base::task::spawn_small("jf readmit", move || {
+        let admitted = crate::jf::plaintext::admit(&origin, &server_id).is_ok();
+        if admitted {
+            // The registry blanked this server's token when its grant ended: put it back.
+            crate::catalog::install(&origin, &user.token, None, crate::catalog::ConnectionFacts::default());
+            log(&format!("jf: unencrypted connection to {} proved again — reconnected", origin.log_form()));
+        }
+        let mut r = READMIT.lock().unwrap_or_else(|e| e.into_inner());
+        r.in_flight = false;
+        r.attempt = if admitted { 0 } else { (r.attempt + 1).min(4) };
+        let wait_ms = 5_000u32 << r.attempt.min(3);
+        r.due = now.wrapping_add(wait_ms.min(60_000));
+        drop(r);
+        nj_machine::idle::invalidate();
     });
 }

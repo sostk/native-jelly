@@ -17,7 +17,8 @@
 //!
 //! ## What a grant is bound to
 //!
-//! A grant is minted only by discovery ([`mint`]), from a FRESH verdict — plex.tv's resources and
+//! A Plex grant is minted only by discovery ([`mint`]; a Jellyfin server's is minted by
+//! `crate::jf::plaintext`, below), from a FRESH verdict — plex.tv's resources and
 //! a tokenless `/identity` answer — that [`InsecureEvidence::plaintext_eligibility`] calls
 //! eligible, and only when the person's recorded consent for that (account, server) allows it.
 //! Consent is the ACCOUNT's ([`account_key`]): an answer is honoured only while the plex.tv
@@ -65,6 +66,18 @@
 //! offers this app no network-change signal it subscribes to — so the foreground return is the
 //! one continuity break treated as a new network.
 //!
+//! ## Jellyfin grants
+//!
+//! A Jellyfin server is not discovered through plex.tv, so none of the evidence above exists for
+//! it. Its grant ([`mint_jellyfin`]) rests on what the sign-in can prove instead: the person
+//! consented to that server (by its own id) at that exact origin, and the anonymous
+//! `/System/Info/Public` at that origin answered with that id under the current generations
+//! (`crate::jf::plaintext`). It is bound to the same identity and network generations as every
+//! grant, and dies the same ways. Unlike a Plex grant it admits its origin for the client the
+//! registry holds there whatever machine id that slot carries — a Jellyfin install registers by
+//! address, with no machine id — because the origin itself is what was verified. Such a grant is
+//! never queued for plex.tv rediscovery: the Jellyfin side re-verifies and re-mints it.
+//!
 //! ## Offers
 //!
 //! The table also holds what may be ASKED: a fresh eligible insecure-only verdict under the
@@ -86,12 +99,22 @@ pub(crate) struct GrantScope {
     network: u64,
 }
 
+impl GrantScope {
+    /// Is `other` on the same network generation — nothing since suggests the television moved?
+    pub(crate) fn same_network(self, other: GrantScope) -> bool {
+        self.network == other.network
+    }
+}
+
 /// One consented plaintext origin. Never persisted; see the module doc.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlaintextGrant {
     scope: GrantScope,
     machine_id: String,
     origin: Origin,
+    /// A Jellyfin grant ([`mint_jellyfin`]): it admits its origin for whatever machine id the
+    /// registry's slot there carries.
+    by_origin: bool,
 }
 
 static GRANTS: Mutex<Vec<PlaintextGrant>> = Mutex::new(Vec::new());
@@ -258,7 +281,7 @@ pub(crate) fn rests_on_grant(policy: CredentialPolicy, machine_id: &str, origin:
 /// Is `machine_id` at `origin` admitted by a live grant right now (the grant half of
 /// [`allowed_for`] alone)?
 pub(crate) fn granted_now(machine_id: &str, origin: &Origin) -> bool {
-    !machine_id.is_empty() && !origin.is_tls() && granted(Some(machine_id), origin)
+    !origin.is_tls() && granted(Some(machine_id), origin)
 }
 
 fn granted(machine_id: Option<&str>, origin: &Origin) -> bool {
@@ -272,9 +295,13 @@ fn granted(machine_id: Option<&str>, origin: &Origin) -> bool {
 /// Pure: does any grant in `grants` admit `origin` at `now` — for `machine_id` when one is named?
 /// Only a grant minted under the current generations counts, and only for its exact origin —
 /// scheme, host and port.
+/// A Plex grant admits only its own server, and an empty `machine_id` names no server; a Jellyfin
+/// grant admits its verified origin for whichever slot holds it.
 fn admits(grants: &[PlaintextGrant], now: GrantScope, machine_id: Option<&str>, origin: &Origin) -> bool {
     grants.iter().any(|g| {
-        g.scope == now && g.origin == *origin && machine_id.is_none_or(|m| g.machine_id == m)
+        g.scope == now
+            && g.origin == *origin
+            && machine_id.is_none_or(|m| g.by_origin || (!m.is_empty() && g.machine_id == m))
     })
 }
 
@@ -353,7 +380,7 @@ fn mint_consented(
     if consent != CONSENT.load(Ordering::Acquire) {
         return Err(MintRefusal::Stale);
     }
-    let fresh = PlaintextGrant { scope, machine_id: machine_id.to_owned(), origin: origin.clone() };
+    let fresh = PlaintextGrant { scope, machine_id: machine_id.to_owned(), origin: origin.clone(), by_origin: false };
     let already = grants.contains(&fresh);
     let before = grants.len();
     grants.retain(|g| g.machine_id != machine_id && g.scope == scope);
@@ -371,6 +398,50 @@ fn mint_consented(
         // The authority only — never the machine id (a household fingerprint) nor the token.
         nj_base::eventlog::log(&format!(
             "security: consented plaintext credentials for one server at {}",
+            origin.log_form()
+        ));
+    }
+    Ok(())
+}
+
+/// The grant table's name for a Jellyfin server: its own id, normalized, in a namespace no Plex
+/// `machineIdentifier` can collide with.
+pub(crate) fn jellyfin_machine(server_id: &str) -> String {
+    format!("jf:{server_id}")
+}
+
+/// **Mint a Jellyfin grant** for the server `server_id` (normalized) at the plaintext `origin`, at
+/// the `scope` the verifying worker captured before it asked the server who it is. The caller has
+/// established both halves of the evidence (module doc, *Jellyfin grants*): the person's consent
+/// for this server at this origin, and the anonymous answer naming this server there. A server
+/// holds one grant: a new origin replaces the old one.
+pub(crate) fn mint_jellyfin(scope: GrantScope, server_id: &str, origin: &Origin) -> Result<(), MintRefusal> {
+    if origin.scheme() != Scheme::Http {
+        return Err(MintRefusal::NotPlaintext);
+    }
+    if server_id.is_empty() {
+        return Err(MintRefusal::NotConsented);
+    }
+    let machine_id = jellyfin_machine(server_id);
+    let mut grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
+    if scope != self::scope() {
+        return Err(MintRefusal::Stale);
+    }
+    let fresh = PlaintextGrant { scope, machine_id: machine_id.clone(), origin: origin.clone(), by_origin: true };
+    let already = grants.contains(&fresh);
+    let before = grants.len();
+    grants.retain(|g| g.machine_id != machine_id && g.scope == scope);
+    let replaced = grants.len() != before && !already;
+    grants.push(fresh);
+    COUNT.store(grants.len(), Ordering::Release);
+    drop(grants);
+    moved();
+    if replaced {
+        super::servers::regrade_credentials();
+    }
+    if !already {
+        nj_base::eventlog::log(&format!(
+            "security: consented plaintext credentials for one Jellyfin server at {}",
             origin.log_form()
         ));
     }
@@ -395,7 +466,8 @@ pub(crate) fn granted_machines() -> Vec<String> {
     }
     let now = scope();
     let grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
-    grants.iter().filter(|g| g.scope == now).map(|g| g.machine_id.clone()).collect()
+    // A Jellyfin grant is the Jellyfin side's to re-prove, never plex.tv discovery's.
+    grants.iter().filter(|g| g.scope == now && !g.by_origin).map(|g| g.machine_id.clone()).collect()
 }
 
 /// **Revoke `machine_id`'s grant now** — consent withdrawn in Settings, or the server verified
@@ -445,7 +517,7 @@ pub(crate) fn network_changed() {
     {
         let grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
         let mut stranded = STRANDED.lock().unwrap_or_else(|e| e.into_inner());
-        for g in grants.iter() {
+        for g in grants.iter().filter(|g| !g.by_origin) {
             if !stranded.contains(&g.machine_id) {
                 stranded.push(g.machine_id.clone());
             }
@@ -911,7 +983,7 @@ mod tests {
     #[test]
     fn a_grant_admits_only_its_exact_origin_under_the_current_generations() {
         let now = GrantScope { identity: 3, network: 5 };
-        let grants = [PlaintextGrant { scope: now, machine_id: "m".into(), origin: lan() }];
+        let grants = [PlaintextGrant { scope: now, machine_id: "m".into(), origin: lan(), by_origin: false }];
         assert!(admits(&grants, now, None, &lan()));
         assert!(!admits(&grants, now, None, &Origin::http("192.168.0.10", 32401)), "another port");
         assert!(!admits(&grants, now, None, &Origin::http("192.168.0.11", 32400)), "another host");
@@ -924,6 +996,47 @@ mod tests {
         assert!(!admits(&[], now, None, &lan()));
         assert!(admits(&grants, now, Some("m"), &lan()));
         assert!(!admits(&grants, now, Some("other"), &lan()), "another server");
+    }
+
+    /// A Jellyfin grant admits its verified origin for whatever slot holds it — a Jellyfin install
+    /// registers by address, with no machine id — while a Plex grant never admits an empty id.
+    #[test]
+    fn a_jellyfin_grant_admits_its_origin_for_any_slot_and_a_plex_one_does_not() {
+        let now = GrantScope { identity: 3, network: 5 };
+        let jf = Origin::http("nas.local", 8096);
+        let grants = [
+            PlaintextGrant { scope: now, machine_id: jellyfin_machine("abc"), origin: jf.clone(), by_origin: true },
+            PlaintextGrant { scope: now, machine_id: "m".into(), origin: lan(), by_origin: false },
+        ];
+        assert!(admits(&grants, now, Some(""), &jf), "the address-only Jellyfin slot");
+        assert!(admits(&grants, now, Some("anything"), &jf));
+        assert!(admits(&grants, now, None, &jf), "the transport's question");
+        assert!(!admits(&grants, now, Some(""), &lan()), "an empty id names no Plex server");
+        assert!(!admits(&grants, now, Some(""), &Origin::http("nas.local", 8097)), "only its exact origin");
+        assert!(!admits(&grants, GrantScope { identity: 3, network: 6 }, Some(""), &jf), "network moved");
+    }
+
+    /// Minting a Jellyfin grant: plaintext only, under the current generations only, for a named
+    /// server only; it dies with the network like any grant, and is never queued for plex.tv
+    /// rediscovery.
+    #[test]
+    fn a_jellyfin_grant_is_minted_live_and_dies_with_the_network() {
+        let _g = nj_base::testlock::serial();
+        reset_for_test();
+        let jf = Origin::http("192.168.1.20", 8096);
+        let stale = scope();
+        assert_eq!(mint_jellyfin(scope(), "abc", &Origin::new(Scheme::Https, "192.168.1.20", 8920)), Err(MintRefusal::NotPlaintext));
+        assert_eq!(mint_jellyfin(scope(), "", &jf), Err(MintRefusal::NotConsented));
+        assert_eq!(mint_jellyfin(scope(), "abc", &jf), Ok(()));
+        assert!(credential_allowed_for("", &jf) || CredentialPolicy::build() == CredentialPolicy::AllowPlaintext);
+        assert!(granted_now("", &jf), "the Jellyfin slot is admitted");
+        assert_eq!(granted_origin(&jellyfin_machine("abc")), Some(jf.clone()));
+        assert!(granted_machines().is_empty(), "plex.tv rediscovery does not watch it");
+        network_changed();
+        assert!(!granted_now("", &jf), "the network moved");
+        assert!(take_stranded().is_empty(), "nothing queued for plex.tv rediscovery");
+        assert_eq!(mint_jellyfin(stale, "abc", &jf), Err(MintRefusal::Stale), "proved before the move");
+        reset_for_test();
     }
 
     /// Minting re-checks everything the origin itself can answer, then the eligibility rule, then
