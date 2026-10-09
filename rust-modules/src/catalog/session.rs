@@ -2756,11 +2756,62 @@ impl Session {
     }
 }
 
-/// Which profile's history is in play: the active Plex Home user's `uuid`, or `""` for the owner
-/// with no Home selection. One accessor, so the reader and the writer cannot key on different
-/// things — which would look exactly like the leak this scoping exists to prevent.
+/// Which profile's history is in play: the active **Jellyfin user** (`jf-<user id>`, published by
+/// `jf::store` through [`set_jellyfin_profile`]) — else the active Plex Home user's `uuid`, or
+/// `""` for the owner with no Home selection. One accessor, so the reader and the writer cannot
+/// key on different things — which would look exactly like the leak this scoping exists to
+/// prevent: pins, search terms, the last library, sort choices and subtitle offsets are all
+/// filed under it, so two people on one Jellyfin server each keep their own.
 pub fn current_profile_key() -> String {
+    let jf = JELLYFIN_PROFILE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !jf.is_empty() {
+        return jf;
+    }
     current().map(|u| u.uuid).unwrap_or_default()
+}
+
+/// The active Jellyfin user's profile key, kept here (the catalog's own module) because
+/// `jf::store` names this module and not the other way round. Empty: no Jellyfin user is active.
+static JELLYFIN_PROFILE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// The profile key a Jellyfin user's history is filed under. `user_id` is already normalized
+/// (`jf::ids::normalize`): one person, one key, however the server spelled the id.
+pub(crate) fn jellyfin_profile_key(user_id: &str) -> String {
+    format!("jf-{user_id}")
+}
+
+/// Publish (`Some(normalized user id)`) or clear the active Jellyfin user. Memory only.
+pub(crate) fn set_jellyfin_profile(user_id: Option<&str>) {
+    let key = user_id.filter(|id| !id.is_empty()).map(jellyfin_profile_key).unwrap_or_default();
+    *JELLYFIN_PROFILE.lock().unwrap_or_else(|e| e.into_inner()) = key;
+}
+
+/// **Give the history filed under no profile to `key`** — once, when an install that kept one
+/// Jellyfin user under the empty key (every build before multi-user) boots with that user active.
+/// Each list moves only when `key` has no entry of its own, so it can never overwrite a person's
+/// own history. `None`: nothing to move.
+pub(crate) fn adopt_unscoped_profile(s: &Session, key: &str) -> Option<Session> {
+    if key.is_empty() {
+        return None;
+    }
+    let mut next = s.clone();
+    let mut moved = false;
+    macro_rules! adopt {
+        ($list:ident) => {
+            if !next.$list.iter().any(|e| e.user == key) {
+                for e in next.$list.iter_mut().filter(|e| e.user.is_empty()) {
+                    e.user = key.to_string();
+                    moved = true;
+                }
+            }
+        };
+    }
+    adopt!(home_pins);
+    adopt!(recent_searches);
+    adopt!(last_library);
+    adopt!(library_sorts);
+    adopt!(subtitle_offsets);
+    moved.then_some(next)
 }
 
 /// **The I/O lock.** Blocking loads and writers take it; per-frame [`peek`] never does.

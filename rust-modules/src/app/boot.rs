@@ -751,7 +751,7 @@ pub(crate) unsafe fn construct(
     // dev: /tmp/nativejelly-pickuser=<index> — force the boot picker even on an automated boot and
     // auto-select that roster tile once it's up (headless exercise of the who's-watching flow).
     let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
-    let session = match &initial {
+    let mut session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
         None => crate::catalog::session::load(),
     };
@@ -786,6 +786,15 @@ pub(crate) unsafe fn construct(
     if let Some((origin, stored)) = &jf_stored {
         crate::jf::seat::register_with(origin, stored.seat());
         log(&format!("boot: stored Jellyfin sign-in at {}", origin.log_form()));
+        // History an earlier build kept under no profile (one Jellyfin user, empty key) becomes
+        // the active user's, before anything reads it: their pins must not look "never asked".
+        let key = stored.profile_key();
+        if let Some(adopted) = crate::catalog::session::adopt_unscoped_profile(&session, &key) {
+            let saved = crate::catalog::session::update(|cur| crate::catalog::session::adopt_unscoped_profile(cur, &key));
+            log(if saved { "boot: earlier history filed under the signed-in Jellyfin user" }
+                else { "boot: earlier history filed under the signed-in Jellyfin user for this run only" });
+            session = adopted;
+        }
     }
     let dev_primary = if let Some((origin, stored)) = &jf_stored {
         Some(crate::catalog::session::ServerRef {

@@ -59,6 +59,11 @@ pub struct Stored {
 }
 
 impl Stored {
+    /// The profile key this user's pins, searches and offsets are filed under.
+    pub fn profile_key(&self) -> String {
+        crate::catalog::session::jellyfin_profile_key(&super::ids::normalize(&self.user_id))
+    }
+
     pub fn new(origin: &Origin, s: &SignedIn) -> Self {
         Self {
             version: VERSION,
@@ -233,8 +238,14 @@ impl Roster {
 
 static ROSTER: Mutex<Roster> = Mutex::new(Roster { users: Vec::new(), active: None, recent: None });
 
+/// Every change to the live roster goes through here, so the profile key the rest of the app
+/// files history under (`session::current_profile_key`) always names the active user.
 fn with_roster<T>(f: impl FnOnce(&mut Roster) -> T) -> T {
-    f(&mut ROSTER.lock().unwrap_or_else(|e| e.into_inner()))
+    let mut roster = ROSTER.lock().unwrap_or_else(|e| e.into_inner());
+    let out = f(&mut roster);
+    let active = roster.current().map(|u| super::ids::normalize(&u.user_id));
+    crate::catalog::session::set_jellyfin_profile(active.as_deref());
+    out
 }
 
 /// Make `s` the sign-in this process runs on, keeping it in the roster (`None`: nobody is signed
@@ -582,6 +593,52 @@ mod tests {
             "server_name":"Home"});
         let r = Roster::from_value(&v1).unwrap();
         assert_eq!(r.recent.unwrap().server_name, "Home");
+    }
+
+    /// The active Jellyfin user is the profile every per-user list is filed under: switching
+    /// moves the key, signing everyone out clears it.
+    #[test]
+    fn each_jellyfin_user_files_history_under_their_own_key() {
+        use crate::catalog::session::current_profile_key;
+        let _g = nj_base::testlock::serial();
+        let (alex, sam) = (user("alex", "ta"), user("sam", "ts"));
+        assert_ne!(alex.profile_key(), sam.profile_key());
+        set_live(Some(alex.clone()));
+        assert_eq!(current_profile_key(), alex.profile_key());
+        remember(sam.clone());
+        assert_eq!(current_profile_key(), sam.profile_key());
+        assert!(activate("http://10.0.0.2:8096", "alex"));
+        assert_eq!(current_profile_key(), alex.profile_key());
+        set_live(None);
+        let after = current_profile_key();
+        assert!(after != alex.profile_key() && after != sam.profile_key(), "nobody is active: {after}");
+        forget_everything();
+    }
+
+    /// An install upgraded from one Jellyfin user kept that user's history under the empty key; it
+    /// becomes the active user's, list by list, and never over a list that user already has.
+    #[test]
+    fn earlier_history_becomes_the_active_users_and_never_overwrites_theirs() {
+        use crate::catalog::session::{adopt_unscoped_profile, HomePins, LastLibrary, RecentSearches, Session};
+        let key = user("alex", "ta").profile_key();
+        let s = Session {
+            home_pins: vec![HomePins { user: String::new(), asked: true, ..Default::default() }],
+            recent_searches: vec![
+                RecentSearches { user: String::new(), terms: vec!["old".into()], ..Default::default() },
+                RecentSearches { user: key.clone(), terms: vec!["mine".into()], ..Default::default() },
+            ],
+            last_library: vec![LastLibrary { user: "jf-someone-else".into(), ..Default::default() }],
+            ..Default::default()
+        };
+        let next = adopt_unscoped_profile(&s, &key).expect("the pins move");
+        assert_eq!(next.home_pins[0].user, key);
+        assert!(next.pins_for(&key).is_some_and(|p| p.asked), "the answer moved with the pins");
+        let mine: Vec<_> = next.recent_searches.iter().filter(|r| r.user == key).collect();
+        assert_eq!(mine.len(), 1, "their own searches stay theirs alone");
+        assert_eq!(mine[0].terms, ["mine"]);
+        assert_eq!(next.last_library[0].user, "jf-someone-else");
+        assert!(adopt_unscoped_profile(&next, &key).is_none(), "nothing left to move");
+        assert!(adopt_unscoped_profile(&s, "").is_none());
     }
 
     #[test]
