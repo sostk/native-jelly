@@ -16,6 +16,14 @@
 //! (`widgets::panel_ground`) holding the step's form; every control in it is full width except
 //! the server card's *Change server* pill and Quick Connect's centred pair. Focus walks the panel
 //! top to bottom ([`JfLoginScreen::order`]); Quick Connect's pair is a row.
+//!
+//! **Add a user** ([`JfLoginScreen::adding_user`], approved design "Multi-user profiles", boards 3
+//! and 3b): the same two columns on the server already signed in to, opening at *Who's signing
+//! in?* — the people the server lists (`GET /Users/Public`) as avatars, *Other user* to type a
+//! username, and Quick Connect. Picking someone with a password asks only for it, beside their
+//! avatar and *Not name?*; someone without one signs straight in; someone already on this
+//! television is switched to instead (`LoopReq::PickJellyfinUser`). A server that lists nobody
+//! goes straight to the username and password.
 
 use std::ffi::{CStr, CString};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
@@ -43,7 +51,7 @@ use nj_platform::i18n::msg;
 
 use super::registry::{word, AppFx, AppLike, JfAuthCmd, JfAuthReply, LoopReq};
 
-pub(crate) const SHAPE: &str = "JfLoginScreen{entry:u32,instance:u32,step:server|credentials|quick_connect,server_len:u32,user_len:u32,pass_len:u32,editing:Option<u32>,busy:Option<connecting|signing_in|starting|adopting>,waiting:bool,error:bool,origin:bool}";
+pub(crate) const SHAPE: &str = "JfLoginScreen{entry:u32,instance:u32,step:server|credentials|quick_connect|pick,server_len:u32,user_len:u32,pass_len:u32,editing:Option<u32>,busy:Option<connecting|signing_in|starting|adopting>,waiting:bool,error:bool,origin:bool,adding:bool,people:u32,picked:bool}";
 
 const SERVER: u32 = 1;
 const CONNECT: u32 = 2;
@@ -53,6 +61,16 @@ const SIGN_IN: u32 = 5;
 const QUICK: u32 = 6;
 const CHANGE: u32 = 7;
 const USE_PASSWORD: u32 = 8;
+/// *Add a user*: someone not in the server's list types their username.
+const OTHER: u32 = 10;
+/// *Add a user*: the person at position `i` of the server's list is `PERSON + i`.
+const PERSON: u32 = 100;
+/// The most people the list shows (the server's own sign-in screen pages a longer list); anyone
+/// else is *Other user*.
+const MAX_PEOPLE: usize = 11;
+const PEOPLE_COLS: usize = 4;
+const PERSON_DISC: f32 = 120.0;
+const PERSON_H: f32 = PERSON_DISC + 16.0 + 36.0 + 30.0;
 /// `GroupId(0)` is the container's default fresh-mount target, so the first frame seats with no
 /// correction of its own.
 const GROUP: GroupId = GroupId(0);
@@ -96,12 +114,36 @@ const FIELD_SZ: i32 = theme::size::HEADLINE;
 const BUTTON_SZ: i32 = theme::size::BODY;
 const CARET_W: f32 = 3.0;
 const POP_MS: u32 = 450;
+/// A focused person in the server's list grows by the shared control pop.
+const CTRL_POP: f32 = crate::ui::widgets::CTRL_FOCUS_SCALE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
     Server,
     Credentials,
     QuickConnect,
+    /// *Add a user*: who's signing in?
+    Pick,
+}
+
+/// How the sign-in page opens when it is not a first sign-in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Opening {
+    /// *Add a user* on the active server, at *Who's signing in?*.
+    AddUser,
+    /// One kept user's sign-in was refused: straight to *Sign in as name* on their server, with a
+    /// line saying why.
+    SignInAgain { server: String, server_name: String, id: String, name: String },
+}
+
+/// Someone the server lists on its sign-in screen, as *Add a user* shows them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Person {
+    id: String,
+    name: String,
+    has_password: bool,
+    /// Already signed in on this television: their position in the roster, to switch to.
+    on_tv: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,9 +199,45 @@ pub(crate) struct JfLoginScreen {
     pop: CtlPop<3>,
     ground: RouteGround,
     recent: Option<Recent>,
+    /// *Add a user* on the server already signed in to, rather than a first sign-in.
+    adding: bool,
+    /// *Add a user*: the people the server lists, once they have landed.
+    people: Option<Vec<Person>>,
+    /// *Add a user*: who was picked, so the password step names them.
+    picked: Option<Person>,
 }
 
 impl JfLoginScreen {
+    /// **Add a user**: open at *Who's signing in?* on the server the active user is signed in to
+    /// (or, with nobody active, the one signed in to last) — or, for a user whose sign-in was
+    /// refused, straight at *Sign in as name* with the reason in the status band. With no server
+    /// known it is an ordinary sign-in.
+    pub(crate) fn adding_user(entry: EntryId, instance: InstanceId, opening: Opening) -> Self {
+        let mut s = Self::new(entry, instance);
+        if let Opening::SignInAgain { server, server_name, id, name } = opening {
+            if let Some(origin) = Origin::parse(&server) {
+                s.server_name = if server_name.trim().is_empty() { origin.host().to_owned() } else { server_name };
+                s.origin = Some(origin);
+                s.adding = true;
+                s.stage = Stage::Credentials;
+                s.user = TextBuffer::new(name.clone(), name.len());
+                s.picked = Some(Person { id, name, has_password: true, on_tv: None });
+                s.error = Some(msg::jellyfin_login_error_expired().to_owned());
+            }
+            return s;
+        }
+        let server = crate::jf::store::current()
+            .map(|u| (u.origin(), u.server_name))
+            .or_else(|| crate::jf::store::recent_server().map(|r| (r.origin(), r.server_name)));
+        if let Some((Some(origin), name)) = server {
+            s.server_name = if name.trim().is_empty() { origin.host().to_owned() } else { name };
+            s.origin = Some(origin);
+            s.adding = true;
+            s.stage = Stage::Pick;
+        }
+        s
+    }
+
     pub(crate) fn new(entry: EntryId, instance: InstanceId) -> Self {
         // The server signed in to last — kept through a sign-out, and still there when the saved
         // server failed to come up — offered as the *Recent* row, one press from reconnecting;
@@ -196,6 +274,9 @@ impl JfLoginScreen {
             pop: CtlPop::new(),
             ground: RouteGround::new(),
             recent,
+            adding: false,
+            people: None,
+            picked: None,
         }
     }
 
@@ -206,17 +287,37 @@ impl JfLoginScreen {
     fn fields(&self) -> &'static [u32] {
         match self.stage {
             Stage::Server => &[SERVER],
+            // The person picked from the server's list has their name already: only the password.
+            Stage::Credentials if self.picked.is_some() => &[PASS],
             Stage::Credentials => &[USER, PASS],
-            Stage::QuickConnect => &[],
+            Stage::QuickConnect | Stage::Pick => &[],
         }
     }
 
+    /// The controls that pop on focus, in their [`CtlPop`] slots. A person's avatar is not one.
     fn buttons(&self) -> &'static [u32] {
         match self.stage {
             Stage::Server => &[CONNECT, RECENT],
             Stage::Credentials => &[SIGN_IN, QUICK, CHANGE],
             Stage::QuickConnect => &[USE_PASSWORD, CHANGE],
+            Stage::Pick => &[OTHER, QUICK],
         }
+    }
+
+    /// The people shown, at most [`MAX_PEOPLE`].
+    fn shown(&self) -> &[Person] {
+        self.people.as_deref().map_or(&[], |p| &p[..p.len().min(MAX_PEOPLE)])
+    }
+
+    /// The person behind a `PERSON + i` element.
+    fn person(&self, elem: u32) -> Option<&Person> {
+        elem.checked_sub(PERSON).and_then(|i| self.shown().get(i as usize))
+    }
+
+    /// *Change server*, or — adding a user — the way back to the server's list: *Not name?* beside
+    /// the person picked. Adding a user never changes server, so without a pick it is not offered.
+    fn offers_change(&self) -> bool {
+        !self.adding || (self.stage == Stage::Credentials && self.picked.is_some())
     }
 
     /// Every focusable element, in the order focus walks it: down the panel, or along Quick
@@ -230,9 +331,50 @@ impl JfLoginScreen {
                 }
                 v
             }
-            Stage::Credentials => vec![CHANGE, USER, PASS, SIGN_IN, QUICK],
-            Stage::QuickConnect => vec![USE_PASSWORD, CHANGE],
+            Stage::Credentials => {
+                let mut v = Vec::with_capacity(5);
+                if self.offers_change() {
+                    v.push(CHANGE);
+                }
+                v.extend_from_slice(self.fields());
+                v.extend([SIGN_IN, QUICK]);
+                v
+            }
+            Stage::QuickConnect if self.offers_change() => vec![USE_PASSWORD, CHANGE],
+            Stage::QuickConnect => vec![USE_PASSWORD],
+            Stage::Pick => {
+                let mut v: Vec<u32> = (0..self.shown().len() as u32).map(|i| PERSON + i).collect();
+                v.extend([OTHER, QUICK]);
+                v
+            }
         }
+    }
+
+    /// Focus across the server's list: LEFT/RIGHT along a row, UP/DOWN a column, DOWN from the last
+    /// row to Quick Connect and UP from it back to the row's end.
+    fn grid_step(&self, elem: u32, dir: Dir) -> Option<u32> {
+        let grid = self.grid();
+        if elem == QUICK {
+            return (dir == Dir::Up).then(|| *grid.last().expect("Other user is always there"));
+        }
+        let i = grid.iter().position(|&e| e == elem)?;
+        let n = grid.len();
+        match dir {
+            Dir::Left if i % PEOPLE_COLS > 0 => Some(grid[i - 1]),
+            Dir::Right if i % PEOPLE_COLS < PEOPLE_COLS - 1 && i + 1 < n => Some(grid[i + 1]),
+            Dir::Up => i.checked_sub(PEOPLE_COLS).map(|j| grid[j]),
+            Dir::Down if (i / PEOPLE_COLS + 1) * PEOPLE_COLS < n => Some(grid[(i + PEOPLE_COLS).min(n - 1)]),
+            Dir::Down => Some(QUICK),
+            _ => None,
+        }
+    }
+
+    /// The server's list is a grid: its people and *Other user*, [`PEOPLE_COLS`] to a row, with
+    /// Quick Connect under it.
+    fn grid(&self) -> Vec<u32> {
+        let mut v: Vec<u32> = (0..self.shown().len() as u32).map(|i| PERSON + i).collect();
+        v.push(OTHER);
+        v
     }
 
     /// Quick Connect's two buttons are a row; every other step is a column.
@@ -250,8 +392,15 @@ impl JfLoginScreen {
         match self.stage {
             Stage::Server if self.recent.is_some() => RECENT,
             Stage::Server => SERVER,
+            Stage::Credentials if self.picked.is_some() => PASS,
             Stage::Credentials => USER,
             Stage::QuickConnect => USE_PASSWORD,
+            // The first person not already on this TV: they are who is being added.
+            Stage::Pick => self
+                .shown()
+                .iter()
+                .position(|p| p.on_tv.is_none())
+                .map_or(OTHER, |i| PERSON + i as u32),
         }
     }
 
@@ -329,6 +478,11 @@ impl JfLoginScreen {
         self.error = None;
         if stage == Stage::Server {
             self.origin = None;
+        }
+        if stage == Stage::Pick {
+            self.picked = None;
+            self.user = TextBuffer::new(String::new(), 0);
+            self.pass = TextBuffer::new(String::new(), 0);
         }
         self.reseat(self.first(), fx);
         fx.invalidate(Provenance::Input);
@@ -434,10 +588,34 @@ impl JfLoginScreen {
             JfAuthReply::Polled(Ok(None)) => {
                 self.next_poll_ms = Some(self.now_ms.wrapping_add(POLL_MS));
             }
+            JfAuthReply::People(Ok(listed)) => {
+                self.busy = None;
+                let roster = crate::jf::store::roster();
+                let origin = self.origin.as_ref().map(|o| o.base()).unwrap_or_default();
+                let people: Vec<Person> = listed
+                    .into_iter()
+                    .map(|u| {
+                        let probe = crate::jf::store::Stored { server: origin.clone(), user_id: u.id.clone(), ..Default::default() };
+                        let on_tv = roster.users.iter().position(|kept| kept.same_user(&probe)).map(|i| i as u8);
+                        Person { id: u.id, name: u.name, has_password: u.has_password, on_tv }
+                    })
+                    .collect();
+                let nobody = people.is_empty();
+                self.people = Some(people);
+                if nobody {
+                    // The administrator hides the list: ask for a username instead.
+                    self.go(Stage::Credentials, fx);
+                } else {
+                    self.reseat(self.first(), fx);
+                }
+            }
             JfAuthReply::Probed(Err(e))
             | JfAuthReply::SignedIn(Err(e))
             | JfAuthReply::QuickConnect(Err(e))
-            | JfAuthReply::Polled(Err(e)) => self.fail(e),
+            | JfAuthReply::Polled(Err(e))
+            | JfAuthReply::People(Err(e)) => self.fail(e),
+            // Asked by the who's-watching screen, never by this one.
+            JfAuthReply::Checked(..) => {}
         }
         fx.invalidate(Provenance::Input);
     }
@@ -467,6 +645,13 @@ impl JfLoginScreen {
             return;
         }
         match elem {
+            CHANGE if self.adding => {
+                self.go(Stage::Pick, fx);
+                if self.people.is_none() {
+                    self.load_people(fx);
+                }
+                return;
+            }
             CHANGE => return self.go(Stage::Server, fx),
             USE_PASSWORD => {
                 let origin = self.origin.clone();
@@ -492,7 +677,42 @@ impl JfLoginScreen {
             }
             SIGN_IN => self.sign_in(fx),
             QUICK => self.start_quick_connect(fx),
-            _ => {}
+            OTHER => {
+                self.picked = None;
+                self.user = TextBuffer::new(String::new(), 0);
+                self.go(Stage::Credentials, fx);
+            }
+            _ => {
+                if let Some(person) = self.person(elem).cloned() {
+                    self.pick(person, fx);
+                }
+            }
+        }
+    }
+
+    /// *Add a user*: ask the server who it lists.
+    fn load_people<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        if let Some(origin) = self.origin.clone() {
+            self.request(Busy::Connecting, fx, |reply| JfAuthCmd::PublicUsers { origin, reply });
+        }
+    }
+
+    /// *Add a user*: someone already on this television is switched to; someone without a
+    /// password signs straight in; anyone else is asked for theirs.
+    fn pick<H: AppLike>(&mut self, person: Person, fx: &mut Effects<'_, H>) {
+        if let Some(index) = person.on_tv {
+            fx.push(Fx::App(AppFx::Loop(LoopReq::PickJellyfinUser(index))));
+            return;
+        }
+        let name = person.name.clone();
+        let needs_password = person.has_password;
+        self.picked = Some(person);
+        self.go(Stage::Credentials, fx);
+        self.user = TextBuffer::new(name.clone(), name.len());
+        if needs_password {
+            self.open(PASS, fx);
+        } else {
+            self.sign_in(fx);
         }
     }
 
@@ -518,6 +738,9 @@ impl JfLoginScreen {
     }
 
     fn back<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        if self.adding {
+            return self.back_adding(fx);
+        }
         match self.stage {
             Stage::Server if self.busy.is_some() => {
                 self.rx = None;
@@ -530,6 +753,28 @@ impl JfLoginScreen {
                 let origin = self.origin.clone();
                 self.go(Stage::Credentials, fx);
                 self.origin = origin;
+            }
+            Stage::Pick => fx.push(Fx::App(AppFx::Loop(LoopReq::BackAtRoot))),
+        }
+    }
+
+    /// BACK while adding a user walks back to the server's list, then out: to the user signed in
+    /// underneath, else to the who's-watching screen. A server that lists nobody has no list to
+    /// walk back to.
+    fn back_adding<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
+        let listed = self.people.as_ref().is_some_and(|p| !p.is_empty());
+        match self.stage {
+            Stage::QuickConnect if self.picked.is_some() || !listed => self.go(Stage::Credentials, fx),
+            Stage::Credentials | Stage::QuickConnect if listed => self.go(Stage::Pick, fx),
+            _ => {
+                let roster = crate::jf::store::roster();
+                let req = match roster.active {
+                    Some(i) => LoopReq::PickJellyfinUser(i as u8),
+                    None => LoopReq::AccountSwitchUser,
+                };
+                self.rx = None;
+                self.busy = None;
+                fx.push(Fx::App(AppFx::Loop(req)));
             }
         }
     }
@@ -585,13 +830,17 @@ impl JfLoginScreen {
             Stage::Credentials => {
                 let card = Rect::new(x, y, w, CARD_H);
                 form.card = Some(card);
-                let cw = Button::pill_w_measured(button_label(CHANGE), BUTTON_SZ, false, false, measure);
-                form.buttons.push((CHANGE, Rect::new(x + w - cw, card.cy() - CHANGE_H * 0.5, cw, CHANGE_H)));
+                if self.offers_change() {
+                    let cw = Button::pill_w_measured(&self.label_of(CHANGE), BUTTON_SZ, false, false, measure);
+                    form.buttons.push((CHANGE, Rect::new(x + w - cw, card.cy() - CHANGE_H * 0.5, cw, CHANGE_H)));
+                }
                 y += CARD_H + theme::space::MD;
                 form.or_rule = Some(Rect::new(x, y, w, 1.0));
                 y += 1.0 + theme::space::MD;
-                field(&mut form, &mut y, USER);
-                y += theme::space::MD;
+                if self.picked.is_none() {
+                    field(&mut form, &mut y, USER);
+                    y += theme::space::MD;
+                }
                 field(&mut form, &mut y, PASS);
                 y += theme::space::XS;
                 form.status.y = y;
@@ -612,17 +861,38 @@ impl JfLoginScreen {
                 y += CODE_CELL_H + theme::space::SM;
                 form.status.y = y;
                 y += STATUS_H;
-                let ws: Vec<f32> = [USE_PASSWORD, CHANGE]
+                let pair: &[u32] = if self.offers_change() { &[USE_PASSWORD, CHANGE] } else { &[USE_PASSWORD] };
+                let ws: Vec<f32> = pair
                     .iter()
-                    .map(|&b| Button::pill_w_measured(button_label(b), BUTTON_SZ, false, false, measure))
+                    .map(|&b| Button::pill_w_measured(&self.label_of(b), BUTTON_SZ, false, false, measure))
                     .collect();
-                let total = ws.iter().sum::<f32>() + CONTROL_GAP;
+                let total = ws.iter().sum::<f32>() + CONTROL_GAP * (pair.len() - 1) as f32;
                 let mut bx = x + ((w - total) * 0.5).max(0.0);
-                for (&b, bw) in [USE_PASSWORD, CHANGE].iter().zip(ws) {
+                for (&b, bw) in pair.iter().zip(ws) {
                     form.buttons.push((b, Rect::new(bx, y, bw, PAIR_H)));
                     bx += bw + CONTROL_GAP;
                 }
                 y += PAIR_H;
+            }
+            Stage::Pick => {
+                form.card = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::LG;
+                let grid = self.grid();
+                let cell_w = w / PEOPLE_COLS as f32;
+                for (i, &elem) in grid.iter().enumerate() {
+                    let (row, col) = (i / PEOPLE_COLS, i % PEOPLE_COLS);
+                    let cy = y + row as f32 * (PERSON_H + theme::space::MD);
+                    let cx = x + col as f32 * cell_w + (cell_w - PERSON_DISC) * 0.5;
+                    form.buttons.push((elem, Rect::new(cx, cy, PERSON_DISC, PERSON_DISC)));
+                }
+                let rows = grid.len().div_ceil(PEOPLE_COLS);
+                y += rows as f32 * PERSON_H + (rows - 1) as f32 * theme::space::MD;
+                form.status.y = y;
+                y += STATUS_H;
+                form.recent_caption = Some(Rect::new(x, y, w, LABEL_H));
+                y += LABEL_H + theme::space::MD;
+                form.buttons.push((QUICK, Rect::new(x, y, w, WIDE_H)));
+                y += WIDE_H;
             }
         }
         let h = y + PANEL_PAD;
@@ -643,6 +913,15 @@ impl JfLoginScreen {
         form
     }
 
+    /// A button's words: [`button_label`], except that adding a user, the way back from the
+    /// password step is *Not name?*.
+    fn label_of(&self, button: u32) -> CString {
+        match (button, &self.picked) {
+            (CHANGE, Some(person)) => cstring(&msg::jellyfin_login_not_user(&person.name)),
+            _ => button_label(button).to_owned(),
+        }
+    }
+
     fn elem_rect(&self, elem: u32, measure: &dyn Measure) -> Option<Rect> {
         let form = self.form(measure);
         form.fields
@@ -659,7 +938,7 @@ impl JfLoginScreen {
             && match self.stage {
                 Stage::Server => field == SERVER,
                 Stage::Credentials => field == PASS,
-                Stage::QuickConnect => false,
+                Stage::QuickConnect | Stage::Pick => false,
             }
     }
 
@@ -782,6 +1061,75 @@ impl JfLoginScreen {
         r
     }
 
+    /// The person picked from the server's list, as the password step heads its panel: their avatar,
+    /// their name, the server — and *Not name?* beside them.
+    fn draw_person_card(&self, p: Painter, person: &Person, rect: Rect, change_x: f32) {
+        let disc = Rect::new(rect.x, rect.cy() - CARD_DISC * 0.5, CARD_DISC, CARD_DISC);
+        crate::ui::widgets::avatar_disc(p, disc, &person.name, &person.id, false, theme::size::HEADLINE);
+        let tx = disc.x + disc.w + theme::space::MD;
+        let tw = (change_x - theme::space::MD - tx).max(0.0);
+        TextView::new(&person.name, theme::size::BODY, theme::TEXT_PRIMARY)
+            .bold()
+            .max_lines(1)
+            .draw(p, Rect::new(tx, rect.y + 2.0, tw, rect.h * 0.5));
+        let server = match &self.origin {
+            Some(origin) => format!("{} \u{b7} {}:{}", self.server_name, origin.host(), origin.port()),
+            None => self.server_name.clone(),
+        };
+        TextView::new(&server, theme::size::CAPTION, theme::TEXT_TERTIARY)
+            .max_lines(1)
+            .draw(p, Rect::new(tx, rect.y + rect.h * 0.5 + 4.0, tw, rect.h * 0.5));
+    }
+
+    /// One tile of the server's list: the person's avatar (or *Other user*'s outline), their name,
+    /// and — someone already on this television — "On this TV", the whole tile quietened.
+    fn draw_person(&self, p: Painter, elem: u32, rect: Rect, focused: bool, scale: f32) {
+        let r = Rect::new(
+            rect.cx() - rect.w * scale * 0.5,
+            rect.cy() - rect.h * scale * 0.5,
+            rect.w * scale,
+            rect.h * scale,
+        );
+        let person = self.person(elem);
+        let on_tv = person.is_some_and(|p| p.on_tv.is_some());
+        let p = if on_tv && !focused { p.alpha(0.55) } else { p };
+        let name = match person {
+            Some(person) => {
+                crate::ui::widgets::avatar_disc(p, r, &person.name, &person.id, focused, theme::size::DISPLAY);
+                person.name.as_str()
+            }
+            None => {
+                let rad = r.w * 0.5;
+                p.rrect(r, rad, rad, theme::CONTROL_IDLE_FILL_UNKEYED);
+                p.rring(r, rad, if focused { 5.0 } else { 2.0 },
+                    if focused { theme::CONTROL_RIM_FOCUS_UNKEYED } else { theme::CONTROL_RIM_IDLE_UNKEYED });
+                let mark = r.w * 0.42;
+                crate::ui::icons::draw(
+                    p,
+                    crate::ui::icons::Icon::User,
+                    Rect::new(r.cx() - mark * 0.5, r.cy() - mark * 0.5, mark, mark),
+                    if focused { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY },
+                );
+                msg::jellyfin_login_other_user()
+            }
+        };
+        let cell_w = rect.w + 2.0 * theme::space::LG;
+        let tx = rect.cx() - cell_w * 0.5;
+        let ty = rect.y + rect.h + (r.h - rect.h) * 0.5 + 16.0;
+        let ink = if focused { theme::TEXT_PRIMARY } else { theme::TEXT_SECONDARY };
+        let mut view = TextView::new(name, theme::size::LABEL, ink).h(HAlign::Center).max_lines(1);
+        if focused {
+            view = view.bold();
+        }
+        view.draw(p, Rect::new(tx, ty, cell_w, 36.0));
+        if on_tv {
+            TextView::new(msg::jellyfin_login_on_this_tv(), theme::size::MICRO, theme::TEXT_TERTIARY)
+                .h(HAlign::Center)
+                .max_lines(1)
+                .draw(p, Rect::new(tx, ty + 34.0, cell_w, 30.0));
+        }
+    }
+
     /// The server card: the server's mark, its name and its address, *Change server* beside them.
     fn draw_card(&self, p: Painter, rect: Rect, change_x: f32) {
         let disc = Self::disc(p, rect.x + CARD_DISC * 0.5, rect.cy(), CARD_DISC, theme::CONTROL_IDLE_FILL_UNKEYED);
@@ -890,24 +1238,35 @@ impl JfLoginScreen {
     }
 
     /// The narrative column, vertically centred: the step eyebrow, the title, then the copy (on
-    /// Quick Connect, three numbered instructions) and, on the first two steps, the tracker.
+    /// Quick Connect, three numbered instructions) and, on the first two steps of a first sign-in,
+    /// the tracker. Adding a user has no tracker: the server is the one already signed in to.
     fn draw_narrative(&self, p: Painter, measure: &dyn Measure) {
         let layout = RouteLayout::screen();
         let x = layout.narrative.x;
         let w = layout.narrative.w;
         let eyebrow = match self.stage {
-            Stage::Server => msg::jellyfin_login_step_server(),
-            Stage::Credentials => msg::jellyfin_login_step_sign_in(),
             Stage::QuickConnect => msg::jellyfin_login_step_quick_connect(),
+            _ if self.adding => msg::jellyfin_login_step_add_user(),
+            Stage::Server => msg::jellyfin_login_step_server(),
+            Stage::Credentials | Stage::Pick => msg::jellyfin_login_step_sign_in(),
         };
-        let title = match self.stage {
-            Stage::Server => msg::jellyfin_login_title_server().to_owned(),
-            Stage::Credentials if !self.server_name.trim().is_empty() => {
+        let title = match (self.stage, &self.picked) {
+            (Stage::Pick, _) => msg::jellyfin_login_title_pick_user().to_owned(),
+            (Stage::Credentials, Some(person)) => msg::jellyfin_login_title_sign_in_as(&person.name),
+            (Stage::Server, _) => msg::jellyfin_login_title_server().to_owned(),
+            (Stage::Credentials, None) if !self.server_name.trim().is_empty() => {
                 msg::jellyfin_login_title_sign_in(&self.server_name)
             }
-            Stage::Credentials => msg::jellyfin_login_title().to_owned(),
-            Stage::QuickConnect => msg::jellyfin_login_title_quick_connect().to_owned(),
+            (Stage::Credentials, None) => msg::jellyfin_login_title().to_owned(),
+            (Stage::QuickConnect, _) => msg::jellyfin_login_title_quick_connect().to_owned(),
         };
+        let copy = match (self.stage, &self.picked) {
+            (Stage::Pick, _) => msg::jellyfin_login_pick_user_intro(&self.server_name),
+            (Stage::Credentials, Some(person)) => msg::jellyfin_login_sign_in_as_intro(&person.name),
+            (Stage::Server, _) => msg::jellyfin_login_server_intro().to_owned(),
+            _ => msg::jellyfin_login_credentials_intro().to_owned(),
+        };
+        let tracked = !self.adding && self.stage != Stage::QuickConnect;
         let title_view = RouteLayout::narrative_title(&title).with_measure(measure);
         let title_h = title_view.measure_h(w);
         let copy_size = theme::size::LABEL;
@@ -930,15 +1289,9 @@ impl JfLoginScreen {
                 })
                 .sum::<f32>()
                 + 2.0 * theme::space::MD,
-            _ => {
-                let copy = match self.stage {
-                    Stage::Server => msg::jellyfin_login_server_intro(),
-                    _ => msg::jellyfin_login_credentials_intro(),
-                };
-                TextView::new(copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead).measure_h(w)
-            }
+            _ => TextView::new(&copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead).measure_h(w),
         };
-        let tracker_h = if self.stage == Stage::QuickConnect { 0.0 } else { theme::space::LG + 2.0 * STEP_ROW_H };
+        let tracker_h = if tracked { theme::space::LG + 2.0 * STEP_ROW_H } else { 0.0 };
         let total = EYEBROW_H + theme::space::SM + title_h + theme::space::MD + copy_h + tracker_h;
         let safe = crate::ui::consts::SAFE;
         let mut y = (safe.y + (safe.h - total) * 0.5).max(layout.narrative.y);
@@ -964,14 +1317,12 @@ impl JfLoginScreen {
                 }
             }
             _ => {
-                let copy = match self.stage {
-                    Stage::Server => msg::jellyfin_login_server_intro(),
-                    _ => msg::jellyfin_login_credentials_intro(),
-                };
-                let view = TextView::new(copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead);
+                let view = TextView::new(&copy, copy_size, theme::TEXT_READING).with_measure(measure).leading(copy_lead);
                 view.draw(p, Rect::new(x, y, w, copy_h));
                 y += copy_h + theme::space::LG;
-                self.draw_tracker(p, x, y, w);
+                if tracked {
+                    self.draw_tracker(p, x, y, w);
+                }
             }
         }
     }
@@ -1127,6 +1478,9 @@ impl<H: AppLike> Focusable<H> for JfLoginScreen {
     /// The panel is a column: UP/DOWN walk [`JfLoginScreen::order`]. Quick Connect's two buttons
     /// are a row: LEFT/RIGHT walk them. Everything else is an edge.
     fn neighbour(&self, key: FocusKey<u32>, dir: Dir, _cx: &Cx<'_, H>) -> Step<u32> {
+        if self.stage == Stage::Pick {
+            return self.grid_step(key.elem, dir).map_or(Step::Edge, |elem| Step::Move(self.key(elem)));
+        }
         let order = self.order();
         let Some(i) = order.iter().position(|&e| e == key.elem) else { return Step::Edge };
         let (back, ahead) = if self.is_row() { (Dir::Left, Dir::Right) } else { (Dir::Up, Dir::Down) };
@@ -1160,7 +1514,12 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
     type Ev = ScreenEvent<H>;
     fn step(&mut self, ev: &Self::Ev, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
         match ev {
-            ScreenEvent::Mount => self.reseat(self.first(), fx),
+            ScreenEvent::Mount => {
+                self.reseat(self.first(), fx);
+                if self.stage == Stage::Pick && self.people.is_none() {
+                    self.load_people(fx);
+                }
+            }
             ScreenEvent::Unmount => {
                 self.close(fx);
                 self.rx = None;
@@ -1256,12 +1615,11 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
         let focus = f.focus.current.filter(|k| k.entry == self.entry).map(|k| k.elem);
         crate::ui::widgets::panel_ground(p, form.panel, PANEL_R, f.underlay);
         if let Some(rect) = form.card {
-            match self.stage {
-                Stage::QuickConnect => self.draw_server_line(p, rect, f.measure),
-                _ => {
-                    let change_x = form.buttons.iter().find(|(b, _)| *b == CHANGE).map_or(rect.x + rect.w, |(_, r)| r.x);
-                    self.draw_card(p, rect, change_x);
-                }
+            let change_x = form.buttons.iter().find(|(b, _)| *b == CHANGE).map_or(rect.x + rect.w, |(_, r)| r.x);
+            match (self.stage, &self.picked) {
+                (Stage::QuickConnect | Stage::Pick, _) => self.draw_server_line(p, rect, f.measure),
+                (_, Some(person)) => self.draw_person_card(p, person, rect, change_x),
+                _ => self.draw_card(p, rect, change_x),
             }
         }
         for &(field, rect) in &form.labels {
@@ -1289,7 +1647,7 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
         }
         if let Some(rect) = form.recent_caption {
             match self.stage {
-                Stage::Credentials => Self::draw_rule(p, rect, Some(msg::jellyfin_login_or_c()), f.measure),
+                Stage::Credentials | Stage::Pick => Self::draw_rule(p, rect, Some(msg::jellyfin_login_or_c()), f.measure),
                 _ => Self::draw_caption(p, msg::jellyfin_login_recent(), rect, false),
             }
         }
@@ -1303,7 +1661,14 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 self.draw_recent(p, rect, focus == Some(button), scale);
                 continue;
             }
-            let mut b = Button::new(button_label(button).as_ptr(), BUTTON_SZ, rect)
+            if button == OTHER || self.person(button).is_some() {
+                let focused = focus == Some(button);
+                let scale = if button == OTHER { scale } else if focused { CTRL_POP } else { 1.0 };
+                self.draw_person(p, button, rect, focused, scale);
+                continue;
+            }
+            let label = self.label_of(button);
+            let mut b = Button::new(label.as_ptr(), BUTTON_SZ, rect)
                 .focused(focus == Some(button))
                 .scale(scale);
             if button == QUICK {
@@ -1337,6 +1702,7 @@ impl LogicalState for JfLoginScreen {
             Stage::Server => 0,
             Stage::Credentials => 1,
             Stage::QuickConnect => 2,
+            Stage::Pick => 3,
         });
         c.u32(self.server.text().len() as u32)
             .u32(self.user.text().len() as u32)
@@ -1348,6 +1714,7 @@ impl LogicalState for JfLoginScreen {
             c.u32(busy as u32);
         });
         c.bool(self.waiting()).bool(self.error.is_some()).bool(self.origin.is_some());
+        c.bool(self.adding).u32(self.shown().len() as u32).bool(self.picked.is_some());
     }
     fn probe(&self, out: &mut String) {
         out.push_str(&format!(
@@ -1438,6 +1805,7 @@ mod tests {
         for (id, svg) in [
             (Icon::Server, include_str!("../../../assets/icons/server.svg")),
             (Icon::Phone, include_str!("../../../assets/icons/phone.svg")),
+            (Icon::Plus, include_str!("../../../assets/icons/plus.svg")),
         ] {
             for px in [26, 28, 32] {
                 let rgba = nj_gfx::svg::rasterize(svg, px, px).unwrap_or_else(|| panic!("{id:?} at {px}px"));
@@ -1464,6 +1832,127 @@ mod tests {
         assert!(!s.is_row());
         s.stage = Stage::QuickConnect;
         assert!(s.is_row());
+    }
+
+    /// The smallest host the screen's effects can be stepped on.
+    struct TestHost;
+    impl nj_machine::machine::Host for TestHost {
+        type Arg = super::super::family::SettingsPage;
+        type Fx = AppFx;
+        type Msg = crate::screens::registry::AppMsg;
+        type Elem = u32;
+        type Views<'a> = crate::auth::SessionRead<'a>;
+        type Init = super::super::family::NoInit;
+        type Memory = ();
+    }
+
+    /// What one step asked the app for: the loop requests, and the sign-in commands by name and
+    /// username (never a password).
+    fn effects(s: &mut JfLoginScreen, f: impl FnOnce(&mut JfLoginScreen, &mut Effects<'_, TestHost>)) -> (Vec<LoopReq>, Vec<String>) {
+        let mut out = Vec::new();
+        let mut present = nj_machine::present::Present::new();
+        let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
+        f(s, &mut fx);
+        drop(fx);
+        let (mut loops, mut auth) = (Vec::new(), Vec::new());
+        for e in out {
+            match e.fx {
+                Fx::App(AppFx::Loop(req)) => loops.push(req),
+                Fx::App(AppFx::JfAuth(JfAuthCmd::Password { username, .. })) => auth.push(format!("password:{username}")),
+                Fx::App(AppFx::JfAuth(JfAuthCmd::PublicUsers { .. })) => auth.push("people".into()),
+                Fx::App(AppFx::JfAuth(JfAuthCmd::QuickConnectStart { .. })) => auth.push("quick-connect".into()),
+                _ => {}
+            }
+        }
+        (loops, auth)
+    }
+
+    fn adding(people: Vec<Person>) -> JfLoginScreen {
+        let mut s = JfLoginScreen::new(EntryId(1), InstanceId(0));
+        s.recent = None;
+        s.adding = true;
+        s.origin = Origin::parse("http://192.168.1.20:8096");
+        s.server_name = "Living Room".into();
+        s.stage = Stage::Pick;
+        s.people = Some(people);
+        s
+    }
+
+    fn person(name: &str, has_password: bool, on_tv: Option<u8>) -> Person {
+        Person { id: format!("id-{name}"), name: name.into(), has_password, on_tv }
+    }
+
+    /// *Add a user* opens on the server's list: its people, *Other user* and Quick Connect, walked
+    /// as a grid. Someone already on this TV is switched to; someone with a password is asked for
+    /// only that, beside *Not name?*; someone without one signs straight in.
+    #[test]
+    fn adding_a_user_picks_from_the_servers_list() {
+        let people = vec![person("Alex", true, Some(0)), person("Sam", true, None), person("Kids", false, None)];
+        let mut s = adding(people);
+        assert_eq!(s.order(), [PERSON, PERSON + 1, PERSON + 2, OTHER, QUICK]);
+        assert_eq!(s.first(), PERSON + 1, "focus starts on the first person not on this TV");
+        assert_eq!(s.grid_step(PERSON, Dir::Right), Some(PERSON + 1));
+        assert_eq!(s.grid_step(PERSON + 1, Dir::Down), Some(QUICK), "one row, then Quick Connect");
+        assert_eq!(s.grid_step(QUICK, Dir::Up), Some(OTHER));
+        assert_eq!(s.grid_step(OTHER, Dir::Right), None);
+
+        let (loops, auth) = effects(&mut s, |s, fx| s.activate(PERSON, fx));
+        assert_eq!((loops, auth), (vec![LoopReq::PickJellyfinUser(0)], vec![]), "Alex is on this TV already");
+        assert_eq!(s.stage, Stage::Pick);
+
+        let (loops, auth) = effects(&mut s, |s, fx| s.activate(PERSON + 1, fx));
+        assert!(loops.is_empty() && auth.is_empty(), "{loops:?} {auth:?}");
+        assert_eq!(s.stage, Stage::Credentials);
+        assert_eq!(s.order(), [CHANGE, PASS, SIGN_IN, QUICK], "only the password is asked");
+        assert_eq!(s.first(), PASS);
+        assert_eq!(s.editing, Some(PASS), "the keyboard is up for it");
+        assert_eq!(s.label_of(CHANGE).to_str().unwrap(), "Not Sam?");
+        assert_eq!(s.user.text(), "Sam");
+
+        let (loops, _) = effects(&mut s, |s, fx| s.back(fx));
+        assert!(loops.is_empty());
+        assert_eq!((s.stage, s.picked.is_none(), s.user.text()), (Stage::Pick, true, ""), "BACK is the list again");
+
+        let (_, auth) = effects(&mut s, |s, fx| s.activate(PERSON + 2, fx));
+        assert_eq!(auth, ["password:Kids"], "no password: straight in");
+        assert_eq!(s.busy, Some(Busy::SigningIn));
+    }
+
+    /// *Other user* types a username on the same server — no *Change server*: adding a user never
+    /// changes server — and BACK from the list leaves for the who's-watching screen.
+    #[test]
+    fn other_user_types_a_name_and_back_leaves_the_flow() {
+        let _g = nj_base::testlock::serial();
+        crate::jf::store::forget_everything();
+        let mut s = adding(vec![person("Sam", true, None)]);
+        effects(&mut s, |s, fx| s.activate(OTHER, fx));
+        assert_eq!(s.stage, Stage::Credentials);
+        assert_eq!(s.order(), [USER, PASS, SIGN_IN, QUICK]);
+        effects(&mut s, |s, fx| s.start_quick_connect(fx));
+        assert_eq!(s.order(), [USE_PASSWORD], "Quick Connect offers no server change either");
+        effects(&mut s, |s, fx| s.back(fx));
+        effects(&mut s, |s, fx| s.back(fx));
+        assert_eq!(s.stage, Stage::Pick);
+        let (loops, _) = effects(&mut s, |s, fx| s.back(fx));
+        assert_eq!(loops, [LoopReq::AccountSwitchUser], "nobody signed in underneath");
+    }
+
+    /// A server whose administrator hides its user list answers with nobody: the flow asks for a
+    /// username instead, and BACK from there leaves rather than showing an empty list.
+    #[test]
+    fn a_server_that_lists_nobody_asks_for_a_username() {
+        let _g = nj_base::testlock::serial();
+        crate::jf::store::forget_everything();
+        let mut s = adding(Vec::new());
+        s.people = None;
+        let (tx, rx) = mpsc::channel();
+        s.rx = Some(rx);
+        tx.send(JfAuthReply::People(Ok(Vec::new()))).unwrap();
+        effects(&mut s, |s, fx| s.drain(fx));
+        assert_eq!(s.stage, Stage::Credentials);
+        assert_eq!(s.order(), [USER, PASS, SIGN_IN, QUICK]);
+        let (loops, _) = effects(&mut s, |s, fx| s.back(fx));
+        assert_eq!(loops, [LoopReq::AccountSwitchUser]);
     }
 
     #[test]

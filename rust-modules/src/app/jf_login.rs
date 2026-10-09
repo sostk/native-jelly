@@ -33,6 +33,22 @@ pub(super) fn execute(bridge: &mut super::bridge::Bridge, command: JfAuthCmd) {
             JfAuthReply::Polled(crate::jf::auth::quick_connect_poll(&origin, &client_id, &qc))
         }),
         JfAuthCmd::Adopt { origin, signed_in } => adopt(bridge, origin, signed_in),
+        JfAuthCmd::PublicUsers { origin, reply } => answer("jf public users", reply, move || {
+            JfAuthReply::People(crate::jf::auth::public_users(&origin, &client_id))
+        }),
+        JfAuthCmd::CheckKept { index, reply } => {
+            let Some(user) = crate::jf::store::roster().users.get(usize::from(index)).cloned() else {
+                let _ = reply.send(JfAuthReply::Checked(index, Err(crate::jf::auth::AuthError::Malformed)));
+                return;
+            };
+            let Some(origin) = user.origin() else {
+                let _ = reply.send(JfAuthReply::Checked(index, Err(crate::jf::auth::AuthError::Malformed)));
+                return;
+            };
+            answer("jf check user", reply, move || {
+                JfAuthReply::Checked(index, crate::jf::auth::check_token(&origin, &client_id, &user.token, &user.device_user))
+            })
+        }
     }
 }
 
@@ -61,49 +77,107 @@ pub(super) fn ready_creds(origin: &crate::catalog::Origin, token: String) -> cra
     }
 }
 
-/// **Sign out of the live Jellyfin sign-in**, if there is one: forget it here at once, tell the
-/// server on a worker, and drop every registered client. The server's address and name stay
-/// behind for the sign-in screen's *Recent* row. `false` when no Jellyfin sign-in is live (the
-/// caller signs out of plex.tv instead).
-pub(super) fn sign_out() -> bool {
-    sign_out_with(Keep::Server)
-}
-
-/// [`sign_out`] for Delete all local data: the server goes too, and every stored copy with it.
-/// Nothing is written back — the session file is about to be deleted, and a write queued behind
-/// that delete would bring it back.
-pub(super) fn sign_out_and_forget_server() -> bool {
-    sign_out_with(Keep::Nothing)
-}
-
-enum Keep {
-    Server,
-    Nothing,
-}
-
-fn sign_out_with(keep: Keep) -> bool {
-    let live = crate::jf::store::current();
-    match keep {
-        Keep::Server => {
-            crate::jf::store::set_live(None);
-            let roster = crate::jf::store::roster();
-            let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
-        }
-        Keep::Nothing => {
-            crate::jf::store::forget_everything();
-            let _ = nj_base::storage_worker::submit_retained(crate::jf::store::erase);
-        }
+/// **Choose the kept user at `index`** on the who's-watching screen. The user already running
+/// enters straight away; another one becomes the active user and takes the same handoff a
+/// sign-in does (`bridge::follow_auth_landing`), which reinstalls the server under their token
+/// and drops every page of the previous user.
+pub(super) fn pick_user(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge, index: usize) {
+    let roster = crate::jf::store::roster();
+    let Some(user) = roster.users.get(index).cloned() else {
+        log("jf: who's watching — that user is no longer kept");
+        return;
+    };
+    let Some(origin) = user.origin() else { return };
+    if roster.current().is_some_and(|live| live.same_user(&user)) {
+        log("jf: who's watching — the signed-in user carries on");
+        enter_signed_in(pages, bridge);
+        return;
     }
-    let Some(stored) = live else { return false };
-    if let Some(origin) = stored.origin() {
-        crate::jf::seat::forget(&origin);
-        let client_id = crate::catalog::session::peek().client_id.clone();
-        nj_base::task::spawn_small("jf sign-out", move || {
-            let revoked = crate::jf::auth::sign_out_detached(&origin, &client_id, &stored.token, &stored.device_user);
-            log(if revoked { "jf: signed out — the server revoked this device's token" }
-                else { "jf: signed out — the server could not be told (the token stays valid there)" });
-        });
+    crate::jf::store::activate(&user.server, &user.user_id);
+    let roster = crate::jf::store::roster();
+    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+    // The previous user's clients go; the server is installed again under this user's token and
+    // their own DeviceId, exactly as after a sign-in.
+    crate::catalog::revoke_all();
+    crate::jf::seat::register_with(&origin, user.seat());
+    log(&format!("jf: switching user at {} — installing the server", origin.log_form()));
+    bridge.hand_off_jf(ready_creds(&origin, user.token));
+}
+
+/// **The kept user at `index` was refused by the server** (their token was revoked, or expired):
+/// forget them here, and ask for their password again — the add-a-user screen, open at
+/// *Sign in as name* with a line saying why. Whoever is signed in underneath stays.
+pub(super) fn reauth_user(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge, index: usize) {
+    let Some(user) = crate::jf::store::roster().users.get(index).cloned() else { return };
+    crate::jf::store::forget_user(&user.server, &user.user_id);
+    let roster = crate::jf::store::roster();
+    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+    log("jf: who's watching — the server refused that user's sign-in; asking for it again");
+    let name = if user.user_name.is_empty() { user.user_id.clone() } else { user.user_name.clone() };
+    super::bridge::open_login_as(pages, bridge, crate::screens::jf_login::Opening::SignInAgain {
+        server: user.server, server_name: user.server_name, id: user.user_id, name });
+}
+
+/// The signed-in user leaves the who's-watching screen as themselves: on to their Home, or their
+/// first-run Favourites when they have never answered it — the landing a sign-in takes, without
+/// installing anything again.
+fn enter_signed_in(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge) {
+    use crate::screens::registry::AppArg;
+    super::input::maybe_ask_consent(pages);
+    bridge.refresh_browse_directory();
+    let to = if crate::stores::browse::onboard::asks(bridge.browse_directory()) { AppArg::Onboard } else { AppArg::Home };
+    super::bridge::nav_root(pages, to);
+}
+
+/// What a Jellyfin sign-out left on this television.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SignedOut {
+    /// No Jellyfin user was signed in: the caller signs out of plex.tv instead.
+    NotJellyfin,
+    /// Other users are still kept: the who's-watching screen offers them.
+    OthersRemain,
+    /// Nobody is kept: the sign-in screen, with the server under *Recent*.
+    Nobody,
+}
+
+/// **Sign the active Jellyfin user out**: forget their sign-in here at once, tell the server on a
+/// worker, and drop every registered client. Everyone else kept on this television stays, and so
+/// do the server's address and name, for the sign-in screen's *Recent* row.
+pub(super) fn sign_out() -> SignedOut {
+    let Some(live) = crate::jf::store::current() else { return SignedOut::NotJellyfin };
+    crate::jf::store::forget_user(&live.server, &live.user_id);
+    let roster = crate::jf::store::roster();
+    let left = if roster.users.is_empty() { SignedOut::Nobody } else { SignedOut::OthersRemain };
+    let _ = nj_base::storage_worker::submit_retained(move || crate::jf::store::persist(&roster));
+    revoke(live);
+    crate::catalog::revoke_all();
+    left
+}
+
+/// Sign-out for Delete all local data: every kept user and the server go, and every stored copy
+/// with them. Each kept user's token is revoked at the server. Nothing is written back — the
+/// session file is about to be deleted, and a write queued behind that delete would bring it back.
+pub(super) fn sign_out_and_forget_server() {
+    let users = crate::jf::store::roster().users;
+    crate::jf::store::forget_everything();
+    let _ = nj_base::storage_worker::submit_retained(crate::jf::store::erase);
+    for user in users {
+        revoke(user);
     }
     crate::catalog::revoke_all();
-    true
+}
+
+/// Tell the server to revoke `stored`'s token, on a worker, and forget its seat here.
+fn revoke(stored: Stored) {
+    let Some(origin) = stored.origin() else { return };
+    crate::jf::seat::forget(&origin);
+    let client_id = crate::catalog::session::peek().client_id.clone();
+    nj_base::task::spawn_small("jf sign-out", move || {
+        let revoked = crate::jf::auth::sign_out_detached(&origin, &client_id, &stored.token, &stored.device_user);
+        log(if revoked { "jf: signed out — the server revoked this device's token" }
+            else { "jf: signed out — the server could not be told (the token stays valid there)" });
+    });
 }

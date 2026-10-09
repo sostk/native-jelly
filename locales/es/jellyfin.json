@@ -36,5 +36,14 @@
   "jellyfin.login.or": "o",
   "jellyfin.login.qc_step_open": "Abre Jellyfin en un teléfono u ordenador que ya tenga la sesión iniciada.",
   "jellyfin.login.qc_step_profile": "Ve a tu perfil y elige Quick Connect.",
-  "jellyfin.login.qc_step_code": "Escribe el código que aparece aquí. Este televisor iniciará sesión solo."
+  "jellyfin.login.qc_step_code": "Escribe el código que aparece aquí. Este televisor iniciará sesión solo.",
+  "jellyfin.login.step_add_user": "Añadir un usuario",
+  "jellyfin.login.title_pick_user": "¿Quién inicia sesión?",
+  "jellyfin.login.pick_user_intro": "Elígete entre las personas de {server}. ¿No apareces? Elige Otro usuario y escribe tu nombre de usuario.",
+  "jellyfin.login.other_user": "Otro usuario",
+  "jellyfin.login.on_this_tv": "En este televisor",
+  "jellyfin.login.title_sign_in_as": "Inicia sesión como {name}",
+  "jellyfin.login.sign_in_as_intro": "Escribe la contraseña de Jellyfin de {name} una sola vez. Después, {name} estará a un solo clic en la pantalla ¿Quién está viendo?",
+  "jellyfin.login.not_user": "¿No eres {name}?",
+  "jellyfin.login.error_expired": "Este inicio de sesión ha caducado. Vuelve a escribir la contraseña."
 }

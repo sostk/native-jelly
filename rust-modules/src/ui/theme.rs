@@ -769,6 +769,10 @@ pub const WASH_WARM: [f32; 4] = SAND_100;
 /// [`crate::ui::route_screen::RouteGround`] uses that instead.
 pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
+/// **A person's avatar disc** (who's watching, *Add a user*): the person's initial on one of these,
+/// chosen by their id so one person keeps one colour on every screen. Drawn from the pre-Home
+/// atmosphere those screens stand on, so a disc reads as part of that ground rather than a badge.
+pub const AVATAR_TONES: [[f32; 4]; 4] = [ATMOS_WARM_GREY, ATMOS_ASH, ATMOS_UMBER, NEUTRAL_600];
 /// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
 pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
 /// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member

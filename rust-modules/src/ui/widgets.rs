@@ -76,6 +76,28 @@ impl Glass {
     }
 }
 
+/// **A person's avatar**: their initial, centred on a disc in their own tone
+/// ([`theme::AVATAR_TONES`], picked by `id` so one person keeps one colour). The who's-watching
+/// screen and *Add a user* draw people with it; a focused disc wears the focus rim around it.
+pub(crate) fn avatar_disc(p: Painter, rect: Rect, name: &str, id: &str, focused: bool, size: i32) {
+    let tone = theme::AVATAR_TONES[avatar_tone(id)];
+    let r = rect.w.min(rect.h) * 0.5;
+    p.rrect(rect, r, r, tone);
+    if focused {
+        p.rring(rect, r, 5.0, theme::CONTROL_RIM_FOCUS_UNKEYED);
+    }
+    let initial: String = name.trim().chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+    let text = CString::new(initial).unwrap_or_default();
+    Label::new(text.as_ptr(), size, theme::TEXT_PRIMARY).bold().h(HAlign::Center).v(VAlign::Middle).draw(p, rect);
+}
+
+/// Which of [`theme::AVATAR_TONES`] belongs to the person `id` — a stable hash, never their
+/// position in a list, so a list that reorders does not repaint anyone.
+pub(crate) fn avatar_tone(id: &str) -> usize {
+    let h = id.bytes().fold(2166136261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16777619));
+    h as usize % theme::AVATAR_TONES.len()
+}
+
 /// **A popover panel's GROUND — the page under it, carried into it, WHERE it is.**
 ///
 /// Every popover in the app stands on this: the menus, the alert panels, the person bio, the

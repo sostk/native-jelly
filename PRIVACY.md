@@ -36,9 +36,12 @@ never leave the device it was made on.
 Native Jelly stores the address, name, identifier and version of the Jellyfin server you signed in
 to, and for each person signed in on this television their user name and user identifier there,
 the access token that server issued to this television and the device identifier it was issued
-under, in one file created with mode 0600. It never stores your password. It also keeps downloaded artwork (posters, backdrops and cast images,
-cached as bounded files for reuse across restarts), your Home library choices, your recent
-searches, your playback quality, Direct Play and app language preferences, and local technical
+under, in one file created with mode 0600. It never stores your password. Up to twelve people can
+be signed in at once; the Who's watching? screen lists them by name. It also keeps downloaded
+artwork (posters, backdrops and cast images, cached as bounded files for reuse across restarts);
+for each person their Home library choices, recent searches, last library, sort choices and
+subtitle timing adjustments, kept apart from everyone else's; your playback quality, Direct Play
+and app language preferences, which the whole television shares; and local technical
 logs: a small rotating event log and a bounded storage status snapshot. It also stores your answers
 to the two optional-reporting questions, the random Crash report ID if you turned crash reports on,
 the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a
@@ -46,13 +49,16 @@ marker recording how much of the crash log has already been read.
 It keeps no bookmark of its own for where you stopped watching: playback position is held by your
 Jellyfin server. The Settings screen can sign out and remove Native Jelly data from this television.
 
-Those lifetimes differ. Signing out removes your Jellyfin sign-in from this television (your user
-name and identifier there, and the access token) and asks that server to revoke the token. It keeps
-the address, name and identifier of the server you signed in to last, with no user or token, so
-the sign-in screen can offer it under Recent; signing in to another server replaces it.
+Those lifetimes differ. Signing out removes that one person's Jellyfin sign-in from this
+television (their user name and identifier there, and the access token) and asks the server to
+revoke the token; everyone else signed in stays. When the last person signs out, Native Jelly keeps
+the address, name and identifier of the server signed in to last, with no user or token, so the
+sign-in screen can offer it under Recent; signing in to another server replaces it.
 **Signing out does not currently remove anything else Native Jelly keeps**, including that
-server, your optional-reporting answers, both identifiers and any queued report: turn a category
-off, or use Delete all local data, to remove those. A queued report is deleted once sent, or at the moment you
+server, the signed-out person's library choices, searches and subtitle adjustments, your
+optional-reporting answers, both identifiers and any queued report: turn a category off, or use
+Delete all local data, to remove those. Delete all local data signs everyone out, asks the server
+to revoke every token, and removes the server under Recent too. A queued report is deleted once sent, or at the moment you
 switch its category off. The event log rotates continuously and the storage snapshot is replaced
 when its bounded status changes. **webOS gives an application no way to run code as it is
 removed**, so the sign-in and the reporting answers can survive an uninstall — use Delete all local

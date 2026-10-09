@@ -432,7 +432,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local"
   },
   "settings.legal.privacy.local_body": {
-    "value": "Native Jelly stores the address, name, identifier and version of the Jellyfin server you signed in to, your user name and user identifier there, the access token that server issued to this television and the device identifier it was issued under. It never stores your password. It also keeps downloaded artwork (posters, backdrops and cast images, cached as bounded files for reuse across restarts), your Home library choices, your recent searches, your playback quality, Direct Play and app language preferences, and local technical logs: a small rotating event log and a bounded storage status snapshot. It also stores your answers to the two optional-reporting questions, the random Crash report ID if you turned crash reports on, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Jellyfin server. Delete all local data in Settings signs out and removes Native Jelly data from this television.",
+    "value": "Native Jelly stores the address, name, identifier and version of the Jellyfin server you signed in to, and for each person signed in on this television (up to twelve, listed on the Who's watching? screen) their user name and user identifier there, the access token that server issued to this television and the device identifier it was issued under. It never stores your password. It also keeps downloaded artwork (posters, backdrops and cast images, cached as bounded files for reuse across restarts), each person's Home library choices and recent searches, kept apart from everyone else's, your playback quality, Direct Play and app language preferences, and local technical logs: a small rotating event log and a bounded storage status snapshot. It also stores your answers to the two optional-reporting questions, the random Crash report ID if you turned crash reports on, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Jellyfin server. Delete all local data in Settings signs out and removes Native Jelly data from this television.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local_body"
   },
   "settings.legal.privacy.crashes": {
@@ -464,7 +464,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention"
   },
   "settings.legal.privacy.retention_body": {
-    "value": "Different things here have different lifetimes, so this is stated for each. Signing out removes your Jellyfin sign-in from this television (your user name and identifier there, and the access token) and asks that server to revoke the token. It keeps the address, name and identifier of the server you signed in to last, with no user or token, so the sign-in screen can offer it under Recent; signing in to another server replaces it. Signing out does not currently remove anything else Native Jelly keeps, including that server, your answers to the two optional-reporting questions and the Crash report ID and Analytics ID if they exist: turn a category off, or use Delete all local data, to remove those. A report waiting to be sent is deleted once it is sent, and a queued report of a category you switch off is deleted at that moment; one report that the sender had already picked up at that moment may still be sent, and no further report is picked up after it. The event log rotates continuously and the storage snapshot is replaced when its bounded status changes. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; ask through the contact below what those periods currently are. The app language preference belongs to this television and is kept when you sign out; Delete all local data resets it.",
+    "value": "Different things here have different lifetimes, so this is stated for each. Signing out removes that one person's Jellyfin sign-in from this television (their user name and identifier there, and the access token) and asks the server to revoke the token; everyone else signed in stays. When the last person signs out, the address, name and identifier of the server signed in to last are kept, with no user or token, so the sign-in screen can offer it under Recent; signing in to another server replaces it. Each person's library choices, searches and subtitle adjustments are kept apart from everyone else's. Signing out does not currently remove anything else Native Jelly keeps, including that server, the signed-out person's library choices and searches, your answers to the two optional-reporting questions and the Crash report ID and Analytics ID if they exist: turn a category off, or use Delete all local data, to remove those. A report waiting to be sent is deleted once it is sent, and a queued report of a category you switch off is deleted at that moment; one report that the sender had already picked up at that moment may still be sent, and no further report is picked up after it. The event log rotates continuously and the storage snapshot is replaced when its bounded status changes. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; ask through the contact below what those periods currently are. The app language preference belongs to this television and is kept when you sign out; Delete all local data resets it.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention_body"
   },
   "settings.legal.privacy.choices": {
@@ -1151,5 +1151,20 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.account.switch_user": {
+    "value": "Switch user",
+    "description": "Account menu row: show the screen of everyone signed in to Jellyfin on this TV and switch to one of them"
+  },
+  "settings.account.add_user": {
+    "value": "Add user",
+    "description": "Account menu row and Who's watching tile: sign another person in to the same Jellyfin server"
+  },
+  "settings.account.sign_out_of": {
+    "value": "Sign out of {name}",
+    "description": "Account menu row: sign this one user out of Jellyfin on this TV; others stay signed in. {name} is the user's own name",
+    "args": {
+      "name": "str"
+    }
   }
 }

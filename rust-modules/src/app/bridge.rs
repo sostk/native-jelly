@@ -2575,6 +2575,9 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
             nj_base::eventlog::log("login: server installed — entering Home");
             nav_root_if_unsettled(pages, AppArg::Home);
         }
+    } else if matches!(pages.top_arg(), Some(AppArg::Profiles)) && !crate::jf::store::roster().users.is_empty() {
+        // The Jellyfin who's-watching screen: its own pick hands credentials over (the arm above),
+        // and nothing the plex.tv Session owner says is about it.
     } else if bridge.auth_read().0.persistence_warning.is_some() {
         // A fresh save could not be confirmed durable: keep the report reachable before
         // consent/profile routing, exactly as 0.6.6 did — the warning is answered on the login
@@ -2824,6 +2827,18 @@ pub(crate) fn nav_cancel(d: &mut Dispatcher<AppHost>) -> bool {
 ///
 /// `reset_for_profile` had no production caller at all before D1; see
 /// `switching_profile_leaves_the_container_holding_nothing_of_the_previous_profile`.
+/// **Add a user**: the sign-in page, opened at "Who's signing in?" on the active server. The user
+/// who asked stays installed underneath until the new one is signed in.
+pub(crate) fn open_add_user(d: &mut Dispatcher<AppHost>, bridge: &mut Bridge) {
+    open_login_as(d, bridge, crate::screens::jf_login::Opening::AddUser);
+}
+
+/// The sign-in page, opened as `opening` rather than as a first sign-in.
+pub(crate) fn open_login_as(d: &mut Dispatcher<AppHost>, bridge: &mut Bridge, opening: crate::screens::jf_login::Opening) {
+    bridge.mounter.login_opening = Some(opening);
+    nav_root(d, AppArg::Login);
+}
+
 pub(crate) fn switch_profile(d: &mut Dispatcher<AppHost>) {
     d.reset_for_profile();
     d.request(MachineId::Nav, NavOp::Root(AppArg::Profiles));

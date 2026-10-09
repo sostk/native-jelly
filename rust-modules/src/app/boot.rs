@@ -751,7 +751,7 @@ pub(crate) unsafe fn construct(
     // dev: /tmp/nativejelly-pickuser=<index> — force the boot picker even on an automated boot and
     // auto-select that roster tile once it's up (headless exercise of the who's-watching flow).
     let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
-    let session = match &initial {
+    let mut session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
         None => crate::catalog::session::load(),
     };
@@ -786,6 +786,15 @@ pub(crate) unsafe fn construct(
     if let Some((origin, stored)) = &jf_stored {
         crate::jf::seat::register_with(origin, stored.seat());
         log(&format!("boot: stored Jellyfin sign-in at {}", origin.log_form()));
+        // History an earlier build kept under no profile (one Jellyfin user, empty key) becomes
+        // the active user's, before anything reads it: their pins must not look "never asked".
+        let key = stored.profile_key();
+        if let Some(adopted) = crate::catalog::session::adopt_unscoped_profile(&session, &key) {
+            let saved = crate::catalog::session::update(|cur| crate::catalog::session::adopt_unscoped_profile(cur, &key));
+            log(if saved { "boot: earlier history filed under the signed-in Jellyfin user" }
+                else { "boot: earlier history filed under the signed-in Jellyfin user for this run only" });
+            session = adopted;
+        }
     }
     let dev_primary = if let Some((origin, stored)) = &jf_stored {
         Some(crate::catalog::session::ServerRef {
@@ -1212,7 +1221,14 @@ pub(crate) unsafe fn construct(
         // sources answer walked Onboard → Home and was never asked at all.
         BootTo::Home => {
             owes_consent_question = true;
-            if ask_first_run() {
+            // More than one Jellyfin user kept: ask who is watching, signed in as the last one
+            // underneath so choosing them again costs nothing — unless Automatically Sign In is
+            // on, which enters as the last user exactly as a single-user television does.
+            let kept = crate::jf::store::roster().users.len();
+            if jf_stored.is_some() && kept > 1 && !session.auto_sign_in() {
+                log(&format!("boot: {kept} Jellyfin users kept — asking who's watching"));
+                AppArg::Profiles
+            } else if ask_first_run() {
                 log("boot: asking which sources feed Home");
                 // No `enter()`: the first-run editor is an OWNED screen, and naming the route is
                 // the whole of mounting it — `bridge`'s mounter builds `OnboardScreen::first_run`

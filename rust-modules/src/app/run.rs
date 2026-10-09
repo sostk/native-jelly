@@ -1955,11 +1955,33 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::AccountSignIn => {
                 super::bridge::nav_root(&mut app.pages, AppArg::Login);
             }
+            // Signing one Jellyfin user out leaves the others: they are offered on the
+            // who's-watching screen, and only when nobody is left does the sign-in screen come up.
             crate::screens::registry::LoopReq::AccountSignOut => {
-                if !super::jf_login::sign_out() {
-                    super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::SignOut);
-                }
-                super::bridge::nav_root(&mut app.pages, AppArg::Login);
+                use super::jf_login::SignedOut;
+                let to = match super::jf_login::sign_out() {
+                    SignedOut::NotJellyfin => {
+                        super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::SignOut);
+                        AppArg::Login
+                    }
+                    SignedOut::OthersRemain => AppArg::Profiles,
+                    SignedOut::Nobody => AppArg::Login,
+                };
+                super::bridge::nav_root(&mut app.pages, to);
+            }
+            // The user who opened the menu stays installed until someone else is picked, so
+            // choosing them again (or BACK) costs nothing.
+            crate::screens::registry::LoopReq::AccountSwitchUser => {
+                super::bridge::nav_root(&mut app.pages, AppArg::Profiles);
+            }
+            crate::screens::registry::LoopReq::AccountAddUser => {
+                super::bridge::open_add_user(&mut app.pages, &mut app.bridge);
+            }
+            crate::screens::registry::LoopReq::PickJellyfinUser(index) => {
+                super::jf_login::pick_user(&mut app.pages, &mut app.bridge, usize::from(index));
+            }
+            crate::screens::registry::LoopReq::ReauthJellyfinUser(index) => {
+                super::jf_login::reauth_user(&mut app.pages, &mut app.bridge, usize::from(index));
             }
             // The host route does NOT move: Settings is a surface presented over the same page,
             // and its Privacy, Legal and Favourite-libraries children are pages of that surface's
