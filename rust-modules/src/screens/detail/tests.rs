@@ -3467,3 +3467,37 @@ fn record_stops_places_nothing_outside_the_visible_walk() {
     assert_eq!(walk(crate::ui::Painter::recording()), (0, 0), "the text prewarm walk placed stops");
     clear();
 }
+
+/// **A page opened from a shelf card must still play.** The card's row is a list read
+/// (`jf::api` `LIST_FIELDS`, no `MediaSources`), so its `part` is empty; the page's own loaded
+/// item carries the file. Play used to hand the CARD to `route::request_play_movie`, which refuses
+/// an empty part without a word — the page simply sat there. It must play the loaded item's file,
+/// and the version the page describes rather than the card's.
+#[test]
+fn play_from_a_shelf_card_without_a_part_plays_the_loaded_items_file() {
+    let _guard = install(Detail {
+        sid: ServerId::UNSET,
+        rk: "movie".into(),
+        kind: "movie".into(),
+        title: "Movie".into(),
+        part: "/Videos/movie/stream.mkv?static=true&MediaSourceId=v2".into(),
+        vcodec: "hevc".into(),
+        acodec: "eac3".into(),
+        ..Default::default()
+    });
+    let mut screen = bare(&_guard, ServerId::UNSET, "movie");
+    screen.selected = Some(crate::catalog_fetch::PmsMovie {
+        rk: "movie".into(),
+        title: "Movie".into(),
+        year: 2020,
+        ..Default::default()
+    });
+    let (_, fx) = step(&mut screen, &ScreenEvent::Activate(hero::ELEM_PLAY), Some(hero::ELEM_PLAY));
+    let (part, vcodec, acodec) = match play_item(&fx).expect("Play must request playback") {
+        (PlayIntent::Movie(m), _) => (m.part.clone(), m.vcodec.clone(), m.acodec.clone()),
+        (PlayIntent::Item { part, vcodec, acodec, .. }, _) => (part.clone(), vcodec.clone(), acodec.clone()),
+    };
+    assert_eq!(part, "/Videos/movie/stream.mkv?static=true&MediaSourceId=v2");
+    assert_eq!((vcodec.as_str(), acodec.as_str()), ("hevc", "eac3"));
+    clear();
+}

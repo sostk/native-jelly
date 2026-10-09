@@ -3860,7 +3860,17 @@ impl DetailScreen {
                     title: d.title.clone(),
                     context: String::new(),
                 },
-                |m| PlayIntent::Movie(m.clone()),
+                // The card the page was opened from names the item; the LOADED item names its file.
+                // A shelf row is a list read without `MediaSources` (`jf::api` `LIST_FIELDS`), so
+                // its `part` is empty and `request_play_movie` refuses it silently; and even a row
+                // that has one names version 0, not the version the page describes.
+                |m| {
+                    let mut m = m.clone();
+                    m.part = d.part.clone();
+                    m.vcodec = d.vcodec.clone();
+                    m.acodec = d.acodec.clone();
+                    PlayIntent::Movie(m)
+                },
             );
             let resume_ns = play_resume_ns(from_start, d.resume_ms, d.dur_ms);
             self.content(fx, ContentReq::Play { play, resume_ns });
