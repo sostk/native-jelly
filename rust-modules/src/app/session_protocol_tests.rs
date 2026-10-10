@@ -672,10 +672,18 @@ fn refused_restart_preserves_the_exact_owner_state_through_dispatch() {
     // retain that separate responsibility. The allowed restart branch is mapped separately.
 }
 
+// The Profiles route used to mount the Plex profile picker, which issued this command from a
+// committed press and read the reply back into its own `selection_pending/accepted` state. The
+// rebrand replaced it with the Jellyfin "Who's watching?" screen (`screens::jf_users`), which
+// neither sends `SelectProfileWithReply` nor consumes `SelectionReply`, so the screen-level half
+// of the old test went with the picker. What still exists, and is checked here, is the session
+// contract under the real dispatcher: the owner accepts the selection with a reply address, the
+// reply carries the post-acceptance flow epoch to exactly that live instance, a foreign or
+// retired instance never receives it, and redelivering the reply does not select again.
 #[test]
-fn mounted_profiles_selection_crosses_owner_and_live_ack_with_constructor_and_command_carry() {
-    use crate::auth::owner::Command;
-    use nj_machine::machine::{PressId, RequestId};
+fn profile_selection_with_reply_crosses_owner_and_reaches_only_the_live_instance() {
+    use crate::auth::owner::{Command, ReplyTo};
+    use nj_machine::machine::RequestId;
     let _guard = nj_base::testlock::serial();
     let epoch = u64::from(u32::MAX) + 31;
     let mut init = crate::auth::SessionInit::captured(crate::catalog::session::Session {
@@ -685,81 +693,67 @@ fn mounted_profiles_selection_crosses_owner_and_live_ack_with_constructor_and_co
     });
     init.epoch = epoch;
     init.phase = crate::auth::Phase::Profiles;
-    init.pin_denied = true;
     init.users = vec![crate::auth::UserTile { uuid: "synthetic-user".into(),
         title: "Synthetic user".into(), ..Default::default() }];
     let mut rig = Bridge::for_session_test(init);
     let mut d = Dispatcher::<AppHost>::new();
-    let probe = |d: &Dispatcher<AppHost>| {
-        let mut text = String::new();
-        d.top_screen().unwrap().state().probe(&mut text);
-        text
-    };
-    for _ in 0..crate::ui::dispatch::MAX_STEPS_PRE + crate::ui::dispatch::MAX_STEPS_POST {
-        execute_session_command(&mut d, Command::NoteDeleteLeftovers(0));
-    }
     d.request(MachineId::Nav, NavOp::Root(AppArg::Profiles));
-    let mounted = d.frame_with(&mut rig, Tick::default(), Vec::new(), Vec::new(), &mut NoTap, false);
-    assert!(mounted.carried > 0);
+    d.frame_with(&mut rig, Tick::default(), Vec::new(), Vec::new(), &mut NoTap, false);
     let instance = d.top_page().expect("actual AppMounter must construct the Profiles instance");
-    assert_eq!(d.top_screen().unwrap().name(), "profiles");
-    assert!(rig.auth_read().0.pin_denied, "constructor dismissal must still be carried");
-    assert!(probe(&d).contains("denied=false"), "first-paint state must not inherit the stale denial");
-    d.frame_with(&mut rig, Tick { ms: 16, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
-    assert!(!rig.auth_read().0.pin_denied, "typed constructor dismissal reaches the owner");
-    assert_eq!(d.focus_record().unwrap().1, 0);
 
-    // A committed press reaches the actual mounted screen and its real focus-selected action.
-    // Gesture recognition itself is covered by the existing press tests; no Session command
-    // is manufactured here for the selection.
-    for _ in 0..crate::ui::dispatch::MAX_STEPS_PRE + crate::ui::dispatch::MAX_STEPS_POST - 1 {
-        execute_session_command(&mut d, Command::NoteDeleteLeftovers(0));
+    // A reply addressed to an instance that was never mounted is dropped by the dispatcher, and
+    // a refused selection (no such tile) leaves the owner exactly where it was.
+    execute_session_command(&mut d, Command::SelectProfileWithReply { index: 9, pin: None,
+        reply: ReplyTo { instance: u32::MAX, correlation: 1 } });
+    let refused = d.frame_with(&mut rig, Tick { ms: 16, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
+    assert!(refused.dropped_deliveries > 0, "foreign-instance reply must be rejected by the dispatcher");
+    assert_eq!(rig.auth_read().0.flow_epoch, epoch, "a refused selection does not advance the flow");
+    assert_eq!(rig.auth_read().0.phase, crate::auth::Phase::Profiles);
+
+    // Records every SelectionReply the frame routes, with its destination.
+    #[derive(Default)]
+    struct Replies(Vec<(MachineId, u32, u32, bool, u64)>);
+    impl crate::ui::dispatch::Tap<AppHost> for Replies {
+        fn effect(&mut self, _f: u64, s: &nj_machine::machine::Stamped<AppHost>) {
+            if let Fx::Deliver(to, Delivery::Screen(ScreenEvent::Async(RequestId(req),
+                AppMsg::SelectionReply { correlation, accepted, flow_epoch }))) = &s.fx {
+                self.0.push((*to, *req, *correlation, *accepted, *flow_epoch));
+            }
+        }
     }
-    d.emit(MachineId::Input, Fx::Deliver(MachineId::Instance(instance),
-        Delivery::Screen(ScreenEvent::PressCommit(PressId(1)))));
-    let pressed = d.frame_with(&mut rig, Tick { ms: 32, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
-    assert!(pressed.carried > 0);
-    assert_eq!(rig.auth_read().0.flow_epoch, epoch, "UI emission is not owner acceptance");
-    assert!(probe(&d).contains("selection_pending=true"));
-    assert!(probe(&d).contains("selection_accepted=false"));
-    for (to, request, correlation) in [
-        (InstanceId(u32::MAX), 1, 1), // foreign instance
-        (instance, 0, 0), // stale/nonmatching correlation
-        (instance, 2, 1), // mismatched async header and payload
-    ] {
-        d.emit(MachineId::Session, Fx::Deliver(MachineId::Instance(to), Delivery::Screen(
-            ScreenEvent::Async(RequestId(request), AppMsg::SelectionReply {
-                correlation, accepted: true, flow_epoch: u64::MAX,
-            }))));
-    }
-    let accepted = d.frame_with(&mut rig, Tick { ms: 48, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
-    assert!(accepted.dropped_deliveries > 0, "foreign-instance delivery must be rejected by the dispatcher");
+    execute_session_command(&mut d, Command::SelectProfileWithReply { index: 0, pin: None,
+        reply: ReplyTo { instance: instance.0, correlation: 2 } });
+    let mut replies = Replies::default();
+    let accepted = d.frame_with(&mut rig, Tick { ms: 32, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut replies, false);
+    assert_eq!(replies.0, vec![(MachineId::Instance(instance), 2, 2, true, epoch + 1)],
+        "exactly one reply, to the addressed live instance, carrying the post-acceptance epoch");
+    assert_eq!(accepted.dropped_deliveries, 0, "the live instance receives the owner's reply");
     assert_eq!(rig.auth_read().0.flow_epoch, epoch + 1);
-    assert_eq!(rig.auth_read().0.phase, crate::auth::Phase::Ready);
-    assert!(probe(&d).contains("selection_accepted=true"),
-        "the real live screen, not a Tap, must receive the owner's acceptance");
+    assert_eq!(rig.auth_read().0.phase, crate::auth::Phase::Ready, "same seated user takes the shortcut");
+
+    // Redelivering the reply is an acknowledgement, not a command: nothing is selected again.
     d.emit(MachineId::Session, Fx::Deliver(MachineId::Instance(instance), Delivery::Screen(
-        ScreenEvent::Async(RequestId(1), AppMsg::SelectionReply {
-            correlation: 1, accepted: true, flow_epoch: epoch + 1,
+        ScreenEvent::Async(RequestId(2), AppMsg::SelectionReply {
+            correlation: 2, accepted: true, flow_epoch: epoch + 1,
         }))));
-    d.frame_with(&mut rig, Tick { ms: 64, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
-    assert!(probe(&d).contains("selection_pending=false"), "the next matching retained read settles the screen");
-    assert!(probe(&d).contains("selection_accepted=false"));
+    let duplicate = d.frame_with(&mut rig, Tick { ms: 48, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
+    assert_eq!(duplicate.dropped_deliveries, 0);
     assert_eq!(rig.auth_read().0.flow_epoch, epoch + 1, "duplicate ACK does not execute selection again");
+
     // A top-page change can retain cached live instances. Use the actual profile-reset
     // retirement boundary before proving rejection of a genuinely retired instance.
     d.reset_for_profile();
     d.request(MachineId::Nav, NavOp::Root(AppArg::Login));
-    let retired = d.frame_with(&mut rig, Tick { ms: 80, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
+    let retired = d.frame_with(&mut rig, Tick { ms: 64, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
     assert!(retired.unmounted.contains(&instance));
     d.prune(&retired.unmounted); // the same frame-tail step performed by frame_ingest
     let replacement = d.top_page().unwrap();
     assert_ne!(replacement, instance);
     d.emit(MachineId::Session, Fx::Deliver(MachineId::Instance(instance), Delivery::Screen(
-        ScreenEvent::Async(RequestId(1), AppMsg::SelectionReply {
-            correlation: 1, accepted: true, flow_epoch: epoch + 1,
+        ScreenEvent::Async(RequestId(2), AppMsg::SelectionReply {
+            correlation: 2, accepted: true, flow_epoch: epoch + 1,
         }))));
-    let stale = d.frame_with(&mut rig, Tick { ms: 96, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
+    let stale = d.frame_with(&mut rig, Tick { ms: 80, dt_us: 16_000 }, Vec::new(), Vec::new(), &mut NoTap, false);
     assert!(stale.dropped_deliveries > 0);
     assert_eq!(d.top_page(), Some(replacement));
 }
