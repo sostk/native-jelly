@@ -2982,6 +2982,77 @@ mod lifecycle_regression_tests {
         panic!("{reason}");
     }
 
+    /// The lifecycle fixture's items. Rating keys are the GUIDs' first 13 hex digits: 1, 2, 3.
+    const LIFECYCLE_FIRST: &str = "0000000000001aaaaaaaaaaaaaaaaaaa";
+    const LIFECYCLE_NEXT: &str = "0000000000002aaaaaaaaaaaaaaaaaaa";
+    const LIFECYCLE_REPLACEMENT: &str = "0000000000003aaaaaaaaaaaaaaaaaaa";
+    const LIFECYCLE_SERIES: &str = "00000000000ffaaaaaaaaaaaaaaaaaaa";
+
+    /// The part key a Jellyfin item plays from: its static stream, naming its media source.
+    fn lifecycle_part(guid: &str) -> String {
+        format!("/Videos/{guid}/stream.mkv?static=true&MediaSourceId={guid}")
+    }
+
+    /// One `BaseItemDto`: an episode of the fixture series (with `index`) or a film.
+    fn lifecycle_item(guid: &str, title: &str, episode: Option<i64>) -> String {
+        let source = format!(
+            r#"{{"Id":"{guid}","Container":"mkv","Protocol":"File","RunTimeTicks":600000000,"MediaStreams":[{{"Type":"Video","Codec":"h264","Index":0,"Width":1280,"Height":720}},{{"Type":"Audio","Codec":"aac","Index":1,"Channels":2,"IsDefault":true}}]}}"#
+        );
+        let kind = match episode {
+            Some(index) => format!(
+                r#""Type":"Episode","SeriesId":"{LIFECYCLE_SERIES}","SeriesName":"Series","ParentIndexNumber":1,"IndexNumber":{index}"#
+            ),
+            None => r#""Type":"Movie""#.to_string(),
+        };
+        format!(r#"{{"Id":"{guid}","Name":"{title}",{kind},"RunTimeTicks":600000000,"MediaSources":[{source}]}}"#)
+    }
+
+    /// The fixture's answer to one request line, or `None` for its empty reply (404 for a GET,
+    /// 204 otherwise — session reports and `DELETE /Videos/ActiveEncodings`).
+    fn lifecycle_answer(request: &str, path: &str, successor: bool, convert: bool) -> Option<String> {
+        let guid = [LIFECYCLE_FIRST, LIFECYCLE_NEXT, LIFECYCLE_REPLACEMENT]
+            .into_iter()
+            .find(|g| path.contains(g));
+        if path.starts_with("/Users/Me") {
+            return Some(r#"{"Id":"lifecycle-user","Name":"lifecycle","Configuration":{"PlayDefaultAudioTrack":true,"SubtitleMode":"Default"}}"#.into());
+        }
+        if path.contains("/PlaybackInfo") {
+            let guid = guid?;
+            let delivery = if convert && guid == LIFECYCLE_FIRST {
+                format!(
+                    r#""SupportsDirectPlay":false,"SupportsDirectStream":false,"SupportsTranscoding":true,"TranscodingUrl":"/videos/{guid}/stream.mkv?VideoCodec=h264&AudioCodec=aac&TranscodeReasons=ContainerBitrateExceedsLimit&PlaySessionId=ps-lifecycle""#
+                )
+            } else {
+                r#""SupportsDirectPlay":true,"SupportsDirectStream":true,"SupportsTranscoding":true"#.into()
+            };
+            return Some(format!(
+                r#"{{"MediaSources":[{{"Id":"{guid}","Container":"mkv","Protocol":"File","RunTimeTicks":600000000,{delivery},"MediaStreams":[{{"Type":"Video","Codec":"h264","Index":0}},{{"Type":"Audio","Codec":"aac","Index":1,"Channels":2,"IsDefault":true}}]}}],"PlaySessionId":"ps-lifecycle"}}"#
+            ));
+        }
+        if !request.starts_with("GET ") {
+            return None;
+        }
+        if path.starts_with(&format!("/Shows/{LIFECYCLE_SERIES}/Episodes")) {
+            return successor.then(|| format!(
+                r#"{{"Items":[{},{}],"TotalRecordCount":2}}"#,
+                lifecycle_item(LIFECYCLE_FIRST, "First", Some(1)),
+                lifecycle_item(LIFECYCLE_NEXT, "Next", Some(2)),
+            ));
+        }
+        if path.starts_with("/MediaSegments/") {
+            return Some(r#"{"Items":[],"TotalRecordCount":0}"#.into());
+        }
+        if path.starts_with("/Items/") && !path.contains("/Images/") {
+            return match guid? {
+                LIFECYCLE_FIRST if successor => Some(lifecycle_item(LIFECYCLE_FIRST, "First", Some(1))),
+                LIFECYCLE_FIRST => Some(lifecycle_item(LIFECYCLE_FIRST, "First", None)),
+                LIFECYCLE_NEXT => Some(lifecycle_item(LIFECYCLE_NEXT, "Next", Some(2))),
+                _ => Some(lifecycle_item(LIFECYCLE_REPLACEMENT, "Replacement", None)),
+            };
+        }
+        None
+    }
+
     // No boot, renderer or device: the real App/event/frame phases with Bridge's host rig.
     fn app() -> App {
         crate::player::SHARED.reset_session();
@@ -3519,10 +3590,28 @@ mod lifecycle_regression_tests {
             Self::serving(true)
         }
 
-        /// `successor: false` serves a one-row queue — a film, with no Up Next to hand off to — so
-        /// an end of stream leaves the player instead of starting the next item.
+        /// `successor: false` serves a film — no Up Next to hand off to — so an end of stream
+        /// leaves the player instead of starting the next item.
         fn serving(successor: bool) -> Option<Rig> {
+            Self::fixture(successor, false)
+        }
+
+        /// The first item as a CONVERSION: PlaybackInfo refuses direct play and answers a
+        /// `TranscodingUrl`, so the plan owns a server encoder that an abandoned plan must end.
+        fn converting() -> Option<Rig> {
+            Self::fixture(true, true)
+        }
+
+        /// A loopback JELLYFIN server: what the resolve asks for since the Plex transport went —
+        /// the item (`/Items/{id}`), an episode's successors (`/Shows/{series}/Episodes`) and
+        /// `PlaybackInfo`. Items are keyed so their rating keys are `1`, `2` and `3`
+        /// (`jf::ids::rating_key` reads the GUID's first 13 hex digits). The FIRST request is held
+        /// until `release`, which is how the tests keep a resolve in flight.
+        fn fixture(successor: bool, convert: bool) -> Option<Rig> {
             crate::catalog::reset_servers_for_test();
+            for guid in [LIFECYCLE_FIRST, LIFECYCLE_NEXT, LIFECYCLE_REPLACEMENT] {
+                crate::jf::ids::intern(guid);
+            }
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -3570,39 +3659,18 @@ mod lifecycle_regression_tests {
                         arrived.send(()).unwrap();
                         let _ = wait.recv_timeout(Duration::from_secs(5));
                     }
-                    let body = if request.contains("/decision?") {
-                        r#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"directplay"}]}]}]}}"#
-                    } else if !successor {
-                        r#"{"MediaContainer":{"machineIdentifier":"lifecycle-fixture","size":1,
-                        "playQueueID":1,"playQueueSelectedItemID":11,"playQueueTotalCount":1,
-                        "Metadata":[
-                        {"ratingKey":"1","playQueueItemID":11,"type":"movie","title":"First",
-                         "duration":60000,
-                         "Media":[{"videoCodec":"h264","audioCodec":"aac","width":1280,"height":720,
-                         "Part":[{"id":1,"key":"/library/parts/1/file.mkv","Stream":[
-                         {"id":1,"streamType":1,"codec":"h264"},
-                         {"id":2,"streamType":2,"codec":"aac","selected":true}]}]}]}]}}"#
-                    } else {
-                        r#"{"MediaContainer":{"machineIdentifier":"lifecycle-fixture","size":2,
-                        "playQueueID":1,"playQueueSelectedItemID":11,"playQueueTotalCount":2,
-                        "Metadata":[
-                        {"ratingKey":"1","playQueueItemID":11,"type":"episode","title":"First",
-                         "parentIndex":1,"index":1,"duration":60000,
-                         "Media":[{"videoCodec":"h264","audioCodec":"aac","width":1280,"height":720,
-                         "Part":[{"id":1,"key":"/library/parts/1/file.mkv","Stream":[
-                         {"id":1,"streamType":1,"codec":"h264"},
-                         {"id":2,"streamType":2,"codec":"aac","selected":true}]}]}]},
-                        {"ratingKey":"2","playQueueItemID":12,"type":"episode","title":"Next",
-                         "parentIndex":1,"index":2,"duration":60000,
-                         "Media":[{"videoCodec":"h264","audioCodec":"aac",
-                         "Part":[{"id":2,"key":"/library/parts/2/file.mkv"}]}]}]}}"#
+                    let path = request.split_whitespace().nth(1).unwrap_or("").to_string();
+                    let body = lifecycle_answer(&request, &path, successor, convert);
+                    let _ = match body {
+                        Some(body) => write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()),
+                        None if request.starts_with("GET ") => write!(socket, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                        None => write!(socket, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
                     };
-                    let _ = write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
                 }
             }) {
                 Some(h) => h,
                 None => {
-                    // See the doc comment above: nothing past this point has run yet, so undoing
+                    // See the doc comment on `new`: nothing past this point has run yet, so undoing
                     // the initial reset is the whole cleanup owed.
                     crate::catalog::reset_servers_for_test();
                     return None;
@@ -3615,6 +3683,11 @@ mod lifecycle_regression_tests {
                 "synthetic",
                 "lifecycle-fixture",
             );
+            let client = crate::catalog::client_for(sid).expect("fixture registered");
+            crate::jf::seat::register_with(client.origin(), crate::jf::seat::Seat {
+                user_id: "lifecycle-user".into(),
+                ..Default::default()
+            });
             let mut app = app();
             super::super::bridge::nav_root(&mut app.pages, AppArg::Home);
             frame(&mut app, 0);
@@ -3635,7 +3708,7 @@ mod lifecycle_regression_tests {
                 self.app.bridge.metadata_mut(),
                 self.sid,
                 "1",
-                "/library/parts/1/file.mkv",
+                &lifecycle_part(LIFECYCLE_FIRST),
                 "h264",
                 "aac",
                 "First",
@@ -3724,7 +3797,7 @@ mod lifecycle_regression_tests {
     #[test]
     fn did_background_cancels_accepted_resolve_before_player_mount() {
         let _serial = nj_base::testlock::serial();
-        let Some(mut rig) = Rig::new() else {
+        let Some(mut rig) = Rig::converting() else {
             eprintln!(
                 "SKIPPED did_background_cancels_accepted_resolve_before_player_mount: \
                  lifecycle fixture worker thread could not be spawned"
@@ -3752,7 +3825,7 @@ mod lifecycle_regression_tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|r| r.contains("closeResourceSession=1")),
+                .any(|r| r.starts_with("DELETE /Videos/ActiveEncodings")),
             "the blocked resolve cannot clean up before it is released"
         );
         rig.release.send(()).unwrap();
@@ -3774,16 +3847,18 @@ mod lifecycle_regression_tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .any(|r| r.contains("closeResourceSession=1"))
+                .any(|r| r.starts_with("DELETE /Videos/ActiveEncodings"))
         });
         assert!(!crate::route::has_url(&rig.app.player.session));
         let requests = rig.requests.lock().unwrap();
+        // On Jellyfin the server resource a plan owns is its ENCODER (a direct play has none to
+        // end), retired by `DELETE /Videos/ActiveEncodings` for exactly that play session.
         let cleanup = requests
             .iter()
-            .find(|r| r.contains("closeResourceSession=1"))
+            .find(|r| r.starts_with("DELETE /Videos/ActiveEncodings"))
             .expect("the completed late plan must retire its exact server resource");
-        assert!(cleanup.contains("session="), "{cleanup}");
-        assert!(cleanup.contains("X-Plex-Session-Identifier="), "{cleanup}");
+        assert!(cleanup.contains("playSessionId=ps-lifecycle"), "{cleanup}");
+        assert!(cleanup.contains("deviceId="), "{cleanup}");
         drop(requests);
         frame(&mut rig.app, 32);
         assert!(super::super::bridge::player(&rig.app.pages).is_some());
@@ -3973,8 +4048,8 @@ mod lifecycle_regression_tests {
             &mut rig.app.player.session,
             rig.app.bridge.metadata_mut(),
             rig.sid,
-            "replacement",
-            "/library/parts/2/file.mkv",
+            "3",
+            &lifecycle_part(LIFECYCLE_REPLACEMENT),
             "h264",
             "aac",
             "Replacement",

@@ -22,6 +22,15 @@ pub mod state;
 pub mod wire;
 
 const FORMAT: &str = "nativejelly-record";
+/// The same record under the name it was written with before the Native Jelly rebrand (a07eaeb).
+/// The app id changed two days EARLIER (c06fcaf), so builds of this app id wrote this marker; a
+/// record is read under either name and always rewritten under [`FORMAT`].
+const LEGACY_FORMAT: &str = "plxnative-record";
+
+/// Whether `format` names this store's record wrapper, under its current or its pre-rebrand name.
+pub fn is_record_format(format: &str) -> bool {
+    format == FORMAT || format == LEGACY_FORMAT
+}
 const VERSION: u64 = 1;
 const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -880,7 +889,7 @@ pub fn parse_record(bytes: &[u8], expected: RecordKey) -> Result<Record, StoreEr
     let value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|_| StoreError::InvalidSchema)?;
     match value.get("format") {
-        Some(serde_json::Value::String(s)) if s == FORMAT => {}
+        Some(serde_json::Value::String(s)) if is_record_format(s) => {}
         _ => return Err(StoreError::UnknownFormat),
     }
     // Inspect the version before deserializing the current schema. A newer writer may have added
@@ -1218,6 +1227,19 @@ mod tests {
         assert!(widened.exists());
         assert!(unrelated.exists());
         assert!(other_key.exists());
+    }
+
+    /// The rebrand renamed the wrapper two days AFTER the app id changed, so builds of this app id
+    /// wrote `plxnative-record`. Refusing it silently lost a stored sign-in and consent decision.
+    #[test]
+    fn a_record_written_before_the_rebrand_still_opens_and_is_rewritten_under_the_new_name() {
+        let legacy = br#"{"format":"plxnative-record","version":1,"domain":"session","key":"session","revision":3,"state":"Cleared"}"#;
+        let record = parse_record(legacy, RecordKey::Session).expect("a pre-rebrand record opens");
+        assert_eq!(record.revision, 3);
+        let rewritten = String::from_utf8(encode_record(RecordKey::Session, &record).unwrap()).unwrap();
+        assert!(rewritten.contains(r#""format":"nativejelly-record""#), "{rewritten}");
+        let foreign = br#"{"format":"someone-elses-record","version":1,"domain":"session","key":"session","revision":3,"state":"Cleared"}"#;
+        assert_eq!(parse_record(foreign, RecordKey::Session), Err(StoreError::UnknownFormat));
     }
 
     #[test]

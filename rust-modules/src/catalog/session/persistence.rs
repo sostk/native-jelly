@@ -1135,7 +1135,7 @@ fn decode_legacy_at_depth(
         .unwrap()
         .remove(super::FALLBACK_MARKER);
     match value.get("format").and_then(serde_json::Value::as_str) {
-        Some("nativejelly-record") => {
+        Some(format) if nj_platform::storage::is_record_format(format) => {
             match nj_platform::storage::parse_record(bytes, RecordKey::Session)?.state {
                 RecordState::Data { payload } => {
                     decode_legacy_at_depth(payload.as_bytes(), opener, depth + 1)

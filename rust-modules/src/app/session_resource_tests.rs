@@ -744,9 +744,12 @@ mod tests {
             assert_ne!(new_client.instance_gen(), old_instance);
             assert_ne!(new_client.token_gen(), old_token);
             let replacement_generation = new_client.token_gen();
-            // URL construction reads the actual Client token without making any request.
+            // URL construction reads the actual Client without making any request. A non-Jellyfin
+            // client's stream URL is its origin plus the part key — the Plex-era `X-Plex-Token`
+            // query is gone with the Plex transport — so the replacement shows in the ORIGIN; the
+            // token generation above is what proves its credential.
             let replacement_url = new_client.direct_play_url("/synthetic", "test").to_url();
-            assert!(replacement_url.contains("X-Plex-Token=synthetic-new-tok"));
+            assert!(replacement_url.starts_with("http://127.0.0.2:32400/"), "{replacement_url}");
             let terminal = records[0].clone();
             frame(&mut rig, &mut d, records);
             assert!(std::ptr::eq(new_client, crate::catalog::client_for(id).unwrap()));
