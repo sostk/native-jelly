@@ -7,6 +7,9 @@
 stub/*.so
 # cross-compiled binary + packaging output
 pkg/nativejelly
+# The names builds wrote before the rename (a07eaeb committed two by accident).
+pkg/plxnative
+pkg/plxnative-storage
 pkg/threadprobe
 pkg/mali-irq-sample
 pkg/nativejelly-stackwalk
