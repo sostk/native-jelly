@@ -1,8 +1,9 @@
-{"updated":"2026-10-10T06:17:20Z",
+{"updated":"2026-10-10T06:26:16Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}}
 ],
 "sim":[
 {"id":38010811522,"at":"2026-10-10T00:51:12Z","sha":"8c6b0669d","title":"Merge pull request #11 from sostk/ci/green-main","pr":null,"jobs":{"Linux simulator build + launch":224,"Windows launcher syntax":16,"macOS simulator build + launch":1062}},
-{"id":38026584849,"at":"2026-10-10T05:10:07Z","sha":"4ba91f9bc","title":"Merge pull request #12 from sostk/fix/ci-remaining","pr":null,"jobs":{"Linux simulator build + launch":251,"macOS simulator build + launch":882,"Windows launcher syntax":18}}
+{"id":38026584849,"at":"2026-10-10T05:10:07Z","sha":"4ba91f9bc","title":"Merge pull request #12 from sostk/fix/ci-remaining","pr":null,"jobs":{"Linux simulator build + launch":251,"macOS simulator build + launch":882,"Windows launcher syntax":18}},
+{"id":38030063072,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"Linux simulator build + launch":240,"Windows launcher syntax":24,"macOS simulator build + launch":875}}
 ]}
