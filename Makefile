@@ -964,7 +964,7 @@ telemetry-local:
 	    echo "telemetry-local: neither NJ_SENTRY_DSN_DEV nor NJ_POSTHOG_KEY_DEV is set on the repo"; \
 	    exit 1; \
 	  fi; \
-	  python3 -c 'import json,sys; json.dump({"_comment":["Written by `make telemetry-local`. GITIGNORED. DEV credentials only — the production pair lives solely in GitHub repository variables and is injected by the release workflow.","No auth token here: gh cannot read secrets, and sentry-cli runs in CI."],"sentry_dsn_dev":sys.argv[1],"posthog_key_dev":sys.argv[2],"sentry_org":"gleb-linnik","sentry_project":"plx-native-dev","posthog_host":"https://eu.i.posthog.com"}, open("$(TELEMETRY_JSON)","w"), indent=2)' "$$dsn" "$$key"; \
+	  python3 -c 'import json,sys; json.dump({"_comment":["Written by `make telemetry-local`. GITIGNORED. DEV credentials only — the production pair lives solely in GitHub repository variables and is injected by the release workflow.","No auth token here: gh cannot read secrets, and sentry-cli runs in CI."],"sentry_dsn_dev":sys.argv[1],"posthog_key_dev":sys.argv[2],"sentry_org":"gleb-linnik","sentry_project":"native-jelly","posthog_host":"https://eu.i.posthog.com"}, open("$(TELEMETRY_JSON)","w"), indent=2)' "$$dsn" "$$key"; \
 	  chmod 0600 $(TELEMETRY_JSON); \
 	  echo "telemetry-local: wrote $(TELEMETRY_JSON) (dev credentials; environment=development)"
 
@@ -1705,9 +1705,9 @@ endif
 # `SENTRY_AUTH_TOKEN` is read only from the process environment and is never echoed or written.
 SENTRY_ORG     ?= gleb-linnik
 # A local symbol build carries the development DSN, so its DIF belongs beside the events in the
-# development project. Release CI supplies SENTRY_PROJECT=plx-native explicitly; a checkout with
+# development project. Release CI supplies SENTRY_PROJECT=native-jelly explicitly; a checkout with
 # no telemetry cache keeps that production fallback for deliberate one-off invocations.
-SENTRY_PROJECT ?= $(or $(call telemetry_val,sentry_project),plx-native)
+SENTRY_PROJECT ?= $(or $(call telemetry_val,sentry_project),native-jelly)
 SENTRY_CLI     ?= npx --yes @sentry/cli@latest
 sentry-symbols: symbols
 	@test -n "$${SENTRY_AUTH_TOKEN:-}" || { \

@@ -300,7 +300,7 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG || 'gleb-linnik' }}
-          SENTRY_PROJECT: ${{ inputs.telemetry == 'production' && (vars.SENTRY_PROJECT || 'plx-native') || (vars.SENTRY_PROJECT_DEV || 'plx-native-dev') }}
+          SENTRY_PROJECT: ${{ inputs.telemetry == 'production' && (vars.SENTRY_PROJECT || 'native-jelly') || (vars.SENTRY_PROJECT_DEV || 'native-jelly') }}
           TELEMETRY: ${{ inputs.telemetry }}
         run: |
           if [ -z "$SENTRY_AUTH_TOKEN" ]; then
@@ -308,7 +308,7 @@ jobs:
             exit 1
           fi
           if [ "$TELEMETRY" = development ]; then
-            [ "$SENTRY_PROJECT" = plx-native-dev ] || { echo "::error::a development-telemetry build's DIFs must upload to plx-native-dev, not $SENTRY_PROJECT."; exit 1; }
+            [ "$SENTRY_PROJECT" = native-jelly ] || { echo "::error::a development-telemetry build's DIFs must upload to native-jelly, not $SENTRY_PROJECT."; exit 1; }
           fi
           # `debug-files check` first: it is the step that says whether Symbolicator can use this
           # object at all, and its answer (`Arch: arm`, `Usable: yes`) is the one thing no vendor
