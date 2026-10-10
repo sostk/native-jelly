@@ -77,15 +77,10 @@ DEV_WITNESSES = (
     b"nativejelly-heroground",
 )
 
-# A build machine's directory layout inside a shipped file. Same shape, and the same two
-# calibration bugs designed around, as `ci/check-package.py` and `ci/verify-published.sh`: the
-# match keeps its leading boundary character so plex.tv's own `/api/v2/home/users` is not read as
-# `/home/users`, and it is applied per PATH rather than per line so that FFmpeg's single
-# configure blob cannot have one allowed token vouch for a forbidden one beside it.
-HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]+)")
-# `/Users/Me` is Jellyfin's signed-in-user endpoint, not a home directory; see the same allowance
-# and its reason in `ci/check-package.py`.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/Me(?:/|$)")
+# A build machine's directory layout inside a shipped file: `ci/hostpath.py`, the one rule
+# check-package.py and verify-published.sh also use.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from hostpath import build_machine_paths  # noqa: E402
 
 HOSTNAME = re.compile(rb"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.){1,4}(?:tv|com|org|net|io|dev))\b")
 RUNTIME_PATH = re.compile(rb"(/(?:tmp|media|etc|var|proc|dev)/[A-Za-z0-9_.%/-]{2,60})")
@@ -442,7 +437,7 @@ def generate(args) -> str:
     # ---- build-machine paths
     dirty = []
     for name, (m, data) in sorted(files.items()):
-        bad = sorted({h for h in HOSTPATH.findall(data) if not ALLOWED_PATH.search(h)})
+        bad = build_machine_paths(data)
         if bad:
             dirty.append((name, bad[0].decode("latin-1", "replace")))
     out.append("### Reproducibility evidence")

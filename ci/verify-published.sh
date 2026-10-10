@@ -26,31 +26,12 @@ bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 note() { printf '  \033[33mnote\033[0m  %s\n' "$1"; NOTE=$((NOTE+1)); }
 head_() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
-# A build-machine path in a shipped file. Anchored on a non-path character so ordinary URLs do not
-# trip it — the app talks to plex.tv's /api/v2/home/users, which is not a build path.
-HOSTPATH='(^|[^A-Za-z0-9/_.-])/(Users|home)/[a-z]'
-# The NDK's own location is unavoidable: --cross-prefix must be absolute (the wrapper gcc dies when
-# invoked through PATH), so it rides in FFmpeg's recorded configure string. It is identical on every
-# CI runner, which is precisely why releases must be built by CI.
-ALLOWED='webos-ndk|/home/runner/'
-
-# Extract each PATH individually rather than filtering whole lines. FFmpeg records its entire
-# configure invocation as one long string, so the offending `--prefix=/Users/<me>/...` sits on the
-# same "line" as the unavoidable `--cross-prefix=/Users/<me>/webos-ndk/...`. A per-line allowlist
-# therefore sees "webos-ndk" and passes the whole blob — which is exactly the false pass this
-# check existed to prevent, caught only by testing it against a release known to be dirty.
-#
-# The match KEEPS its leading boundary character and strips it afterwards, because dropping the
-# anchor to tokenise reintroduces the opposite error: plex.tv's own `/api/v2/home/users` looks like
-# `/home/users` once you extract without context. Both failure modes were observed; this shape is
-# the one that gets both right.
+# A build-machine path in a shipped file: `ci/hostpath.py`, the same rule (and the same tests,
+# `ci/test_hostpath.py`) that check-package.py applies before publishing and gen-release-audit.py
+# records in the audit. This used to be a third copy here, written in grep, and it had drifted.
 scan_paths() { # $1 = file
   local hits
-  hits=$(strings -a "$1" 2>/dev/null \
-    | grep -aoE '(^|[^A-Za-z0-9/_.-])/(Users|home)/[A-Za-z0-9_./+-]+' \
-    | sed -E 's#^[^/]##' \
-    | grep -avE "$ALLOWED" | sort -u | head -3)
-  [ -z "$hits" ] && return 0
+  hits=$(python3 ci/hostpath.py "$1") && return 0
   printf '%s\n' "$hits" | sed 's/^/          /'
   return 1
 }

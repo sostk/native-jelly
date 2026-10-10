@@ -1001,30 +1001,10 @@ else:
 #
 # The pattern is ANCHORED on a non-path character so ordinary URL fragments do not trip it: the
 # app talks to plex.tv's `/api/v2/home/users`, which is not a build path.
-# A build-machine path anywhere in the payload.
-#
-# Two calibration bugs are baked into the shape below, both found by running this against a release
-# KNOWN to be dirty rather than assuming it worked:
-#
-#   * matching per-BLOB and allowing anything containing "webos-ndk" passes the very file it was
-#     written for. FFmpeg records its whole configure invocation as ONE string, so the unavoidable
-#     `--cross-prefix=/…/webos-ndk/…` sits beside the offending `--prefix=/…/plex-native-poc/…`
-#     and one allowed token vouches for the other. v0.2.1's libraries pass that test.
-#   * tokenising to fix it, without keeping the leading boundary, makes plex.tv's own
-#     `/api/v2/home/users` read as `/home/users` and fails every build.
-#
-# So: extract each path WITH its boundary character, drop the boundary, and allow per PATH.
-HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]+)")
-# The NDK's own location cannot be removed — `--cross-prefix` must be absolute (the wrapper gcc
-# dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
-# identical on every CI runner, which is the reason releases must be BUILT by CI.
-#
-# `/Users/Me` is Jellyfin's "the signed-in user" endpoint (`catalog/mod.rs`), not a home
-# directory. Rust string literals are packed into the binary with no separator, so whether it is
-# FOLLOWED by more path-like bytes depends on what the linker happens to place after it: #10's new
-# strings put `/library/sections…` there, and an unchanged literal suddenly read as a Mac home
-# path. Exactly `/Users/Me` then `/` or the end is allowed; `/Users/Megan/…` is still a build path.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/Me(?:/|$)")
+# A build-machine path anywhere in the payload. The rule, its calibration history and its tests are
+# `ci/hostpath.py` and `ci/test_hostpath.py`, shared with gen-release-audit.py and
+# verify-published.sh so the three gates cannot disagree about the same bytes.
+from hostpath import build_machine_paths  # noqa: E402
 
 # A missing payload directory is a HARD failure, not an empty loop. `check` only ever prints for
 # something it was given, so an absent stage used to print nothing at all here — no ok, no FAIL —
@@ -1034,7 +1014,7 @@ check(PAYLOAD.is_dir(), f"the staged payload directory exists ({PAYLOAD.relative
 for member in sorted(PAYLOAD.rglob("*")) if PAYLOAD.is_dir() else []:
     if not member.is_file():
         continue
-    dirty = sorted({m for m in HOSTPATH.findall(member.read_bytes()) if not ALLOWED_PATH.search(m)})
+    dirty = build_machine_paths(member.read_bytes())
     # Labelled by PATH inside the payload, not basename: since the localized descriptors landed
     # there are THIRTEEN files called `appinfo.json` in here (the top level plus one per locale),
     # and a basename cannot say which one is dirty — nor which twelve of the thirteen identical
