@@ -1584,6 +1584,7 @@ check-python: check-localization
 	python3 ci/test_link_evidence.py
 	python3 ci/test_packaged_elf.py
 	python3 ci/test_check_elf.py
+	python3 ci/test_hostpath.py
 	python3 ci/test_build_gc.py
 	@# CI runs the cargo half as three parallel jobs: this pins that no gate fell between them.
 	python3 ci/test_ci_split.py
