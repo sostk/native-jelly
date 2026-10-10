@@ -23,7 +23,7 @@ expiry.
 This used to happen and is fixed: PlxNative now keeps your sign-in in its own private storage, and
 uses the TV's key manager service where the platform provides one. If you still see it on the
 current release, use **Details → Send report** on the sign-in screen, or [open an
-issue](https://github.com/GLinnik21/plx-native/issues) with your TV model and webOS platform
+issue](https://github.com/sostk/native-jelly/issues) with your TV model and webOS platform
 release.
 
 ## Playback reports `jail_missing_rtkmem`
@@ -51,7 +51,7 @@ Try the current release first, then photograph the failure screen. Include:
 - whether the item was Direct Play or a chosen quality;
 - what happened after you pressed Play.
 
-Report it in [GitHub Issues](https://github.com/GLinnik21/plx-native/issues).
+Report it in [GitHub Issues](https://github.com/sostk/native-jelly/issues).
 
 If you're sharing an old event log, know that log redaction has improved across releases — a log
 written by a much older PlxNative version can still show an address that a current release would
