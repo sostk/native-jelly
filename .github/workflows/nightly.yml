@@ -165,9 +165,10 @@ jobs:
       flavor: nightly
       nightly-date: ${{ needs.plan.outputs.date }}
       # The DEVELOPMENT telemetry pair — a nightly is unreleased and untested on a television, so
-      # its crash reports and usage events belong in the project's development project
-      # (`plx-native-dev`), not mixed into what a real release reports. build-package.yml's own
-      # build step asserts this pair specifically for `telemetry: development`.
+      # its crash reports and usage events belong in the `development` environment of the
+      # `native-jelly` Sentry project, not mixed into what a real release reports.
+      # build-package.yml's own build step asserts this pair specifically for
+      # `telemetry: development`.
       telemetry: development
       artifact: nightly-assets
       # The package REDISTRIBUTES FFmpeg, so the LGPL corresponding-source obligation applies here
