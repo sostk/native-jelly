@@ -1,7 +1,8 @@
-{"updated":"2026-10-10T10:58:29Z",
+{"updated":"2026-10-10T11:22:41Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
-{"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}}
+{"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}},
+{"id":38047886088,"at":"2026-10-10T11:17:30Z","sha":"8136f6148","title":"Merge pull request #18 from sostk/chore/drop-stale-binaries","pr":null,"jobs":{"cross-build (armv7) + artifact assertions":244,"host unit tests (hostsim)":256,"host python/shell/C gates":272,"host unit tests (default features)":218,"host lint + type-checks":190,"host checks (NOT a device gate)":3}}
 ],
 "sim":[
 {"id":38010811522,"at":"2026-10-10T00:51:12Z","sha":"8c6b0669d","title":"Merge pull request #11 from sostk/ci/green-main","pr":null,"jobs":{"Linux simulator build + launch":224,"Windows launcher syntax":16,"macOS simulator build + launch":1062}},
