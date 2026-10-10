@@ -1132,7 +1132,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     #[cfg(not(test))]
     let dv_decision = dovi.decision_now(vcodec == "hevc");
     let dv = dv_decision.presentation;
-    let video_dp = if forced { video_feed_supported(vcodec, dv) } else {
+    let video_dp = if forced { video_feed_supported(vcodec, dv, nj_platform::devcaps::caps()) } else {
         video_direct_plays(vcodec, src_w, src_h, dv, nj_platform::devcaps::caps())
     };
     plan.source_decodable = video_dp;
@@ -1710,9 +1710,18 @@ pub(super) fn pick_dp_subtitle_pref(
     (ord >= 0).then_some((subs[i].id, ord))
 }
 
-/// Software feed formats and Dolby Vision declaration support, independent of device limits.
-pub(super) fn video_feed_supported(vcodec: &str, dv: crate::metadata::DvPresentation) -> bool {
-    matches!(vcodec, "h264" | "hevc") && dv.refusal().is_none()
+/// Software feed formats and Dolby Vision declaration support. Forced mode bypasses device bounds
+/// for h264/hevc, but AV1 and VP9 need the table's row: a set without one has no such decoder to
+/// feed, so Forced cannot make it play.
+pub(super) fn video_feed_supported(
+    vcodec: &str,
+    dv: crate::metadata::DvPresentation,
+    caps: &nj_platform::devcaps::Caps,
+) -> bool {
+    (matches!(vcodec, "h264" | "hevc")
+        || (vcodec == "av1" && caps.av1)
+        || (vcodec == "vp9" && caps.vp9))
+        && dv.refusal().is_none()
 }
 
 pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::catalog::LinkPolicy) -> crate::catalog::LinkPolicy {
@@ -1726,8 +1735,9 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::catalog::L
 /// PURE: the local direct-play VIDEO test — the codec, the source's stated frame size and its
 /// Dolby Vision layering must ALL clear what this device and this pipeline can actually show.
 ///
-/// The codec half: h264 unconditionally (every webOS SoC decodes it), hevc only when the table
-/// lists the decoder — anything else the pipeline cannot feed at all. The resolution half is the
+/// The codec half: h264 unconditionally (every webOS SoC decodes it), hevc when the table lists the
+/// decoder, av1 and vp9 only when the table lists their own rows (`Caps::av1`, `Caps::vp9`), and
+/// anything else the pipeline cannot feed at all. The resolution half is the
 /// local agreement with the profile's `*`-scoped `video.width`/`video.height` limitation: the
 /// profile makes PMS transcode a 4K source down for a 1080p-bounded SoC, but when `/decision` is
 /// unreachable the fallback never asks PMS, so without this test a 4K file with one
@@ -1769,6 +1779,13 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::catalog::L
 /// Unknown dimensions (0) PASS: PMS omitting a Media attribute is not evidence of 4K, and
 /// failing open is yesterday's behavior for every file the server never measured — the same
 /// misread-degrades-to-assumed rule `devcaps::parse` applies, and `Dovi` applies it too.
+///
+/// **AV1 and VP9 are the codecs that need the table's own row.** `hevc_max` is the shared bound
+/// and applies to every codec. AV1 and VP9 additionally have to clear `caps.av1_row` /
+/// `caps.vp9_row` on each non-zero axis, because the row is the decoder's own statement of its
+/// size; a set whose table lists no such decoder refuses the codec at any size. Bit depth is not
+/// tested here (no codec's is): the DeviceProfile's `VideoBitDepth` condition carries it to the
+/// server.
 pub(super) fn video_direct_plays(
     vcodec: &str,
     src_w: i64,
@@ -1776,9 +1793,20 @@ pub(super) fn video_direct_plays(
     dv: crate::metadata::DvPresentation,
     caps: &nj_platform::devcaps::Caps,
 ) -> bool {
-    let codec_ok = vcodec == "h264" || (vcodec == "hevc" && caps.hevc);
+    let codec_ok = vcodec == "h264"
+        || (vcodec == "hevc" && caps.hevc)
+        || (vcodec == "av1" && caps.av1)
+        || (vcodec == "vp9" && caps.vp9);
     let (bw, bh) = caps.hevc_max;
-    codec_ok && src_w <= bw as i64 && src_h <= bh as i64 && dv.refusal().is_none()
+    // The codec's own row, on each axis it states: AV1 and VP9 are the codecs whose bound is the
+    // table's separate row rather than the shared one.
+    let (rw, rh, _) = match vcodec {
+        "av1" => caps.av1_row,
+        "vp9" => caps.vp9_row,
+        _ => (0, 0, 0),
+    };
+    let row_ok = (rw == 0 || src_w <= rw as i64) && (rh == 0 || src_h <= rh as i64);
+    codec_ok && row_ok && src_w <= bw as i64 && src_h <= bh as i64 && dv.refusal().is_none()
 }
 
 
@@ -1923,3 +1951,6 @@ mod track_selection_tests;
 #[path = "plan_dolby_vision_tests.rs"]
 mod dolby_vision_tests;
 
+#[cfg(test)]
+#[path = "plan_av1_tests.rs"]
+mod av1_tests;

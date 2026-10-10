@@ -62,7 +62,7 @@ pub(crate) mod scenarios;
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 35] = [
+const DIAG: [&str; 36] = [
     "nativejelly-diag.log",
     "nativejelly-events.log",
     "nativejelly-stderr.log",
@@ -147,6 +147,10 @@ const DIAG: [&str; 35] = [
     // route policy, so an experiment must not independently replace Home with the profile picker.
     "nativejelly-dvcaps0",
     "nativejelly-dvcaps1",
+    // The AV1 framing A/B (`ff`'s `av1obu` tokens: notd, noseq, raw). It alters only how an AV1
+    // packet is framed before the decoder sees it, so an on-device comparison of the variants must
+    // not move the boot screen out from under the playback being compared.
+    "nativejelly-av1obu",
 ];
 
 /// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/nativejelly-gstlog`.
