@@ -165,8 +165,16 @@ fi
 # Dots also belong to the token: do not extract four components out of a longer
 # dotted number sequence. URL separators and ports still delimit real IPv4 literals.
 PRIVATE_IPV4_RE='(^|[^[:alnum:]_.])(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}($|[^[:alnum:]_.])'
-if grep -qE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings"; then
-  grep -oE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings" | sort -u | sed -n '1,10p'
+# ONE exception, exact: the sign-in screen's example of what to type (`jellyfin.login.server_hint`
+# in locales/*/jellyfin.json), a LAN address on purpose because that is what people type. It is
+# catalogue text, not a configured server, so it is blanked — address AND port, nothing wider —
+# before the scan. A developer whose real host is this address is still caught by the placeholder
+# assertion below. ci/test_check_elf.py holds this value to the catalogue's.
+SERVER_HINT_EXAMPLE='192.168.1.20:8096'
+sed "s/${SERVER_HINT_EXAMPLE//./\\.}//g" "$AUDIT_TMP/strings" > "$AUDIT_TMP/strings.scan" \
+  || fail "cannot prepare the private-IP scan"
+if grep -qE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings.scan"; then
+  grep -oE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings.scan" | sort -u | sed -n '1,10p'
   fail "private IP address baked into the binary — was this built with src/config.local.h present?"
 fi
 grep -q YOUR_PMS_HOST "$AUDIT_TMP/strings" \

@@ -131,6 +131,42 @@ class ElfGateTests(unittest.TestCase):
                 self.assertIn("private IP address", result.stdout)
                 self.assertIn(address, result.stdout, "the gate must identify the full four-octet address")
 
+    def test_the_sign_in_screens_example_address_is_not_a_compiled_in_host(self):
+        # `jellyfin.login.server_hint`: an example of what to type, a LAN address on purpose, and
+        # its pseudo-locale rendering. It is catalogue text, not a configured server.
+        spec = defaults()
+        spec["strings"]["output"] += "192.168.1.20:8096\n[!! 192.168.1.20:8096 !!]\n"
+        self.assert_pass(spec)
+
+    def test_only_the_exact_example_address_is_allowed(self):
+        for near in ("http://192.168.1.20:32400/library", "192.168.1.20\n", "192.168.1.21:8096"):
+            with self.subTest(near=near):
+                spec = defaults()
+                spec["strings"]["output"] += near + "\n"
+                result = self.run_gate(spec)
+                self.assertNotEqual(result.returncode, 0, "a private address was allowed: " + near)
+                self.assertIn("private IP address", result.stdout)
+
+    def test_the_allowed_example_is_the_catalogues_own_hint(self):
+        catalogue = json.loads((Path(__file__).resolve().parents[1] / "locales/en/jellyfin.json").read_text())
+
+        def values(node):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "jellyfin.login.server_hint":
+                        yield value["value"] if isinstance(value, dict) else value
+                    else:
+                        yield from values(value)
+            elif isinstance(node, list):
+                for item in node:
+                    yield from values(item)
+
+        hints = set(values(catalogue))
+        script = (Path(__file__).resolve().parent / "check-elf.sh").read_text()
+        self.assertEqual(len(hints), 1, hints)
+        line = f"SERVER_HINT_EXAMPLE='{hints.pop()}'"
+        self.assertTrue(line in script, f"check-elf.sh must allow exactly the hint the sign-in screen shows: {line}")
+
     def test_neighbouring_public_ipv4_ranges_are_allowed(self):
         spec = defaults()
         spec["strings"]["output"] += "9.11.12.13\n11.11.12.13\n172.15.255.255\n172.32.0.1\n192.167.0.1\n192.169.0.1\n"

@@ -786,6 +786,16 @@ impl Default for CanonicalSessionPreferences {
 /// The returned public object is still protected by the helper-owned private DB8 kind, but it is
 /// deliberately readable while Keymanager is unavailable.  The returned string contains every
 /// credential and all unknown extensions and must only cross the authenticated helper socket.
+/// The protected half of a canonical session record, as this build writes it.
+const SESSION_AUTH_FORMAT: &str = "nativejelly-session-auth";
+/// The same blob under its pre-rebrand name (a07eaeb). The app id changed two days earlier
+/// (c06fcaf), so builds of this app id wrote it; read under either, written under the current one.
+const LEGACY_SESSION_AUTH_FORMAT: &str = "plxnative-session-auth";
+
+fn is_session_auth_format(format: &str) -> bool {
+    format == SESSION_AUTH_FORMAT || format == LEGACY_SESSION_AUTH_FORMAT
+}
+
 #[allow(dead_code)] // Connected by the Stage B Session adapter.
 pub(crate) fn split_canonical(
     session: &Session,
@@ -794,7 +804,7 @@ pub(crate) fn split_canonical(
     // ambiguous v2 write; only the typed field is permitted to carry active credentials.
     if session.extensions.0.contains_key("profiles") { return Err(()); }
     let auth = serde_json::to_string(&CanonicalSessionAuth {
-        format: "nativejelly-session-auth".into(),
+        format: SESSION_AUTH_FORMAT.into(),
         version: 2,
         profiles: Some(serde_json::to_value(valid_profiles(session.profiles.clone())).map_err(|_| ())?),
         account_token: session.account_token.clone(),
@@ -858,7 +868,7 @@ pub(crate) fn join_canonical(
     protected: &str,
 ) -> Result<Session, ()> {
     let auth: CanonicalSessionAuth = serde_json::from_str(protected).map_err(|_| ())?;
-    if auth.format != "nativejelly-session-auth" || !matches!(auth.version, 1 | 2) {
+    if !is_session_auth_format(&auth.format) || !matches!(auth.version, 1 | 2) {
         return Err(());
     }
     let profiles = match (auth.version, auth.profiles) {

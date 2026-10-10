@@ -166,8 +166,14 @@ fn carried_dev_ready_is_not_handed_off_after_erase() {
     assert!(witnessed, "actual Ready effect must be carried after activation ACK");
 }
 
+/// One and two boundary errors on a dev bootstrap leave the auth machine in `Error` with the dev
+/// authority still held; Try again (`StartLogin`) then crosses the revoke ACK and launches a clean
+/// account Login. Until the rebrand this pressed the Plex sign-in screen's Try again (entry 0); that
+/// screen is gone and the Login route now mounts the Jellyfin sign-in, so the command is issued as
+/// the button did. `dev_native_activation_is_ephemeral_and_revoke_ack_precedes_clean_login_work`
+/// covers the single-activation case.
 #[test]
-fn mounted_login_try_again_recovers_dev_boundary_errors_through_revoke_ack() {
+fn try_again_recovers_dev_boundary_errors_through_revoke_ack() {
     use crate::auth::owner::{BootstrapAuthority, CommitAdmission, CommitReply, SessionEvent, SessionWork};
     use crate::catalog::session::{Session, ServerRef};
     use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -199,9 +205,7 @@ fn mounted_login_try_again_recovers_dev_boundary_errors_through_revoke_ack() {
         }
         d.request(MachineId::Nav, NavOp::Root(AppArg::Login));
         frame(&mut rig, &mut d);
-        assert_eq!(d.top_screen().unwrap().name(), "login");
-        assert_eq!(d.focus_record().unwrap().1, 0, "real Error action is focused");
-        let instance = d.top_page().unwrap();
+        assert_eq!(d.top_screen().unwrap().name(), "login", "the Login route mounts the sign-in");
         let ran = Arc::new(AtomicBool::new(false));
         let signal = Arc::clone(&ran);
         let req = rig.session.snapshot_init().next_req + 2;
@@ -210,10 +214,9 @@ fn mounted_login_try_again_recovers_dev_boundary_errors_through_revoke_ack() {
             assert_eq!(client_id, "synthetic-device");
             signal.store(true, Ordering::Release);
         });
-        d.emit(MachineId::Input, Fx::Deliver(MachineId::Instance(instance),
-            Delivery::Screen(ScreenEvent::Activate(0))));
+        execute_session_command(&mut d, crate::auth::SessionCmd::StartLogin);
         frame(&mut rig, &mut d);
-        assert!(ran.load(Ordering::Acquire), "mounted Try again must cross revoke ACK and launch clean Login");
+        assert!(ran.load(Ordering::Acquire), "Try again must cross revoke ACK and launch clean Login");
         let state = rig.session.snapshot_init();
         assert!(matches!(state.authority, BootstrapAuthority::Account { ref extras } if extras.is_empty()));
         assert!(state.persisted.account_token.is_empty());
