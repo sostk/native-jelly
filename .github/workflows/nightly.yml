@@ -276,7 +276,7 @@ jobs:
           gh release create "$TAG" \
             "dist/$IPK" dist/nightly.sha256 dist/ffmpeg-*.tar.xz dist/build-ffmpeg.sh dist/nativejelly-source-*.tar.gz* \
             --target "$SHA" \
-            --title "PlxNative $LABEL" \
+            --title "Native Jelly $LABEL" \
             --prerelease \
             --latest=false \
             --notes-file "$RUNNER_TEMP/notes.md"
