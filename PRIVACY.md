@@ -129,8 +129,28 @@ internal kinds it was — the connection's `link` class, an `http_status` or net
 been `failing_for` (both bucketed), how many codes were shown (`code_generation`, capped), and, when
 a sign-in could not be saved, a `persistence` failure class, the `keymanager_stage` a key-service
 step stopped at and the key service's own numeric `service_error_code`. A storage-helper failure
-also carries fixed startup, connection, activation or backend stages, wire/DB8 error codes, and
-up to eight failed storage-candidate errno numbers. It carries no candidate paths, file owners or helper generation identifiers.
+also carries fixed startup, connection, activation or backend stages and wire/DB8 error codes
+(`helper`), and up to eight failed storage-candidate errno numbers (`candidate_errnos`). It carries
+no candidate paths, file owners or helper generation identifiers.
+The fields in the rest of this paragraph that describe plex.tv discovery are produced only by the
+Plex sign-in inherited from PlxNative, which a Jellyfin sign-in never uses.
+When a server was found but answered only over an unencrypted connection, it also carries a fixed
+outcome class (`absent`, `timeout`, `dns`, `tls`, `refused` and the like) for each secure route to
+that server — `https_lan`, `https_public`, `https_custom` and `https_relay` — and, about the
+unencrypted answer, only fixed facts: whether plex.tv marked that connection local
+(`plaintext_local`), whether plex.tv saw this television behind the server's own network address
+(`public_address_matches`), whether the server is `owned` by the signed-in account, whether it
+requires secure connections (`https_required`), the kind of address it was (`plaintext_scope`:
+private, link-local, unique-local, loopback, public or a name) and its family
+(`plaintext_family`: v4, v6 or unknown), whether the app could offer to connect without encryption
+on your home network or the fixed reason it could not (`plaintext_eligibility`: eligible,
+https_required, not_local, not_same_network, not_private_address, identity_unverified,
+https_unsettled or https_answered) and, when it asked, what became of the question
+(`plaintext_consent`: offered, accepted, declined or revoked) — never the address itself, the
+server or whose it is. When the account has no
+server, it carries how many other devices plex.tv listed (`resources`, bucketed) and whether that
+happened right after signing in or on a retry (`discovery_trigger`). For unreachable discovery it
+also says whether the failed target was plex.tv or the listed servers (`discovery_target`).
 It also carries whether the report was `consent`ed to as a standing choice or as a one-off, the app version and when it
 happened. It never includes your account name, tokens, PIN, sign-in code or network addresses. With
 crash reports on, it is sent automatically, carries the Crash report ID, and the sign-in screen
