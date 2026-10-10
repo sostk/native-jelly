@@ -66,7 +66,7 @@ def next_nightly_version() -> str:
 
 def nightly_label(version: str, date: str) -> str:
     """`X.Y.Z-nightly-YYYYMMDD` — the one string this build reports everywhere (Sentry release,
-    `X-Plex-Version`, the diagnostics panel) and the one a bug report names."""
+    the client version sent to the server, the diagnostics panel) and the one a bug report names."""
     return f"{version}-nightly-{date}"
 
 
@@ -197,8 +197,8 @@ def render_notes(*, label: str, sha: str, prev_tag: "str | None", ipk: str, sha2
 
     return "\n\n".join([
         f"Automatic build of `main` at [`{short_sha}`]({commit_link}). It installs beside "
-        "PlxNative as a separate app, \"PlxNative Nightly\", with its own launcher tile and its "
-        "own sign-in — your regular PlxNative install is untouched.",
+        "Native Jelly as a separate app, \"Native Jelly Nightly\", with its own launcher tile and "
+        "its own sign-in — your regular Native Jelly install is untouched.",
 
         "**This build has not been tested on a television.** It passed the same automated checks "
         "a release does — the ARM cross-build, the packaging gates, and the firmware loader "
@@ -381,10 +381,12 @@ def _selftest() -> int:
     body = render_notes(
         label="0.7.0-nightly-20260919", sha="abc1234def5678900000000000000000000000",
         prev_tag="nightly/v0.7.0-nightly-20260918", ipk="nativejelly-v0.7.0-nightly-20260919.ipk",
-        sha256="deadbeef" * 8, repo="GLinnik21/plx-native",
+        sha256="deadbeef" * 8, repo="sostk/native-jelly",
         changes=["- session: one in-memory cache owned by the session module (#136)"],
     )
-    check("PlxNative Nightly" in body, "notes name the nightly tile")
+    check("Native Jelly Nightly" in body, "notes name the nightly tile")
+    check("PlxNative" not in body and "Plex" not in body,
+          "notes name this app, not the PlxNative app it was forked from")
     check("**This build has not been tested on a television.**" in body,
           "notes carry the untested-on-TV warning in bold")
     check("## Changes since 0.7.0-nightly-20260918" in body,
@@ -400,7 +402,7 @@ def _selftest() -> int:
           "the first paragraph is not internally hard-wrapped")
     first_notes = render_notes(
         label="0.7.0-nightly-20260919", sha="0" * 40, prev_tag=None,
-        ipk="nativejelly-v0.7.0-nightly-20260919.ipk", sha256="0" * 64, repo="GLinnik21/plx-native",
+        ipk="nativejelly-v0.7.0-nightly-20260919.ipk", sha256="0" * 64, repo="sostk/native-jelly",
         changes=[],
     )
     check("First nightly." in first_notes, "no prev_tag -> 'First nightly.'")
@@ -412,7 +414,7 @@ def _selftest() -> int:
     fake_release = {
         "tag_name": "nightly/v0.7.0-nightly-20260919",
         "target_commitish": "abc1234def5678900000000000000000000000",
-        "html_url": "https://github.com/GLinnik21/plx-native/releases/tag/nightly%2Fv0.7.0-nightly-20260919",
+        "html_url": "https://github.com/sostk/native-jelly/releases/tag/nightly%2Fv0.7.0-nightly-20260919",
         "assets": [
             {"name": "nativejelly-v0.7.0-nightly-20260919.ipk",
              "browser_download_url": "https://example.invalid/ipk"},
