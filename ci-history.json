@@ -1,4 +1,4 @@
-{"updated":"2026-10-10T10:29:42Z",
+{"updated":"2026-10-10T10:58:29Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
 {"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}}
@@ -7,5 +7,6 @@
 {"id":38010811522,"at":"2026-10-10T00:51:12Z","sha":"8c6b0669d","title":"Merge pull request #11 from sostk/ci/green-main","pr":null,"jobs":{"Linux simulator build + launch":224,"Windows launcher syntax":16,"macOS simulator build + launch":1062}},
 {"id":38026584849,"at":"2026-10-10T05:10:07Z","sha":"4ba91f9bc","title":"Merge pull request #12 from sostk/fix/ci-remaining","pr":null,"jobs":{"Linux simulator build + launch":251,"macOS simulator build + launch":882,"Windows launcher syntax":18}},
 {"id":38030063072,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"Linux simulator build + launch":240,"Windows launcher syntax":24,"macOS simulator build + launch":875}},
-{"id":38044108575,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"Windows launcher syntax":17,"Linux simulator build + launch":260,"macOS simulator build + launch":1001}}
+{"id":38044108575,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"Windows launcher syntax":17,"Linux simulator build + launch":260,"macOS simulator build + launch":1001}},
+{"id":38045986349,"at":"2026-10-10T10:45:03Z","sha":"47bec31a0","title":"Merge pull request #16 from sostk/ci/build-path-scan","pr":null,"jobs":{"macOS simulator build + launch":789,"Linux simulator build + launch":228,"Windows launcher syntax":13}}
 ]}
