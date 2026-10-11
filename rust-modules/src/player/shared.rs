@@ -505,6 +505,9 @@ pub(crate) struct Shared {
     pub load_completed: AtomicBool,          // bf_loaded signal
     pub media_id: Mutex<Option<CString>>,    // bf_mediaId (captured once)
     pub source_info: Mutex<Option<Vec<u8>>>, // sourceInfoRaw, VERBATIM incl NUL
+    /// What the demuxer read of a VP9 stream's colour (PQ tag, mastering display, light level). Set
+    /// only for VP9, cleared per session; `pump` writes it into `source_info` before ACB is sent it.
+    pub container_hdr: Mutex<Option<super::vp9_hdr::ContainerHdr>>,
 
     // main/pump (M) -> library callback thread (K)
     pub pts_shift: AtomicI64, // g_pts_shift
@@ -900,6 +903,7 @@ impl Shared {
             load_completed: AtomicBool::new(false),
             media_id: Mutex::new(None),
             source_info: Mutex::new(None),
+            container_hdr: Mutex::new(None),
             pts_shift: AtomicI64::new(0),
             disp_base: AtomicI64::new(0),
             offset_rebase: AtomicBool::new(false),
@@ -1496,6 +1500,7 @@ impl Shared {
         self.native_load_elapsed_ms.store(0, Ordering::Relaxed);
         *self.media_id.lock().unwrap() = None;
         *self.source_info.lock().unwrap() = None;
+        *self.container_hdr.lock().unwrap() = None;
         self.pts_shift.store(0, Ordering::Relaxed);
         self.disp_base.store(0, Ordering::Relaxed);
         self.offset_rebase.store(false, Ordering::Relaxed);

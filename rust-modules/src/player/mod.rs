@@ -38,6 +38,7 @@ pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (s
 pub(crate) mod sim_audio; // the simulator's sound, through a system ffmpeg (see its doc)
 pub(crate) mod threads;
 pub(crate) mod video_geometry;
+pub(crate) mod vp9_hdr; // HDR10 for a VP9 stream: the container's PQ tag, written into the sourceInfo envelope ACB is sent
 
 use nj_base::task::MainThread;
 pub(crate) use shared::HlsAutomaticTransition;

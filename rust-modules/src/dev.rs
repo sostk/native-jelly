@@ -62,7 +62,7 @@ pub(crate) mod scenarios;
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 36] = [
+const DIAG: [&str; 37] = [
     "nativejelly-diag.log",
     "nativejelly-events.log",
     "nativejelly-stderr.log",
@@ -151,6 +151,9 @@ const DIAG: [&str; 36] = [
     // packet is framed before the decoder sees it, so an on-device comparison of the variants must
     // not move the boot screen out from under the playback being compared.
     "nativejelly-av1obu",
+    // Send VP9's sourceInfo envelope as the pipeline made it, without the container-derived HDR10
+    // declaration (`player::vp9_hdr`): the A/B for whether the television switches to HDR.
+    "nativejelly-novp9hdr",
 ];
 
 /// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/nativejelly-gstlog`.
