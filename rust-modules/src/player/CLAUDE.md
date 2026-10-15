@@ -200,9 +200,25 @@ something.
   survived a long time because the test suite's cases inherited a server-side `viewOffset`, so the
   seek under test usually had nowhere to go (fixed 2026-07-28; see the
   `docs/agent-reference.md` testing note).
-- **Seeks are in-place** (Kodi-style): flush + `av_seek_frame` to the target,
-  then on the first post-seek keyframe `feed_stream` re-anchors the GStreamer segment
-  (`setTimeToDecode` + `sendSegmentEvent`) — no reload/decoder re-init. A transcode seek instead
+- **Seeks are in-place**, in one of three per-session modes (`player::SeekMode`, chosen by
+  `engine::select_seek_mode` in `start_bufferfeed`, the `/tmp/nativejelly-seekmode` dev trigger
+  `native|segment|reload` wins): the demuxer is `av_seek_frame`d to the target, then on the first
+  post-seek keyframe `feed_stream` re-anchors the pipeline — no reload/decoder re-init.
+  `Segment` (webOS 4.x) is Kodi-style: pump `flush()`, then `setTimeToDecode` + `sendSegmentEvent`
+  through decompile-derived private offsets. `NativeSeek` (`VP_EXPORTED`, webOS 5+; issue #568) is
+  LG's PUBLIC `StarfishMediaAPIs::Seek(millis)` (`sink().seek`, `sf_seek_ms`): it flushes itself, so
+  the pump does NOT `flush()` and nothing may flush after it (a `flush()` is a seek to 0 and re-creates
+  the stale-segment stall); it re-anchors the segment AT the millis passed, so `feed_stream` feeds
+  content-time PTS (`pts_shift = 0`) and calls `Seek(max(kf_pts,0) / 1e6)` before feeding the landed
+  keyframe — on the main thread, the only Feed caller, so it cannot race a Feed. A refused Seek
+  (rv 0) drops the session to `Reload`, re-posts this seek for the pump's `reload_at` (the stuck
+  watchdog goes straight to `reload_at` in `Reload` mode, and a flushed keyframe in a non-`Segment`
+  mode anchors nothing: the private Segment offsets never run on webOS 5+), and latches
+  `native_seek_refused` so the reload's fresh session stays `Reload` for the rest of THAT playback;
+  a fresh play (`start_bufferfeed_tracked` with no live Engine) clears the latch. `Reload`
+  (old-ABI 3.x, and the fallback of both) is a fresh `Load` per seek. Otherwise the mode is
+  re-selected per session. The evidence is in `docs/webos5-port.md` ("The public `Seek`").
+  A transcode seek instead
   restarts the encode at `&offset` with a full fresh `Load`. The rebase machinery
   (`pts_shift`/`rebase_pending` in `shared.rs`) keeps Starfish from ever seeing a PTS jump.
 - **`frames` is SEEK-scoped, `seen_frame` is SESSION-scoped.** `pump` zeroes `SHARED.frames` as
