@@ -171,6 +171,10 @@ pub(crate) struct Engine {
     pub placed_src: (c_int, c_int),
     pub eos_pushed: bool, // Kodi VIDEO_DRAIN: pushEOS() sent once at true EOF
     pub rebase_pending: bool, // g_rebase_pending
+    /// The rebase above also anchors `disp_base` at the landed keyframe ([`arm_offset_rebase`]):
+    /// this Load is a conversion started at an offset, whose first keyframe may carry the film's
+    /// time or 0.
+    pub anchor_at_rebase: bool,
     // In-place seek only: keyframes this far AHEAD of the seek target are stale frames the demuxer
     // produced from its pre-flush read position before the reopen+av_seek won the race (playback
     // drifts forward during a long scrub) — reject them so the rebase anchors on the REAL post-seek
@@ -1364,6 +1368,7 @@ fn start_bufferfeed_inner(
         None
     };
 
+    let (rebase_pending, anchor_at_rebase) = first_keyframe_rebase();
     let eng = Engine {
         route_start: route_attempt,
         native_epoch,
@@ -1371,11 +1376,8 @@ fn start_bufferfeed_inner(
         video_info_sent: false,
         placed_src: (0, 0),
         eos_pushed: false,
-        // if a seek is armed for the FIRST open (resume, or reload_at), rebase the first
-        // post-seek keyframe to fed-pts 0 so the pipeline sees a 0-based timeline identical
-        // to fresh play (disp_base carries the content offset). Plain fresh play leaves this
-        // false (first keyframe is already ~0).
-        rebase_pending: SHARED.seek_to_ns.load(Ordering::Relaxed) >= 0,
+        rebase_pending,
+        anchor_at_rebase,
         rebase_drops: 0,
         seek_armed_at: 0,
         seek_retries: 0,
@@ -1462,10 +1464,31 @@ pub(crate) fn arm_seek(target_ns: i64) {
     SHARED.playpos_ns.store(t, Ordering::Relaxed); // instant HUD feedback until frames land
 }
 
+/// Display a conversion started at `offset_ns` in film time on the NEXT Load, whatever timestamps
+/// its stream carries. Jellyfin's encode copies them (`CopyTimestamps`: `-ss <offset> -copyts`), so
+/// its first keyframe K sits at about the offset; Plex's restarted at 0. The Load rebases K to
+/// fed-pts 0 either way, which is what the feed-ahead throttle measures against (a fresh Load's
+/// presented position starts at 0, and an un-rebased K 36 s ahead of it was never fed), and moves
+/// `disp_base` to `offset - K`, so the position reads `offset + fed`.
+pub(crate) fn arm_offset_rebase(offset_ns: i64) {
+    SHARED.disp_base.store(offset_ns, Ordering::Relaxed);
+    SHARED.playpos_ns.store(offset_ns, Ordering::Relaxed); // instant HUD feedback until frames land
+    SHARED.offset_rebase.store(true, Ordering::Relaxed);
+}
+
+/// What a new Engine's first keyframe does, as `(rebase_pending, anchor_at_rebase)`. A seek armed
+/// for the FIRST open (resume, or reload_at), or a conversion started at an offset
+/// ([`arm_offset_rebase`], taken here once), rebases it to fed-pts 0 so the pipeline sees a 0-based
+/// timeline identical to fresh play. Plain fresh play does not (its first keyframe is already ~0).
+fn first_keyframe_rebase() -> (bool, bool) {
+    let anchor = SHARED.offset_rebase.swap(false, Ordering::Relaxed);
+    (SHARED.seek_to_ns.load(Ordering::Relaxed) >= 0 || anchor, anchor)
+}
+
 /// Resume/seek AT the first Load. A direct-play item seeks the demuxer (av_seek via arm_seek).
-/// A TRANSCODE item's stream is 0-based and NOT seekable (no byte-index, Content-Length=-1), so
-/// av_seek fails — instead restart the encode at `&offset=secs` (transcode_seek) and display
-/// content time via disp_base. Call BEFORE start_bufferfeed, AFTER route::play_movie has run the
+/// A TRANSCODE item's stream is NOT seekable (no byte-index, Content-Length=-1), so av_seek
+/// fails — instead restart the encode at `&offset=secs` (transcode_seek) and display content time
+/// through [`arm_offset_rebase`]. Call BEFORE start_bufferfeed, AFTER route::play_movie has run the
 /// decision (so the transcode session + flavor are set). Used for viewOffset resume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use = "resume preparation is an external route effect and must be settled"]
@@ -1487,14 +1510,12 @@ pub(crate) fn resume_at(ps: &mut crate::route::PlaybackSession, resume_ns: i64) 
         arm_seek(resume_ns); // direct-play: av_seek the file at the first open
         ResumeOutcome::Prepared
     } else if crate::route::take_encoder_start(ps, offset_secs) {
-        SHARED.disp_base.store(resume_ns, Ordering::Relaxed);
-        SHARED.playpos_ns.store(resume_ns, Ordering::Relaxed);
+        arm_offset_rebase(resume_ns);
         log(&format!("resume(transcode): the encoder already starts at {offset_secs}s"));
         ResumeOutcome::Prepared
     } else if crate::route::transcode_seek(ps, offset_secs).is_some() {
-        // transcode: the encode restarts at &offset (0-based); disp_base carries the offset
-        SHARED.disp_base.store(resume_ns, Ordering::Relaxed);
-        SHARED.playpos_ns.store(resume_ns, Ordering::Relaxed);
+        // transcode: the encode restarts at &offset; the first keyframe anchors the offset
+        arm_offset_rebase(resume_ns);
         log(&format!(
             "resume(transcode): restart at offset {}s",
             resume_ns / 1_000_000_000
@@ -1568,8 +1589,7 @@ fn reload_transcode_start(ps: &mut crate::route::PlaybackSession, pa: &mut super
         offset_ns / 1_000_000_000
     ));
     teardown(ps, pa, true); // keep the session; reload mode
-    SHARED.disp_base.store(offset_ns, Ordering::Relaxed); // transcode is 0-based at content=offset
-    SHARED.playpos_ns.store(offset_ns, Ordering::Relaxed);
+    arm_offset_rebase(offset_ns);
     Some(start_bufferfeed_for(ps, pa, ticket))
 }
 
@@ -1607,8 +1627,9 @@ pub(crate) fn switch_audio_native(ps: &mut crate::route::PlaybackSession, pa: &m
 
 /// Reload the pipeline for a MODE/CODEC change — an audio-track switch on a direct-play HEVC
 /// item forces a transcode (H264/AC3), so the pipeline must be re-Loaded with the H264 payload
-/// (feeding H264 into the H265-configured pipeline stalls). Unlike reload_at, the transcode
-/// start.mkv is already 0-based at `&offset`, so no av_seek — just set disp_base to the offset.
+/// (feeding H264 into the H265-configured pipeline stalls). Unlike reload_at, the encode already
+/// starts at the offset, so no av_seek — [`arm_offset_rebase`] anchors the offset at its first
+/// keyframe.
 /// route::retranscode has already set the URL + session + STREAM_VCODEC=h264 before this call.
 pub(crate) fn reload_transcode(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, offset_ns: i64) -> ReloadOutcome {
     if crate::route::url(ps).is_empty() {
@@ -2495,6 +2516,17 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                     // reload / initial-resume seek: rebase the landed keyframe to fed-pts 0 (the
                     // fresh Load's pipeline expects a 0-based feed; disp_base carries the offset).
                     SHARED.pts_shift.store(-pts, Ordering::Relaxed);
+                    if eng.anchor_at_rebase {
+                        // A conversion started at an offset: playpos = fed - pts_shift + disp_base
+                        // = fed + pts + disp_base, so `offset - pts` reads `offset + fed`.
+                        SHARED.disp_base.fetch_sub(pts, Ordering::Relaxed);
+                        eng.anchor_at_rebase = false;
+                        log(&format!(
+                            "rebase: conversion keyframe pts={}ms anchored at offset -> disp_base={}ms",
+                            pts / 1_000_000,
+                            SHARED.disp_base.load(Ordering::Relaxed) / 1_000_000
+                        ));
+                    }
                 }
                 eng.rebase_pending = false; // releases the AUDIO lane (which holds until this clears)
                 eng.seek_base_pts = pts + SHARED.pts_shift.load(Ordering::Relaxed); // fed-pts base
@@ -3319,6 +3351,7 @@ mod prime_livelock_tests {
             placed_src: (0, 0),
             eos_pushed: false,
             rebase_pending: false,
+            anchor_at_rebase: false,
             rebase_drops: 0,
             seek_armed_at: 0,
             seek_retries: 0,
@@ -4085,6 +4118,78 @@ mod prime_livelock_tests {
             SHARED.hls_rebuffering.load(Ordering::Relaxed),
             "the UI/runtime hold was cleared without a successful clock transition",
         );
+    }
+}
+
+/// **A conversion restarted at an offset carries the FILM's timestamps.** Jellyfin encodes with
+/// `CopyTimestamps` (`-ss <offset> … -copyts -start_at_zero`), so the stream a track switch, a
+/// quality change or a seek reloads at 36 s begins at pts 36.036 s — measured from Jellyfin 12.0 on
+/// 2026-10-18. The reload used to assume the Plex transcoder's 0-based restart: no rebase, the
+/// presented position reset to 0, and so the first keyframe sat 36 s past the feed-ahead budget and
+/// was never fed. Nothing presented, the reference never moved, and every subtitle or audio switch
+/// on a converted title hung on the spinner (`feed v#` never logged after `reload_transcode`).
+#[cfg(all(test, feature = "hostsim"))]
+mod offset_reload_tests {
+    use super::*;
+
+    const OFFSET_NS: i64 = 36_000_000_000;
+    const FIRST_KEY_NS: i64 = 36_036_000_000;
+
+    #[test]
+    fn a_conversion_reloaded_at_an_offset_feeds_and_reads_film_time() {
+        let _serial = nj_base::testlock::serial();
+        // Process-global state this test writes, put back panic or not: the feed and the prime move
+        // the clock, and a later test reading it would fail for this one.
+        struct Restore {
+            pts_shift: i64,
+            presented: i64,
+            disp_base: i64,
+            playpos: i64,
+        }
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SHARED.pts_shift.store(self.pts_shift, Ordering::Relaxed);
+                SHARED.pres_fed.store(self.presented, Ordering::Relaxed);
+                SHARED.disp_base.store(self.disp_base, Ordering::Relaxed);
+                SHARED.playpos_ns.store(self.playpos, Ordering::Relaxed);
+                SHARED.offset_rebase.store(false, Ordering::Relaxed);
+                SHARED.reset_hls_clock_for_test();
+                crate::player::ffi_host::force_clocksink_for_test(false);
+            }
+        }
+        let _restore = Restore {
+            pts_shift: SHARED.pts_shift.load(Ordering::Relaxed),
+            presented: SHARED.pres_fed.load(Ordering::Relaxed),
+            disp_base: SHARED.disp_base.load(Ordering::Relaxed),
+            playpos: SHARED.playpos_ns.load(Ordering::Relaxed),
+        };
+        crate::player::ffi_host::force_clocksink_for_test(true);
+        SHARED.reset_hls_clock_for_test();
+        let mt = unsafe { nj_base::task::MainThread::assume() };
+
+        // What `reload_transcode_start` leaves behind: the reset's presented position, no seek armed,
+        // and the conversion's offset armed.
+        SHARED.pres_fed.store(0, Ordering::Relaxed);
+        SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
+        SHARED.pts_shift.store(0, Ordering::Relaxed);
+        arm_offset_rebase(OFFSET_NS);
+        let mut eng = super::prime_livelock_tests::engine_after_reload();
+        // As `start_bufferfeed` builds the Engine for this Load, and as the pump's loadCompleted arm
+        // then primes it (`pump::prime_before_play`: a rebase primes before Play).
+        (eng.rebase_pending, eng.anchor_at_rebase) = first_keyframe_rebase();
+        eng.prime_play = eng.rebase_pending;
+        assert!(!SHARED.offset_rebase.load(Ordering::Relaxed), "the Engine took the arm");
+
+        let qv = &mut **eng.aq_video.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        let au = [0u8; 64];
+        for i in 0..24i64 {
+            crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, FIRST_KEY_NS + i * 41_708_333, c_int::from(i == 0), 1);
+        }
+        feed_both_lanes(&mt, &mut eng);
+
+        assert!(eng.max_fed_video_pts > 0, "nothing was fed: the reload sat on its first keyframe");
+        let shown = eng.max_fed_video_pts - SHARED.pts_shift.load(Ordering::Relaxed) + SHARED.disp_base.load(Ordering::Relaxed);
+        assert!((shown - (FIRST_KEY_NS + 23 * 41_708_333)).abs() < 100_000_000, "position reads film time, got {shown}");
     }
 }
 
