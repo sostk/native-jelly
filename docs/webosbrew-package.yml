@@ -5,13 +5,20 @@
 # https://github.com/webosbrew/apps-repo and copy this file to `packages/com.sostk.nativejelly.yml`.
 #
 # Schema: content/schemas/packages/PackageInfo.json in that repo.
-# Required: title, iconUri, manifestUrl, category, pool, description. Verified 2026-08-04.
+# Required: title, iconUri, manifestUrl, category, pool, description. Verified 2026-10-18.
+#
+# Every claim in `description` must be one the current release note makes
+# (docs/release-notes/), and no stronger. This file was carried over from PlxNative's listing and
+# rewritten for v0.8.0 on 2026-10-18: PlxNative's device evidence, issue numbers and features
+# (a 2019 set before every release, usage reports from every firmware line, Dolby Vision on one
+# panel, Skip Intro, Up Next) belong to a different app talking to a different server, and none of
+# it carries over.
 
 title: Native Jelly
 
-# Both icon URLs are raw links to THIS repository's default branch, so they resolve only once the
-# repo is public — and `repogen.lintpkg` rejects a submission whose iconUri does not return 200.
-# 160 for the listing card, 320 for the detail page; tools/mkicons.py cuts both from the master.
+# Both icon URLs are raw links to THIS repository's default branch; `repogen.lintpkg` rejects a
+# submission whose iconUri does not return 200. 160 for the listing card, 320 for the detail page;
+# tools/mkicons.py cuts both from the master.
 iconUri: https://raw.githubusercontent.com/sostk/native-jelly/main/pkg/icon160.png
 detailIconUri: https://raw.githubusercontent.com/sostk/native-jelly/main/pkg/icon320.png
 
@@ -24,95 +31,52 @@ category: multimedia
 pool: main
 
 # Max 80 characters (schema-enforced).
-shortDescription: A native, Apple-TV-style Jellyfin client for LG webOS TVs — no browser
+shortDescription: A native Jellyfin client for LG webOS TVs, played by the TV's own decoder
+
+# Rendered by `make screenshots` from tests/demo_library: openly licensed films only, credited in
+# docs/screenshots/CREDITS.md and in the description below. Pinned to the release tag rather than
+# `main`, so the listing shows the release it describes; move the tag with each release.
+screenshots:
+  - url: https://raw.githubusercontent.com/sostk/native-jelly/v0.8.0/docs/screenshots/home.jpg
+    caption: Home
+  - url: https://raw.githubusercontent.com/sostk/native-jelly/v0.8.0/docs/screenshots/ux-detail.jpg
+    caption: A film's page
+  - url: https://raw.githubusercontent.com/sostk/native-jelly/v0.8.0/docs/screenshots/player.jpg
+    caption: Playback
 
 requirements:
   # Passed VERBATIM to `webosbrew-ipk-verify --fw-releases`, the same tool and flag the release CI
-  # runs against the built binary. This bound exists ONLY here — the manifest CI generates carries
-  # no version requirement.
-  #
-  # THE UPPER BOUND IS GONE, and the reasoning is worth keeping. It used to read '>=4.0, <5.0'
-  # because the binary genuinely could not START past webOS 4.x: it named libAcbAPI and four
-  # FFmpeg SONAMEs in DT_NEEDED, all of which vanish at 5.0, so the loader killed the process
-  # before main. That is no longer true — those libraries are resolved at runtime and FFmpeg is
-  # bundled, and `tools/fwcompat.py` grades the binary clean on every release from 4.4.2 to
-  # 11.2.0 against real firmware inventories.
-  #
-  # THE CEILING CAME BACK AND WENT AGAIN, 2026-08-09, and the round trip is worth recording.
-  # mariotaku's first report from real webOS 6 and 10 hardware read as "crashes or didn't start",
-  # which is known-broken and deserves a ceiling. His correction an hour later was the opposite:
-  # the app runs, signs in and browses the library there — only playback sticks in buffering. That
-  # is an unfinished feature on a working app, not a broken app, and the submission is a DRAFT that
-  # cannot land until playback works anyway. Ceiling off.
-  #
-  # THE FLOOR IS AN INFERENCE, not a measurement, and it should be read as one. webosbrew's
-  # firmware database carries exactly ONE image below 4.4.2, so releases 4.0 through 4.3 are graded
-  # by nothing. What makes '>=4.0' defensible is webosbrew's own bucketing: their data keys every 
-  # release by CODENAME, and 4.0~4.4 are all `goldilocks` with one library set between them
-  # (docs/develop/guides/library-version.md). So the claim is "the whole goldilocks bucket looks
-  # like the 4.4.2 we graded", which is their model, not ours.
-  #
-  # AND IT IS SETTLED, 2026-08-11, in the affirmative. The exported-window path that replaces ACB
-  # on 5+ has now run on real hardware: mariotaku played six of eight items on an LG 65UP7560AUD
-  # (6.5.2) — H.264 1080p and 4K, HEVC, AAC, AC3, an episode, an item watched to the end
-  # (github.com/GLinnik21/plx-native/issues/22). His two failures were a server-side defect fixed
-  # in v0.3.0 and were firmware-independent. That is ONE firmware, so 5.x, 10 and 11 are still
-  # start-verified only and the description says so — but "playback does not start on 5+" is no
-  # longer a true sentence and must not be restated. A floor with no ceiling is also how every
-  # other package in this repository declares itself.
+  # runs against the built binary. It is a STARTUP bound: the release run fails if any firmware
+  # image webosbrew has from 4.4.2 up would refuse the binary. 4.0 to 4.4.1 have no image and are
+  # inferred from webosbrew's own bucketing (all `goldilocks`). Playback is a separate, narrower
+  # claim and lives in the description.
   webosRelease: '>=4.0'
 
 description: |
   An unofficial, native Jellyfin client for LG webOS televisions.
 
-  Native Jelly draws its interface directly on the GPU and hands video to the TV's own hardware
-  decoder — the same silicon the built-in apps use — so the picture sits on the video plane with
-  the interface composited over it.
+  Native Jelly draws its interface directly on the GPU and hands video to the television's own hardware decoder, the same one the built-in apps use. It is built from [PlxNative](https://github.com/GLinnik21/plx-native)'s native player and interface, rebuilt to sign in to and play from your own Jellyfin server.
 
   **What it does**
 
-  * Sign in on the TV with your Jellyfin server address, a password or Quick Connect, then browse and play
-  * Movies and TV libraries from the Jellyfin server you connected
-  * Search from one field, typed with the television's own keyboard
-  * Direct play wherever the TV can decode it, including HEVC, 4K and 10-bit; the server is asked
-    to transcode only when it genuinely cannot
-  * Resume, seek and scrub, chapters, audio and subtitle track switching (including image
-    subtitles), Skip Intro / Skip Credits, Up Next with auto-advance, and progress reported back
-    to your server
-  * Dolby Vision and Dolby Atmos are declared to the television rather than sent down unlabelled,
-    so a Dolby Vision file is no longer played as if it were ordinary HDR, and the panel is
-    confirmed to switch into its Dolby Vision mode on one television — see the scope note below
+  * Sign in with your Jellyfin server's address, then a user name and password or a Quick Connect code approved from another device
+  * Up to twelve Jellyfin users on one television, with **Who's watching?** at start
+  * Your libraries, Home, Search and Continue Watching
+  * Plays a file directly when the television can decode it; anything else is remuxed or transcoded by your server, which also records where you stopped and what you finished
+  * Choose audio and subtitle tracks, including image subtitles, and adjust subtitle timing, size and position
+  * English, Spanish and Belarusian, following the television's language
 
   **Scope — please read before installing**
 
-  * **Movies and TV shows only.** No music, photos, live TV or DVR.
-  * **Unencrypted connections to your server, including over the internet.** The app can speak plain
-    HTTP to a LAN address, with your access token in the URL. Your own server on your own LAN is
-    reached there after you allow it; remote plaintext is refused.
-  * **Video plays on sets from 2018 through webOS 11.** The author verifies it on a 2019 LG
-    (platform release 4.10.2) before every release, and opt-in usage reports show playback, direct
-    and transcoded, on Developer Mode installs of every firmware line from 4.4.2 to 11.2.0. Known
-    exceptions: some 2019 sets on LG's k5lp or k3lp chip, whose Developer Mode sandbox withholds a
-    device the video path needs; 2018 sets on platform release 3.9.3, where video has never been
-    seen to start (issue #249); and a crash on k6hp sets (issue #174).
-  * **Dolby Vision is confirmed on ONE television.** On the 2019 set this is developed against, a
-    Profile 5 or Profile 8 film moves the panel into its Dolby Vision picture mode, and a Profile 7
-    film — the dual-layer kind this app cannot feed — is refused and lands on HDR10, which is what
-    refusing it should produce. That is one set. If yours is a different year or a different panel,
-    that is still the report worth sending.
-  * **Seeking on webOS 5 and newer takes a slower route.** It reloads the stream rather than
-    moving within it. It works; it has not been watched on hardware.
-  * **Bit depth is asserted, not probed.** The app reads the codec table your television publishes
-    and reports the codecs and resolutions it actually lists — but that table has no column for
-    bit depth, so 10-bit is still claimed without asking.
+  * **Video playback is verified on one television:** an LG C1 (2021) on webOS 6.5.3, including transcoded films with subtitles, seeking and track changes. On every other firmware from webOS 4.0 up the app is only known to start. If you try it on another set, please [report what happened](https://github.com/sostk/native-jelly/issues), whether it worked or not.
+  * **Movies and TV shows only.** No music, photos or live TV.
+  * **A server reached over plain http receives your password unencrypted.** Native Jelly asks before it connects to one, with a stronger warning for an internet address, and **Settings → Unencrypted connections** lists and revokes what you allowed. Use your server's https address when it has one.
+  * **Known issues:** playback can fail from a server reached over https through a reverse proxy; a re-encode is always H.264; Auto quality away from home has not been tried on a television.
 
-  The app talks to the Jellyfin server you sign in to. Error reports and usage are two separate
-  switches. The first question presents both selected, but that is only an inert draft: nothing is
-  collected or sent until you explicitly save reporting settings, BACK cancels, and Continue
-  without reporting records both as off. The choices remain reversible under Account → Reporting
-  settings, the question shows the exact messages before anything can be enabled, and no title,
-  search term, server name or address can appear in one.
+  Crash reports and usage analytics are both off until you choose to share them; the [privacy policy](https://github.com/sostk/native-jelly/blob/main/PRIVACY.md) lists exactly what each contains.
+
+  Screenshots show openly licensed films from the Blender Foundation and others, credited in [CREDITS.md](https://github.com/sostk/native-jelly/blob/main/docs/screenshots/CREDITS.md).
 
   Not affiliated with, endorsed by, or sponsored by the Jellyfin project or LG Electronics.
 
-  Source, screenshots and issues: https://github.com/sostk/native-jelly
+  Source, release notes and issues: https://github.com/sostk/native-jelly
