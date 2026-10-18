@@ -201,6 +201,7 @@ pub(super) struct JfLoopback {
     log: std::sync::Arc<std::sync::Mutex<Vec<JfRequest>>>,
     info: std::sync::Arc<std::sync::Mutex<String>>,
     converted: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    by_request: std::sync::Arc<std::sync::Mutex<Option<fn(&serde_json::Value) -> String>>>,
 }
 
 impl JfLoopback {
@@ -222,6 +223,8 @@ impl JfLoopback {
         let answer = info.clone();
         let converted = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
         let converted_answer = converted.clone();
+        let by_request = std::sync::Arc::new(std::sync::Mutex::new(None::<fn(&serde_json::Value) -> String>));
+        let by_request_answer = by_request.clone();
         let handle = std::thread::spawn(move || {
             loop {
                 match nj_base::testnet::accept(&listener) {
@@ -255,11 +258,12 @@ impl JfLoopback {
                             write_json(&mut socket, me.as_bytes());
                         } else if path.contains("/PlaybackInfo") {
                             std::thread::sleep(delay);
-                            let no_direct = serde_json::from_slice::<serde_json::Value>(&body)
-                                .is_ok_and(|b| b["EnableDirectPlay"] == false);
-                            let body = no_direct
-                                .then(|| converted_answer.lock().unwrap_or_else(|e| e.into_inner()).clone())
-                                .flatten()
+                            let ask = serde_json::from_slice::<serde_json::Value>(&body).unwrap_or_default();
+                            let modelled = *by_request_answer.lock().unwrap_or_else(|e| e.into_inner());
+                            let no_direct = ask["EnableDirectPlay"] == false;
+                            let body = modelled
+                                .map(|f| f(&ask))
+                                .or_else(|| no_direct.then(|| converted_answer.lock().unwrap_or_else(|e| e.into_inner()).clone()).flatten())
                                 .unwrap_or_else(|| answer.lock().unwrap_or_else(|e| e.into_inner()).clone());
                             write_json(&mut socket, body.as_bytes());
                         } else if path.starts_with("/Playback/BitrateTest") {
@@ -296,7 +300,7 @@ impl JfLoopback {
             ..Default::default()
         });
         let _ = jf_rk();
-        JfLoopback { sid, done, handle, log, info, converted }
+        JfLoopback { sid, done, handle, log, info, converted, by_request }
     }
 
     /// Answer every later `PlaybackInfo` with `info`.
@@ -308,6 +312,12 @@ impl JfLoopback {
     /// `TranscodingUrl` only when direct play is not the answer.
     pub(super) fn answer_converted(&self, info: &str) {
         *self.converted.lock().unwrap_or_else(|e| e.into_inner()) = Some(info.to_string());
+    }
+
+    /// Answer every later `PlaybackInfo` with what `f` makes of its request body — for a server
+    /// whose answer depends on the profile it was sent, which a canned answer cannot model.
+    pub(super) fn answer_by(&self, f: fn(&serde_json::Value) -> String) {
+        *self.by_request.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
     }
 
     /// Every request seen so far, while the loopback keeps serving.

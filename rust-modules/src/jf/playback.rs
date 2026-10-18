@@ -277,6 +277,9 @@ pub(crate) struct ProfileAsk {
     pub burn: bool,
     /// Ask for an HLS conversion with segments of this many seconds instead of progressive mkv.
     pub hls: Option<u8>,
+    /// Offer a conversion the bitmap formats as `Embed`. Withdrawn only to ask again for a text
+    /// track the server answered as an embedded bitmap ([`Reask::Sidecar`]).
+    pub embed_bitmap: bool,
 }
 
 /// The DeviceProfile for this client: [`Capabilities`] in the server's vocabulary, shaped by what
@@ -384,7 +387,7 @@ pub(crate) fn device_profile(caps: &crate::catalog::capabilities::Capabilities, 
             // Direct play feeds the container's own bytes, so an embedded track rides along and
             // the client's renderer draws it.
             subs.extend(EMBEDDED_SUBTITLES.iter().map(|f| json!({ "Format": f, "Method": "Embed" })));
-        } else {
+        } else if ask.embed_bitmap {
             // On a converted stream only the bitmap formats need muxing in — they have no text
             // form to fetch, and `Embed` is the only delivery that is not a burn.
             subs.extend(BITMAP_SUBTITLES.iter().map(|f| json!({ "Format": f, "Method": "Embed" })));
@@ -522,9 +525,22 @@ fn with_play_session(path: &str, play_session_id: &str) -> String {
     format!("{path}{sep}PlaySessionId={}", crate::catalog::urlenc_str(play_session_id))
 }
 
+/// Why a conversion's subtitle answer is asked again, and how.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reask {
+    /// As a burn: a delivery this client cannot draw.
+    Burn(&'static str),
+    /// Without the bitmap `Embed` profiles: a text track the server answered as an embedded bitmap.
+    /// Jellyfin tries every `Embed` profile before an `External` one and takes, in its second pass,
+    /// any format a text track converts to (`StreamBuilder.GetSubtitleProfile`,
+    /// `MediaStream.SupportsSubtitleConversionTo`) — so the bitmap entries capture an SRT track and
+    /// the server runs `-codec:s pgssub`, which ffmpeg cannot encode. Asked without them, the same
+    /// track is answered `External`.
+    Sidecar(&'static str),
+}
+
 /// How the conversion at `url` delivers the subtitle at `index` of `src`, from the stream's
-/// `DeliveryMethod`; `Err` names a delivery this client cannot draw, which the caller asks again
-/// as a burn.
+/// `DeliveryMethod`; `Err` names an answer the caller asks again, and how ([`Reask`]).
 ///
 /// * `External` — a path on the server (`/Videos/{id}/{source}/Subtitles/{index}/0/Stream.{fmt}`,
 ///   start 0 because the transcoding profile copies timestamps). The `api_key` the server appends
@@ -542,7 +558,7 @@ fn subtitle_delivery(
     index: Option<i64>,
     url: &str,
     burned: bool,
-) -> Result<Option<SubtitleDelivery>, &'static str> {
+) -> Result<Option<SubtitleDelivery>, Reask> {
     let Some(index) = index.filter(|i| *i >= 0) else { return Ok(None) };
     if burned {
         return Ok(Some(SubtitleDelivery::Burned));
@@ -565,10 +581,17 @@ fn subtitle_delivery(
             if on_server && drawable {
                 Ok(Some(SubtitleDelivery::External { path: path.to_string(), codec }))
             } else {
-                Err("an external subtitle the client cannot fetch from the server")
+                Err(Reask::Burn("an external subtitle the client cannot fetch from the server"))
             }
         }
         "Embed" => {
+            let into_bitmap = stream.is_some_and(|s| s.is_text_subtitle_stream)
+                && query_param(url, "SubtitleCodec").is_some_and(|c| {
+                    crate::catalog::capabilities::BITMAP_SUBTITLES.iter().any(|b| b.eq_ignore_ascii_case(c))
+                });
+            if into_bitmap {
+                return Err(Reask::Sidecar("a text track the server would convert to a bitmap format it cannot encode"));
+            }
             let dvb = stream
                 .and_then(|s| s.codec.as_deref())
                 .is_some_and(|c| c.eq_ignore_ascii_case("dvbsub") || c.eq_ignore_ascii_case("dvb_subtitle"));
@@ -576,7 +599,7 @@ fn subtitle_delivery(
         }
         "Encode" => Ok(Some(SubtitleDelivery::Burned)),
         "Drop" => Ok(None),
-        _ => Err("a subtitle delivery the client does not draw"),
+        _ => Err(Reask::Burn("a subtitle delivery the client does not draw")),
     }
 }
 
@@ -691,6 +714,12 @@ impl Jf<'_> {
     /// to open and the codecs each lane will arrive in. The PlaySessionId is filed under
     /// `ask.session` for the reports that follow.
     pub fn negotiate(&self, ask: &Ask) -> Negotiation {
+        self.negotiate_offering(ask, true)
+    }
+
+    /// [`Self::negotiate`], offering a conversion the bitmap `Embed` profiles or not
+    /// ([`ProfileAsk::embed_bitmap`]).
+    fn negotiate_offering(&self, ask: &Ask, embed_bitmap: bool) -> Negotiation {
         let Some(guid) = self.guid(ask.rk) else { return Negotiation::Unreachable };
         let caps = crate::catalog::capabilities::Capabilities::current();
         static LOGGED: std::sync::Once = std::sync::Once::new();
@@ -701,6 +730,7 @@ impl Jf<'_> {
             ceiling: ask.ceiling,
             burn: ask.burn,
             hls: ask.hls_segment_secs,
+            embed_bitmap,
         });
         let Some(r) = self.playback_info(&guid, profile, caps.max_audio_channels(), &InfoAsk {
             direct_play: ask.direct_play,
@@ -735,7 +765,7 @@ impl Jf<'_> {
                 ids::normalize(&src.id),
                 dropped.join(","),
             ));
-            return self.negotiate(&Ask { direct_play: false, ..*ask });
+            return self.negotiate_offering(&Ask { direct_play: false, ..*ask }, embed_bitmap);
         }
         let play_session_id = r.play_session_id.clone().unwrap_or_default();
         let v = pick(src, "Video", None);
@@ -768,11 +798,16 @@ impl Jf<'_> {
         let subtitle = if method == PlayMethod::DirectPlay {
             None
         } else {
+            let index = ask.subtitle_index.unwrap_or(-1);
             match subtitle_delivery(src, ask.subtitle_index, &path, ask.burn) {
                 Ok(subtitle) => subtitle,
-                Err(why) => {
-                    nj_base::eventlog::log(&format!("jf: subtitle #{} is {why}; asking for it burned", ask.subtitle_index.unwrap_or(-1)));
-                    return self.negotiate(&Ask { burn: true, ..*ask });
+                Err(Reask::Sidecar(why)) if embed_bitmap => {
+                    nj_base::eventlog::log(&format!("jf: subtitle #{index} is {why}; asking for it without the bitmap formats"));
+                    return self.negotiate_offering(ask, false);
+                }
+                Err(Reask::Burn(why) | Reask::Sidecar(why)) => {
+                    nj_base::eventlog::log(&format!("jf: subtitle #{index} is {why}; asking for it burned"));
+                    return self.negotiate_offering(&Ask { burn: true, ..*ask }, embed_bitmap);
                 }
             }
         };
@@ -1080,7 +1115,7 @@ mod tests {
 
     #[test]
     fn the_direct_profile_advertises_the_panels_own_decode_limits() {
-        let p = profile(&ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None });
+        let p = profile(&ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true });
         let dp = &p["DirectPlayProfiles"][0];
         assert_eq!(dp["VideoCodec"], "h264,hevc");
         assert_eq!(dp["AudioCodec"], "aac,ac3,eac3,dts");
@@ -1126,7 +1161,7 @@ mod tests {
     fn the_profile_states_the_measured_panels_video_ranges() {
         use nj_platform::devcaps::{dv::DvCapability, hdr::HdrCapability};
         let d = device();
-        let ask = ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None };
+        let ask = ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true };
         let caps = crate::catalog::capabilities::Capabilities::of(&d, DvCapability::Unknown);
         let unmeasured = device_profile(&caps, &ask);
         assert_eq!(range_condition(&unmeasured, "hevc"), None);
@@ -1145,7 +1180,7 @@ mod tests {
     #[test]
     fn a_ceiling_bounds_the_original_file_as_well_as_the_encode() {
         let c = Ceiling { max_kbps: 4000, max_w: 1280, max_h: 720 };
-        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: Some(c), burn: true, hls: None });
+        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: Some(c), burn: true, hls: None, embed_bitmap: true });
         assert_eq!(p["MaxStreamingBitrate"], 4_000_000);
         // The whole point: an explicit ask the direct-play branch cannot ignore.
         assert_eq!(p["MaxStaticBitrate"], 4_000_000);
@@ -1158,7 +1193,7 @@ mod tests {
     /// segment length; the codecs are the progressive profile's.
     #[test]
     fn an_hls_ask_offers_an_hls_conversion() {
-        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: Some(2) });
+        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: Some(2), embed_bitmap: true });
         let t = &p["TranscodingProfiles"][0];
         assert_eq!(p["TranscodingProfiles"].as_array().unwrap().len(), 1);
         assert_eq!(t["Protocol"], "hls");
@@ -1172,14 +1207,14 @@ mod tests {
 
     #[test]
     fn no_ceiling_leaves_both_rates_unbounded() {
-        let p = profile(&ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None });
+        let p = profile(&ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true });
         assert_eq!(p["MaxStreamingBitrate"], UNBOUNDED_BPS);
         assert_eq!(p["MaxStaticBitrate"], UNBOUNDED_BPS);
     }
 
     #[test]
     fn a_conversion_still_offers_the_soft_subtitle_methods() {
-        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: None });
+        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true });
         let subs = p["SubtitleProfiles"].as_array().unwrap();
         assert!(!subs.is_empty(), "an empty list asks the server to burn the item's default track");
         // Text travels as a sidecar, so the video lane stays copyable...
@@ -1257,7 +1292,7 @@ mod tests {
 
     #[test]
     fn forced_original_offers_no_target_and_no_limits() {
-        let p = profile(&ProfileAsk { direct: true, forced: true, ceiling: None, burn: false, hls: None });
+        let p = profile(&ProfileAsk { direct: true, forced: true, ceiling: None, burn: false, hls: None, embed_bitmap: true });
         assert!(p["TranscodingProfiles"].as_array().unwrap().is_empty());
         assert!(p["CodecProfiles"].as_array().unwrap().is_empty());
     }
@@ -1291,7 +1326,7 @@ mod tests {
     /// H.264 to a pipeline loaded for HEVC (live 12.0, 2026-10-08).
     #[test]
     fn an_encoded_lane_is_the_codec_the_server_encodes() {
-        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: None });
+        let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true });
         assert_eq!(p["TranscodingProfiles"][0]["VideoCodec"], "h264,hevc");
         let url = "/videos/x/stream.mkv?VideoCodec=h264,hevc&AudioCodec=ac3,eac3,aac";
         let hevc = MediaStream { kind: "Video".into(), codec: Some("hevc".into()), ..Default::default() };
@@ -1339,6 +1374,59 @@ mod tests {
         assert_eq!(subtitle_delivery(&sub("PGSSUB", None, None), Some(2), "/x?SubtitleStreamIndex=2&SubtitleMethod=Embed", false), Ok(Some(SubtitleDelivery::Embedded)));
         assert_eq!(subtitle_delivery(&sub("PGSSUB", None, None), Some(2), "/x?SubtitleStreamIndex=2", false), Ok(Some(SubtitleDelivery::Burned)));
         assert_eq!(subtitle_delivery(&sub("subrip", None, None), Some(2), plain, false), Ok(None));
+    }
+
+    /// Jellyfin tries every `Embed` profile before any `External` one, and its second pass takes a
+    /// format a text track merely converts to (`StreamBuilder.GetSubtitleProfile`,
+    /// `MediaStream.SupportsSubtitleConversionTo`, true for any target but ASS/SSA). A conversion's
+    /// bitmap `Embed` entries therefore captured an SRT track: the server ran `-codec:s:0 pgssub`,
+    /// ffmpeg has no such encoder, and the stream answered 500 (live 12.0, 2026-10-18). Such an
+    /// answer is asked again for a sidecar; a bitmap track stays embedded, and so does a text track
+    /// embedded in its own format.
+    #[test]
+    fn a_text_track_answered_as_an_embedded_bitmap_is_asked_again() {
+        let sub = |codec: &str, text: bool| MediaSourceInfo {
+            media_streams: vec![MediaStream {
+                kind: "Subtitle".into(),
+                index: 4,
+                codec: Some(codec.into()),
+                is_text_subtitle_stream: text,
+                delivery_method: Some("Embed".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // The answer the server gave for SubRip #4 of a conversion ask.
+        let pgs = "/videos/x/stream.mkv?VideoCodec=h264,hevc&AudioCodec=ac3,eac3,aac&SubtitleStreamIndex=4&SubtitleMethod=Embed&SubtitleCodec=pgssub";
+        assert!(
+            matches!(subtitle_delivery(&sub("subrip", true), Some(4), pgs, false), Err(Reask::Sidecar(_))),
+            "SRT as PGS is an encode the server cannot run: ask for the sidecar, not a burn",
+        );
+        assert_eq!(subtitle_delivery(&sub("PGSSUB", false), Some(4), pgs, false), Ok(Some(SubtitleDelivery::Embedded)));
+        let same = "/videos/x/stream.mkv?SubtitleStreamIndex=4&SubtitleMethod=Embed&SubtitleCodec=subrip";
+        assert_eq!(subtitle_delivery(&sub("subrip", true), Some(4), same, false), Ok(Some(SubtitleDelivery::Embedded)));
+    }
+
+    /// The ask that follows a [`Reask::Sidecar`]: the same conversion with the text sidecars alone,
+    /// which the server answers `External` because no `Embed` profile is left to capture the track.
+    /// A burn still withdraws everything, and a direct ask keeps its embedded formats.
+    #[test]
+    fn a_sidecar_reask_offers_a_conversion_no_bitmap_embed() {
+        let methods = |p: &Value| -> Vec<(String, String)> {
+            p["SubtitleProfiles"].as_array().unwrap().iter()
+                .map(|s| (s["Format"].as_str().unwrap().to_string(), s["Method"].as_str().unwrap().to_string()))
+                .collect()
+        };
+        let conversion = |embed_bitmap| ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap };
+        let reask = methods(&profile(&conversion(false)));
+        assert!(!reask.is_empty(), "an empty list would ask the server to burn");
+        assert!(reask.iter().all(|(_, m)| m == "External"), "{reask:?}");
+        let sidecars: Vec<&str> = reask.iter().map(|(f, _)| f.as_str()).collect();
+        assert_eq!(sidecars, crate::catalog::capabilities::SIDECAR_SUBTITLES);
+        // The first ask is unchanged: a PGS track is still muxed rather than burned.
+        assert!(methods(&profile(&conversion(true))).contains(&("pgssub".into(), "Embed".into())));
+        let direct = methods(&profile(&ProfileAsk { direct: true, embed_bitmap: false, ..conversion(false) }));
+        assert!(direct.contains(&("pgssub".into(), "Embed".into())), "a direct ask is not what the flag governs");
     }
 
     #[test]

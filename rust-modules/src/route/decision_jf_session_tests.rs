@@ -426,6 +426,59 @@ fn an_external_subtitle_outside_the_server_is_asked_again_as_a_burn() {
     assert_eq!(n.subtitle, Some(crate::catalog::SubtitleDelivery::Burned));
 }
 
+/// Jellyfin 12.0 as measured on 2026-10-18: offered a bitmap `Embed` profile, it delivers a SubRip
+/// track of a conversion as `pgssub` (`-codec:s:0 pgssub`, which ffmpeg cannot encode — the stream
+/// answered 500 for two such titles on the dev set); offered the sidecars alone,
+/// it answers `External`.
+fn jellyfin_subtitle_answer(ask: &serde_json::Value) -> String {
+    let bitmap_embed = ask["DeviceProfile"]["SubtitleProfiles"]
+        .as_array()
+        .is_some_and(|p| p.iter().any(|s| s["Format"] == "pgssub" && s["Method"] == "Embed"));
+    let base = format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=h264,hevc&AudioCodec=ac3,eac3,aac&TranscodeReasons=AudioCodecNotSupported,DirectPlayError&PlaySessionId=ps-loopback");
+    let (delivery, url) = if bitmap_embed {
+        (r#""DeliveryMethod":"Embed""#.to_string(), format!("{base}&SubtitleStreamIndex=2&SubtitleMethod=Embed&SubtitleCodec=pgssub"))
+    } else {
+        (format!(r#""DeliveryMethod":"External","DeliveryUrl":"/Videos/{JF_GUID}/{JF_GUID}/Subtitles/2/0/Stream.subrip""#), base)
+    };
+    let streams = format!(
+        r#"{{"Type":"Video","Codec":"hevc","Index":0}},{{"Type":"Audio","Codec":"truehd","Index":1,"Channels":8}},{{"Type":"Subtitle","Codec":"subrip","Index":2,"IsForced":true,"IsTextSubtitleStream":true,{delivery}}}"#
+    );
+    playback_info(false, "mkv", &streams, Some(&url))
+}
+
+/// A text track the server answers as an embedded bitmap is asked for again without the bitmap
+/// formats, and lands as the server's sidecar — not embedded (a stream the server cannot produce)
+/// and not burned.
+#[test]
+fn a_text_subtitle_the_server_would_encode_as_pgs_is_asked_again_as_a_sidecar() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let lb = loopback(String::new());
+    lb.answer_by(jellyfin_subtitle_answer);
+    let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
+    let rk = jf_rk();
+    let contract = crate::catalog::EncodeContract { no_video_copy: true, ..Default::default() };
+    let spec = transcode_spec(&rk, "jf-text-as-pgs", "jf-text-as-pgs", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract);
+    let n = client.transcode(&spec).playable().expect("playable");
+    let seen = lb.finish();
+
+    let asks: Vec<_> = seen.iter().filter(|r| r.line.contains("/PlaybackInfo")).map(|r| r.json()).collect();
+    assert_eq!(asks.len(), 2, "{seen:?}");
+    let embeds = |a: &serde_json::Value| {
+        a["DeviceProfile"]["SubtitleProfiles"].as_array().unwrap().iter().filter(|s| s["Method"] == "Embed").count()
+    };
+    assert!(embeds(&asks[0]) > 0, "the first ask offers the bitmap formats");
+    assert_eq!(embeds(&asks[1]), 0, "the second withdraws them");
+    assert!(asks.iter().all(|a| a["AlwaysBurnInSubtitleWhenTranscoding"] == false), "never a burn");
+    assert_eq!(
+        n.subtitle,
+        Some(crate::catalog::SubtitleDelivery::External {
+            path: format!("/Videos/{JF_GUID}/{JF_GUID}/Subtitles/2/0/Stream.subrip"),
+            codec: "srt".into(),
+        }),
+    );
+}
+
 // ---- start and stop ordering (W2) -----------------------------------------------------------
 
 /// The final stop of `session`, as `ScrobbleWork` sends it.

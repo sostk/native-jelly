@@ -155,7 +155,12 @@ seek, Original remux):
 
 Two answers are asked again with `AlwaysBurnInSubtitleWhenTranscoding: true`: an `External`
 delivery that is not a path on the server or not a format the renderer draws (a remote source's
-own subtitle URL), and `Hls`, which the profile never offers and the player does not read. A DVB
+own subtitle URL), and `Hls`, which the profile never offers and the player does not read. A text
+track answered `Embed` with a bitmap `SubtitleCodec` is asked again without the bitmap `Embed`
+profiles: `GetSubtitleProfile` tries every `Embed` profile before an `External` one, and its second
+pass takes any format a non-ASS text track converts to, so the conversion profile's `pgssub` entry
+captured an SRT track and the server ran `-codec:s pgssub`, which ffmpeg cannot encode (a 500 on the
+stream, live 12.0, 2026-10-18). Asked without them, the same track is answered `External`. A DVB
 subtitle answered `Embed` is treated as burned, because the server burns it while saying so
 (`NormalizeSubtitleEmbed`). A server that states no method is read from its URL: `SubtitleMethod`
 names it, and a `SubtitleStreamIndex` alone is a burn.
