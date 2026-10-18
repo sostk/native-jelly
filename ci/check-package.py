@@ -598,6 +598,7 @@ FW_EXTRA = {
     "4.5": "LG's marketing number for the dev set's generation",
     "4.10.2": "what the dev television itself reports (docs/webos5-port.md)",
     "6.5.2": "the reviewer's set in issue #22",
+    "6.5.3": "the owner's LG C1, read from the set (docs/release-audits/v0.8.0.md)",
     "10.3.1": "the rented Cloud Lab set (docs/webos10-resource-allocation.md)",
 }
 
