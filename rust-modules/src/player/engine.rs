@@ -1468,7 +1468,8 @@ pub(crate) fn arm_seek(target_ns: i64) {
 /// its stream carries. Jellyfin's encode copies them (`CopyTimestamps`: `-ss <offset> -copyts`), so
 /// its first keyframe K sits at about the offset; Plex's restarted at 0. The Load rebases K to
 /// fed-pts 0 either way, which is what the feed-ahead throttle measures against (a fresh Load's
-/// presented position starts at 0, and an un-rebased K 36 s ahead of it was never fed), and moves
+/// presented position starts at 0, and an un-rebased K 36 s ahead of it was never fed). A K near
+/// the offset is film time and the position is read from it (`disp_base` 0); a K near 0 moves
 /// `disp_base` to `offset - K`, so the position reads `offset + fed`.
 pub(crate) fn arm_offset_rebase(offset_ns: i64) {
     SHARED.disp_base.store(offset_ns, Ordering::Relaxed);
@@ -1965,6 +1966,11 @@ const PRIME_VIDEO_MAX_NS: i64 = 2_500_000_000;
 // clock from running ahead, and cuts latency. AUDIO gets a looser bound so it can ride slightly
 // ahead (audio buffer is cheap and it's the master clock) without unbounded race on odd muxes.
 const MAX_FEED_AHEAD_NS: i64 = 1_600_000_000;
+/// How far a conversion's first keyframe may land from the offset it was asked at and still be read
+/// as carrying film time ([`arm_offset_rebase`]). Jellyfin starts the encode at the whole second
+/// below the ask and cuts at a keyframe, so it lands within about a second of it; a stream that
+/// restarted at 0 lands an offset away, and below this offset the two readings differ by less.
+const FILM_TIME_KEYFRAME_SLACK_NS: i64 = 5_000_000_000;
 const AUDIO_SLACK_NS: i64 = 2_000_000_000;
 // A fed pts this far below a lane's high-water is a stale pre-seek AU (past the B-frame reorder
 // distance) → drop it rather than feed a backward jump.
@@ -2518,8 +2524,14 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                     SHARED.pts_shift.store(-pts, Ordering::Relaxed);
                     if eng.anchor_at_rebase {
                         // A conversion started at an offset: playpos = fed - pts_shift + disp_base
-                        // = fed + pts + disp_base, so `offset - pts` reads `offset + fed`.
-                        SHARED.disp_base.fetch_sub(pts, Ordering::Relaxed);
+                        // = fed + pts + disp_base. A keyframe near the asked offset carries film
+                        // time (Jellyfin's copied timestamps — and its encode starts at the whole
+                        // second below the ask, so anchoring the ask would read up to 1 s ahead):
+                        // its own pts is the position, disp_base 0. One far below it restarted at
+                        // 0: `offset - pts` reads `offset + fed`.
+                        let offset = SHARED.disp_base.load(Ordering::Relaxed);
+                        let base = if (pts - offset).abs() <= FILM_TIME_KEYFRAME_SLACK_NS { 0 } else { offset - pts };
+                        SHARED.disp_base.store(base, Ordering::Relaxed);
                         eng.anchor_at_rebase = false;
                         log(&format!(
                             "rebase: conversion keyframe pts={}ms anchored at offset -> disp_base={}ms",
@@ -4132,12 +4144,15 @@ mod prime_livelock_tests {
 mod offset_reload_tests {
     use super::*;
 
-    const OFFSET_NS: i64 = 36_000_000_000;
-    const FIRST_KEY_NS: i64 = 36_036_000_000;
+    // The position a switch asks for is not a whole second, and Jellyfin's encode starts at the
+    // whole second below it (`-ss 00:10:13.000` for a 613.27 s ask): the first keyframe lands short.
+    const OFFSET_NS: i64 = 36_400_000_000;
+    const STEP_NS: i64 = 41_708_333; // 23.976 fps
+    const AUS: i64 = 24;
 
-    #[test]
-    fn a_conversion_reloaded_at_an_offset_feeds_and_reads_film_time() {
-        let _serial = nj_base::testlock::serial();
+    /// Reload a conversion at [`OFFSET_NS`] whose first keyframe carries `first_key_ns`, feed one
+    /// tick, and answer the position the last fed AU reads as (`playpos`'s formula).
+    fn reload_and_feed(first_key_ns: i64) -> i64 {
         // Process-global state this test writes, put back panic or not: the feed and the prime move
         // the clock, and a later test reading it would fail for this one.
         struct Restore {
@@ -4182,14 +4197,35 @@ mod offset_reload_tests {
 
         let qv = &mut **eng.aq_video.as_mut().unwrap() as *mut crate::aq::AuQueue;
         let au = [0u8; 64];
-        for i in 0..24i64 {
-            crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, FIRST_KEY_NS + i * 41_708_333, c_int::from(i == 0), 1);
+        for i in 0..AUS {
+            crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, first_key_ns + i * STEP_NS, c_int::from(i == 0), 1);
         }
         feed_both_lanes(&mt, &mut eng);
 
         assert!(eng.max_fed_video_pts > 0, "nothing was fed: the reload sat on its first keyframe");
-        let shown = eng.max_fed_video_pts - SHARED.pts_shift.load(Ordering::Relaxed) + SHARED.disp_base.load(Ordering::Relaxed);
-        assert!((shown - (FIRST_KEY_NS + 23 * 41_708_333)).abs() < 100_000_000, "position reads film time, got {shown}");
+        eng.max_fed_video_pts - SHARED.pts_shift.load(Ordering::Relaxed) + SHARED.disp_base.load(Ordering::Relaxed)
+    }
+
+    /// Jellyfin's stream (live 12.0: a 36 s ask began at pts 36.036 s). Its own timestamps ARE film
+    /// time, so the position is the last fed AU's pts — not the ask anchored at the keyframe, which
+    /// read 243–493 ms ahead on the TV (and the sidecar with it).
+    #[test]
+    fn a_conversion_reloaded_at_an_offset_feeds_and_reads_film_time() {
+        let _serial = nj_base::testlock::serial();
+        let first_key = 36_036_000_000;
+        let shown = reload_and_feed(first_key);
+        let last = first_key + (AUS - 1) * STEP_NS;
+        assert!((shown - last).abs() < 5_000_000, "position reads film time {last}, got {shown}");
+    }
+
+    /// A conversion that restarts at 0 (Plex's transcoder; the fixtures) still reads the offset plus
+    /// what was fed.
+    #[test]
+    fn a_conversion_restarted_at_zero_reads_the_offset_plus_the_feed() {
+        let _serial = nj_base::testlock::serial();
+        let shown = reload_and_feed(0);
+        let last = OFFSET_NS + (AUS - 1) * STEP_NS;
+        assert!((shown - last).abs() < 5_000_000, "position reads {last}, got {shown}");
     }
 }
 
