@@ -1876,11 +1876,13 @@ pub(crate) fn playback_preview_of(
 /// old mkv-only gate was measured obsolete on-device 2026-08-11). Other containers (mov/avi/…)
 /// are sent to Plex for a container remux instead of direct-play. Matches the container
 /// extension in the part-key filename; the m4v spelling is the same mov demuxer and the same
-/// `container=mp4` in PMS metadata.
+/// `container=mp4` in PMS metadata. WebM is a Matroska subset the same demuxer reads, and the
+/// container VP9 and AV1 files usually come in (`jf::convert::stream_ext` names a Jellyfin `webm`
+/// source `stream.webm`).
 pub(super) fn part_is_streamable(part_key: &str) -> bool {
     let name = part_key.rsplit('/').next().unwrap_or(part_key);
     let name = name.split('?').next().unwrap_or(name);
-    name.ends_with(".mkv") || name.ends_with(".mp4") || name.ends_with(".m4v")
+    name.ends_with(".mkv") || name.ends_with(".webm") || name.ends_with(".mp4") || name.ends_with(".m4v")
 }
 
 

@@ -288,9 +288,14 @@ pub(crate) struct ProfileAsk {
 /// [`Capabilities`]: crate::catalog::capabilities::Capabilities
 pub(crate) fn device_profile(caps: &crate::catalog::capabilities::Capabilities, ask: &ProfileAsk) -> Value {
     use crate::catalog::capabilities::{BITMAP_SUBTITLES, CONTAINERS, EMBEDDED_SUBTITLES, SIDECAR_SUBTITLES};
-    let dp_video = if ask.forced { caps.pipeline_video_codecs().to_vec() } else { caps.video_codecs() };
+    let dp_video = if ask.forced { caps.pipeline_video_codecs() } else { caps.video_codecs() };
     let dp_audio = if ask.forced { caps.pipeline_audio_codecs() } else { caps.audio_codecs() };
-    let target_video = caps.transcode_video_codecs().join(",");
+    let target_codecs = caps.transcode_video_codecs();
+    let target_video = target_codecs.join(",");
+    // HLS segments are MPEG-TS, which the player demuxes only as H.264 (`ff::hls_demux_segment`)
+    // and the ask re-encodes anyway: the VP9/AV1 copy lanes have no place there.
+    let hls_target_video =
+        target_codecs.iter().copied().filter(|c| !matches!(*c, "vp9" | "av1")).collect::<Vec<_>>().join(",");
     let target_audio = caps.transcode_audio_codecs();
     let (mut w, mut h) = caps.max_resolution();
     let device_bps = caps.max_bitrate_bps().unwrap_or(UNBOUNDED_BPS);
@@ -324,7 +329,7 @@ pub(crate) fn device_profile(caps: &crate::catalog::capabilities::Capabilities, 
         (false, Some(secs)) => vec![json!({
             "Container": "ts",
             "Type": "Video",
-            "VideoCodec": target_video,
+            "VideoCodec": hls_target_video,
             "AudioCodec": target_audio,
             "Protocol": "hls",
             "Context": "Streaming",
@@ -367,6 +372,30 @@ pub(crate) fn device_profile(caps: &crate::catalog::capabilities::Capabilities, 
                 "Codec": "h264",
                 "Conditions": [cond("EqualsAny", "VideoRangeType", "SDR")],
             }));
+        }
+        // VP9 and AV1, offered only where the table lists their decoders: each one's own row bound,
+        // VP9's measured bit depth, and the ranges that can reach the panel for each.
+        for (name, rw, rh, depth) in caps.codec_row_bounds() {
+            let mut conditions = Vec::new();
+            if rw > 0 {
+                conditions.push(cond("LessThanEqual", "Width", &rw.min(w).to_string()));
+            }
+            if rh > 0 {
+                conditions.push(cond("LessThanEqual", "Height", &rh.min(h).to_string()));
+            }
+            if let Some(bits) = depth {
+                conditions.push(cond("LessThanEqual", "VideoBitDepth", &bits.to_string()));
+            }
+            let ranges = match name {
+                "vp9" => caps.vp9_video_ranges(),
+                _ => caps.av1_video_ranges(),
+            };
+            if let Some(ranges) = ranges {
+                conditions.push(cond("EqualsAny", "VideoRangeType", &ranges.join("|")));
+            }
+            if !conditions.is_empty() {
+                codec.push(json!({ "Type": "Video", "Codec": name, "Conditions": conditions }));
+            }
         }
         for (c, ch) in caps.audio_channel_limits() {
             codec.push(json!({
@@ -1191,6 +1220,49 @@ mod tests {
 
     /// An HLS ask names the protocol, the MPEG-TS segments the player demuxes and the route's
     /// segment length; the codecs are the progressive profile's.
+    /// A set whose table lists VP9 and AV1 decoders is offered both, in WebM too: direct play,
+    /// copy lanes after the H.264 encode head on the progressive target (but never on the HLS one,
+    /// whose TS segments the player demuxes only as H.264), and each codec's own bounds.
+    #[test]
+    fn vp9_and_av1_are_offered_where_the_table_lists_them() {
+        let mut d = device();
+        d.vp9 = true;
+        d.vp9_row = (3840, 2160, 60);
+        d.av1 = true;
+        d.av1_row = (1920, 1080, 60);
+        let caps = crate::catalog::capabilities::Capabilities::of(&d, nj_platform::devcaps::dv::DvCapability::Unknown)
+            .with_hdr(nj_platform::devcaps::hdr::HdrCapability::Supported);
+        let ask = ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true };
+        let p = device_profile(&caps, &ask);
+        let dp = &p["DirectPlayProfiles"][0];
+        assert_eq!(dp["VideoCodec"], "h264,hevc,vp9,av1");
+        assert!(dp["Container"].as_str().unwrap().split(',').any(|c| c == "webm"));
+        assert_eq!(p["TranscodingProfiles"][0]["VideoCodec"], "h264,hevc,vp9,av1");
+        let codec = |name: &str| {
+            p["CodecProfiles"].as_array().unwrap().iter().find(|c| c["Codec"] == name).cloned().unwrap()
+        };
+        let value = |c: &Value, prop: &str| {
+            c["Conditions"].as_array().unwrap().iter().find(|x| x["Property"] == prop).map(|x| x["Value"].clone())
+        };
+        let vp9 = codec("vp9");
+        assert_eq!(value(&vp9, "Width"), Some("3840".into()));
+        assert_eq!(value(&vp9, "VideoBitDepth"), Some("8".into()), "8-bit VP9 unless measured otherwise");
+        assert_eq!(value(&vp9, "VideoRangeType"), Some("SDR".into()));
+        let av1 = codec("av1");
+        assert_eq!(value(&av1, "Width"), Some("1920".into()));
+        assert_eq!(value(&av1, "Height"), Some("1080".into()));
+        assert_eq!(value(&av1, "VideoRangeType"), Some("SDR|HDR10|HDR10Plus|HLG".into()));
+
+        let hls = device_profile(
+            &caps,
+            &ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: Some(2), embed_bitmap: true },
+        );
+        assert_eq!(hls["TranscodingProfiles"][0]["VideoCodec"], "h264,hevc", "TS segments carry no VP9/AV1 lane");
+
+        let plain = profile(&ask);
+        assert!(plain["CodecProfiles"].as_array().unwrap().iter().all(|c| c["Codec"] != "vp9" && c["Codec"] != "av1"));
+    }
+
     #[test]
     fn an_hls_ask_offers_an_hls_conversion() {
         let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: None, burn: false, hls: Some(2), embed_bitmap: true });
