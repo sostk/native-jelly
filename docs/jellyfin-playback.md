@@ -155,15 +155,25 @@ seek, Original remux):
 
 Two answers are asked again with `AlwaysBurnInSubtitleWhenTranscoding: true`: an `External`
 delivery that is not a path on the server or not a format the renderer draws (a remote source's
-own subtitle URL), and `Hls`, which the profile never offers and the player does not read. A DVB
+own subtitle URL), and `Hls`, which the profile never offers and the player does not read. A text
+track answered `Embed` with a bitmap `SubtitleCodec` is asked again without the bitmap `Embed`
+profiles: `GetSubtitleProfile` tries every `Embed` profile before an `External` one, and its second
+pass takes any format a non-ASS text track converts to, so the conversion profile's `pgssub` entry
+captured an SRT track and the server ran `-codec:s pgssub`, which ffmpeg cannot encode (a 500 on the
+stream, live 12.0, 2026-10-18). Asked without them, the same track is answered `External`. A DVB
 subtitle answered `Embed` is treated as burned, because the server burns it while saying so
 (`NormalizeSubtitleEmbed`). A server that states no method is read from its URL: `SubtitleMethod`
 names it, and a `SubtitleStreamIndex` alone is a burn.
 
-The sidecar's cues are on the movie timeline on both paths: a conversion's `playpos_ns` is the
-display base plus the fed timestamps, and the server's file starts at 0 because the transcoding
-profile copies timestamps. A track switch during a conversion re-negotiates (a new encoder, the
-old one retired as for any rebuild) and adopts the new answer.
+The sidecar's cues are on the movie timeline on both paths, and so is a conversion's
+`playpos_ns`: the transcoding profile copies timestamps (`-copyts -start_at_zero`), so a conversion
+started at an offset — every seek, track switch and quality change on a converted title — carries
+the film's own timestamps (a 36 s start began at pts 36.036 s, live 12.0, 2026-10-18), not 0. The
+fresh Load rebases its first keyframe to fed-pts 0 for the pipeline and reads the position from
+that keyframe (`player::engine::arm_offset_rebase`). Read as 0-based, the first keyframe sat past
+the feed-ahead budget and was never fed, and every such reload hung on the spinner. A track switch
+during a conversion re-negotiates (a new encoder, the old one retired as for any rebuild) and
+adopts the new answer.
 
 ## PlayMethod
 

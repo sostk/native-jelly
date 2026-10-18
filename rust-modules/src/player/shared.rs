@@ -508,10 +508,15 @@ pub(crate) struct Shared {
 
     // main/pump (M) -> library callback thread (K)
     pub pts_shift: AtomicI64, // g_pts_shift
-    // content-time offset added to the displayed position: a transcode SEEK restarts the
-    // stream 0-based (its PTS loses the seek offset), so playpos = fed - pts_shift + this.
-    // 0 for direct-play (file PTS already IS content time) and for the initial transcode.
+    // content-time offset added to the displayed position: playpos = fed - pts_shift + this.
+    // 0 for direct-play (file PTS already IS content time) and for the initial transcode. A
+    // conversion started at an offset sets it to the offset and arms `offset_rebase`, and the first
+    // keyframe then moves it to `offset - keyframe` (see `engine::arm_offset_rebase`).
     pub disp_base: AtomicI64,
+    // main (M) -> the next Engine: rebase the next Load's first keyframe and anchor `disp_base` at
+    // it, because the stream of a conversion started at an offset may carry the film's timestamps
+    // (Jellyfin's `CopyTimestamps`) or restart at 0. Taken once by the Engine it arms.
+    pub offset_rebase: AtomicBool,
 
     // main/pump (M) -> demux (D)
     // The demux seek target in content-ns (-1 = none). The pump publishes it and the demux
@@ -897,6 +902,7 @@ impl Shared {
             source_info: Mutex::new(None),
             pts_shift: AtomicI64::new(0),
             disp_base: AtomicI64::new(0),
+            offset_rebase: AtomicBool::new(false),
             seek_to_ns: AtomicI64::new(-1),
             seek_target_ns: AtomicI64::new(-1),
             seeking: AtomicBool::new(false),
@@ -1492,6 +1498,7 @@ impl Shared {
         *self.source_info.lock().unwrap() = None;
         self.pts_shift.store(0, Ordering::Relaxed);
         self.disp_base.store(0, Ordering::Relaxed);
+        self.offset_rebase.store(false, Ordering::Relaxed);
         self.seek_to_ns.store(-1, Ordering::Relaxed);
         self.seek_target_ns.store(-1, Ordering::Relaxed);
         self.seeking.store(false, Ordering::Relaxed);
