@@ -3,8 +3,8 @@
 //!
 //! 1. the DeviceProfile sent to Jellyfin (`catalog::capabilities::Capabilities::video_codecs`, the
 //!    list its `DirectPlayProfiles` `VideoCodec` is built from),
-//! 2. the local direct-play gate (`video_direct_plays`, which stands in for `/decision` when it is
-//!    unreachable and decides whether "Original" is offered),
+//! 2. the local direct-play gate (`video_direct_plays`, which decides whether a direct play is asked
+//!    for at all and whether "Original" is offered),
 //! 3. the Load refusal (`engine::load_video_refused`, the guard against a server that ignored the
 //!    profile).
 //!

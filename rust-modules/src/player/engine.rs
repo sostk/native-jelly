@@ -539,7 +539,7 @@ pub(crate) enum LoadVideo {
 }
 
 impl LoadVideo {
-    /// The route's stream vcodec -> what the Load declares, case-insensitively (PMS emits lowercase;
+    /// The route's stream vcodec -> what the Load declares, case-insensitively (Jellyfin emits lowercase;
     /// the route's own comparisons elsewhere are case-insensitive too). **An unknown codec is `None`,
     /// not H.264**: the old catch-all declared an H.264 Load for whatever the route held, so a codec
     /// the pipeline cannot feed arrived as an H.264 declaration over a bitstream it could not parse,
