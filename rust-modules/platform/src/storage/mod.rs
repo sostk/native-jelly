@@ -949,9 +949,17 @@ mod tests {
     }
     use std::os::unix::fs::{symlink, PermissionsExt};
 
-    struct Scratch(std::path::PathBuf);
+    // Holds the global test lock for the scratch dir's lifetime: `storage::diagnostics`'s umask
+    // test makes every file created during its window unreadable, and every commit here writes
+    // (and reads back) real files. Conditional take follows `imgcache`'s `TestDir` so a future
+    // test that already holds the guard and builds a second scratch does not deadlock on itself.
+    struct Scratch(
+        std::path::PathBuf,
+        #[allow(dead_code)] Option<nj_base::testlock::Serial>,
+    );
     impl Scratch {
         fn new() -> Self {
+            let serial = (!nj_base::testlock::held()).then(nj_base::testlock::serial);
             let p = std::env::temp_dir().join(format!(
                 "nativejelly-storage-{}-{}",
                 std::process::id(),
@@ -959,7 +967,7 @@ mod tests {
             ));
             std::fs::create_dir(&p).unwrap();
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).unwrap();
-            Self(p)
+            Self(p, serial)
         }
     }
     impl Drop for Scratch {
