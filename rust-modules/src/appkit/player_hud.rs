@@ -2587,7 +2587,7 @@ mod tests {
             &[A::Repair, A::Back],
         ];
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
+        for language in [Preference::En, Preference::Es, Preference::Be, Preference::Ru] {
             let _guard = language_on_this_thread_for_test(language);
             for row in rows {
                 let labels: Vec<&'static std::ffi::CStr> = row.iter().map(|a| failure_action_label(*a)).collect();
@@ -2611,7 +2611,7 @@ mod tests {
         use crate::ui::fit::HEADROOM;
         use nj_platform::i18n::{language_on_this_thread_for_test, msg, Preference};
         let mut out = Vec::new();
-        for language in [Preference::En, Preference::Es, Preference::Be] {
+        for language in [Preference::En, Preference::Es, Preference::Be, Preference::Ru] {
             let _guard = language_on_this_thread_for_test(language);
             for s in [msg::widgets_verdict_forced_no_original(), msg::widgets_verdict_forced_container(),
                 msg::widgets_verdict_forced_video(), msg::widgets_verdict_forced_audio(),

@@ -2242,7 +2242,7 @@ mod tests {
         let measure = FixtureMeasure;
         let flow = header_flow(false, "A short biography.", true, false, true, &measure);
         let mut labels = Vec::new();
-        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be, nj_platform::i18n::Preference::Ru] {
             let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
             labels.push(nj_platform::i18n::msg::browse_person_filmography_in(&locale).to_owned());
         }

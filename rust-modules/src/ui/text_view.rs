@@ -724,7 +724,7 @@ mod tests {
     /// silently drifting one screen away from every other.
     #[test]
     fn the_more_mark_is_uppercase_in_supported_locales() {
-        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be, nj_platform::i18n::Preference::Ru] {
         let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
         let s = nj_platform::i18n::msg::browse_action_more_in(&locale);
         assert_eq!(

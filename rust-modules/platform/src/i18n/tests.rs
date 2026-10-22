@@ -33,7 +33,12 @@ fn locale_resolution_separates_language_from_formatting() {
             .language(),
         Language::Be
     );
-    for tag in ["fr-FR", "be-Latn", "garbage\r\nheader", "C"] {
+    assert_eq!(
+        LocaleContext::resolve(Preference::System, None, None, None, Some("ru_RU.UTF-8"))
+            .language(),
+        Language::Ru
+    );
+    for tag in ["fr-FR", "be-Latn", "ru-Latn", "garbage\r\nheader", "C"] {
         assert_eq!(
             LocaleContext::resolve(Preference::System, Some(tag), None, None, None).language(),
             Language::En
@@ -59,6 +64,17 @@ fn plural_rules_follow_the_message_language() {
     assert_eq!(es.plural(1), PluralCategory::One);
     assert_eq!(es.plural(2), PluralCategory::Other);
     assert_eq!(es.plural(1_000_000), PluralCategory::Many);
+    // Russian shares Belarusian's East-Slavic cardinal rules.
+    let ru = LocaleContext::resolve(Preference::Ru, None, Some("en-US"), None, None);
+    for n in [1, 21, 101] {
+        assert_eq!(ru.plural(n), PluralCategory::One);
+    }
+    for n in [2, 3, 4, 22, 103] {
+        assert_eq!(ru.plural(n), PluralCategory::Few);
+    }
+    for n in [0, 5, 11, 12, 14, 20, 111] {
+        assert_eq!(ru.plural(n), PluralCategory::Many);
+    }
 }
 
 #[test]

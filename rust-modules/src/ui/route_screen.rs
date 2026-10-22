@@ -1085,7 +1085,7 @@ mod tests {
         }
         let measure = TitleMeasure;
         let min_content = RouteLayout::screen().content.w;
-        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be, nj_platform::i18n::Preference::Ru] {
             let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
             let title = nj_platform::i18n::msg::browse_person_filmography_in(&locale);
             let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
@@ -1147,7 +1147,7 @@ mod tests {
         }
         let measure = QuestionMeasure;
         let layout = RouteLayout::screen();
-        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be, nj_platform::i18n::Preference::Ru] {
             let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
             for question in [nj_platform::i18n::msg::settings_consent_crash_title_in(&locale),
                 nj_platform::i18n::msg::settings_consent_product_title_in(&locale)] {
