@@ -1642,9 +1642,10 @@ fn preference_name(preference: nj_platform::i18n::Preference) -> &'static str {
     }
 }
 
-const LANGUAGES: [nj_platform::i18n::Preference; 4] = [
+const LANGUAGES: [nj_platform::i18n::Preference; 5] = [
     nj_platform::i18n::Preference::System, nj_platform::i18n::Preference::En,
     nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be,
+    nj_platform::i18n::Preference::Ru,
 ];
 
 /// A Language row's identity: the preference a `Choice` row saves, or the contribution guide.
@@ -1662,7 +1663,8 @@ impl FormId for LangId {
             LangId::Choice(P::En) => 1,
             LangId::Choice(P::Es) => 2,
             LangId::Choice(P::Be) => 3,
-            LangId::Contribute => 4,
+            LangId::Choice(P::Ru) => 4,
+            LangId::Contribute => 5,
         })
     }
 }

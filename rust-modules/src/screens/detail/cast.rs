@@ -260,7 +260,7 @@ mod tests {
     fn combined_crew_captions_fit_two_caption_lines_at_both_safe_edges() {
         let measure = LabelMeasure;
         let safe = crate::ui::consts::SAFE;
-        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be] {
+        for preference in [nj_platform::i18n::Preference::En, nj_platform::i18n::Preference::Es, nj_platform::i18n::Preference::Be, nj_platform::i18n::Preference::Ru] {
             let locale = nj_platform::i18n::LocaleContext::resolve(preference, None, None, None, None);
             let caption = nj_platform::i18n::msg::browse_crew_director_writer_in(&locale);
             for center in [safe.x + RowStyle::CAST.w * 0.5,
