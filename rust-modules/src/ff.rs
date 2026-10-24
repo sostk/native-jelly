@@ -537,14 +537,18 @@ pub const AVMEDIA_TYPE_AUDIO: c_int = 1;
 pub const AVMEDIA_TYPE_SUBTITLE: c_int = 3;
 // Proven against the bundled headers by ci/ffabi-assert.c.
 const AVMEDIA_TYPE_ATTACHMENT: c_int = 4;
-// The only codec id the app compares against. The others (H264, AC3, E-AC3) and AV_PKT_FLAG_KEY
-// were declared and never read; their values shift between FFmpeg majors, so each one was a
-// constant to re-derive and assert in order to prove nothing.
+// The codec ids the app compares against are AAC, H264, HEVC, VP9 and AV1. Their values shift between
+// FFmpeg majors, so each is asserted against the bundled headers in ci/ffabi-assert.c.
+// AV1 needs no FFmpeg parser or bsf: matroska (V_AV1) and mov (av01) demux it without one, and
+// with the av1 parser absent the packets arrive raw. `av1_packet_to_tu` frames the OBUs itself.
+// Enabling the parser would pull in cbs_av1 for nothing.
 pub const AV_CODEC_ID_AAC: c_int = 0x15002;
 pub const AV_CODEC_ID_H264: c_int = 27;
 // FF_API_XVMC and FF_API_VOXWARE both died before FFmpeg 6, which is why these differ from the
 // values the n3.3 televisions use (28 / 174 / 0x15029).
 pub const AV_CODEC_ID_HEVC: c_int = 172;
+pub const AV_CODEC_ID_VP9: c_int = 166;
+pub const AV_CODEC_ID_AV1: c_int = 222;
 pub const AV_PKT_FLAG_KEY: c_int = 1;
 pub const AVSEEK_FLAG_BACKWARD: c_int = 1;
 pub const AVERROR_EOF: c_int = -541478725;
@@ -563,6 +567,13 @@ pub const NS_TB: AVRational = AVRational {
 /// because `AVPacketSideDataType` is an ordinary sequential enum and every value in it shifts
 /// when a member is inserted above.
 pub const AV_PKT_DATA_DOVI_CONF: c_int = 29;
+/// `AV_PKT_DATA_MASTERING_DISPLAY_METADATA` (an `AVMasteringDisplayMetadata`, 88 bytes) and
+/// `AV_PKT_DATA_CONTENT_LIGHT_LEVEL` (an `AVContentLightMetadata`, 8 bytes): 20 and 22 in FFmpeg 9.0,
+/// asserted in `ci/ffabi-assert.c` for the same reason as the Dolby Vision tag. The two structs'
+/// member offsets are hard-coded in `player::vp9_hdr::{parse_mastering, parse_cll}` and pinned by
+/// the same file; a bump that moves them has to change both.
+pub const AV_PKT_DATA_MASTERING_DISPLAY_METADATA: c_int = 20;
+pub const AV_PKT_DATA_CONTENT_LIGHT_LEVEL: c_int = 22;
 
 // ---- AVStream field accessors, at the constants above. Read by offset rather than modelled:
 // the struct is large, mostly internal, and only three fields are wanted. ----
@@ -624,6 +635,37 @@ unsafe fn dovi_conf(cp: *const AVCodecParameters) -> Option<AVDOVIDecoderConfigu
         return parse_dovi_conf(std::slice::from_raw_parts(sd.data, sd.size));
     }
     None
+}
+/// What the container said about a stream's colour: the three H.273 code points from
+/// `AVCodecParameters`, plus the mastering display and content light level from the stream's coded
+/// side data when the demuxer found them (Matroska's `Colour` element fills them; each only when the
+/// file states it). Read for VP9, whose bitstream cannot carry the transfer function.
+unsafe fn container_hdr(cp: *const AVCodecParameters) -> crate::player::vp9_hdr::ContainerHdr {
+    use crate::player::vp9_hdr::{parse_cll, parse_mastering, ContainerHdr};
+    let mut h = ContainerHdr {
+        trc: (*cp).color_trc,
+        pri: (*cp).color_primaries,
+        mc: (*cp).color_space,
+        mastering: None,
+        cll: None,
+    };
+    let (list, n) = ((*cp).coded_side_data, (*cp).nb_coded_side_data);
+    if list.is_null() || n <= 0 {
+        return h;
+    }
+    for i in 0..n as usize {
+        let sd = &*list.add(i);
+        if sd.data.is_null() {
+            continue;
+        }
+        let bytes = std::slice::from_raw_parts(sd.data, sd.size);
+        match sd.type_ {
+            AV_PKT_DATA_MASTERING_DISPLAY_METADATA => h.mastering = parse_mastering(bytes),
+            AV_PKT_DATA_CONTENT_LIGHT_LEVEL => h.cll = parse_cll(bytes),
+            _ => {}
+        }
+    }
+    h
 }
 /// The container's own name for this track — `title` (Matroska and most formats), else `name`
 /// (MP4's per-track `udta` name box, which is what FFmpeg's mov demuxer exposes it as).
@@ -2908,10 +2950,272 @@ unsafe fn free_avio(avio: *mut AVIOContext) {
     av_freep(&mut p as *mut *mut AVIOContext as *mut c_void); // frees + NULLs the context
 }
 
-/// The libavformat demuxer thread body (spawned by engine::start_bufferfeed).
-/// Opens the URL through a custom AVIO over stream.rs, reads packets, converts video to
-/// Annex-B via the mp4toannexb BSF (VPS/SPS/PPS prepended at every keyframe), feeds video
-/// (es=1) + raw audio (es=2) to the AuQueue, and seeks via av_seek_frame.
+// -- AV1 framing ------------------------------------------------------------------------
+//
+// The TV pipeline is handed no codec_data for AV1 (libpf's AV1 caps carry none, and the pipeline
+// has no av1parse element), so the configuration has to travel in-band. These helpers turn the
+// demuxed packet into a Section-5 temporal unit: a temporal delimiter first, the av1C config OBUs
+// in front of each keyframe, and every OBU carrying a size field. Everything here is pure, so
+// the framing is tested on the host (ff_packet_framing_tests.rs).
+
+const OBU_SEQUENCE_HEADER: u8 = 1;
+const OBU_TEMPORAL_DELIMITER: u8 = 2;
+const OBU_METADATA: u8 = 5;
+/// A temporal delimiter OBU with an empty payload: header 0x12 (type 2, size field), size 0.
+const AV1_TD: [u8; 2] = [0x12, 0x00];
+
+/// Read one leb128 value from the front of `b` (AV1 section 4.10.5), returning the value and the
+/// number of bytes it took. A run with no terminator inside eight bytes, a truncated run, and a
+/// value wider than 32 bits are all rejected: the spec bounds every leb128 field to 32 bits.
+fn read_leb128(b: &[u8]) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    for (i, &byte) in b.iter().take(8).enumerate() {
+        value |= u64::from(byte & 0x7f) << (7 * i);
+        if byte & 0x80 == 0 {
+            return (value <= u64::from(u32::MAX)).then_some((value, i + 1));
+        }
+    }
+    None
+}
+
+/// Append `v` as a minimal leb128 encoding.
+fn write_leb128(mut v: u64, out: &mut Vec<u8>) {
+    loop {
+        let byte = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// One OBU inside a byte run: where its header starts, how long the header is (one byte, plus
+/// one when the extension flag is set), where its payload starts, and where it ends (exclusive).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ObuSpan {
+    start: usize,
+    header_len: usize,
+    payload_start: usize,
+    end: usize,
+    obu_type: u8,
+    has_size: bool,
+}
+
+/// Split an OBU run into its OBUs. An OBU without a size field runs to the end of the run and
+/// is therefore the last one. Returns None for a set forbidden bit, a truncated header or size,
+/// or a payload that overruns the run.
+fn walk_obus(b: &[u8]) -> Option<Vec<ObuSpan>> {
+    let mut spans = Vec::new();
+    let mut p = 0usize;
+    while p < b.len() {
+        let h = b[p];
+        if h & 0x80 != 0 {
+            return None;
+        }
+        let obu_type = (h >> 3) & 0x0f;
+        let header_len = 1 + usize::from((h >> 2) & 1);
+        let has_size = (h >> 1) & 1 == 1;
+        if p + header_len > b.len() {
+            return None;
+        }
+        let body = p + header_len;
+        let (payload_start, end) = if has_size {
+            let (size, n) = read_leb128(&b[body..])?;
+            let payload_start = body + n;
+            // u64 arithmetic: on the 32-bit TV `payload_start + size` could wrap a usize.
+            if payload_start as u64 + size > b.len() as u64 {
+                return None;
+            }
+            (payload_start, payload_start + size as usize)
+        } else {
+            (body, b.len())
+        };
+        spans.push(ObuSpan {
+            start: p,
+            header_len,
+            payload_start,
+            end,
+            obu_type,
+            has_size,
+        });
+        p = end;
+    }
+    Some(spans)
+}
+
+/// Append one OBU with a size field. An OBU that already has one is copied verbatim; a sizeless
+/// one (only ever the last in its run) gets the minimal leb128 of its payload length.
+fn push_obu_sized(b: &[u8], s: &ObuSpan, out: &mut Vec<u8>) {
+    if s.has_size {
+        out.extend_from_slice(&b[s.start..s.end]);
+        return;
+    }
+    out.push(b[s.start] | 0x02);
+    if s.header_len == 2 {
+        out.push(b[s.start + 1]);
+    }
+    write_leb128((s.end - s.payload_start) as u64, out);
+    out.extend_from_slice(&b[s.payload_start..s.end]);
+}
+
+/// The av1C configOBUs to insert in front of a keyframe: every sequence header, then every
+/// metadata OBU (HDR10 MDCV/CLL may live only in the record). Empty when the record carries no
+/// sequence header, because metadata alone is never inserted. Accepts both the av1C record
+/// (marker and version byte 0x81, three bytes of fixed fields, then the OBUs) and a bare OBU run.
+fn parse_av1c(ed: &[u8]) -> Vec<u8> {
+    let obus = if ed.len() >= 4 && ed[0] == 0x81 {
+        &ed[4..]
+    } else if !ed.is_empty() && ed[0] & 0x80 == 0 {
+        ed
+    } else {
+        return Vec::new();
+    };
+    let Some(spans) = walk_obus(obus) else {
+        return Vec::new();
+    };
+    if !spans.iter().any(|s| s.obu_type == OBU_SEQUENCE_HEADER) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for s in spans.iter().filter(|s| s.obu_type == OBU_SEQUENCE_HEADER) {
+        push_obu_sized(obus, s, &mut out);
+    }
+    for s in spans.iter().filter(|s| s.obu_type == OBU_METADATA) {
+        push_obu_sized(obus, s, &mut out);
+    }
+    out
+}
+
+/// Which pieces of the AV1 temporal-unit framing are emitted. DEFAULT is the conformant form.
+/// The other settings exist so the reporter can A/B the Realtek decoder's expectations on a
+/// device; they come from the `av1obu` dev trigger and are never set in a release build.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Av1Framing {
+    /// Prepend a temporal delimiter when the packet has none.
+    td: bool,
+    /// Prepend the av1C config block on keyframes that carry no sequence header.
+    seq: bool,
+    /// Pass the packet bytes through exactly as demuxed.
+    raw: bool,
+}
+
+impl Av1Framing {
+    const DEFAULT: Av1Framing = Av1Framing {
+        td: true,
+        seq: true,
+        raw: false,
+    };
+
+    /// Parse the `av1obu` trigger. Tokens are separated by commas or whitespace; each one sets
+    /// one flag independently, and unknown tokens are ignored.
+    fn from_trigger(s: Option<&str>) -> Av1Framing {
+        let mut f = Self::DEFAULT;
+        for tok in s
+            .unwrap_or("")
+            .split(|c: char| c == ',' || c.is_ascii_whitespace())
+            .filter(|t| !t.is_empty())
+        {
+            match tok {
+                "notd" => f.td = false,
+                "noseq" => f.seq = false,
+                "raw" => f.raw = true,
+                _ => {}
+            }
+        }
+        f
+    }
+}
+
+/// Frame one demuxed AV1 packet as a temporal unit in `out`, returning `key` unchanged.
+/// A packet that does not parse as OBUs is copied through untouched: it is never dropped.
+fn av1_packet_to_tu(pkt: &[u8], key: bool, cfg: &[u8], f: Av1Framing, out: &mut Vec<u8>) -> bool {
+    out.clear();
+    let spans = match walk_obus(pkt) {
+        Some(spans) if !f.raw => spans,
+        _ => {
+            out.extend_from_slice(pkt);
+            return key;
+        }
+    };
+    let has_td = spans
+        .first()
+        .is_some_and(|s| s.obu_type == OBU_TEMPORAL_DELIMITER);
+    let has_seq = spans.iter().any(|s| s.obu_type == OBU_SEQUENCE_HEADER);
+    let mut rest = &spans[..];
+    if has_td {
+        push_obu_sized(pkt, &spans[0], out);
+        rest = &spans[1..];
+    } else if f.td {
+        out.extend_from_slice(&AV1_TD);
+    }
+    if key && f.seq && !has_seq && !cfg.is_empty() {
+        out.extend_from_slice(cfg);
+    }
+    if let Some((last, body)) = rest.split_last() {
+        for s in body {
+            out.extend_from_slice(&pkt[s.start..s.end]);
+        }
+        push_obu_sized(pkt, last, out);
+    }
+    key
+}
+
+/// How a demuxed video packet is turned into the access unit the television's pipeline is fed:
+/// the one place a codec id is mapped to a framing, so a codec with no arm is REFUSED instead of
+/// falling into the Annex-B path (which on a bitstream that is not H.264/HEVC produces garbage the
+/// decoder rejects with nothing in the log naming the cause).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VideoFraming {
+    /// Length-prefixed NAL units rewritten to Annex-B with the parameter sets prepended at each
+    /// keyframe (`packet_to_annexb`).
+    AnnexB { hevc: bool },
+    /// Section-5 temporal units with the av1C configuration in-band (`av1_packet_to_tu`).
+    Av1,
+    /// The packet unchanged (`vp9_packet_to_frame`).
+    Vp9,
+}
+
+impl VideoFraming {
+    pub(crate) fn of_codec_id(id: c_int) -> Option<Self> {
+        match id {
+            AV_CODEC_ID_H264 => Some(Self::AnnexB { hevc: false }),
+            AV_CODEC_ID_HEVC => Some(Self::AnnexB { hevc: true }),
+            AV_CODEC_ID_AV1 => Some(Self::Av1),
+            AV_CODEC_ID_VP9 => Some(Self::Vp9),
+            _ => None,
+        }
+    }
+
+    /// The Load declaration this framing belongs with. The Load is sent before the demuxer opens the
+    /// file, so a disagreement can only abort and say so afterwards; that still beats the black
+    /// screen it would otherwise be.
+    pub(crate) fn load_video(self) -> crate::player::engine::LoadVideo {
+        use crate::player::engine::LoadVideo;
+        match self {
+            Self::AnnexB { hevc: false } => LoadVideo::H264,
+            Self::AnnexB { hevc: true } => LoadVideo::H265,
+            Self::Av1 => LoadVideo::Av1,
+            Self::Vp9 => LoadVideo::Vp9,
+        }
+    }
+}
+
+/// Hand one demuxed VP9 packet to the decoder as it came, returning `key` unchanged.
+///
+/// A VP9 frame is self-describing: every keyframe carries its profile, size and colour config in
+/// its own uncompressed header, and libpf's `video/x-vp9` appsrc caps have no `codec_data` to
+/// fill, so there is nothing to prepend (compare `av1_packet_to_tu`, where the sequence header
+/// has to be put back in-band). A Matroska/MP4 packet may be a SUPERFRAME, a shown frame and its
+/// hidden reference frames under one trailing index; it is passed whole, the way a WebM-aware
+/// hardware decoder is fed.
+fn vp9_packet_to_frame(pkt: &[u8], key: bool, out: &mut Vec<u8>) -> bool {
+    out.clear();
+    out.extend_from_slice(pkt);
+    key
+}
+
 /// Parse an avcC (H264) / hvcC (HEVC) extradata record into a ready-to-prepend Annex-B
 /// parameter-set blob (VPS/SPS/PPS with 4-byte start codes) + the NAL length-prefix size.
 /// (Ported from the retired mkv.rs demuxer) — the format the Starfish decoder wants.
@@ -8149,6 +8453,33 @@ pub(crate) fn demux(
                 SHARED.publish_video_raster((*vcp).width, (*vcp).height);
                 let cname =
                     std::ffi::CStr::from_ptr(avcodec_get_name((*vcp).codec_id)).to_string_lossy();
+                // Refuse a stream the pipeline cannot be fed, BEFORE anything else is opened for it
+                // (subtitle decoders, ASS sources): the exit then has the same shape as the "no video
+                // stream" one above, with nothing to release but the input and its AVIO.
+                let Some(framing) = VideoFraming::of_codec_id((*vcp).codec_id) else {
+                    crate::player::log(&format!(
+                        "ff: no framing for video codec {cname} (codec_id={}); refusing the stream",
+                        (*vcp).codec_id
+                    ));
+                    SHARED.demux_failed.store(true, Ordering::Release);
+                    avformat_close_input(&mut fmt);
+                    free_avio(avio);
+                    break;
+                };
+                // What the Load declared (`dg_load_v`, 0 when this start sent a static payload) must
+                // be what the file is: a Load that says one codec over another codec's bitstream is a
+                // black screen, so stop and name both.
+                let declared = SHARED.dg_load_v.load(Ordering::Relaxed);
+                if declared != 0 && declared != framing.load_video().diag_code() {
+                    crate::player::log(&format!(
+                        "ff: the Load declared {} but the file is {cname}; refusing the stream",
+                        crate::player::load_v_name(declared)
+                    ));
+                    SHARED.demux_failed.store(true, Ordering::Release);
+                    avformat_close_input(&mut fmt);
+                    free_avio(avio);
+                    break;
+                }
                 // WHAT THE STREAM ACTUALLY IS, not just what it is called. `codec=hevc` is the same
                 // four letters for an SDR file, an HDR10 file, a Dolby Vision Profile 8.1 file whose
                 // base layer is that same HDR10, and a Profile 5 file that will display in visibly
@@ -8236,17 +8567,52 @@ pub(crate) fn demux(
                 // format Starfish decodes). FFmpeg's hevc_mp4toannexb does NOT reliably prepend the
                 // parameter sets on this 3.3 build (it leaves the keyframe starting with SEI), so we
                 // build the AU from the codecpar extradata; libavformat still owns demux + seeking.
-                let is_hevc = (*vcp).codec_id == AV_CODEC_ID_HEVC;
-                let (param_blob, nal_len_size) = parse_extradata(
-                    (*vcp).extradata,
-                    (*vcp).extradata_size.max(0) as usize,
-                    is_hevc,
-                );
+                // AV1 is framed by av1_packet_to_tu as Section-5 temporal units with the av1C config
+                // in-band on keyframes, because the TV pipeline is given no codec_data for AV1.
+                let is_hevc = framing == VideoFraming::AnnexB { hevc: true };
+                let is_av1 = framing == VideoFraming::Av1;
+                let is_vp9 = framing == VideoFraming::Vp9;
+                let (param_blob, nal_len_size) = if is_av1 || is_vp9 {
+                    (Vec::new(), 0)
+                } else {
+                    parse_extradata(
+                        (*vcp).extradata,
+                        (*vcp).extradata_size.max(0) as usize,
+                        is_hevc,
+                    )
+                };
+                let av1_ed: &[u8] = if (*vcp).extradata.is_null() || (*vcp).extradata_size <= 0 {
+                    &[]
+                } else {
+                    std::slice::from_raw_parts((*vcp).extradata, (*vcp).extradata_size as usize)
+                };
+                let av1_cfg = if is_av1 { parse_av1c(av1_ed) } else { Vec::new() };
+                let av1_framing = if is_av1 {
+                    Av1Framing::from_trigger(nj_base::devtrig::read("av1obu").as_deref())
+                } else {
+                    Av1Framing::DEFAULT
+                };
+                #[cfg(feature = "devtriggers")]
+                {
+                    if is_av1 && av1_framing != Av1Framing::DEFAULT {
+                        crate::player::log(&format!(
+                            "ff: av1obu trigger: td={} seq={} raw={}",
+                            av1_framing.td, av1_framing.seq, av1_framing.raw
+                        ));
+                    }
+                }
+                // A VP9 stream's PQ is in the container only; hand it to the pump, which writes it into
+                // the sourceInfo envelope ACB is sent. Always replaced, so a previous stream's colour
+                // cannot outlive it.
+                *SHARED.container_hdr.lock().unwrap() = if is_vp9 { Some(container_hdr(vcp)) } else { None };
                 crate::player::log(&format!(
-                    "ff: param_sets={} bytes nal_len={} is_hevc={}",
+                    "ff: param_sets={} bytes nal_len={} is_hevc={} is_av1={} is_vp9={} av1_cfg={}B",
                     param_blob.len(),
                     nal_len_size,
-                    is_hevc
+                    is_hevc,
+                    is_av1,
+                    is_vp9,
+                    av1_cfg.len()
                 ));
                 let mut aubuf: Vec<u8> = Vec::with_capacity(4 * 1024 * 1024);
 
@@ -8322,14 +8688,36 @@ pub(crate) fn demux(
                     }
                     let si = (*pkt).stream_index;
                     if si == vi {
-                        let is_key = packet_to_annexb(
-                            (*pkt).data,
-                            (*pkt).size.max(0) as usize,
-                            nal_len_size,
-                            is_hevc,
-                            &param_blob,
-                            &mut aubuf,
-                        );
+                        let is_key = if is_av1 {
+                            let pkt_bytes: &[u8] = if (*pkt).data.is_null() {
+                                &[]
+                            } else {
+                                std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize)
+                            };
+                            av1_packet_to_tu(
+                                pkt_bytes,
+                                (*pkt).flags & AV_PKT_FLAG_KEY != 0,
+                                &av1_cfg,
+                                av1_framing,
+                                &mut aubuf,
+                            )
+                        } else if is_vp9 {
+                            let pkt_bytes: &[u8] = if (*pkt).data.is_null() {
+                                &[]
+                            } else {
+                                std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize)
+                            };
+                            vp9_packet_to_frame(pkt_bytes, (*pkt).flags & AV_PKT_FLAG_KEY != 0, &mut aubuf)
+                        } else {
+                            packet_to_annexb(
+                                (*pkt).data,
+                                (*pkt).size.max(0) as usize,
+                                nal_len_size,
+                                is_hevc,
+                                &param_blob,
+                                &mut aubuf,
+                            )
+                        };
                         let pts = pts_ns(pkt, vst);
                         if DIAG_FIRST.swap(false, Ordering::Relaxed) {
                             let n = aubuf.len().min(40);

@@ -25,7 +25,7 @@ is not one any `shutdown(2)` of ours can reach. Exactly one of the two ever has 
 and pinned to majors 63/63/61, and is built `--disable-network` with `file` as its only protocol —
 so the AVIO is not merely how bytes reach it today, it is the only way they *can*. See the root
 `docs/agent-reference.md` linking section for why. It
-emits Annex-B video AUs (param sets prepended at each keyframe) and AC3/EAC3, ADTS-framed AAC, or DTS core audio frames,
+emits Annex-B video AUs (param sets prepended at each keyframe) and, for AV1, Section-5 temporal units (TD OBU first, the av1C sequence header and metadata OBUs in-band on keyframes; `/tmp/nativejelly-av1obu` = notd,noseq,raw tokens varies it on a debug build), for VP9 the demuxed packet unchanged (a frame carries its own headers and libpf's `video/x-vp9` caps have no `codec_data`), and AC3/EAC3, ADTS-framed AAC, or DTS core audio frames,
 and seeks by time via `av_seek_frame` (libavformat's own Cues index).
 
 ## Threading model (this is the whole ballgame)
@@ -100,8 +100,9 @@ something.
   measured the picture: **13.0 fps presented under the 60 declaration, 24.1 under 24**. So H.264
   declares the stream's rate class
   (`fps_class`), HEVC keeps 60 (4K HEVC under 60 holds 24), and a transcode with no known rate
-  keeps 60. `/tmp/nativejelly-sinkmax=WxH@F` overrides the envelope for the legs still unrun on
-  10.3.1.
+  keeps 60. AV1 (only on a set whose codec table lists an AV1 decoder) keeps HEVC's 4K60 rule,
+  clamped by `Caps::av1_row`; the clamp is unmeasured (one owner reports AV1 playing on a webOS 10.3.1 set, with no log). `/tmp/nativejelly-sinkmax=WxH@F`
+  overrides the envelope for the legs still unrun on 10.3.1.
 - **There IS a presented-frame instrument now, and it is not a GStreamer trace.** The payload's
   `streamQualityInfo` / `streamQualityInfoNonFlushable` keys make libpf read the video sink's
   `dropped-frames` / `non-flushable-displayed-frames` properties on the same 200 ms timer as the
@@ -153,9 +154,9 @@ something.
   collides with the pipeline's uMS connection (CONN_FIND_ERR). See the comment in `load_thread`.
 - **ACB bind order matters** (mirrors Kodi/ss4s): `setSinkType(MAIN)` → `setMediaId` →
   `setState(LOADED)` → *wait for decoded frames* → `setMediaVideoData(<sourceInfo envelope
-  VERBATIM>)` → `setDisplayWindow` → `setState(PLAYING)`. The payload passed to
+  as captured; a PQ VP9 gets its HDR keys written in first, see below>)` → `setDisplayWindow` → `setState(PLAYING)`. The payload passed to
   `setMediaVideoData` is the **whole `sourceInfo` envelope** captured verbatim from the pipeline's
-  callback (`sourceInfoRaw`), not a reconstructed one. Audio is owned by the pipeline — **never feed
+  callback (`sourceInfoRaw`), not a reconstructed one — with ONE exception: a VP9 stream whose container says PQ gets `hdrType` / `mediaVui` / `mediaSei` written in first (`player/vp9_hdr.rs`), because a VP9 bitstream cannot carry the transfer function, so the pipeline's own envelope says `"hdrType":"none"` and the panel stays SDR (device-measured on the dev set, whose ACB path is the only one that sends the envelope: the TV's `picture.dynamicRange` flips to HDR with the rewrite and stays SDR with `/tmp/nativejelly-novp9hdr`; webOS 5+ has no ACB, so nothing is sent there and its VP9 HDR behaviour is unknown). The envelope is otherwise untouched, and an envelope that already names an HDR type is never overridden. Audio is owned by the pipeline — **never feed
   ACB an audio SINK or elementary stream**. That half is real and unchanged. Its long-stated
   consequence is not: `SOUND_ERROR_019` is a literal that exists in **no library on this
   television** (swept across ~70 harvested libraries including 92 MB of Chromium), and the clause
@@ -199,9 +200,25 @@ something.
   survived a long time because the test suite's cases inherited a server-side `viewOffset`, so the
   seek under test usually had nowhere to go (fixed 2026-07-28; see the
   `docs/agent-reference.md` testing note).
-- **Seeks are in-place** (Kodi-style): flush + `av_seek_frame` to the target,
-  then on the first post-seek keyframe `feed_stream` re-anchors the GStreamer segment
-  (`setTimeToDecode` + `sendSegmentEvent`) — no reload/decoder re-init. A transcode seek instead
+- **Seeks are in-place**, in one of three per-session modes (`player::SeekMode`, chosen by
+  `engine::select_seek_mode` in `start_bufferfeed`, the `/tmp/nativejelly-seekmode` dev trigger
+  `native|segment|reload` wins): the demuxer is `av_seek_frame`d to the target, then on the first
+  post-seek keyframe `feed_stream` re-anchors the pipeline — no reload/decoder re-init.
+  `Segment` (webOS 4.x) is Kodi-style: pump `flush()`, then `setTimeToDecode` + `sendSegmentEvent`
+  through decompile-derived private offsets. `NativeSeek` (`VP_EXPORTED`, webOS 5+; issue #568) is
+  LG's PUBLIC `StarfishMediaAPIs::Seek(millis)` (`sink().seek`, `sf_seek_ms`): it flushes itself, so
+  the pump does NOT `flush()` and nothing may flush after it (a `flush()` is a seek to 0 and re-creates
+  the stale-segment stall); it re-anchors the segment AT the millis passed, so `feed_stream` feeds
+  content-time PTS (`pts_shift = 0`) and calls `Seek(max(kf_pts,0) / 1e6)` before feeding the landed
+  keyframe — on the main thread, the only Feed caller, so it cannot race a Feed. A refused Seek
+  (rv 0) drops the session to `Reload`, re-posts this seek for the pump's `reload_at` (the stuck
+  watchdog goes straight to `reload_at` in `Reload` mode, and a flushed keyframe in a non-`Segment`
+  mode anchors nothing: the private Segment offsets never run on webOS 5+), and latches
+  `native_seek_refused` so the reload's fresh session stays `Reload` for the rest of THAT playback;
+  a fresh play (`start_bufferfeed_tracked` with no live Engine) clears the latch. `Reload`
+  (old-ABI 3.x, and the fallback of both) is a fresh `Load` per seek. Otherwise the mode is
+  re-selected per session. The evidence is in `docs/webos5-port.md` ("The public `Seek`").
+  A transcode seek instead
   restarts the encode at `&offset` with a full fresh `Load`. The rebase machinery
   (`pts_shift`/`rebase_pending` in `shared.rs`) keeps Starfish from ever seeing a PTS jump.
 - **`frames` is SEEK-scoped, `seen_frame` is SESSION-scoped.** `pump` zeroes `SHARED.frames` as

@@ -36,12 +36,14 @@ impl Support {
 }
 
 /// Containers the demuxer (bundled libavformat over the app's own reader) is fed as whole files,
-/// in Jellyfin's spelling.
-pub(crate) const CONTAINERS: [&str; 4] = ["mkv", "mp4", "m4v", "mov"];
+/// in Jellyfin's spelling. WebM is Matroska to the demuxer (`--enable-demuxer=matroska` reads
+/// both), and it is the container VP9 and AV1 files most often come in.
+pub(crate) const CONTAINERS: [&str; 5] = ["mkv", "webm", "mp4", "m4v", "mov"];
 
-/// Video codecs the feed hands to the platform decoder. VP9 and AV1 may decode on the panel, but
-/// the feed cannot carry them (`route::plan::video_feed_supported`).
-const PIPELINE_VIDEO: [&str; 2] = ["h264", "hevc"];
+/// Video codecs the feed hands to the platform decoder (`ff::VideoFraming` frames each). VP9 and
+/// AV1 are fed only where the device table lists their decoder (`devcaps::Caps::{vp9, av1}`), so
+/// they are offered only there (`route::plan::video_feed_supported`).
+const PIPELINE_VIDEO: [&str; 4] = ["h264", "hevc", "vp9", "av1"];
 
 /// Subtitle formats the client draws itself out of the container, in Jellyfin's spelling.
 pub(crate) const EMBEDDED_SUBTITLES: [&str; 10] =
@@ -83,14 +85,53 @@ impl<'a> Capabilities<'a> {
         Self { hdr, ..self }
     }
 
-    /// Video codecs direct play can use: the pipeline's, where the SoC decodes them.
+    /// Video codecs direct play can use: the pipeline's, where the SoC decodes them. The same rule
+    /// as the local gate (`route::plan::video_direct_plays`) and the Load refusal
+    /// (`player::engine::load_video_refused`), which `route::plan_codec_agreement_tests` holds
+    /// together over every capability set.
     pub(crate) fn video_codecs(&self) -> Vec<&'static str> {
-        PIPELINE_VIDEO.into_iter().filter(|c| *c == "h264" || self.device.hevc).collect()
+        PIPELINE_VIDEO
+            .into_iter()
+            .filter(|c| match *c {
+                "h264" => true,
+                "hevc" => self.device.hevc,
+                "vp9" => self.device.vp9,
+                "av1" => self.device.av1,
+                _ => false,
+            })
+            .collect()
     }
 
-    /// The pipeline's video codecs whatever the device table says — Strict Original's ask.
-    pub(crate) fn pipeline_video_codecs(&self) -> &'static [&'static str] {
-        &PIPELINE_VIDEO
+    /// The pipeline's video codecs past the device's bounds — Strict Original's ask. H.264 and HEVC
+    /// are offered whatever the table says (Strict Original takes the file as it is), but VP9 and
+    /// AV1 still need their rows: a set with no such decoder cannot play the file at all, and the
+    /// Load would refuse it (`route::plan::video_feed_supported`).
+    pub(crate) fn pipeline_video_codecs(&self) -> Vec<&'static str> {
+        PIPELINE_VIDEO
+            .into_iter()
+            .filter(|c| match *c {
+                "vp9" => self.device.vp9,
+                "av1" => self.device.av1,
+                _ => true,
+            })
+            .collect()
+    }
+
+    /// Per-codec bounds beyond the shared raster: `(codec, max width, max height, max bit depth)`
+    /// for each table-gated codec this set decodes. The width and height are the table's own row
+    /// (0 = not stated, so only the shared bound applies); VP9's bit depth is
+    /// `devcaps::Caps::vp9_bit_depth`, which is 10 only where 10-bit VP9 was measured.
+    pub(crate) fn codec_row_bounds(&self) -> Vec<(&'static str, u32, u32, Option<u32>)> {
+        let mut rows = Vec::new();
+        if self.device.vp9 {
+            let (w, h, _) = self.device.vp9_row;
+            rows.push(("vp9", w, h, Some(self.device.vp9_bit_depth)));
+        }
+        if self.device.av1 {
+            let (w, h, _) = self.device.av1_row;
+            rows.push(("av1", w, h, None));
+        }
+        rows
     }
 
     /// Audio codecs the pipeline feeds AND this television decodes, in Jellyfin's spelling.
@@ -133,11 +174,23 @@ impl<'a> Capabilities<'a> {
     /// allowed encoding them (`EncodingHelper.ShiftVideoCodecsIfNeeded`), a setting a client cannot
     /// read; H.264 is never moved, so a head of H.264 is the codec that arrives. The others stay
     /// listed so a source in them can still be copied. The web client orders its list the same way.
+    ///
+    /// VP9 and AV1 trail the list where the table lists their decoders, so a progressive
+    /// conversion that only has to change the audio or the container can COPY such a source
+    /// (Jellyfin copies only a codec the target list names). They are never the head, so they are
+    /// never what the server encodes to.
     pub(crate) fn transcode_video_codecs(&self) -> Vec<&'static str> {
-        match self.device.encode_vcodec() {
+        let mut codecs = match self.device.encode_vcodec() {
             "h264" => vec!["h264"],
             other => vec!["h264", other],
+        };
+        if self.device.vp9 {
+            codecs.push("vp9");
         }
+        if self.device.av1 {
+            codecs.push("av1");
+        }
+        codecs
     }
 
     /// Audio codecs a re-encode may target, preferred first: the surround codecs before AAC.
@@ -196,6 +249,44 @@ impl<'a> Capabilities<'a> {
         }
         if hlg {
             ranges.push("DOVIWithHLG");
+        }
+        Some(ranges)
+    }
+
+    /// The VP9 `VideoRangeType`s direct play and a video copy may carry, `None` while HDR10 is not
+    /// measured. VP9 carries its HDR signalling in the container, not the bitstream, so the panel
+    /// learns of it only through `player::vp9_hdr`'s sourceInfo rewrite, which handles PQ and only
+    /// on the ACB path (webOS 1-4). HDR10 is therefore offered only where 10-bit VP9 was measured
+    /// to reach HDR (`devcaps::Caps::vp9_bit_depth` = 10); HLG never, as nothing signals it.
+    pub(crate) fn vp9_video_ranges(&self) -> Option<Vec<&'static str>> {
+        let hdr10 = match self.hdr10() {
+            Support::Yes => true,
+            Support::No => false,
+            Support::Unknown => return None,
+        };
+        let mut ranges = vec!["SDR"];
+        if hdr10 && self.device.vp9_bit_depth >= 10 {
+            ranges.push("HDR10");
+        }
+        Some(ranges)
+    }
+
+    /// The AV1 `VideoRangeType`s direct play and a video copy may carry, `None` while HDR10 is not
+    /// measured. AV1 states its colour in the sequence header the decoder reads, as HEVC does in its
+    /// VUI, so the panel's own HDR10 and HLG support decide it. Dolby Vision AV1 is never offered:
+    /// the Load declares no Dolby Vision node for AV1. Unverified on an AV1 set.
+    pub(crate) fn av1_video_ranges(&self) -> Option<Vec<&'static str>> {
+        let hdr10 = match self.hdr10() {
+            Support::Yes => true,
+            Support::No => false,
+            Support::Unknown => return None,
+        };
+        let mut ranges = vec!["SDR"];
+        if hdr10 {
+            ranges.extend(["HDR10", "HDR10Plus"]);
+        }
+        if self.hlg() == Support::Yes {
+            ranges.push("HLG");
         }
         Some(ranges)
     }
@@ -260,6 +351,57 @@ mod tests {
         assert_eq!(Capabilities::of(&without, DvCapability::Unknown).video_codecs(), ["h264"]);
         assert_eq!(Capabilities::of(&without, DvCapability::Unknown).transcode_video_codecs(), ["h264"]);
         assert_eq!(Capabilities::of(&with, DvCapability::Unknown).transcode_video_codecs(), ["h264", "hevc"]);
+    }
+
+    /// VP9 and AV1 are offered for direct play, as copy lanes after the encode head, and with their
+    /// own row bounds, exactly where the device table lists their decoders, and nowhere else.
+    #[test]
+    fn vp9_and_av1_follow_the_device_table() {
+        let none = soc(true, "aac");
+        let caps = Capabilities::of(&none, DvCapability::Unknown);
+        assert_eq!(caps.video_codecs(), ["h264", "hevc"]);
+        assert_eq!(caps.pipeline_video_codecs(), ["h264", "hevc"], "Strict Original cannot conjure a decoder");
+        assert!(caps.codec_row_bounds().is_empty());
+
+        let both = Caps {
+            vp9: true,
+            vp9_row: (3840, 2160, 60),
+            av1: true,
+            av1_row: (1920, 1080, 60),
+            ..soc(true, "aac")
+        };
+        let caps = Capabilities::of(&both, DvCapability::Unknown);
+        assert_eq!(caps.video_codecs(), ["h264", "hevc", "vp9", "av1"]);
+        assert_eq!(caps.pipeline_video_codecs(), ["h264", "hevc", "vp9", "av1"]);
+        let targets = caps.transcode_video_codecs();
+        assert_eq!(targets.first(), Some(&"h264"), "the encode head stays H.264");
+        assert_eq!(&targets[targets.len() - 2..], ["vp9", "av1"], "copy lanes trail the list");
+        assert_eq!(
+            caps.codec_row_bounds(),
+            [("vp9", 3840, 2160, Some(8)), ("av1", 1920, 1080, None)],
+            "a table read alone never claims 10-bit VP9",
+        );
+    }
+
+    /// VP9 reaches HDR only through the ACB sourceInfo rewrite, so HDR10 is offered only with the
+    /// measured 10-bit claim; AV1 follows the panel like HEVC, without Dolby Vision.
+    #[test]
+    fn vp9_and_av1_ranges_follow_what_can_reach_the_panel() {
+        let eight = Caps { vp9: true, av1: true, ..Caps::assumed() };
+        let ten = Caps { vp9_bit_depth: 10, ..eight.clone() };
+        let unknown = Capabilities::of(&eight, DvCapability::Supported);
+        assert_eq!(unknown.vp9_video_ranges(), None);
+        assert_eq!(unknown.av1_video_ranges(), None);
+        let hdr8 = unknown.with_hdr(HdrCapability::Supported);
+        assert_eq!(hdr8.vp9_video_ranges().unwrap(), ["SDR"], "8-bit VP9 claims no HDR");
+        let hdr10 = Capabilities::of(&ten, DvCapability::Supported).with_hdr(HdrCapability::Supported);
+        assert_eq!(hdr10.vp9_video_ranges().unwrap(), ["SDR", "HDR10"]);
+        let av1 = hdr10.av1_video_ranges().unwrap();
+        assert_eq!(av1, ["SDR", "HDR10", "HDR10Plus", "HLG"]);
+        assert!(av1.iter().all(|r| !r.starts_with("DOVI")));
+        let sdr = Capabilities::of(&ten, DvCapability::Supported).with_hdr(HdrCapability::Unsupported);
+        assert_eq!(sdr.vp9_video_ranges().unwrap(), ["SDR"]);
+        assert_eq!(sdr.av1_video_ranges().unwrap(), ["SDR"]);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use super::engine::{
     arm_live_clock_prime, drain_aq, feed_both_lanes, feed_sample, Engine, Source,
 };
 use super::shared::{HlsPauseCompletion, HlsPrimeKind, HlsSeekPause, Stage};
-use super::{ACB_OK, SHARED, TX};
+use super::{seek_mode, SeekMode, ACB_OK, SHARED, TX};
 use nj_base::task::MainThread;
 use std::os::raw::c_char;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -96,6 +96,13 @@ fn set_state(s: super::shared::PlaybackState) {
 /// by whichever of two paths wins a race with the stuck-watchdog, which log different lines.
 /// Counting either line therefore measures PMS latency, not merging — `coalesced=` measures
 /// merging directly, and both paths report it.
+/// Whether a direct-play seek in `mode` is a full fresh `Load` (`engine::reload_at`) rather than an
+/// in-place one. Only `Reload` is: `Segment` and `NativeSeek` (LG's public `Seek`, issue #568) both
+/// seek in place.
+pub(super) fn seek_reloads(mode: SeekMode) -> bool {
+    mode == SeekMode::Reload
+}
+
 fn take_coalesced() -> u32 {
     TX.seek_reqs.swap(0, Relaxed).saturating_sub(1)
 }
@@ -1165,7 +1172,10 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             // permanently Busy and old ABR evidence authorized against the new bytes.
             crate::route::commit_user_seek();
         }
-        if eng.seek_retries < 2 {
+        // A refused native `Seek` leaves the engine flushed with the target re-posted for the
+        // reload: never retry the reopen (it would re-open the feed and re-publish an av_seek
+        // into a session whose mode no longer anchors in place), go straight to `reload_at`.
+        if eng.seek_retries < 2 && !seek_reloads(seek_mode()) {
             eng.seek_retries += 1;
             SHARED.seek_to_ns.store(tgt, Release); // re-publish; the demux thread seeks on it
             SHARED.seek_target_ns.store(tgt, Relaxed); // rebase guard keys on the retried target
@@ -1198,7 +1208,9 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         && t >= 0
         && !crate::route::original_recovery_pending()
         && !crate::route::claim_in_flight() // see the SEEK_STUCK_MS branch's doc above
-        && !(eng.flushed && eng.rebase_pending) // coalesce: don't stack in-place seeks
+        // coalesce: don't stack in-place seeks. Not in `Reload` mode: a refused native `Seek`
+        // leaves the engine flushed and re-posts the target for exactly this branch to reload at.
+        && !(eng.flushed && eng.rebase_pending && !seek_reloads(seek_mode()))
         && eng.stage >= Stage::Playing
         && SHARED.duration_ns.load(Relaxed) > 0
         && (is_transcode || SHARED.file_size.load(Relaxed) > 0)
@@ -1229,16 +1241,17 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             }
             return;
         }
-        // DIRECT-PLAY seek: Kodi IN-PLACE seek — flush + av_seek the demuxer, and
-        // (in feed_stream, on the first post-flush keyframe) setTimeToDecode + sendSegmentEvent
-        // to re-anchor the GStreamer segment WITHOUT a reload/decoder re-init (no A/V-resync
-        // glitch). A plain flush()+refeed with NO fresh segment left a STALE GStreamer segment
-        // → the HW sink stops draining ~48 s later → permanent BufferFull + "Playing error"
-        // (root-caused by decompiling libpipeline/lxvideosink; see engine::reload_at). Falls
-        // back to reload-per-seek if the pipeline isn't reachable (INPLACE_SEEK_OK cleared by
-        // feed_stream when sendSegmentEvent can't find it). reload_at REPLACES the ENGINE, so
-        // `eng` dangles after it: return immediately.
-        if !super::INPLACE_SEEK_OK.load(Relaxed) {
+        // DIRECT-PLAY seek: IN-PLACE — pause, av_seek the demuxer and, in feed_stream on the first
+        // post-seek keyframe, re-anchor the GStreamer segment WITHOUT a reload/decoder re-init (no
+        // A/V-resync glitch): `Segment` = flush here + setTimeToDecode + sendSegmentEvent (Kodi),
+        // `NativeSeek` = LG's public Seek(millis), which flushes by itself. A plain flush()+refeed
+        // with NO fresh segment left a STALE GStreamer segment → the HW sink stops draining ~48 s
+        // later → permanent BufferFull + "Playing error" (root-caused by decompiling
+        // libpipeline/lxvideosink; see engine::reload_at). `Reload` mode — selected for old-ABI
+        // libraries, or set by feed_stream when sendSegmentEvent can't find the pipeline or a
+        // native Seek is refused — is reload-per-seek. reload_at REPLACES the ENGINE, so `eng`
+        // dangles after it: return immediately.
+        if seek_reloads(seek_mode()) {
             crate::route::commit_user_seek();
             settle_reload(super::engine::reload_at(ps, pa, t), "direct seek reload");
             return;
@@ -1294,8 +1307,13 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         // Advancing earlier would strand the live worker when PMS/native refused; advancing later
         // would let pre-seek ABR evidence publish while queues are already being reset.
         crate::route::commit_user_seek();
-        unsafe {
-            super::sink().flush(mt); // drop decoded/queued frames only after the clock is really held
+        // `NativeSeek` does not flush here: LG's public `Seek` flushes the pipeline itself when
+        // `feed_stream` calls it on the landed keyframe, and a `flush()` is itself a seek to 0, so
+        // flushing after (or instead of re-anchoring) leaves the stale segment at 0 (#568).
+        if seek_mode() != SeekMode::NativeSeek {
+            unsafe {
+                super::sink().flush(mt); // drop decoded/queued frames only after the clock is really held
+            }
         }
         drain_aq(eng);
         // in-place direct-play seek: publish the target and let the DEMUX THREAD av_seek_frame
@@ -1506,11 +1524,24 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         }
     }
 
-    // ---------- send the WHOLE sourceInfo envelope VERBATIM, once frames flow, then
+    // ---------- send the WHOLE sourceInfo envelope once frames flow (verbatim, except a
+    // container-PQ VP9 stream, see below), then
     // window + PLAYING (setMediaVideoData -> setDisplayWindow -> setState PLAYING) ----------
     if eng.stage == Stage::Bound && !eng.video_info_sent && SHARED.frames.load(Relaxed) >= 2 {
         let bytes = SHARED.source_info.lock().unwrap().clone();
-        if let Some(bytes) = bytes {
+        if let Some(mut bytes) = bytes {
+            // A VP9 stream's PQ lives in the container, which the pipeline never sees, so its own
+            // envelope says "hdrType":"none". Say HDR10 here when the demuxer found PQ (see
+            // `vp9_hdr`). `/tmp/nativejelly-novp9hdr` sends the envelope as the pipeline made it.
+            let container_hdr = *SHARED.container_hdr.lock().unwrap();
+            if let Some(h) = container_hdr {
+                if !nj_base::devtrig::flag("novp9hdr") {
+                    if let Some(rewritten) = super::vp9_hdr::rewrite_source_info(&bytes, &h) {
+                        super::log(&super::vp9_hdr::log_line(&h));
+                        bytes = rewritten;
+                    }
+                }
+            }
             let rv = unsafe { super::sink().plane_send_video_data(mt, bytes.as_ptr() as *const c_char) };
             super::log(&format!(
                 "setMediaVideoData rv={rv} frames={}",
@@ -1849,5 +1880,195 @@ mod tests {
         let (carried, _, still_owed) = run_carry(-1, None);
         assert_eq!(carried, None);
         assert!(!still_owed);
+    }
+}
+
+/// #568, at the PUMP level: a direct-play seek on a `VP_EXPORTED` (webOS 5+) session, driven by
+/// the real `pump` ticks and the real `feed_stream` against the host sink with the clock sink
+/// armed (which reports `VP_EXPORTED`). `reload_at` has no route to reload in a unit rig (an empty
+/// URL is ignored), so each call is read off `engine::RELOAD_AT_LOG`; the rig stands in for the
+/// reload's EFFECT (a new Engine) where the next seek needs one.
+#[cfg(all(test, feature = "hostsim"))]
+mod native_seek_pump_tests {
+    use super::*;
+    use crate::player::ffi_host;
+    use crate::player::SeekMode;
+    use std::os::raw::c_int;
+
+    const TARGET_NS: i64 = 905_000_000_000;
+    const NEXT_NS: i64 = 1_200_000_000_000;
+    const V_STEP_NS: i64 = 41_708_333;
+
+    struct Rig {
+        ps: crate::route::PlaybackSession,
+        pa: super::super::adapter::PlayerAdapter,
+        now: u32,
+    }
+
+    impl Rig {
+        fn new(force_seek: Option<c_int>) -> Rig {
+            SHARED.reset_session();
+            TX.reset();
+            super::super::claim_hold::clear();
+            ffi_host::reset_native_lifecycle_for_test();
+            ffi_host::force_clocksink_for_test(true);
+            ffi_host::force_object_ready_for_test(true);
+            ffi_host::reset_seek_probe_for_test(force_seek);
+            super::super::engine::RELOAD_AT_LOG.lock().unwrap_or_else(|e| e.into_inner()).clear();
+            crate::player::set_native_seek_refused(false);
+            let mut pa = super::super::adapter::PlayerAdapter::new(unsafe { MainThread::assume() });
+            let epoch = SHARED.begin_native_session().expect("native session");
+            let mut eng = super::super::engine::streaming_engine_for_test(epoch);
+            eng.stage = Stage::Playing;
+            pa.install(eng);
+            SHARED.duration_ns.store(7_200_000_000_000, Relaxed);
+            SHARED.file_size.store(50_000_000_000, Relaxed);
+            SHARED.playpos_ns.store(60_000_000_000, Relaxed);
+            crate::player::set_seek_mode(SeekMode::NativeSeek);
+            Rig { ps: crate::route::PlaybackSession::IDLE, pa, now: 1_000 }
+        }
+
+        fn frame(&mut self) {
+            let _frame = nj_base::task::FrameScope::enter();
+            self.now += 16;
+            pump(&mut self.ps, &mut self.pa, self.now);
+        }
+
+        fn eng(&mut self) -> &mut Engine {
+            self.pa.engine().expect("engine")
+        }
+
+        /// The demux thread's job: the first keyframe at `ns` and the AUs after it.
+        fn land_keyframe(&mut self, ns: i64) {
+            // The demux thread took the av_seek mailbox before it produced the keyframe.
+            SHARED.seek_to_ns.store(-1, Release);
+            let au = [0u8; 64];
+            let qv = &mut **self.eng().aq_video.as_mut().unwrap() as *mut crate::aq::AuQueue;
+            for i in 0..60 {
+                crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, ns + i * V_STEP_NS, c_int::from(i == 0), 1);
+            }
+        }
+
+        /// Request a seek and frame until the pump has armed it (flushed, awaiting the keyframe).
+        fn arm(&mut self, ns: i64) {
+            crate::player::request_seek(ns);
+            for _ in 0..20 {
+                self.frame();
+                if self.eng().flushed {
+                    return;
+                }
+            }
+            panic!("the pump never armed the seek");
+        }
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            crate::player::set_native_seek_refused(false);
+            crate::player::set_seek_mode(SeekMode::Segment);
+            ffi_host::reset_seek_probe_for_test(None);
+            ffi_host::reset_native_lifecycle_for_test();
+            ffi_host::force_clocksink_for_test(false);
+            ffi_host::force_object_ready_for_test(false);
+            SHARED.test_force_native_idle();
+            SHARED.reset_session();
+            TX.reset();
+            crate::route::reset_player_control_for_test(crate::route::idle_session_for_test());
+        }
+    }
+
+    fn reloads() -> Vec<i64> {
+        super::super::engine::RELOAD_AT_LOG.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    #[test]
+    fn a_native_seek_lands_on_the_keyframe_without_a_flush_or_a_reload() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        rig.arm(TARGET_NS);
+        assert_eq!(SHARED.seek_to_ns.load(Relaxed), TARGET_NS, "the demux thread is told to av_seek");
+        rig.land_keyframe(TARGET_NS);
+        for _ in 0..5 {
+            rig.frame();
+        }
+        assert_eq!(ffi_host::seek_log_for_test(), vec![TARGET_NS / 1_000_000], "one native Seek, at the keyframe");
+        assert_eq!(ffi_host::flush_calls_for_test(), 0, "Seek flushes itself; the pump must not");
+        assert_eq!(ffi_host::segment_calls_for_test(), 0, "the private Segment verbs never run on VP_EXPORTED");
+        assert!(reloads().is_empty(), "no fresh Load");
+        assert!(!rig.eng().flushed && !rig.eng().rebase_pending, "the seek is applied");
+        assert_eq!(crate::player::seek_mode(), SeekMode::NativeSeek);
+    }
+
+    #[test]
+    fn a_refused_seek_reloads_exactly_once_at_the_target_even_past_the_stuck_watchdog() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(Some(0));
+        rig.arm(TARGET_NS);
+        rig.land_keyframe(TARGET_NS);
+        rig.frame(); // the feed refuses the Seek and re-posts the target for the reload
+        assert_eq!(ffi_host::seek_log_for_test().len(), 1, "one refused Seek");
+        assert_eq!(TX.seek_to_ns.load(Relaxed), TARGET_NS, "re-posted for the reload");
+        // Late in the window: the stuck watchdog (SEEK_STUCK_MS) is due on the very next tick, and
+        // it runs BEFORE the pending-seek branch.
+        rig.now += 5_000;
+        for _ in 0..6 {
+            rig.frame();
+            if !reloads().is_empty() {
+                break;
+            }
+        }
+        assert_eq!(ffi_host::seek_log_for_test().len(), 1, "one refused Seek");
+        assert_eq!(reloads(), vec![TARGET_NS], "exactly one reload_at, at the user's target");
+        assert_eq!(
+            SHARED.seek_to_ns.load(Relaxed),
+            -1,
+            "the demux feed is not re-opened with a second av_seek in Reload mode"
+        );
+        assert_eq!(crate::player::seek_mode(), SeekMode::Reload);
+        assert!(crate::player::native_seek_refused());
+
+        // Another keyframe reaching the flushed engine must not anchor through the private offsets.
+        rig.land_keyframe(TARGET_NS + 1_000_000_000);
+        for _ in 0..3 {
+            rig.eng(); // the real reload replaced the engine; here it is the same, still flushed
+            let mt = unsafe { MainThread::assume() };
+            super::super::engine::feed_both_lanes(&mt, rig.eng());
+        }
+        assert_eq!(ffi_host::segment_calls_for_test(), 0, "no setTimeToDecode/setContentInfo/sendSegment, ever");
+        assert_eq!(ffi_host::flush_calls_for_test(), 0);
+    }
+
+    #[test]
+    fn once_refused_the_same_playback_reloads_every_later_seek_without_calling_seek() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(Some(0));
+        rig.arm(TARGET_NS);
+        rig.land_keyframe(TARGET_NS);
+        for _ in 0..3 {
+            rig.frame();
+        }
+        assert_eq!(ffi_host::seek_log_for_test().len(), 1);
+        assert_eq!(reloads(), vec![TARGET_NS]);
+
+        // The reload starts a NEW session in the same playback: it must not re-offer the Seek.
+        let mode = super::super::engine::session_seek_mode(true, crate::player::VP_EXPORTED, None);
+        assert_eq!(mode, SeekMode::Reload, "the downgrade survives reload_at");
+        crate::player::set_seek_mode(mode);
+        // Stand in for the reload's new Engine.
+        let epoch = SHARED.begin_native_session().unwrap_or(0);
+        let mut fresh = super::super::engine::streaming_engine_for_test(epoch);
+        fresh.stage = Stage::Playing;
+        rig.pa.install(fresh);
+        crate::player::request_seek(NEXT_NS);
+        for _ in 0..4 {
+            rig.frame();
+        }
+        assert_eq!(reloads(), vec![TARGET_NS, NEXT_NS], "the next seek is a reload");
+        assert_eq!(ffi_host::seek_log_for_test().len(), 1, "Seek is not called again this playback");
+        assert_eq!(ffi_host::segment_calls_for_test(), 0);
+
+        // A fresh play is a new playback and gets to try the native Seek again.
+        let _ = crate::player::start_bufferfeed_tracked(&mut rig.ps, &mut super::super::adapter::PlayerAdapter::new(unsafe { MainThread::assume() }));
+        assert!(!crate::player::native_seek_refused(), "a fresh play clears the latch");
     }
 }

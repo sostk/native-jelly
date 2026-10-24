@@ -11,6 +11,7 @@
 //! or the ACB/Starfish seam, so the parameter carries information. `arm_seek` and `resume_at`
 //! run on the main thread too and deliberately do not take one: they only publish to `SHARED`.
 use super::shared::{HlsPlayCompletion, HlsPrimeKind, Stage};
+use super::SeekMode;
 use super::{log, sink, threads, ACB_OK, PTYPE, SHARED, TX};
 use crate::aq::{AuNode, AuQueue};
 use nj_net::stream::HttpStream;
@@ -527,6 +528,67 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
     fps: 60,
 };
 
+/// The video codec one Load declares: what the payload's `codec.video` names, and what the
+/// `dg_load_v` diagnostic code says. Written once here so the three never disagree.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum LoadVideo {
+    H264,
+    H265,
+    Av1,
+    Vp9,
+}
+
+impl LoadVideo {
+    /// The route's stream vcodec -> what the Load declares, case-insensitively (Jellyfin emits lowercase;
+    /// the route's own comparisons elsewhere are case-insensitive too). **An unknown codec is `None`,
+    /// not H.264**: the old catch-all declared an H.264 Load for whatever the route held, so a codec
+    /// the pipeline cannot feed arrived as an H.264 declaration over a bitstream it could not parse,
+    /// i.e. a black screen with nothing in the log naming the cause. The empty string is the one
+    /// deliberate H.264: the route holds it until a decision installs a codec, which is the pipeline
+    /// tier's and the local-sample feeds' baseline.
+    pub(crate) fn of_stream(vcodec: &str) -> Option<Self> {
+        match vcodec.to_ascii_lowercase().as_str() {
+            "" | "h264" => Some(Self::H264),
+            "hevc" | "h265" => Some(Self::H265),
+            "av1" => Some(Self::Av1),
+            "vp9" => Some(Self::Vp9),
+            _ => None,
+        }
+    }
+    /// The payload's `codec.video` string. libpf selects its AV1 caps for `"AV1"`; the pipeline
+    /// has no av1parse, so an AV1 Load carries its configuration in-band (see `ff.rs`). `"VP9"`
+    /// is the name in libpf's codec table beside `"VP8"`; its `video/x-vp9` appsrc caps carry no
+    /// `codec_data`, and a VP9 frame carries its own headers, so nothing is added to the packets.
+    pub(crate) fn payload_name(self) -> &'static str {
+        match self {
+            Self::H264 => "H264",
+            Self::H265 => "H265",
+            Self::Av1 => "AV1",
+            Self::Vp9 => "VP9",
+        }
+    }
+    /// `SHARED.dg_load_v`'s code (video 1 = H264, 2 = H265, 3 = AV1, 4 = VP9).
+    pub(crate) fn diag_code(self) -> u8 {
+        match self {
+            Self::H264 => 1,
+            Self::H265 => 2,
+            Self::Av1 => 3,
+            Self::Vp9 => 4,
+        }
+    }
+}
+
+/// True when the Load must be refused: an AV1 or VP9 stream on a set whose table lists no such
+/// decoder. Only reachable when a server ignores the profile we sent, so the refusal is a refusal
+/// to declare a codec the set may not have, never a fallback to H.264 for another bitstream.
+pub(crate) fn load_video_refused(lv: LoadVideo, caps: &nj_platform::devcaps::Caps) -> bool {
+    match lv {
+        LoadVideo::Av1 => !caps.av1,
+        LoadVideo::Vp9 => !caps.vp9,
+        LoadVideo::H264 | LoadVideo::H265 => false,
+    }
+}
+
 /// **The sink envelope for this session, and the rule is deliberately narrow.** Until 2026-09-03
 /// the streamed A/V Load declared `ENVELOPE_UHD60` for every codec and every source, and on
 /// webOS 10.3.1 that refuses EVERY H.264 Load — i.e. every server transcode — with `type=18
@@ -554,8 +616,11 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
 /// value every Dolby Vision verification was taken under. `/tmp/nativejelly-sinkmax=WxH@F`
 /// overrides the whole result so the remaining legs are an A/B with no rebuild. Pure; the
 /// wrappers feed it the route.
+///
+/// AV1 and VP9 copy HEVC's rule because only H.264 was measured to need the FHD declaration on
+/// webOS 10; both are unmeasured on that axis (issue #593).
 fn sink_envelope(
-    is_h265: bool,
+    video: LoadVideo,
     max_raster: (u16, u16),
     stream_fps: f64,
     caps: &nj_platform::devcaps::Caps,
@@ -563,7 +628,7 @@ fn sink_envelope(
 ) -> SinkEnvelope {
     let fits_fhd = |w: u32, h: u32| w > 0 && h > 0 && w <= 1920 && h <= 1088;
     let (mw, mh) = (u32::from(max_raster.0), u32::from(max_raster.1));
-    let mut env = if !is_h265 && fits_fhd(mw, mh) {
+    let mut env = if video == LoadVideo::H264 && fits_fhd(mw, mh) {
         ENVELOPE_FHD60
     } else {
         ENVELOPE_UHD60
@@ -579,11 +644,16 @@ fn sink_envelope(
     // what the eye saw: declared at 60 the 4K 24p stream was PRESENTED at 13.0 fps mean, worst
     // second 10; declared at 24, 24.1 fps.** The class, not the exact value: 23.976 → 24 keeps
     // the declaration a ceiling the stream fits under.
-    if !is_h265 && stream_fps > 0.0 && stream_fps.is_finite() {
+    if video == LoadVideo::H264 && stream_fps > 0.0 && stream_fps.is_finite() {
         env.fps = fps_class(stream_fps);
     }
     if measured {
-        let (rw, rh, rf) = if is_h265 { caps.hevc_row } else { caps.h264_row };
+        let (rw, rh, rf) = match video {
+            LoadVideo::H264 => caps.h264_row,
+            LoadVideo::H265 => caps.hevc_row,
+            LoadVideo::Av1 => caps.av1_row,
+            LoadVideo::Vp9 => caps.vp9_row,
+        };
         let clamp = |v: u32, bound: u32| if bound == 0 { v } else { v.min(bound) };
         env.w = clamp(env.w, rw);
         env.h = clamp(env.h, rh);
@@ -600,16 +670,22 @@ fn sink_envelope(
 /// every arm that sends one (the local-sample feeds and the streamed `/tmp/nativejelly-noaudio`
 /// path), so the `load:` line's `max=` reports what was SENT rather than the streamed builder's
 /// initializer. The test below pins these to the strings themselves.
-fn static_envelope(hevc: bool) -> SinkEnvelope {
-    if hevc {
-        ENVELOPE_UHD60
-    } else {
-        SinkEnvelope {
+fn static_envelope(video: LoadVideo) -> SinkEnvelope {
+    match video {
+        LoadVideo::H264 => SinkEnvelope {
             w: 1920,
             h: 1080,
             fps: 30,
-        }
+        },
+        LoadVideo::H265 | LoadVideo::Av1 | LoadVideo::Vp9 => ENVELOPE_UHD60,
     }
+}
+
+/// The `PAYLOAD_H265` template with its codec renamed: the static Load for an AV1 or VP9 stream on
+/// the no-audio path, which keeps that template's envelope and transport.
+fn renamed_static_payload(video: LoadVideo) -> String {
+    let to = format!(r#""video":"{}""#, video.payload_name());
+    PAYLOAD_H265.replacen(r#""video":"H265""#, &to, 1)
 }
 
 /// The smallest of the broadcast/film rate classes the stream fits under: 24, 25, 30, 50, 60,
@@ -623,7 +699,7 @@ fn fps_class(fps: f64) -> u32 {
     fps.ceil() as u32
 }
 
-fn sink_envelope_now(ps: &crate::route::PlaybackSession, is_h265: bool) -> SinkEnvelope {
+fn sink_envelope_now(ps: &crate::route::PlaybackSession, video: LoadVideo) -> SinkEnvelope {
     if let Some(spec) = nj_base::devtrig::read("sinkmax") {
         if let Some(env) = parse_sinkmax(&spec) {
             #[cfg(feature = "devtriggers")]
@@ -636,7 +712,7 @@ fn sink_envelope_now(ps: &crate::route::PlaybackSession, is_h265: bool) -> SinkE
         log(&format!("sinkmax: unparseable spec {spec:?} — ignored"));
     }
     sink_envelope(
-        is_h265,
+        video,
         crate::route::sink_max_raster(ps),
         crate::route::stream_fps(ps),
         nj_platform::devcaps::caps(),
@@ -947,6 +1023,11 @@ pub(crate) fn start_bufferfeed_tracked(ps: &mut crate::route::PlaybackSession, p
         return BufferfeedStartOutcome::Failed;
     }
     ps.jail_load_blocked = false;
+    // A fresh play (not a `reload_at`, which reaches `start_bufferfeed_for` directly) is a new
+    // playback: it gets to try the native Seek again.
+    if pa.engine().is_none() {
+        super::set_native_seek_refused(false);
+    }
     if let Some(existing) = pa.engine().map(|engine| engine.route_start) {
         match crate::route::classify_live_engine_start(existing) {
             crate::route::LiveEngineStartRelation::CurrentAttempt => {
@@ -1145,28 +1226,44 @@ fn start_bufferfeed_inner(
     // The LG-side audio name the payload ended up carrying, hoisted so the `load:` line below can
     // report it. "-" is the video-only case, where there is no audio ES to name.
     let mut audio_declared: &str = "-";
-    // ...and the video name beside it, for the same reason and to keep the hevc->"H265" mapping
-    // written ONCE: the `load:` line below would otherwise re-read the route and re-derive it.
+    // ...and the video name beside it, for the same reason and to keep the codec->name mapping
+    // written ONCE (`LoadVideo`): the `load:` line below would otherwise re-read the route and
+    // re-derive it.
     let mut video_declared: &str = "-";
     let payload_str: &str = if stream {
-        let hevc = crate::route::stream_vcodec(ps) == "hevc";
-        video_declared = if hevc { "H265" } else { "H264" };
+        let stream_vcodec = crate::route::stream_vcodec(ps);
+        let Some(lv) = LoadVideo::of_stream(&stream_vcodec) else {
+            log(&format!(
+                "start_bufferfeed: the pipeline cannot feed video codec {stream_vcodec:?}; refusing the Load instead of declaring it H.264"
+            ));
+            SHARED.demux_failed.store(true, Ordering::Release);
+            return Err(crate::route::RouteStartResult::StartFailed);
+        };
+        if load_video_refused(lv, nj_platform::devcaps::caps()) {
+            log(&format!(
+                "start_bufferfeed: {} stream but the device table lists no such decoder; refusing the Load",
+                lv.payload_name()
+            ));
+            SHARED.demux_failed.store(true, Ordering::Release);
+            return Err(crate::route::RouteStartResult::StartFailed);
+        }
+        video_declared = lv.payload_name();
         // Record what the payload ACTUALLY says, for the diagnostics read-out — including the
         // video-only case, where `dg_load_a == 0` is the whole explanation for silence.
-        SHARED
-            .dg_load_v
-            .store(if hevc { 2 } else { 1 }, Ordering::Relaxed);
+        SHARED.dg_load_v.store(lv.diag_code(), Ordering::Relaxed);
         if no_audio {
             SHARED.dg_load_a.store(0, Ordering::Relaxed);
             // A static payload declares its own envelope; say so on the `load:` line.
-            sink_env = static_envelope(hevc);
-            if hevc {
-                PAYLOAD_H265
-            } else {
-                PAYLOAD_V
+            sink_env = static_envelope(lv);
+            match lv {
+                LoadVideo::H264 => PAYLOAD_V,
+                LoadVideo::H265 => PAYLOAD_H265,
+                LoadVideo::Av1 | LoadVideo::Vp9 => {
+                    stream_payload = renamed_static_payload(lv);
+                    stream_payload.as_str()
+                }
             }
         } else {
-            let vc = video_declared;
             // LG's pipeline names E-AC3 "AC3 PLUS" (Dolby Digital Plus), NOT "EAC3" — the
             // wrong string leaves the audio ES unconfigured, and with audioSync the video
             // sink slaves to the dead audio clock and stalls (verified: video-only plays).
@@ -1185,18 +1282,18 @@ fn start_bufferfeed_inner(
             // the declaration and refuses every H.264 Load at 4K60 (`smp_cb type=18 num=601`) —
             // i.e. every server transcode. `sink_envelope` is the rule now, and it is deliberately
             // no wider than what was measured: `docs/webos10-resource-allocation.md`.
-            // `vc` is the STREAM's declared codec; `is_h265` above belongs to the local-sample
+            // `lv` is the STREAM's declared codec; `is_h265` above belongs to the local-sample
             // path and is false here for every streamed HEVC playback (device-measured 2026-09-03:
             // three HEVC cells declared FHD before this read the right flag).
-            sink_env = sink_envelope_now(ps, vc == "H265");
-            stream_payload = build_av_payload(ps, vc, ac, sink_env);
+            sink_env = sink_envelope_now(ps, lv);
+            stream_payload = build_av_payload(ps, lv.payload_name(), ac, sink_env);
             &stream_payload
         }
     } else if is_h265 {
-        sink_env = static_envelope(true);
+        sink_env = static_envelope(LoadVideo::H265);
         PAYLOAD_H265
     } else {
-        sink_env = static_envelope(false);
+        sink_env = static_envelope(LoadVideo::H264);
         PAYLOAD_V
     };
     // The windowId splice happens HERE, at the single point every payload variant passes through,
@@ -1401,25 +1498,20 @@ fn start_bufferfeed_inner(
         report_stop: Some(report_stop),
         preview_abandon: false,
     };
-    // Re-arm the in-place-seek probe for this session. `feed_stream` clears it when
-    // `sf_send_segment` can't reach the pipeline, and that is a fact about the StarfishMediaAPIs
-    // object — which `sf_load` constructs and teardown's `sf_destroy` destructs, once per session
-    // — not about the TV (see the SCOPE note on INPLACE_SEEK_OK in mod.rs). Left latched for the
-    // process, one teardown-window race silently turned every subsequent seek, of every
-    // subsequent item, into a full reload for the rest of the app's life. Placed HERE rather than
-    // at the top of this function on purpose: the `engine_is_live` no-op return above must NOT
-    // re-arm, or a stray PLAY landing mid-session would cancel a fallback that is still needed.
-    //
-    // NOT re-armed on webOS 5+. In-place seek reaches the pipeline through two decompile-derived
-    // offsets into LG-private C++ objects — `StarfishMediaAPIs::player` at object+0x4c, then
-    // `AbstractPlayer::pipeline` at +0x04 (src/starfish.c's sf_pipeline), plus
-    // MEDIA_CUSTOM_CONTENT_INFO's ptsToDecode at +0x28. Every one of those was read off a
-    // webOS 4.5 binary with a disassembler, and nothing in a symbol table can confirm them on
-    // another firmware: a field added to StarfishMediaAPIs by any 5.x build moves +0x4c and the
-    // very next seek dereferences whatever now lives there. The reload fallback is slower but is
-    // built out of Load/Play alone and assumes no layout at all. Re-enable per release only once
-    // somebody has re-derived the offsets on that firmware.
-    super::INPLACE_SEEK_OK.store(sink().window_mode() != super::VP_EXPORTED, Ordering::Relaxed);
+    // Select this session's direct-play seek mode (`SeekMode`, mod.rs, whose SCOPE note argues why
+    // it is per session). `feed_stream` can downgrade it to `Reload` mid-session (the pipeline was
+    // unreachable, or LG refused a `Seek`), and that is a fact about the StarfishMediaAPIs object
+    // — which `sf_load` constructs and teardown's `sf_destroy` destructs, once per session — not
+    // about the TV, so it is re-selected here for every session. Placed HERE rather than at the
+    // top of this function on purpose: the `engine_is_live` no-op return above must NOT re-select,
+    // or a stray PLAY landing mid-session would cancel a downgrade that is still needed.
+    let layout_known = inplace_layout_known(
+        nj_platform::tv::device::info().major,
+        sink().feed_abi_is_cow(),
+    );
+    let mode = session_seek_mode(layout_known, sink().window_mode(), dev_seek_mode());
+    log(&format!("seek mode: {mode:?} (layout_known={layout_known})"));
+    super::set_seek_mode(mode);
     pa.install(eng);
     native_start.commit();
     clock_start.commit();
@@ -1594,7 +1686,14 @@ fn reload_transcode_start(ps: &mut crate::route::PlaybackSession, pa: &mut super
     Some(start_bufferfeed_for(ps, pa, ticket))
 }
 
+/// Every target `reload_at` was asked for (test probe, #568): proves a refused native Seek reloads
+/// exactly once, at the user's target.
+#[cfg(test)]
+pub(super) static RELOAD_AT_LOG: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
+
 pub(crate) fn reload_at(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, target_ns: i64) -> ReloadOutcome {
+    #[cfg(test)]
+    RELOAD_AT_LOG.lock().unwrap_or_else(|e| e.into_inner()).push(target_ns);
     if crate::route::url(ps).is_empty() {
         log("reload_at: no url (ignored)");
         settle_missing_route_start();
@@ -1882,7 +1981,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // reload has no transcode session anyway, so the skip only matters for the URL).
     // The DURATION is a fact about the FILE, and a reload plays the same file: keep it across
     // the reset so the playbar has a denominator while the demuxer reopens. Without this every
-    // reload-based seek — which on webOS 5+ is EVERY seek, in-place being disabled there — drew
+    // reload-based seek (old-ABI 3.x, a refused native Seek, a transcode seek) drew
     // the playhead at position ÷ 0, i.e. the far left, for the few hundred ms until `ff.rs`
     // re-published it, while the clock beside it (position alone, seeded by `arm_seek`) read
     // correctly. Reported on an LG C3 (webOS 23). A real stop still zeroes it: the next item is
@@ -2478,7 +2577,56 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                         continue;
                     }
                 }
-                if eng.flushed {
+                if eng.flushed && super::seek_mode() == SeekMode::NativeSeek {
+                    // NATIVE in-place seek (#568): feed the REAL content PTS (pts_shift=0,
+                    // disp_base=0 -> playpos = presented real pts = content time, as in the
+                    // Segment branch below) and anchor the pipeline with LG's public
+                    // `StarfishMediaAPIs::Seek(millis)`. Seek is a flushing `gst_element_seek`
+                    // whose new segment starts at EXACTLY the millis passed, so the PTS fed from
+                    // here on is on that timeline by construction; the pump skipped its own
+                    // `flush()` for this mode and nothing may flush after this (a `flush()` is
+                    // itself a seek to 0 and re-creates the stale-segment stall). `feed_stream`
+                    // runs on the main thread and is the only Feed caller, and this keyframe is
+                    // not fed yet, so Seek cannot race a Feed. Never a negative millis: Seek
+                    // refuses it, and a negative PTS is unparseable by Feed.
+                    SHARED.pts_shift.store(0, Ordering::Relaxed);
+                    let ms = pts.max(0) / 1_000_000;
+                    let rv = unsafe { sink().seek(mt, ms) };
+                    log(&format!("in-place seek(native): Seek({ms}) rv={rv}"));
+                    if rv == 0 {
+                        // A refused Seek can leave the pipeline refusing every Feed. Drop the rest
+                        // of THIS SESSION's seeks to the reload path and redo THIS one as a
+                        // reload at the user's target (the pump reads the mailbox next tick;
+                        // `reload_at` REPLACES the engine). `eng.flushed`/`rebase_pending` stay
+                        // set so the audio lane keeps holding and no AU reaches a pipeline that
+                        // is rejecting Feed.
+                        super::set_seek_mode(SeekMode::Reload);
+                        // Latched across the reload this very seek is about to do, so the fresh
+                        // session's `select_seek_mode` does not offer the same firmware another
+                        // refused Seek on every later seek of this playback.
+                        super::set_native_seek_refused(true);
+                        log(
+                            "in-place seek DOWNGRADE: native Seek refused -> reload-per-seek for \
+                             the rest of this playback",
+                        );
+                        let tgt = SHARED.seek_target_ns.load(Ordering::Relaxed).max(0);
+                        TX.seek_reqs.store(1, Ordering::Release);
+                        TX.seek_to_ns.store(tgt, Ordering::Release);
+                        eng.pending_video = None;
+                        break;
+                    }
+                    segment_installed = true;
+                    eng.flushed = false;
+                } else if eng.flushed && super::seek_mode() != SeekMode::Segment {
+                    // Flushed but not in a mode that anchors in place: a refused native `Seek`
+                    // downgraded the session to `Reload` and the pump's reload (`reload_at`)
+                    // is on its way. The private Segment path (`sf_pipeline`'s decompile-derived
+                    // offsets, proven on webOS 4.5 only) must NEVER run here, so this keyframe
+                    // anchors nothing: drop it and leave `flushed`/`rebase_pending` set, which
+                    // keeps the audio lane holding until the reload replaces the engine.
+                    eng.pending_video = None;
+                    break;
+                } else if eng.flushed {
                     // Kodi IN-PLACE seek (exact): feed the REAL content PTS (no rebase), tell the
                     // pipeline the real decode position, then inject a fresh GStreamer SEGMENT —
                     // this re-anchors the sink WITHOUT a reload/decoder re-init. disp_base=0 +
@@ -2511,7 +2659,7 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                         // silently became multi-second reloads with nothing in the event log
                         // naming the cause — only the `sendSegment=0` above, whose consequence
                         // was not stated anywhere.
-                        super::INPLACE_SEEK_OK.store(false, Ordering::Relaxed);
+                        super::set_seek_mode(SeekMode::Reload);
                         log(
                             "in-place seek DOWNGRADE: sendSegment=0 (CustomPipeline unreachable) \
                              -> reload-per-seek for the rest of this session",
@@ -2768,6 +2916,68 @@ pub(crate) fn feed_sample(mt: &MainThread, eng: &mut Engine) {
         }
         s.next += 1;
         fed += 1;
+    }
+}
+
+/// Whether the decompiled StarfishMediaAPIs offsets (see the NOR comment in `start_bufferfeed_inner`)
+/// may be trusted for in-place seek. The old-ABI `Feed` is the primary gate: it proves
+/// libplayerAPIs is the pre-C++11 build, so 3.9.x is excluded without listing releases. A known
+/// release below 4 is refused too; `major == 0` (release unknown) defers to the Feed evidence.
+fn inplace_layout_known(major: u32, feed_abi_is_cow: bool) -> bool {
+    !feed_abi_is_cow && (major == 0 || major >= 4)
+}
+
+/// [`select_seek_mode`] for a session that is starting: a `NativeSeek` this playback already had
+/// REFUSED stays `Reload` (the latch `feed_stream` sets, which `reload_at` preserves and a fresh
+/// play clears), instead of paying reopen + keyframe + refused `Seek` + full `Load` on every seek.
+pub(super) fn session_seek_mode(layout_known: bool, window_mode: c_int, dev: Option<SeekMode>) -> SeekMode {
+    match select_seek_mode(layout_known, window_mode, dev) {
+        SeekMode::NativeSeek if super::native_seek_refused() => SeekMode::Reload,
+        mode => mode,
+    }
+}
+
+/// How a direct-play seek re-anchors the pipeline in a new session (see [`SeekMode`]).
+///
+/// - `VP_EXPORTED` (webOS 5+) -> [`SeekMode::NativeSeek`]: LG's PUBLIC `StarfishMediaAPIs::Seek`.
+///   The Kodi in-place path (`Segment`) is NOT used there: it reaches LG-private C++ objects
+///   through two decompile-derived offsets (`StarfishMediaAPIs::player` at object+0x4c, then
+///   `AbstractPlayer::pipeline` at +0x04, plus `MEDIA_CUSTOM_CONTENT_INFO`'s `ptsToDecode` at
+///   +0x28) read off a webOS 4.5 binary, which nothing in a symbol table can confirm on another
+///   firmware: a field added to StarfishMediaAPIs by any 5.x build moves +0x4c and the very next
+///   seek dereferences whatever now lives there. `Seek` is an exported symbol, present on every
+///   firmware 1.2 to 11.2, so it assumes no layout at all.
+/// - A known layout without `VP_EXPORTED` (webOS 4.x) -> [`SeekMode::Segment`], unchanged.
+/// - NOR when the library is the pre-C++11 build (`inplace_layout_known` false): its
+///   StarfishMediaAPIs is a different object from the 4.5 one, and the first fast-forward on a
+///   3.4.0 set crashed through those offsets. The old-ABI Feed (`sf_feed_abi_is_cow`) is the
+///   direct evidence, and it covers 3.9.x too. That COW Feed ABI is also unverified for `Seek`, so
+///   this is [`SeekMode::Reload`], as before. A KNOWN release below 4 is refused as well; an
+///   UNKNOWN one (`major == 0`, os_info unreadable) with the C++11 Feed keeps in-place seek, as
+///   before #578, because that Feed says the library is 4.x or later.
+/// `dev` is the `nativejelly-seekmode` dev trigger and wins when present, so a webOS 4.5 set can
+/// exercise `NativeSeek`.
+pub(super) fn select_seek_mode(layout_known: bool, window_mode: c_int, dev: Option<SeekMode>) -> SeekMode {
+    if let Some(forced) = dev {
+        return forced;
+    }
+    if window_mode == super::VP_EXPORTED {
+        SeekMode::NativeSeek
+    } else if layout_known {
+        SeekMode::Segment
+    } else {
+        SeekMode::Reload
+    }
+}
+
+/// `/tmp/nativejelly-seekmode`: `native`, `segment` or `reload`. `None` without the `devtriggers`
+/// feature (`devtrig::read` folds away), so a release build cannot be steered.
+fn dev_seek_mode() -> Option<SeekMode> {
+    match nj_base::devtrig::read("seekmode")?.trim() {
+        "native" => Some(SeekMode::NativeSeek),
+        "segment" => Some(SeekMode::Segment),
+        "reload" => Some(SeekMode::Reload),
+        _ => None,
     }
 }
 
@@ -5008,9 +5218,9 @@ mod sink_envelope_tests {
             ((0, 0), ENVELOPE_UHD60),  // nobody said: today's value
             ((1920, 0), ENVELOPE_UHD60),
         ] {
-            assert_eq!(sink_envelope(false, raster, 0.0, &c, true), want, "h264 {raster:?}");
+            assert_eq!(sink_envelope(LoadVideo::H264, raster, 0.0, &c, true), want, "h264 {raster:?}");
             assert_eq!(
-                sink_envelope(false, raster, 0.0, &c, false),
+                sink_envelope(LoadVideo::H264, raster, 0.0, &c, false),
                 want,
                 "h264 {raster:?} unmeasured"
             );
@@ -5021,24 +5231,24 @@ mod sink_envelope_tests {
     fn hevc_keeps_the_verified_4k60_on_a_4k_set_whatever_the_source() {
         let c = caps(DEV_SET.0, DEV_SET.1);
         for raster in [(720, 480), (1920, 1080), (3840, 2160), (0, 0)] {
-            assert_eq!(sink_envelope(true, raster, 0.0, &c, true), ENVELOPE_UHD60, "{raster:?}");
-            assert_eq!(sink_envelope(true, raster, 0.0, &c, false), ENVELOPE_UHD60, "{raster:?}");
+            assert_eq!(sink_envelope(LoadVideo::H265, raster, 0.0, &c, true), ENVELOPE_UHD60, "{raster:?}");
+            assert_eq!(sink_envelope(LoadVideo::H265, raster, 0.0, &c, false), ENVELOPE_UHD60, "{raster:?}");
         }
     }
 
     #[test]
     fn a_measured_full_hd_table_clamps_both_codecs_and_the_assumed_table_clamps_nothing() {
         let c = caps(FHD_SET.0, FHD_SET.1);
-        assert_eq!(sink_envelope(true, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
-        assert_eq!(sink_envelope(false, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
-        assert_eq!(sink_envelope(true, (0, 0), 0.0, &c, true), ENVELOPE_FHD60);
+        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
+        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 0.0, &c, true), ENVELOPE_FHD60);
+        assert_eq!(sink_envelope(LoadVideo::H265, (0, 0), 0.0, &c, true), ENVELOPE_FHD60);
         // the same rows, not measured: never a clamp
-        assert_eq!(sink_envelope(true, (3840, 2160), 0.0, &c, false), ENVELOPE_UHD60);
-        assert_eq!(sink_envelope(true, (0, 0), 0.0, &nj_platform::devcaps::Caps::assumed(), true), ENVELOPE_UHD60);
+        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &c, false), ENVELOPE_UHD60);
+        assert_eq!(sink_envelope(LoadVideo::H265, (0, 0), 0.0, &nj_platform::devcaps::Caps::assumed(), true), ENVELOPE_UHD60);
         // a table stating a lower frame rate clamps it; a higher one never raises it
         let slow = caps((3840, 2160, 30), (3840, 2160, 120));
-        assert_eq!(sink_envelope(false, (3840, 2160), 0.0, &slow, true).fps, 30);
-        assert_eq!(sink_envelope(true, (3840, 2160), 0.0, &slow, true).fps, 60);
+        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 0.0, &slow, true).fps, 30);
+        assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), 0.0, &slow, true).fps, 60);
     }
 
     /// The device measurement behind the rate rule: 4K H.264 declared at 60 is re-announced at
@@ -5047,13 +5257,13 @@ mod sink_envelope_tests {
     fn h264_declares_the_streams_rate_class_and_hevc_keeps_60() {
         let c = caps(DEV_SET.0, DEV_SET.1);
         for (fps, want) in [(24.0, 24), (23.976, 24), (25.0, 25), (29.97, 30), (30.0, 30), (50.0, 50), (59.94, 60), (60.0, 60), (120.0, 60), (0.0, 60)] {
-            assert_eq!(sink_envelope(false, (3840, 2160), fps, &c, true).fps, want, "h264 {fps}");
-            assert_eq!(sink_envelope(false, (1920, 1080), fps, &c, true).fps, want, "h264 fhd {fps}");
-            assert_eq!(sink_envelope(true, (3840, 2160), fps, &c, true).fps, 60, "hevc {fps}");
+            assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), fps, &c, true).fps, want, "h264 {fps}");
+            assert_eq!(sink_envelope(LoadVideo::H264, (1920, 1080), fps, &c, true).fps, want, "h264 fhd {fps}");
+            assert_eq!(sink_envelope(LoadVideo::H265, (3840, 2160), fps, &c, true).fps, 60, "hevc {fps}");
         }
         // the table still clamps a class from above
         let slow = caps((3840, 2160, 25), (3840, 2160, 60));
-        assert_eq!(sink_envelope(false, (3840, 2160), 30.0, &slow, true).fps, 25);
+        assert_eq!(sink_envelope(LoadVideo::H264, (3840, 2160), 30.0, &slow, true).fps, 25);
     }
 
     #[test]
@@ -5071,11 +5281,11 @@ mod sink_envelope_tests {
     /// The static payloads' declared envelopes, read out of the strings that are actually sent.
     #[test]
     fn the_static_envelopes_are_the_static_payloads_own_numbers() {
-        for (hevc, payload) in [(false, PAYLOAD_V), (true, PAYLOAD_H265)] {
-            let e = static_envelope(hevc);
-            assert!(payload.contains(&format!(r#""maxWidth":{}"#, e.w)), "{hevc}");
-            assert!(payload.contains(&format!(r#""maxHeight":{}"#, e.h)), "{hevc}");
-            assert!(payload.contains(&format!(r#""maxFrameRate":{}"#, e.fps)), "{hevc}");
+        for (video, payload) in [(LoadVideo::H264, PAYLOAD_V), (LoadVideo::H265, PAYLOAD_H265)] {
+            let e = static_envelope(video);
+            assert!(payload.contains(&format!(r#""maxWidth":{}"#, e.w)), "{video:?}");
+            assert!(payload.contains(&format!(r#""maxHeight":{}"#, e.h)), "{video:?}");
+            assert!(payload.contains(&format!(r#""maxFrameRate":{}"#, e.fps)), "{video:?}");
         }
     }
 
@@ -5088,6 +5298,109 @@ mod sink_envelope_tests {
         assert_eq!(parse_sinkmax("1920x1080"), None);
         assert_eq!(parse_sinkmax("0x1080@60"), None);
         assert_eq!(parse_sinkmax("abc"), None);
+    }
+
+    #[test]
+    fn load_video_maps_exactly_today_plus_av1_and_vp9() {
+        for (vcodec, want) in [
+            ("hevc", LoadVideo::H265),
+            ("h264", LoadVideo::H264),
+            ("av1", LoadVideo::Av1),
+            ("vp9", LoadVideo::Vp9),
+            ("", LoadVideo::H264),
+            ("HEVC", LoadVideo::H265),
+            ("H264", LoadVideo::H264),
+            ("h265", LoadVideo::H265),
+        ] {
+            assert_eq!(LoadVideo::of_stream(vcodec), Some(want), "{vcodec:?}");
+        }
+        // an unknown codec is refused, never declared as H.264
+        for vcodec in ["mpeg2video", "vc1", "vp8", "theora", "mpeg4", "avc", "x"] {
+            assert_eq!(LoadVideo::of_stream(vcodec), None, "{vcodec:?}");
+        }
+        let all = [LoadVideo::H264, LoadVideo::H265, LoadVideo::Av1, LoadVideo::Vp9];
+        assert_eq!(all.map(LoadVideo::payload_name), ["H264", "H265", "AV1", "VP9"]);
+        assert_eq!(all.map(LoadVideo::diag_code), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn vp9_envelope_follows_hevc_and_its_own_row() {
+        let mut c = caps(DEV_SET.0, DEV_SET.1);
+        c.vp9 = true;
+        c.vp9_row = (3840, 2160, 30);
+        assert_eq!(sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, false), ENVELOPE_UHD60);
+        assert_eq!(
+            sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, true),
+            SinkEnvelope { w: 3840, h: 2160, fps: 30 }
+        );
+        c.vp9_row = (0, 0, 0);
+        assert_eq!(sink_envelope(LoadVideo::Vp9, (1920, 1080), 23.976, &c, true), ENVELOPE_UHD60);
+    }
+
+    #[test]
+    fn av1_envelope_follows_hevc_and_its_own_row() {
+        let mut c = caps(DEV_SET.0, DEV_SET.1);
+        c.av1 = true;
+        c.av1_row = (3840, 2160, 30);
+        assert_eq!(sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, false), ENVELOPE_UHD60);
+        assert_eq!(
+            sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, true),
+            SinkEnvelope { w: 3840, h: 2160, fps: 30 }
+        );
+        c.av1_row = (0, 0, 0);
+        assert_eq!(sink_envelope(LoadVideo::Av1, (1920, 1080), 23.976, &c, true), ENVELOPE_UHD60);
+    }
+
+    #[test]
+    fn static_envelope_av1_and_vp9_are_uhd60() {
+        assert_eq!(static_envelope(LoadVideo::Av1), ENVELOPE_UHD60);
+        assert_eq!(static_envelope(LoadVideo::Vp9), ENVELOPE_UHD60);
+        assert_eq!(static_envelope(LoadVideo::H265), ENVELOPE_UHD60);
+        assert_eq!(static_envelope(LoadVideo::H264), SinkEnvelope { w: 1920, h: 1080, fps: 30 });
+    }
+
+    #[test]
+    fn the_renamed_static_payloads_declare_their_codec() {
+        assert_eq!(PAYLOAD_H265.matches(r#""video":"H265""#).count(), 1);
+        for (video, name) in [(LoadVideo::Av1, "AV1"), (LoadVideo::Vp9, "VP9")] {
+            let p = renamed_static_payload(video);
+            assert!(p.contains(&format!(r#""video":"{name}""#)), "{p}");
+            assert!(!p.contains("H265"), "{p}");
+            assert!(p.contains(r#""maxWidth":3840"#) && p.contains(r#""maxHeight":2160"#), "{p}");
+        }
+    }
+
+    #[test]
+    fn load_video_refused_only_for_av1_and_vp9_without_their_rows() {
+        let assumed = nj_platform::devcaps::Caps::assumed();
+        assert!(load_video_refused(LoadVideo::Av1, &assumed));
+        assert!(load_video_refused(LoadVideo::Vp9, &assumed));
+        assert!(!load_video_refused(LoadVideo::H264, &assumed));
+        assert!(!load_video_refused(LoadVideo::H265, &assumed));
+        let with_row = nj_platform::devcaps::Caps {
+            av1: true,
+            vp9: true,
+            ..nj_platform::devcaps::Caps::assumed()
+        };
+        for video in [LoadVideo::H264, LoadVideo::H265, LoadVideo::Av1, LoadVideo::Vp9] {
+            assert!(!load_video_refused(video, &with_row), "{video:?}");
+        }
+        // one row never admits the other codec
+        let av1_only = nj_platform::devcaps::Caps { av1: true, ..nj_platform::devcaps::Caps::assumed() };
+        assert!(load_video_refused(LoadVideo::Vp9, &av1_only));
+    }
+
+    #[test]
+    fn load_v_name_is_the_name_the_payload_declares() {
+        use crate::player::load_v_name;
+        assert_eq!(load_v_name(1), "H264");
+        assert_eq!(load_v_name(2), "H265");
+        assert_eq!(load_v_name(3), "AV1");
+        assert_eq!(load_v_name(4), "VP9");
+        assert_eq!(load_v_name(0), "—");
+        for video in [LoadVideo::H264, LoadVideo::H265, LoadVideo::Av1, LoadVideo::Vp9] {
+            assert_eq!(load_v_name(video.diag_code()), video.payload_name());
+        }
     }
 }
 
@@ -5154,5 +5467,168 @@ mod load_refusal_tests {
             super::super::FailureKind::TvPipeline,
             "and the verdict must name the television's pipeline, not a generic stop"
         );
+    }
+}
+
+#[cfg(test)]
+mod inplace_layout_tests {
+    use super::inplace_layout_known;
+
+    #[test]
+    fn in_place_seek_needs_the_cxx11_feed_and_a_release_that_is_unknown_or_4_plus() {
+        assert!(inplace_layout_known(4, false));
+        assert!(inplace_layout_known(0, false));
+        assert!(inplace_layout_known(11, false));
+        assert!(!inplace_layout_known(3, false));
+        assert!(!inplace_layout_known(3, true));
+        assert!(!inplace_layout_known(4, true));
+        assert!(!inplace_layout_known(0, true));
+    }
+}
+
+/// Test-only: an Engine parked at `Stage::Streaming` on the host sink, for the pump-level rigs
+/// that live outside this module (`pump::native_seek_pump_tests`).
+#[cfg(all(test, feature = "hostsim"))]
+pub(super) fn streaming_engine_for_test(native_epoch: u32) -> Engine {
+    let mut eng = prime_livelock_tests::engine_after_reload();
+    eng.native_epoch = native_epoch;
+    eng
+}
+
+/// **Issue #568: on webOS 5+ (`VP_EXPORTED`) every direct-play seek was a full fresh Starfish
+/// `Load` (black screen, the DV/HDR badge re-popping).** `scrub: tap commit 905s` was followed by
+/// `reload_at: fresh Load at 905s`, because the Kodi in-place path reaches LG-private objects and
+/// was switched off there. The seek now goes through LG's public `StarfishMediaAPIs::Seek`.
+///
+/// These drive the real mode selection, the pump's reload-or-in-place decision and the real
+/// [`feed_stream`] re-anchor against the host sink with the clock sink armed, which reports
+/// `VP_EXPORTED` exactly as a webOS 5+ set does.
+#[cfg(all(test, feature = "hostsim"))]
+mod native_seek_tests {
+    use super::*;
+    use crate::player::ffi_host;
+
+    const V_STEP_NS: i64 = 41_708_333;
+    const TARGET_NS: i64 = 905_000_000_000;
+
+    /// Process-wide state these tests set, restored on the way out, panic or not.
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            ffi_host::force_clocksink_for_test(false);
+            ffi_host::reset_seek_probe_for_test(None);
+            crate::player::set_seek_mode(SeekMode::Segment);
+            SHARED.pts_shift.store(0, Ordering::Relaxed);
+            SHARED.seek_target_ns.store(-1, Ordering::Relaxed);
+            SHARED.pres_fed.store(0, Ordering::Relaxed);
+            TX.seek_to_ns.store(-1, Ordering::Relaxed);
+            TX.seek_reqs.store(0, Ordering::Relaxed);
+        }
+    }
+
+    fn arm(force_seek: Option<c_int>) -> Restore {
+        ffi_host::force_clocksink_for_test(true);
+        ffi_host::reset_seek_probe_for_test(force_seek);
+        SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
+        TX.seek_to_ns.store(-1, Ordering::Relaxed);
+        TX.seek_reqs.store(0, Ordering::Relaxed);
+        Restore
+    }
+
+    /// An engine that has applied a direct-play seek and is waiting for the keyframe: flushed,
+    /// rebase pending, the video queue holding a keyframe at `TARGET_NS` and the AUs after it.
+    fn engine_seeking() -> Engine {
+        let mut eng = super::prime_livelock_tests::engine_after_reload();
+        eng.flushed = true;
+        eng.rebase_pending = true;
+        SHARED.seek_target_ns.store(TARGET_NS, Ordering::Relaxed);
+        let au = [0u8; 64];
+        let qv = &mut **eng.aq_video.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        for i in 0..60 {
+            crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, TARGET_NS + i * V_STEP_NS, c_int::from(i == 0), 1);
+        }
+        eng
+    }
+
+    fn tick(eng: &mut Engine) {
+        let mt = unsafe { nj_base::task::MainThread::assume() };
+        feed_both_lanes(&mt, eng);
+    }
+
+    #[test]
+    fn a_webos5_session_seeks_natively_and_never_reloads() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm(None);
+        let sink_mode = sink().window_mode();
+        assert_eq!(sink_mode, crate::player::VP_EXPORTED, "PRECONDITION: the armed host sink is the webOS 5+ one");
+        let mode = select_seek_mode(inplace_layout_known(5, false), sink_mode, None);
+        assert_eq!(mode, SeekMode::NativeSeek, "VP_EXPORTED selects LG's public Seek");
+        assert!(
+            !crate::player::pump::seek_reloads(mode),
+            "a mid-play direct-play seek on VP_EXPORTED must NOT be a fresh Load (#568)"
+        );
+    }
+
+    #[test]
+    fn the_other_firmwares_keep_their_modes() {
+        assert_eq!(select_seek_mode(true, crate::player::VP_ACB, None), SeekMode::Segment, "webOS 4.x is unchanged");
+        assert_eq!(select_seek_mode(false, crate::player::VP_ACB, None), SeekMode::Reload, "the old ABI reloads, as before");
+        assert_eq!(select_seek_mode(false, crate::player::VP_NONE, None), SeekMode::Reload);
+        assert_eq!(select_seek_mode(true, crate::player::VP_ACB, Some(SeekMode::NativeSeek)), SeekMode::NativeSeek, "the dev trigger wins");
+        assert!(crate::player::pump::seek_reloads(SeekMode::Reload));
+        assert!(!crate::player::pump::seek_reloads(SeekMode::Segment));
+        assert!(!crate::player::pump::seek_reloads(SeekMode::NativeSeek));
+    }
+
+    #[test]
+    fn the_landed_keyframe_is_the_native_seek_and_nothing_flushes() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm(None);
+        crate::player::set_seek_mode(SeekMode::NativeSeek);
+        let mut eng = engine_seeking();
+        tick(&mut eng);
+
+        assert_eq!(ffi_host::seek_log_for_test(), vec![TARGET_NS / 1_000_000], "Seek(<keyframe ms>), once");
+        assert_eq!(ffi_host::flush_calls_for_test(), 0, "Seek flushes itself; a flush after it re-anchors at 0");
+        assert!(!eng.flushed && !eng.rebase_pending, "the seek is applied");
+        assert_eq!(SHARED.pts_shift.load(Ordering::Relaxed), 0, "content time, no rebase");
+        assert!(eng.max_fed_video_pts >= TARGET_NS, "the keyframe and the AUs after it were fed on the Seek's timeline");
+        assert_eq!(crate::player::seek_mode(), SeekMode::NativeSeek);
+    }
+
+    #[test]
+    fn a_pre_zero_keyframe_seeks_to_zero_not_negative() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm(None);
+        crate::player::set_seek_mode(SeekMode::NativeSeek);
+        let mut eng = super::prime_livelock_tests::engine_after_reload();
+        eng.flushed = true;
+        eng.rebase_pending = true;
+        SHARED.seek_target_ns.store(0, Ordering::Relaxed);
+        let au = [0u8; 64];
+        let qv = &mut **eng.aq_video.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        crate::aq::aq_push(qv, au.as_ptr(), au.len() as c_int, -80_000_000, 1, 1);
+        tick(&mut eng);
+        assert_eq!(ffi_host::seek_log_for_test(), vec![0], "Seek refuses a negative millis");
+    }
+
+    #[test]
+    fn a_refused_seek_reloads_this_one_and_every_later_one() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm(Some(0));
+        crate::player::set_seek_mode(SeekMode::NativeSeek);
+        let mut eng = engine_seeking();
+        tick(&mut eng);
+
+        assert_eq!(crate::player::seek_mode(), SeekMode::Reload, "native seek is off for the rest of the session");
+        assert!(crate::player::pump::seek_reloads(crate::player::seek_mode()));
+        assert_eq!(
+            TX.seek_to_ns.load(Ordering::Acquire),
+            TARGET_NS,
+            "this seek is re-posted at the user's target for the pump's reload"
+        );
+        assert_eq!(eng.max_fed_video_pts, 0, "nothing is fed into a pipeline that refused the seek");
+        assert!(eng.pending_video.is_none());
+        assert_eq!(ffi_host::flush_calls_for_test(), 0);
     }
 }

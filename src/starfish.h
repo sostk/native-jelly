@@ -24,8 +24,10 @@ int  sf_pause(void);
 int  sf_flush(void);
 int  sf_set_time_to_decode(long long position_ns); /* Kodi in-place seek: setTimeToDecode (returns 0 on webOS<11) */
 int  sf_set_content_info(long long position_ns);   /* webOS<11 in-place seek: loadSpi_getInfo + setContentInfo(ptsToDecode); 0 = pipeline not reachable */
+int  sf_seek_ms(long long ms);                     /* public StarfishMediaAPIs::Seek(millis): flushes + re-anchors the segment at ms; 0 = refused */
 int  sf_send_segment(void);                        /* Kodi in-place seek: CustomPipeline::sendSegmentEvent; 0 = pipeline not reachable */
 char sf_feed(const unsigned char *p, unsigned size, long long pts, int esData); /* 'O'/'B'/'e' */
+int  sf_feed_abi_is_cow(void);       /* 1 = Feed is the pre-C++11 copy-on-write build (webOS 3.x); resolves Feed on first use */
 void sf_unload(void);                /* Unload the pipeline */
 /* After Unload: close native callback admission and wait (without a timeout) for every admitted
  * callbackFunctionHook call. 1 proves this object's ELF interposer was actually crossed. */
@@ -62,7 +64,7 @@ void vp_destroy_window(void);
  * need not branch. On webOS 5 this whole sequence has no replacement: it is deleted outright. */
 long acb_create(const char *appId, int playerType);        /* create+initialize; 0 = failed */
 void acb_bind(const char *mediaId);                        /* setSinkType(MAIN)+setMediaId+setState(LOADED) */
-int  acb_send_video_data(const char *sourceInfoVerbatim);  /* setMediaVideoData; -1 = rejected */
+int  acb_send_video_data(const char *sourceInfo);  /* setMediaVideoData; the pipeline's own envelope (vp9_hdr may have added HDR keys); -1 = rejected */
 void acb_start(long x, long y, long w, long h);            /* setDisplayWindow + setState(PLAYING) */
 void acb_unload(void);                                     /* setState(UNLOADED) */
 
