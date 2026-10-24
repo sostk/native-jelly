@@ -1276,9 +1276,6 @@ impl TrackMenuState {
         use crate::route::{EnhancementRoute, SubtitleEffect};
         match route {
             EnhancementRoute::Burn => Some(nj_platform::i18n::msg::widgets_tracks_enh_note_burn().to_string()),
-            EnhancementRoute::RemuxDropsDolbyVision => {
-                Some(nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off().to_string())
-            }
             EnhancementRoute::Remux if subtitle_effect == SubtitleEffect::Sidecar => {
                 Some(nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar().to_string())
             }
@@ -2746,17 +2743,18 @@ mod enhancement_menu_tests {
         teardown(&ps);
     }
 
-    /// M7: a usable-base-layer Dolby Vision source no longer hides the rows — the enhanced remux
-    /// simply never declares DV (`fill_direct_plan` is the only place that ever does), so turning
-    /// the toggle on plays the HDR10 base picture instead. The note says so in plain language.
+    /// M7: a usable-base-layer Dolby Vision source is offered the plain remux, with no
+    /// Dolby-Vision-off note: whether the copied remux keeps DV is settled by the server's answer
+    /// (`route::plan::copied_video_dv`), and a copy keeps it.
     #[test]
-    fn enh_rows_offered_dv_drops_declaration() {
+    fn enh_rows_offered_dv_is_plain_remux() {
         let _g = nj_base::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture { dv_declared: true, ..Default::default() });
-        assert_eq!(menu.enhance_route, Some(crate::route::EnhancementRoute::RemuxDropsDolbyVision));
+        assert_eq!(menu.enhance_route, Some(crate::route::EnhancementRoute::Remux));
         assert!(menu.enhance_shown.is_some());
-        let note = menu.form.table.sections[1].rows.last().unwrap();
-        assert_eq!(note.label, nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off());
+        let last = menu.form.table.sections[1].rows.last().unwrap();
+        assert_ne!(last.label, nj_platform::i18n::msg::widgets_tracks_enh_note_burn());
+        assert_ne!(last.label, nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar());
         teardown(&ps);
     }
 
@@ -3479,7 +3477,6 @@ mod enhancement_menu_tests {
             for (name, value) in [
                 ("enh_note_sidecar", nj_platform::i18n::msg::widgets_tracks_enh_note_sidecar()),
                 ("enh_note_burn", nj_platform::i18n::msg::widgets_tracks_enh_note_burn()),
-                ("enh_note_dv_off", nj_platform::i18n::msg::widgets_tracks_enh_note_dv_off()),
                 ("enh_reason_not_analyzed", nj_platform::i18n::msg::widgets_tracks_enh_reason_not_analyzed()),
                 ("enh_reason_dv_unusable", nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_unusable()),
                 ("enh_reason_dv_subtitle", nj_platform::i18n::msg::widgets_tracks_enh_reason_dv_subtitle()),

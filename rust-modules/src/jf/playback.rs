@@ -1369,6 +1369,19 @@ mod tests {
         assert!(p["CodecProfiles"].as_array().unwrap().is_empty());
     }
 
+    /// Force Direct Play offers DTS only to a set whose table has a DTS row (issue #24 is a C1,
+    /// which has none): an absent decoder takes the Load and never starts.
+    #[test]
+    fn forced_original_offers_dts_only_with_a_dts_row() {
+        let audio = |c: &nj_platform::devcaps::Caps| {
+            let caps = crate::catalog::capabilities::Capabilities::of(c, nj_platform::devcaps::dv::DvCapability::Unknown);
+            let ask = ProfileAsk { direct: true, forced: true, ceiling: None, burn: false, hls: None, embed_bitmap: true };
+            device_profile(&caps, &ask)["DirectPlayProfiles"][0]["AudioCodec"].as_str().unwrap().to_string()
+        };
+        assert_eq!(audio(&device()), "aac,ac3,eac3,dts");
+        assert_eq!(audio(&nj_platform::devcaps::Caps::assumed()), "aac,ac3,eac3");
+    }
+
     #[test]
     fn transcode_reasons_split_into_lanes() {
         let url = "/videos/x/stream.mkv?VideoCodec=hevc,h264&AudioCodec=ac3&TranscodeReasons=ContainerNotSupported%2CAudioCodecNotSupported";

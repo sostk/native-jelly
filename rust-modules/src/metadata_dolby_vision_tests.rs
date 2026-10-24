@@ -75,3 +75,72 @@ fn dv_presentation_reads_are_frame_safe() {
     );
     drop(frame);
 }
+
+/// One Jellyfin video `MediaStream`, through `jf::convert::stream`, into the part's DV record.
+fn jellyfin_dovi(json: &str) -> Dovi {
+    let s: crate::jf::models::MediaStream = serde_json::from_str(json).unwrap();
+    convert_streams(&[crate::jf::convert::stream(&s, "", "")]).dovi
+}
+
+/// **Issue #22: a Profile 8.1 file that also carries HDR10+ played as HDR10 on a C1.** Jellyfin
+/// names its range `DOVIWithHDR10Plus`, and the record was built from a range-type table that
+/// did not list it, so the profile read as 0 and the Load went out with no `DolbyHdrInfo` node.
+/// The stream is the reporter's, field for field.
+#[test]
+fn a_dolby_vision_stream_that_also_carries_hdr10_plus_is_declared() {
+    let dovi = jellyfin_dovi(
+        r#"{"Type":"Video","Index":0,"Codec":"hevc","Profile":"Main 10","Width":3840,"Height":2160,
+            "VideoRange":"HDR","VideoRangeType":"DOVIWithHDR10Plus","ColorTransfer":"smpte2084",
+            "DvVersionMajor":1,"DvVersionMinor":0,"DvProfile":8,"DvLevel":6,"RpuPresentFlag":1,
+            "ElPresentFlag":0,"BlPresentFlag":1,"DvBlSignalCompatibilityId":1}"#,
+    );
+    assert_eq!((dovi.present, dovi.profile, dovi.bl_compat, dovi.el_present), (true, 8, 1, false));
+    assert_eq!((dovi.level, dovi.version, dovi.bl_present, dovi.rpu_present), (6, (1, 0), true, true));
+    assert!(!dovi.base_layer_unusable());
+    assert_eq!(
+        dovi.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true)
+            .declared()
+            .map(|n| n.profile_id),
+        Some(8)
+    );
+}
+
+/// A server that sends the range type without the configuration-record fields still yields
+/// the layering every `DOVI*` range type implies.
+#[test]
+fn a_range_type_alone_still_names_the_layering() {
+    let dovi = |range: &str| {
+        jellyfin_dovi(&format!(r#"{{"Type":"Video","Index":0,"Codec":"hevc","VideoRangeType":"{range}"}}"#))
+    };
+    let layering = |d: Dovi| (d.present, d.profile, d.bl_compat, d.el_present);
+    assert_eq!(layering(dovi("DOVI")), (true, 5, 0, false));
+    assert_eq!(layering(dovi("DOVIWithHDR10")), (true, 8, 1, false));
+    assert_eq!(layering(dovi("DOVIWithHDR10Plus")), (true, 8, 1, false));
+    assert_eq!(layering(dovi("DOVIWithSDR")), (true, 8, 2, false));
+    assert_eq!(layering(dovi("DOVIWithHLG")), (true, 8, 4, false));
+    assert_eq!(layering(dovi("DOVIWithEL")), (true, 7, 6, true));
+    assert_eq!(layering(dovi("DOVIWithELHDR10Plus")), (true, 7, 6, true));
+    // Jellyfin's own verdict that the record is unusable: present, never declared.
+    let invalid = dovi("DOVIInvalid");
+    assert_eq!(layering(invalid), (true, 0, 0, false));
+    assert_eq!(
+        invalid.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true),
+        DvPresentation::NotDv
+    );
+    assert_eq!(layering(dovi("HDR10Plus")), (false, 0, 0, false));
+}
+
+/// A dual-layer file whose range type names it is refused whatever the fields say, as the Plex
+/// path's `DOVIELPresent` was.
+#[test]
+fn an_enhancement_layer_is_refused_from_the_jellyfin_fields() {
+    let dovi = jellyfin_dovi(
+        r#"{"Type":"Video","Index":0,"Codec":"hevc","VideoRangeType":"DOVIWithEL",
+            "DvProfile":7,"ElPresentFlag":1,"BlPresentFlag":1,"DvBlSignalCompatibilityId":6}"#,
+    );
+    assert_eq!((dovi.profile, dovi.bl_compat, dovi.el_present), (7, 6, true));
+    assert_eq!(
+        dovi.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true),
+        DvPresentation::Refuse("dual-layer")
+    );
+}

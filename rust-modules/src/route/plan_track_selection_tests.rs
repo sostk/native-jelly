@@ -281,3 +281,20 @@ fn known_audio_channels_cannot_fall_back_to_an_unknown_codec_default() {
     track.channels = 6;
     assert_eq!(pick_dp_audio_eligible(&[track], "aac", AudioLangPrefs::default(), |c, n| caps.audio_supports(c, n)), Some((0, "aac".into(), 1)));
 }
+
+/// The catalog spells DTS `dca` (`jf::convert::codec`) and the device table `dts`: both modes
+/// read the track through one canonicaliser, so a set with a DTS row direct-plays it and a set
+/// without one (the C1 of issue #24) converts it, in Auto and in Force Direct Play alike.
+#[test]
+fn a_dca_track_follows_the_dts_row_in_both_modes() {
+    let mut with_row = nj_platform::devcaps::Caps::assumed();
+    with_row.audio = "aac,ac3,eac3,dts".into();
+    with_row.audio_channels.insert("dts".into(), 6);
+    let without = nj_platform::devcaps::Caps::assumed();
+    for mode in [DirectPlayMode::Auto, DirectPlayMode::Forced] {
+        assert!(audio_direct_plays_with(&with_row, mode, "dca", 6), "{mode:?}");
+        assert!(!audio_direct_plays_with(&without, mode, "dca", 6), "{mode:?}");
+    }
+    assert!(!audio_direct_plays_with(&with_row, DirectPlayMode::Auto, "dca", 8), "Auto keeps the ceiling");
+    assert!(audio_direct_plays_with(&with_row, DirectPlayMode::Forced, "dca", 8), "Forced skips it");
+}

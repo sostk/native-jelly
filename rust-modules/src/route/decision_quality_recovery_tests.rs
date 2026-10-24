@@ -264,7 +264,7 @@ fn dv_decision_survives_reload_recovery_and_rollback() {
     assert_eq!(
         stream_dv_decision(&ps),
         crate::metadata::DvDecision::NONE,
-        "the shared remux/transcode output reset clears the declaration",
+        "the re-encoded (HLS) output reset clears the declaration",
     );
 
     restore_quality(Quality::Original);

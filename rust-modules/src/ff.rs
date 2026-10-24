@@ -727,6 +727,12 @@ unsafe fn stream_index(s: *mut AVStream) -> c_int {
     *((s as *const u8).add(OFF_STREAM_INDEX) as *const c_int)
 }
 
+/// FFmpeg's codec name against the payload codec, through the shared canonicaliser: FFmpeg says
+/// `dts` where the catalog (and so the payload codec) says `dca`.
+fn audio_name_matches(ffmpeg_name: &str, want: &str) -> bool {
+    nj_platform::devcaps::audio_codec_id(ffmpeg_name) == nj_platform::devcaps::audio_codec_id(want)
+}
+
 /// The ffmpeg stream index of the first audio stream whose codec matches `want` (the Load
 /// payload's audio codec, e.g. "ac3"), or None. `av_find_best_stream` picks the "highest
 /// quality" audio (on an 8-track file it chose DTS over the AC3 default) — but the Load payload
@@ -742,7 +748,7 @@ unsafe fn audio_stream_matching(fmt: *mut AVFormatContext, want: &str) -> Option
         let cp = stream_codecpar(*streams.add(i as usize));
         if (*cp).codec_type == AVMEDIA_TYPE_AUDIO {
             let name = std::ffi::CStr::from_ptr(avcodec_get_name((*cp).codec_id)).to_string_lossy();
-            if name.eq_ignore_ascii_case(want) {
+            if audio_name_matches(&name, want) {
                 return Some(i as c_int);
             }
         }
@@ -3305,37 +3311,117 @@ unsafe fn parse_extradata(ed: *const u8, len: usize, is_hevc: bool) -> (Vec<u8>,
 
 static SEI_STRIPPED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
-/// True if this HEVC NAL is an SEI (prefix=39 / suffix=40) carrying a user-data-registered
-/// ITU-T T.35 HDR10+ dynamic-metadata message (payloadType 4, country_code 0xB5, terminal
-/// provider 0x003C). webOS's HEVC decoder does NOT support per-frame HDR10+ metadata and
-/// stalls on it — Kodi strips it unconditionally ("webOS doesn't support HDR10+ and it can
-/// cause issues"). `nal` is the NAL payload WITHOUT the start code (starts at the 2-byte
-/// NAL header). Static HDR10 mastering-display / CLL SEI (payloadType 137/144) is kept.
-fn is_hdr10plus_sei(nal: &[u8]) -> bool {
+/// What to do with one HEVC NAL on its way to the decoder.
+#[derive(Debug, PartialEq, Eq)]
+enum SeiStrip {
+    /// Not an SEI, or an SEI without HDR10+: emit the original bytes (nothing allocated for a non-SEI).
+    Keep,
+    /// Every message was HDR10+ (or the SEI could not be parsed cleanly): emit nothing.
+    Drop,
+    /// The NAL minus its HDR10+ message(s), emulation prevention re-inserted.
+    Rewrite(Vec<u8>),
+}
+
+/// Strip the ITU-T T.35 HDR10+ dynamic-metadata message (SEI payloadType 4, country_code 0xB5,
+/// terminal provider 0x003C) from an HEVC SEI NAL (prefix=39 / suffix=40). webOS's HEVC decoder
+/// does NOT support per-frame HDR10+ metadata and stalls on it — Kodi strips it unconditionally
+/// ("webOS doesn't support HDR10+ and it can cause issues"). `nal` is the NAL payload WITHOUT the
+/// start code (starts at the 2-byte NAL header). Only the HDR10+ message goes: the other messages
+/// of the NAL, static HDR10 mastering-display / CLL (137/144) included, are kept byte for byte,
+/// because on HEVC the panel's HDR envelope comes from the pipeline's own parse of them.
+///
+/// Every message is walked, not just the first: an SEI NAL may carry several, and an HDR10+
+/// message behind another one reached the decoder. A list that does not parse cleanly (truncated
+/// header or payload, bytes after the trailing bits) falls back to the whole-NAL rule: dropped if
+/// an HDR10+ header was seen, kept unchanged otherwise.
+fn strip_hdr10plus_sei(nal: &[u8]) -> SeiStrip {
     if nal.len() < 2 {
-        return false;
+        return SeiStrip::Keep;
     }
     let nal_type = (nal[0] >> 1) & 0x3f;
     if nal_type != 39 && nal_type != 40 {
-        return false;
+        return SeiStrip::Keep;
     }
-    let mut p = 2usize; // SEI RBSP starts after the 2-byte NAL header
-    let mut ptype = 0usize; // payloadType (0xFF-run + terminator)
-    while p < nal.len() && nal[p] == 0xff {
-        ptype += 255;
-        p += 1;
+    let rbsp = sei_rbsp(&nal[2..]);
+    // Byte ranges of the messages to keep, and whether any HDR10+ message was seen.
+    let mut kept: Vec<(usize, usize)> = Vec::new();
+    let mut found = false;
+    let mut clean = false;
+    let mut p = 0usize;
+    // Each message: payloadType and payloadSize as 0xFF runs plus a terminator, then the payload.
+    // The 0x80 trailing-bits byte ends the list.
+    while p < rbsp.len() {
+        if rbsp[p] == 0x80 {
+            clean = p + 1 == rbsp.len();
+            break;
+        }
+        let start = p;
+        let mut read = || {
+            let mut v = 0usize;
+            while p < rbsp.len() && rbsp[p] == 0xff {
+                v += 255;
+                p += 1;
+            }
+            let last = *rbsp.get(p)?;
+            p += 1;
+            Some(v + last as usize)
+        };
+        let (Some(ptype), Some(psize)) = (read(), read()) else {
+            break;
+        };
+        let end = p.saturating_add(psize);
+        let payload = rbsp.get(p..end.min(rbsp.len())).unwrap_or(&[]);
+        let is_plus = ptype == 4 && payload.len() >= 3 && payload[..3] == [0xb5, 0x00, 0x3c];
+        found |= is_plus;
+        if end > rbsp.len() {
+            break;
+        }
+        if !is_plus {
+            kept.push((start, end));
+        }
+        p = end;
     }
-    if p >= nal.len() {
-        return false;
+    if !found {
+        return SeiStrip::Keep;
     }
-    ptype += nal[p] as usize;
-    p += 1;
-    while p < nal.len() && nal[p] == 0xff {
-        p += 1; // skip payloadSize (0xFF-run + terminator); value unused
+    if !clean || kept.is_empty() {
+        return SeiStrip::Drop;
     }
-    p += 1;
-    // user_data_registered_itu_t_t35 == 4; T.35 header: country 0xB5, provider 0x003C
-    ptype == 4 && p + 3 <= nal.len() && nal[p] == 0xb5 && nal[p + 1] == 0x00 && nal[p + 2] == 0x3c
+    let mut out_rbsp = Vec::with_capacity(rbsp.len());
+    for (s, e) in kept {
+        out_rbsp.extend_from_slice(&rbsp[s..e]);
+    }
+    out_rbsp.push(0x80);
+    // Emulation prevention (H.265 7.4.2): 03 after two zeros when the next byte is <= 03. The
+    // RBSP ends in the 0x80 trailing byte, so the "ends in 00" case cannot arise.
+    let mut out = Vec::with_capacity(out_rbsp.len() + 4);
+    out.extend_from_slice(&nal[..2]);
+    let mut zeros = 0;
+    for b in out_rbsp {
+        if zeros >= 2 && b <= 3 {
+            out.push(3);
+            zeros = 0;
+        }
+        out.push(b);
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+    }
+    SeiStrip::Rewrite(out)
+}
+
+/// An SEI payload with its emulation-prevention bytes removed (`00 00 03` reads as `00 00`), so
+/// message sizes count the bytes they describe.
+fn sei_rbsp(ebsp: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ebsp.len());
+    let mut zeros = 0;
+    for &b in ebsp {
+        if zeros >= 2 && b == 3 {
+            zeros = 0;
+            continue;
+        }
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+        out.push(b);
+    }
+    out
 }
 
 /// End offset of a NAL of length `nl` starting at `i`, or None if it is empty or would run
@@ -3411,13 +3497,28 @@ unsafe fn packet_to_annexb(
             break;
         };
         let nal = &d[i..end];
-        if is_hevc && is_hdr10plus_sei(nal) {
-            let n = SEI_STRIPPED.fetch_add(1, Ordering::Relaxed) + 1;
-            if n <= 3 || n % 500 == 0 {
-                crate::player::log(&format!("ff: stripped HDR10+ SEI #{n} ({nl} bytes)"));
+        let mut nal = nal;
+        let rewritten;
+        if is_hevc {
+            match strip_hdr10plus_sei(nal) {
+                SeiStrip::Keep => {}
+                strip => {
+                    let n = SEI_STRIPPED.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n <= 3 || n % 500 == 0 {
+                        crate::player::log(&format!("ff: stripped HDR10+ SEI #{n} ({nl} bytes)"));
+                    }
+                    match strip {
+                        SeiStrip::Rewrite(v) => {
+                            rewritten = v;
+                            nal = &rewritten;
+                        }
+                        _ => {
+                            i += nl;
+                            continue;
+                        }
+                    }
+                }
             }
-            i += nl;
-            continue;
         }
         out.extend_from_slice(&sc);
         out.extend_from_slice(nal);
@@ -9078,3 +9179,19 @@ mod redirect_tests;
 #[cfg(test)]
 #[path = "ff_open_duration_tests.rs"]
 mod open_duration_tests;
+
+#[cfg(test)]
+mod audio_codec_name_tests {
+    use super::*;
+
+    /// FFmpeg names DTS `dts`; the catalog (and so the payload codec reaching the matcher) says `dca`.
+    #[test]
+    fn the_payload_codec_matches_ffmpegs_name_across_spellings() {
+        assert!(audio_name_matches("dts", "dca"));
+        assert!(audio_name_matches("dts", "DTS"));
+        assert!(audio_name_matches("eac3", "ec-3"));
+        assert!(audio_name_matches("ac3", "ac3"));
+        assert!(!audio_name_matches("truehd", "dca"));
+        assert!(!audio_name_matches("ac3", "eac3"));
+    }
+}

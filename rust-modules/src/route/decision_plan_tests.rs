@@ -709,3 +709,63 @@ fn an_encoded_subtitle_is_the_servers_burn_and_the_client_draws_nothing() {
         },
     );
 }
+
+/// A Dolby Vision Profile 8.1 item on a panel that takes Dolby Vision, against `answer`.
+fn resolve_dv(answer: &str) -> Plan {
+    let streams = r#"{"Type":"Video","Codec":"hevc","Index":0,"VideoRangeType":"DOVIWithHDR10"},{"Type":"Audio","Codec":"dts","Index":1,"Channels":6}"#;
+    let url = format!("/videos/{JF_GUID}/stream.mkv?{answer}&MediaSourceId={JF_GUID}");
+    let (plan, _) = resolve_jf(
+        playback_info(false, "mkv", streams, Some(&url)),
+        default_user(),
+        vec![jf_track(1, "dca", 6, "eng", true)],
+        Vec::new(),
+        |env| {
+            env.dv_capability = Some(nj_platform::devcaps::dv::DvCapability::Supported);
+            if let Some(item) = env.cached_item.as_mut() {
+                item.dovi = crate::metadata::Dovi { present: true, profile: 8, bl_compat: 1, ..crate::metadata::Dovi::NONE };
+            }
+        },
+    );
+    plan
+}
+
+/// **A conversion that copies the video keeps the file's Dolby Vision** (upstream #839). A C1 has
+/// no DTS decoder, so a DV file with DTS audio is remuxed with the audio converted; the copied
+/// HEVC lane still carries the DOVI configuration record, and the Load must declare it as the
+/// direct play would have, or the panel shows the HDR10 base layer.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_that_copies_the_video_keeps_the_dolby_vision_declaration() {
+    let plan = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=AudioCodecNotSupported");
+    assert!(plan.contract.remux, "the video lane is copied");
+    assert_eq!(plan.vcodec, "hevc");
+    assert_eq!((plan.dovi.present, plan.dovi.profile), (true, 8));
+    assert_eq!(plan.dv_decision.presentation.declared().map(|n| n.profile_id), Some(8));
+}
+
+/// A conversion that re-encodes the video hands on the server's picture, which carries no DOVI
+/// record: nothing is declared.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_that_reencodes_the_video_declares_no_dolby_vision() {
+    let plan = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=VideoBitrateNotSupported%2CAudioCodecNotSupported");
+    assert!(!plan.contract.remux);
+    assert_eq!(plan.dovi, crate::metadata::Dovi::NONE);
+    assert_eq!(plan.dv_decision, crate::metadata::DvDecision::NONE);
+}
+
+/// **A conversion that copies the video declares the source's frame rate** (upstream #832). The
+/// copied lane is the file's own elementary stream, so the Load describes it as a direct play's:
+/// an H.264 24p stream declared at the 60 an unknown rate keeps is presented at ~13 fps
+/// (`player/CLAUDE.md`, "Load's adaptiveStreaming ceiling"). A re-encode owns its rate and
+/// declares none.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_that_copies_the_video_declares_the_source_rate() {
+    let copy = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=AudioCodecNotSupported");
+    assert!(copy.fps > 23.0 && copy.fps < 24.0, "the file's own rate: {}", copy.fps);
+    assert_eq!(copy.src_fps, copy.fps);
+    let encode = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=VideoBitrateNotSupported%2CAudioCodecNotSupported");
+    assert_eq!(encode.fps, 0.0, "a re-encode owns its rate");
+    assert_eq!(encode.src_fps, copy.src_fps, "the file's rate is still the file's");
+}

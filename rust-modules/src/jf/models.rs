@@ -168,6 +168,17 @@ pub struct MediaStream {
     pub video_range: Option<String>,
     /// `SDR | HDR10 | HDR10Plus | HLG | DOVI | DOVIWithHDR10 | …`.
     pub video_range_type: Option<String>,
+    /// The Dolby Vision configuration record, as the server's probe read it. Absent on a stream
+    /// without Dolby Vision, and on a server too old to report it.
+    pub dv_version_major: Option<i64>,
+    pub dv_version_minor: Option<i64>,
+    pub dv_profile: Option<i64>,
+    pub dv_level: Option<i64>,
+    pub rpu_present_flag: Option<i64>,
+    pub el_present_flag: Option<i64>,
+    pub bl_present_flag: Option<i64>,
+    /// 0 none (Profile 5) / 1 HDR10 / 2 SDR / 4 HLG / 6 the Blu-ray dual layer.
+    pub dv_bl_signal_compatibility_id: Option<i64>,
     pub color_transfer: Option<String>,
     pub color_primaries: Option<String>,
     pub color_space: Option<String>,

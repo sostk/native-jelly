@@ -142,6 +142,33 @@ fn stream_type(kind: &str) -> i64 {
     }
 }
 
+/// A Dolby Vision stream's layering — `(profile, base-layer compatibility id, enhancement layer)`
+/// — as the route's `metadata::Dovi` reads it, all zero for a stream that is not Dolby Vision.
+///
+/// The server's own configuration record (`DvProfile`, `DvBlSignalCompatibilityId`,
+/// `ElPresentFlag`) decides. Without it, the range type implies the layering: plain `DOVI` is
+/// Profile 5, a `DOVIWith<base>` range is a Profile 8 single layer over that base (compat id 1 =
+/// HDR10, 2 = SDR, 4 = HLG; HDR10+ rides the HDR10 base), and `DOVIWithEL*` is the Blu-ray dual
+/// layer. `DOVIInvalid` is the server's verdict that the record is unusable, so it stays
+/// undeclared whatever the fields say (issue #22 was a `DOVIWithHDR10Plus` file that a narrower
+/// table left at profile 0, so it played as HDR10).
+fn dovi_layering(s: &MediaStream, range: &str) -> (i64, i64, bool) {
+    let implied = match range {
+        "DOVI" => (5, 0, false),
+        "DOVIWithHDR10" | "DOVIWithHDR10Plus" => (8, 1, false),
+        "DOVIWithSDR" => (8, 2, false),
+        "DOVIWithHLG" => (8, 4, false),
+        "DOVIWithEL" | "DOVIWithELHDR10Plus" => (7, 6, true),
+        _ => return (0, 0, false),
+    };
+    (
+        s.dv_profile.filter(|&p| p > 0).unwrap_or(implied.0),
+        s.dv_bl_signal_compatibility_id.unwrap_or(implied.1),
+        // Either saying so refuses the stream: a dual layer fed as a single one is the failure.
+        implied.2 || s.el_present_flag.is_some_and(|f| f != 0),
+    )
+}
+
 /// One `MediaStream` → `Stream`. `item_guid`/`source_id` build an external subtitle's key.
 pub fn stream(s: &MediaStream, item_guid: &str, source_id: &str) -> Stream {
     let st = stream_type(&s.kind);
@@ -149,6 +176,12 @@ pub fn stream(s: &MediaStream, item_guid: &str, source_id: &str) -> Stream {
     let (one, name) = language(lang).unwrap_or(("", ""));
     let range = s.video_range_type.as_deref().unwrap_or("");
     let dovi = range.starts_with("DOVI");
+    let (dovi_profile, dovi_bl_compat_id, dovi_el_present) = dovi_layering(s, range);
+    let dv_field = |f: Option<i64>| if dovi { f.unwrap_or(0) } else { 0 };
+    let dovi_version = match (dovi, s.dv_version_major) {
+        (true, Some(major)) => format!("{major}.{}", s.dv_version_minor.unwrap_or(0)),
+        _ => String::new(),
+    };
     let key = if st == 3 && s.is_external {
         let fmt = codec(s.codec.as_deref().unwrap_or("srt"));
         format!("/Videos/{}/{}/Subtitles/{}/0/Stream.{fmt}", ids::normalize(item_guid), ids::normalize(source_id), s.index)
@@ -167,11 +200,13 @@ pub fn stream(s: &MediaStream, item_guid: &str, source_id: &str) -> Stream {
         frame_rate: s.real_frame_rate.or(s.average_frame_rate).unwrap_or(0.0),
         color_trc: s.color_transfer.clone().unwrap_or_default(),
         dovi_present: dovi as i64,
-        // Jellyfin reports the range type, not the RPU profile fields; a `DOVIWith*` source has a
-        // self-displayable base layer (compat id 1 = HDR10, 2 = SDR, 4 = HLG), plain `DOVI` is P5.
-        dovi_profile: match range { "DOVI" => 5, "DOVIWithHDR10" | "DOVIWithSDR" | "DOVIWithHLG" => 8, _ => 0 },
-        dovi_bl_compat_id: match range { "DOVIWithHDR10" => 1, "DOVIWithSDR" => 2, "DOVIWithHLG" => 4, _ => 0 },
-        dovi_el_present: (range == "DOVIWithEL") as i64,
+        dovi_profile,
+        dovi_bl_compat_id,
+        dovi_el_present: dovi_el_present as i64,
+        dovi_level: dv_field(s.dv_level),
+        dovi_version,
+        dovi_bl_present: dv_field(s.bl_present_flag).min(1),
+        dovi_rpu_present: dv_field(s.rpu_present_flag).min(1),
         bitrate: s.bit_rate.unwrap_or(0) / 1000,
         profile: s.profile.clone().unwrap_or_default().to_ascii_lowercase(),
         bit_depth: s.bit_depth.unwrap_or(0),

@@ -736,7 +736,8 @@ fn parse_sinkmax(spec: &str) -> Option<SinkEnvelope> {
 /// getAudioCaps selects audio/x-dts and setAdecSinkInfo_ES configures dts-seamless (issue #221).
 /// Unsupported formats must never be mislabeled as AC3: that can stall the audio master clock.
 fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
-    match codec {
+    // The catalog names DTS `dca`; the shared canonicaliser maps every spelling onto the pipeline's.
+    match nj_platform::devcaps::audio_codec_id(codec).as_ref() {
         "ac3" => Some(("AC3", 1)),
         "eac3" => Some(("AC3 PLUS", 2)),
         "aac" => Some(("AAC", 3)),
@@ -757,8 +758,8 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
             r#""maxFrameRate":30"#,
             &format!(r#""maxFrameRate":{}"#, env.fps),
         );
-    // Real source frame rate (direct-play only; 0 on transcode → skip): give the pipeline the true
-    // fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
+    // Real source frame rate (a direct play, or a conversion that copies the video; 0 on a
+    // re-encode → skip): give the pipeline the true fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
     // the coded dims change. libpf parses videoFpsValue/videoFpsScale/adaptiveResolution (verified).
     // `/tmp/nativejelly-nofps` withholds the pair, for one experiment: the Dolby Vision display
     // -management lookup misses because the LUT ring is keyed ONE 90 kHz tick above what the
@@ -5193,6 +5194,10 @@ mod sink_envelope_tests {
     fn audio_payload_names_dts_and_refuses_unsupported_formats() {
         assert_eq!(audio_payload_codec("dts"), Some(("DTS", 4)));
         assert_eq!(audio_payload_codec("eac3"), Some(("AC3 PLUS", 2)));
+        // The catalog's own spelling of DTS, and the others the shared canonicaliser folds.
+        assert_eq!(audio_payload_codec("dca"), Some(("DTS", 4)));
+        assert_eq!(audio_payload_codec("DCA"), Some(("DTS", 4)));
+        assert_eq!(audio_payload_codec("ec-3"), Some(("AC3 PLUS", 2)));
         for codec in ["truehd", "flac", "", "unknown"] {
             assert_eq!(audio_payload_codec(codec), None);
         }

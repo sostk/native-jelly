@@ -525,13 +525,11 @@ pub(super) struct EnhancementFacts<'a> {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum EnhancementRoute {
     /// The ordinary uncapped progressive-MKV remux: no subtitle on screen, or an external one the
-    /// client draws itself.
+    /// client draws itself. A declared Dolby Vision source whose base layer IS self-displayable
+    /// (P7/P8, `!dovi.base_layer_unusable()`) takes this route too: a server that copies the video
+    /// keeps the `DolbyHdrInfo` the direct play would have declared ([`copied_video_dv`]); one
+    /// that re-encodes the lane drops it.
     Remux,
-    /// The same remux, for a declared Dolby Vision source whose base layer IS self-displayable
-    /// (P7/P8, `!dovi.base_layer_unusable()`). A remux never carries `DolbyHdrInfo` — the
-    /// declaration rides the direct play only (`fill_direct_plan`'s own doc) — so this is the SAME
-    /// wire shape as [`Self::Remux`]; only the menu's wording differs (Dolby Vision turns off).
-    RemuxDropsDolbyVision,
     /// A forced re-encode carrying `subtitleStreamID=<id>&subtitles=burn` (M7): the only shape that
     /// keeps an EMBEDDED subtitle in view once the audio enhancement is on.
     Burn,
@@ -605,10 +603,9 @@ pub(super) fn enhancement_availability(f: &EnhancementFacts, target: RouteFamily
     if !analyzed {
         return Disabled(DisabledReason::NotAnalyzed);
     }
-    Offered(match (dv_declared, f.subtitle_effect) {
-        (_, SubtitleEffect::Embedded) => EnhancementRoute::Burn,
-        (true, SubtitleEffect::None | SubtitleEffect::Sidecar) => EnhancementRoute::RemuxDropsDolbyVision,
-        (false, SubtitleEffect::None | SubtitleEffect::Sidecar) => EnhancementRoute::Remux,
+    Offered(match f.subtitle_effect {
+        SubtitleEffect::Embedded => EnhancementRoute::Burn,
+        SubtitleEffect::None | SubtitleEffect::Sidecar => EnhancementRoute::Remux,
     })
 }
 
@@ -961,14 +958,23 @@ pub(crate) struct Plan {
     /// only one half is recorded. Equal to `vcodec`/`acodec` for a direct play and for a remux.
     pub src_vcodec: String,
     pub src_acodec: String,
+    /// The SOURCE file's video frame rate (0 = unknown), whichever route carries it. Beside
+    /// `src_*` and not beside `fps`: `fps` is what the Load declares for THIS stream (the file's
+    /// rate on a direct play and on a conversion that copies the video, 0 on a re-encode), while
+    /// this stays the file's, so a later rebuild of the route ([`copied_video_fps`]) can decide again.
+    pub src_fps: f64,
     pub fps: f64,
-    /// The direct-played file's Dolby Vision layering, for the Load payload's `DolbyHdrInfo`
-    /// node. Set on the DIRECT-PLAY branch only, beside `fps` and for the same reason: the
-    /// transcode branch's payload describes the server's OUTPUT, which is not this file.
+    /// The fed stream's Dolby Vision layering, for the Load payload's `DolbyHdrInfo` node: the
+    /// file's on a direct play and on a conversion that copies the video, `NONE` on a re-encode,
+    /// whose payload describes the server's OUTPUT ([`copied_video_dv`]).
     pub dovi: crate::metadata::Dovi,
-    /// The direct-play declaration resolved from one cached capability snapshot. Payload builds,
-    /// reloads and recovery consume this stored answer; remux/transcode leave it at `NONE`.
+    /// The declaration resolved from one cached capability snapshot. Payload builds, reloads and
+    /// recovery consume this stored answer; a re-encode leaves it at `NONE`.
     pub dv_decision: crate::metadata::DvDecision,
+    /// The FILE's own record and declaration whatever the route, so a later rebuild that copies
+    /// the video can hand it on (`PlaybackSession::src_dovi`).
+    pub src_dovi: crate::metadata::Dovi,
+    pub src_dv_decision: crate::metadata::DvDecision,
     /// Does the direct-played audio track carry Dolby Atmos, for the Load payload's
     /// `contents.immersive` node. Set on the DIRECT-PLAY branch only, for the same reason `dovi`
     /// is: it describes the FILE's own elementary stream.
@@ -1265,6 +1271,9 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     };
     plan.contract.ceiling = ceiling;
     plan.contract.no_video_copy = no_video_copy;
+    plan.src_dovi = dovi;
+    plan.src_dv_decision = dv_decision;
+    plan.src_fps = plan.playing.as_ref().map_or(0.0, |p| p.video_fps);
     plan.src_measure = (env.src_kbps, src_w, src_h);
     plan.transport_kbps = plan
         .playing
@@ -1355,6 +1364,11 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     }
     // A conversion: describe what the server will SEND, and keep the shape a seek or a track
     // switch re-negotiates from (`Session::cur_contract`).
+    (plan.dovi, plan.dv_decision) = copied_video_dv(&n.video, dovi, dv_decision);
+    plan.fps = copied_video_fps(&n.video, plan.src_fps);
+    if plan.dv_decision.presentation.declared().is_some() {
+        crate::player::log("route: the conversion copies the video; keeping the Dolby Vision declaration");
+    }
     plan.vcodec = n.video.output;
     plan.acodec = n.audio.output;
     // A remux is a conversion whose video lane is copied; the wire method says `Transcode` for it,
@@ -1372,6 +1386,33 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     plan.tsession = session;
     plan.encoder_start_secs = encoder_start_secs(env);
     plan
+}
+
+/// The Dolby Vision a conversion's stream carries. A video lane the server COPIES hands on the
+/// file's own HEVC elementary stream, DOVI configuration record and RPUs included, so the Load
+/// declares it as the direct play would have (upstream #839; an LG C1 has no DTS decoder, so every
+/// DV file with DTS audio arrives this way). A re-encoded lane carries the server's picture and
+/// nothing is declared. A source whose base layer is unusable is never offered a copy
+/// (`EncodeContract::no_video_copy`), and is refused here too should a server copy it anyway.
+pub(super) fn copied_video_dv(
+    video: &crate::catalog::Lane,
+    dovi: crate::metadata::Dovi,
+    decision: crate::metadata::DvDecision,
+) -> (crate::metadata::Dovi, crate::metadata::DvDecision) {
+    if video.copied && video.output.eq_ignore_ascii_case("hevc") && !dovi.base_layer_unusable() {
+        (dovi, decision)
+    } else {
+        (crate::metadata::Dovi::NONE, crate::metadata::DvDecision::NONE)
+    }
+}
+
+/// The video frame rate the Load may declare for a conversion: the SOURCE's own when the server
+/// copies the video lane (the file's elementary stream, so direct play's rule holds there too), 0
+/// (unknown) when it re-encodes it, whose rate the encoder owns. An H.264 24p stream declared at
+/// the 60 an unknown rate keeps is presented at ~13 fps (`player/CLAUDE.md`; upstream #832). The
+/// one place the rule lives: the plan, the recovery install and the retranscode landing ask it.
+pub(super) fn copied_video_fps(video: &crate::catalog::Lane, src_fps: f64) -> f64 {
+    if video.copied { src_fps } else { 0.0 }
 }
 
 /// The offset a conversion starts at: the resume in whole seconds, the unit a transcode seek
@@ -1524,10 +1565,18 @@ pub(super) fn pick_dp_audio_pref(
 }
 
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
+    audio_direct_plays_with(nj_platform::devcaps::caps(), mode, codec, channels)
+}
+
+/// [`audio_direct_plays`] over an explicit capability snapshot. Auto and Forced both go through
+/// `devcaps`' canonicaliser (the catalog's `dca` is the table's `dts`), so they cannot drift apart.
+pub(super) fn audio_direct_plays_with(
+    caps: &nj_platform::devcaps::Caps, mode: DirectPlayMode, codec: &str, channels: i64,
+) -> bool {
     if mode == DirectPlayMode::Forced {
-        crate::catalog::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
+        caps.forced_feeds_audio(codec)
     } else {
-        crate::catalog::is_dp_audio_track(codec, channels)
+        caps.audio_supports(codec, channels)
     }
 }
 
