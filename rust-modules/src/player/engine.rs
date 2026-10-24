@@ -758,8 +758,8 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
             r#""maxFrameRate":30"#,
             &format!(r#""maxFrameRate":{}"#, env.fps),
         );
-    // Real source frame rate (direct-play only; 0 on transcode → skip): give the pipeline the true
-    // fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
+    // Real source frame rate (a direct play, or a conversion that copies the video; 0 on a
+    // re-encode → skip): give the pipeline the true fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
     // the coded dims change. libpf parses videoFpsValue/videoFpsScale/adaptiveResolution (verified).
     // `/tmp/nativejelly-nofps` withholds the pair, for one experiment: the Dolby Vision display
     // -management lookup misses because the LUT ring is keyed ONE 90 kHz tick above what the

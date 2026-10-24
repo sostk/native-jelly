@@ -753,3 +753,19 @@ fn a_conversion_that_reencodes_the_video_declares_no_dolby_vision() {
     assert_eq!(plan.dovi, crate::metadata::Dovi::NONE);
     assert_eq!(plan.dv_decision, crate::metadata::DvDecision::NONE);
 }
+
+/// **A conversion that copies the video declares the source's frame rate** (upstream #832). The
+/// copied lane is the file's own elementary stream, so the Load describes it as a direct play's:
+/// an H.264 24p stream declared at the 60 an unknown rate keeps is presented at ~13 fps
+/// (`player/CLAUDE.md`, "Load's adaptiveStreaming ceiling"). A re-encode owns its rate and
+/// declares none.
+#[test]
+#[cfg(feature = "devtriggers")]
+fn a_conversion_that_copies_the_video_declares_the_source_rate() {
+    let copy = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=AudioCodecNotSupported");
+    assert!(copy.fps > 23.0 && copy.fps < 24.0, "the file's own rate: {}", copy.fps);
+    assert_eq!(copy.src_fps, copy.fps);
+    let encode = resolve_dv("VideoCodec=hevc&AudioCodec=ac3&TranscodeReasons=VideoBitrateNotSupported%2CAudioCodecNotSupported");
+    assert_eq!(encode.fps, 0.0, "a re-encode owns its rate");
+    assert_eq!(encode.src_fps, copy.src_fps, "the file's rate is still the file's");
+}

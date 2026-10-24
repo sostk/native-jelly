@@ -958,6 +958,11 @@ pub(crate) struct Plan {
     /// only one half is recorded. Equal to `vcodec`/`acodec` for a direct play and for a remux.
     pub src_vcodec: String,
     pub src_acodec: String,
+    /// The SOURCE file's video frame rate (0 = unknown), whichever route carries it. Beside
+    /// `src_*` and not beside `fps`: `fps` is what the Load declares for THIS stream (the file's
+    /// rate on a direct play and on a conversion that copies the video, 0 on a re-encode), while
+    /// this stays the file's, so a later rebuild of the route ([`copied_video_fps`]) can decide again.
+    pub src_fps: f64,
     pub fps: f64,
     /// The fed stream's Dolby Vision layering, for the Load payload's `DolbyHdrInfo` node: the
     /// file's on a direct play and on a conversion that copies the video, `NONE` on a re-encode,
@@ -1268,6 +1273,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     plan.contract.no_video_copy = no_video_copy;
     plan.src_dovi = dovi;
     plan.src_dv_decision = dv_decision;
+    plan.src_fps = plan.playing.as_ref().map_or(0.0, |p| p.video_fps);
     plan.src_measure = (env.src_kbps, src_w, src_h);
     plan.transport_kbps = plan
         .playing
@@ -1359,6 +1365,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     // A conversion: describe what the server will SEND, and keep the shape a seek or a track
     // switch re-negotiates from (`Session::cur_contract`).
     (plan.dovi, plan.dv_decision) = copied_video_dv(&n.video, dovi, dv_decision);
+    plan.fps = copied_video_fps(&n.video, plan.src_fps);
     if plan.dv_decision.presentation.declared().is_some() {
         crate::player::log("route: the conversion copies the video; keeping the Dolby Vision declaration");
     }
@@ -1397,6 +1404,15 @@ pub(super) fn copied_video_dv(
     } else {
         (crate::metadata::Dovi::NONE, crate::metadata::DvDecision::NONE)
     }
+}
+
+/// The video frame rate the Load may declare for a conversion: the SOURCE's own when the server
+/// copies the video lane (the file's elementary stream, so direct play's rule holds there too), 0
+/// (unknown) when it re-encodes it, whose rate the encoder owns. An H.264 24p stream declared at
+/// the 60 an unknown rate keeps is presented at ~13 fps (`player/CLAUDE.md`; upstream #832). The
+/// one place the rule lives: the plan, the recovery install and the retranscode landing ask it.
+pub(super) fn copied_video_fps(video: &crate::catalog::Lane, src_fps: f64) -> f64 {
+    if video.copied { src_fps } else { 0.0 }
 }
 
 /// The offset a conversion starts at: the resume in whole seconds, the unit a transcode seek
