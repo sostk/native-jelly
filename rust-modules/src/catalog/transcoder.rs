@@ -9,7 +9,7 @@ use super::client::{Client, QueryBuilder, StreamUrl};
 use super::params::TranscodeSpec;
 use super::probe::Location;
 pub use crate::jf::playback::{
-    Ask as PlaybackAsk, LanguagePrefs, Negotiated, Negotiation, PlayMethod, Refusal, SubtitleDelivery,
+    Ask as PlaybackAsk, Lane, LanguagePrefs, Negotiated, Negotiation, PlayMethod, Refusal, SubtitleDelivery,
 };
 // `DP_AUDIO_CODECS` — the AUDIO codec set the buffer-feed pipeline decodes — is defined in
 // `devcaps` (the platform layer intersects it with the device's own codec table) and re-exported

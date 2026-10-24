@@ -237,6 +237,6 @@ pub use timeline::{queue_index_of, QueueRow};
 // the connection. The negotiation types are Jellyfin's PlaybackInfo outcome (`jf::playback`).
 #[allow(unused_imports)]
 pub use transcoder::{
-    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LanguagePrefs, LinkPolicy, Negotiated, Negotiation, PlayMethod, PlaybackAsk,
+    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, Lane, LanguagePrefs, LinkPolicy, Negotiated, Negotiation, PlayMethod, PlaybackAsk,
     Refusal, SubtitleDelivery, is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
 };

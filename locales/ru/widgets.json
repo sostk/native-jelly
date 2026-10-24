@@ -159,7 +159,6 @@
   "widgets.tracks.normalize_loudness": "Нормализация громкости",
   "widgets.tracks.enh_note_sidecar": "Субтитры не изменятся.",
   "widgets.tracks.enh_note_burn": "Субтитры останутся. Сервер переработает видео, чтобы сохранить их, поэтому картинка может стать чуть мягче.",
-  "widgets.tracks.enh_note_dv_off": "Пока это включено, Dolby Vision отключается. Видео по-прежнему играет в HDR.",
   "widgets.tracks.enh_reason_not_analyzed": "Для этого видео пока недоступно. Серверу нужно сначала проанализировать его звук.",
   "widgets.tracks.enh_reason_dv_unusable": "Недоступно для этого видео в Dolby Vision.",
   "widgets.tracks.enh_reason_dv_subtitle": "Нельзя использовать с субтитрами в этом видео в Dolby Vision. Отключите субтитры, чтобы использовать.",
