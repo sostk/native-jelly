@@ -727,6 +727,12 @@ unsafe fn stream_index(s: *mut AVStream) -> c_int {
     *((s as *const u8).add(OFF_STREAM_INDEX) as *const c_int)
 }
 
+/// FFmpeg's codec name against the payload codec, through the shared canonicaliser: FFmpeg says
+/// `dts` where the catalog (and so the payload codec) says `dca`.
+fn audio_name_matches(ffmpeg_name: &str, want: &str) -> bool {
+    nj_platform::devcaps::audio_codec_id(ffmpeg_name) == nj_platform::devcaps::audio_codec_id(want)
+}
+
 /// The ffmpeg stream index of the first audio stream whose codec matches `want` (the Load
 /// payload's audio codec, e.g. "ac3"), or None. `av_find_best_stream` picks the "highest
 /// quality" audio (on an 8-track file it chose DTS over the AC3 default) — but the Load payload
@@ -742,7 +748,7 @@ unsafe fn audio_stream_matching(fmt: *mut AVFormatContext, want: &str) -> Option
         let cp = stream_codecpar(*streams.add(i as usize));
         if (*cp).codec_type == AVMEDIA_TYPE_AUDIO {
             let name = std::ffi::CStr::from_ptr(avcodec_get_name((*cp).codec_id)).to_string_lossy();
-            if name.eq_ignore_ascii_case(want) {
+            if audio_name_matches(&name, want) {
                 return Some(i as c_int);
             }
         }
@@ -9173,3 +9179,19 @@ mod redirect_tests;
 #[cfg(test)]
 #[path = "ff_open_duration_tests.rs"]
 mod open_duration_tests;
+
+#[cfg(test)]
+mod audio_codec_name_tests {
+    use super::*;
+
+    /// FFmpeg names DTS `dts`; the catalog (and so the payload codec reaching the matcher) says `dca`.
+    #[test]
+    fn the_payload_codec_matches_ffmpegs_name_across_spellings() {
+        assert!(audio_name_matches("dts", "dca"));
+        assert!(audio_name_matches("dts", "DTS"));
+        assert!(audio_name_matches("eac3", "ec-3"));
+        assert!(audio_name_matches("ac3", "ac3"));
+        assert!(!audio_name_matches("truehd", "dca"));
+        assert!(!audio_name_matches("ac3", "eac3"));
+    }
+}

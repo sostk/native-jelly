@@ -139,9 +139,11 @@ impl<'a> Capabilities<'a> {
         self.device.audio.split(',').filter(|c| !c.is_empty()).map(jf_codec).collect()
     }
 
-    /// The pipeline's audio codecs whatever the device table says — Strict Original's ask.
+    /// The pipeline's audio codecs past the device's channel ceilings — Strict Original's ask. DTS
+    /// still needs its table row (`devcaps::Caps::forced_feeds_audio`): a set with no DTS decoder
+    /// takes the Load and never starts.
     pub(crate) fn pipeline_audio_codecs(&self) -> Vec<&'static str> {
-        devcaps::DP_AUDIO_CODECS.split(',').map(jf_codec).collect()
+        devcaps::DP_AUDIO_CODECS.split(',').filter(|c| self.device.forced_feeds_audio(c)).map(jf_codec).collect()
     }
 
     /// Measured channel ceilings, per decodable audio codec, in Jellyfin's spelling.
@@ -406,13 +408,15 @@ mod tests {
 
     #[test]
     fn audio_is_named_in_jellyfins_spelling() {
-        let mut c = soc(true, "aac,ac3,dca");
-        c.audio_channels.insert("dca".into(), 6);
+        let mut c = soc(true, "aac,ac3,dts");
+        c.audio_channels.insert("dts".into(), 6);
         c.audio_channels.insert("truehd".into(), 8);
         let caps = Capabilities::of(&c, DvCapability::Unknown);
         assert_eq!(caps.audio_codecs(), ["aac", "ac3", "dts"]);
         assert_eq!(caps.audio_channel_limits().collect::<Vec<_>>(), [("dts", 6)], "a codec the TV cannot decode has no limit to state");
         assert!(caps.pipeline_audio_codecs().contains(&"dts"));
+        let no_row = soc(true, "aac,ac3");
+        assert!(!Capabilities::of(&no_row, DvCapability::Unknown).pipeline_audio_codecs().contains(&"dts"), "no DTS row, no DTS");
     }
 
     #[test]

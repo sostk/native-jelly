@@ -1524,10 +1524,18 @@ pub(super) fn pick_dp_audio_pref(
 }
 
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
+    audio_direct_plays_with(nj_platform::devcaps::caps(), mode, codec, channels)
+}
+
+/// [`audio_direct_plays`] over an explicit capability snapshot. Auto and Forced both go through
+/// `devcaps`' canonicaliser (the catalog's `dca` is the table's `dts`), so they cannot drift apart.
+pub(super) fn audio_direct_plays_with(
+    caps: &nj_platform::devcaps::Caps, mode: DirectPlayMode, codec: &str, channels: i64,
+) -> bool {
     if mode == DirectPlayMode::Forced {
-        crate::catalog::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
+        caps.forced_feeds_audio(codec)
     } else {
-        crate::catalog::is_dp_audio_track(codec, channels)
+        caps.audio_supports(codec, channels)
     }
 }
 
