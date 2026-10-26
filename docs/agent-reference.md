@@ -1682,7 +1682,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   signal state" is itself a diagnostic that nothing is decoded on the video plane.
 - **Perf gates:** `./tests/run.py --fps` runs the UI-tier FPS regression scenes (gates per scene in
   `tests/manifest.json`; `--fps-player` adds the player tier), asserting the app's once/sec
-  heartbeat. **Six assertions in three families. Three RATE gates — and picking the wrong one is how a frozen
+  heartbeat. **Rate, frame-time and mount assertions, plus poster-upload pacing below. Three RATE gates — and picking the wrong one is how a frozen
   animation ships:**
   `loop_floor` grades `loop=`, which counts LOOP iterations — it proves the app is alive, and cannot
   see a stopped animation at all; `fps_floor` grades `fps=` and is what proves an animation still
@@ -1699,7 +1699,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   no-line PASS, 191.4, 227.8", in which a 30 ms open and a 159 ms one are the same output. The
   `coldopen` line is UNARMED and unconditional, so one mount is one sample and an absent line
   fails. Its value on `cold-open` is PROVISIONAL until TV session 7 leg 6 measures it, and the
-  scene's `_coldopen_note` says so. **And, since 2026-09-19, one STRESS family** — `bench_missed_max` (missed display refreshes summed over the run, default 0: each present interval, or the first frame's Top->Swap after idle, costs `max(0, round(ms/16.67) - 1)`, so a frame is a drop once it spans 1.5 refreshes; Top->Swap alone is not graded because it includes the vsync wait), `bench_drift_ms`, and `bench_rss_growth_kb` for `push-100`/`modal-100`; for the DEEP-stack scene, `bench_depth_rss_kb` (deepest point minus the unwound root, so retained per-level state) and `bench_root_rss_kb` (an absolute ceiling on the unwound root) instead of a growth figure measured from a step-10 baseline that moves. It does not compose with the six: a scene carrying `bench` (`push-100`, `modal-100`, `deep-100`) is graded entirely by `run.py`'s `grade_bench`/`grade_deep_bench` and never reaches the rate, frame-time or mount gates, so "six" counts the gates of an ordinary scene. The Search pair is the
+  scene's `_coldopen_note` says so. **And, since 2026-09-19, one STRESS family** — `bench_missed_max` (missed display refreshes summed over the run, default 0: each present interval, or the first frame's Top->Swap after idle, costs `max(0, round(ms/16.67) - 1)`, so a frame is a drop once it spans 1.5 refreshes; Top->Swap alone is not graded because it includes the vsync wait), `bench_drift_ms`, and `bench_rss_growth_kb` for `push-100`/`modal-100`; for the DEEP-stack scene, `bench_depth_rss_kb` (deepest point minus the unwound root, so retained per-level state) and `bench_root_rss_kb` (an absolute ceiling on the unwound root) instead of a growth figure measured from a step-10 baseline that moves. It does not compose with the ordinary frame gates: a scene carrying `bench` (`push-100`, `modal-100`, `deep-100`) is graded entirely by `run.py`'s `grade_bench`/`grade_deep_bench` and never reaches the rate, frame-time or mount gates, so those stress scenes use their dedicated grader. The Search pair is the
   clearest illustration that these are two halves of ONE question — same screen, same trigger, the
   oscillator added or taken away. A scene with no motion and only a `loop_floor`
   gates nothing — **`home-hero` carries an `_idle_gate_note` saying exactly that, and it is the only
@@ -1736,6 +1736,16 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   present/IRQ observation to an already-running app, with no baseline; it checks profiler triggers
   and labels pacing invalid when one is armed. For a live freeze use `tools/nativejelly-sample`; unlike the
   shipped crash path its `watch` mode is a foreground developer command and sends nothing.
+- **Poster-upload pacing:** a scene can set `upload_per_frame_min`, `upload_late_share_max`
+  and `upload_frames_min` (default 15). The armed heartbeat adds `pupf=<frames>` (frames
+  containing poster-sized uploads), `pupf_ge22=<late>` (present intervals at least 22 ms)
+  and `pup=<uploads>` only in seconds containing those samples. The classifier uses a mean
+  upload size at most 120,000 pixels, excluding ordinary full-size backdrops. The harness sums
+  the samples across the scene, including warm-up, and fails if evidence is missing. Simulator
+  and recorder logs are refused for device timing. `library-scroll` uses a provisional floor
+  of 1.25 uploads per upload frame and a 0.35 late-share backstop, imported from PlxNative #563;
+  Native Jelly TV measurements remain pending. The matching ordinary prepare budget is
+  5000 us with a 2500 us poster price; large-image residency keeps its existing solo-frame price.
 - **Dev trigger files (read once at boot, in the install's RUNTIME ROOT).** There are ~40; this
   lists the ones worth knowing by name. **The ROOT moved for flavoured installs and ONLY for
   them:** the stable install keeps `/tmp` byte for byte, so every `/tmp/nativejelly-*` path written
