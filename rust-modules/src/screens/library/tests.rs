@@ -1455,3 +1455,106 @@ mod art_admission_tests { include!("art_admission_tests.rs"); }
 mod lookahead_tests { include!("lookahead_tests.rs"); }
 
 mod grid_motion_tests { include!("grid_motion_tests.rs"); }
+
+#[test]
+fn incremental_republication_keeps_unchanged_library_row_storage() {
+    let _guard = nj_base::testlock::serial();
+    let names: Vec<String> = (0..80).map(|i| format!("row-{i}")).collect();
+    let titles: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut fixture = Fixture::shelves(&titles, 12);
+    let mut page = fixture.screen();
+    let before: Vec<_> = page.shelves.iter().map(|r| (r.elems.as_ptr(), r.elems.clone())).collect();
+    let stores = fixture.stores.as_ref().unwrap();
+    stores.browse.borrow_mut().seed_shelves_for_test(0, &titles, 12);
+    let publication = stores.capture_browse(&mut fixture.directory);
+    fixture.listing = publication.listing;
+    fixture.hubs = publication.section_hubs;
+    page.keys.reset_register_probes();
+    page.sync(&fixture.cx(None));
+    for (row, (ptr, elems)) in before.iter().enumerate() {
+        assert_eq!(&page.shelves[row].elems, elems);
+        assert_eq!(page.shelves[row].elems.as_ptr(), *ptr,
+            "an unchanged publication must retain shelf {row}'s projection");
+    }
+    assert!(page.keys.register_probes() < 40, "unchanged shelves must not register every card again");
+}
+
+#[test]
+fn incremental_republication_changes_only_one_library_row() {
+    let _guard = nj_base::testlock::serial();
+    let mut fixture = Fixture::shelves(&["a", "b", "c"], 12);
+    let mut page = fixture.screen();
+    let before: Vec<_> = page.shelves.iter().map(|r| (r.elems.as_ptr(), r.elems.clone())).collect();
+    let saved = page.page_memory();
+    let old_hash = PageMemory::Library(saved.clone()).hash();
+    let stores = fixture.stores.as_ref().unwrap();
+    stores.browse.borrow_mut().seed_shelves_for_test(0, &["a", "changed", "c"], 12);
+    let publication = stores.capture_browse(&mut fixture.directory);
+    fixture.listing = publication.listing; fixture.hubs = publication.section_hubs;
+    page.keys.reset_register_probes();
+    page.sync(&fixture.cx(None));
+    for row in [0, 2] {
+        assert_eq!(page.shelves[row].elems.as_ptr(), before[row].0);
+        assert_eq!(page.shelves[row].elems, before[row].1);
+    }
+    assert!(page.keys.register_probes() < 40);
+    assert_eq!(PageMemory::Library(saved).hash(), old_hash);
+}
+
+#[test]
+fn incremental_republication_after_library_restore_rekeys_live_rows() {
+    let _guard = nj_base::testlock::serial();
+    let mut fixture = Fixture::shelves(&["old"], 12);
+    let mut page = fixture.screen();
+    let memory = page.page_memory();
+    let stores = fixture.stores.as_ref().unwrap();
+    stores.browse.borrow_mut().seed_shelves_for_test(0, &["new"], 12);
+    let publication = stores.capture_browse(&mut fixture.directory);
+    fixture.listing = publication.listing; fixture.hubs = publication.section_hubs;
+    page.sync(&fixture.cx(None));
+    page.restore(&memory);
+    page.sync(&fixture.cx(None));
+    for shelf in &page.shelves {
+        for &elem in &shelf.elems {
+            assert!(page.keys.key(elem).is_some(), "a reused row must name keys in the restored registry");
+        }
+    }
+}
+
+#[test]
+fn incremental_republication_library_basis_covers_identity_and_placeholder_query() {
+    let sid = crate::catalog::ServerId::from_raw(2);
+    let mut shelf = crate::browse::section_hubs::Shelf {
+        id: "same".into(), items: vec![crate::catalog_fetch::PmsMovie {
+            sid, rk: "one".into(), ..Default::default()
+        }], ..Default::default()
+    };
+    let basis = ShelfBasis::of(&shelf, 4);
+    shelf.items[0].title = "new title".into();
+    shelf.items[0].resume_ms = 8000;
+    assert!(basis.matches(&shelf, 5), "real item keys do not depend on metadata or query");
+    shelf.items[0].sid = crate::catalog::ServerId::from_raw(3);
+    assert!(!basis.matches(&shelf, 4));
+    shelf.items[0].sid = sid;
+    shelf.items[0].rk.clear();
+    let slot = ShelfBasis::of(&shelf, 4);
+    assert!(slot.matches(&shelf, 4));
+    assert!(!slot.matches(&shelf, 5), "placeholder keys include the listing query");
+}
+
+#[test]
+fn incremental_republication_duplicate_library_rows_keep_group_recovery() {
+    let _guard = nj_base::testlock::serial();
+    let mut fixture = Fixture::shelves(&["same", "same"], 4);
+    let mut page = fixture.screen();
+    let stores = fixture.stores.as_ref().unwrap();
+    stores.browse.borrow_mut().seed_shelves_for_test(0, &["same", "same"], 4);
+    let publication = stores.capture_browse(&mut fixture.directory);
+    fixture.listing = publication.listing; fixture.hubs = publication.section_hubs;
+    page.keys.reset_register_probes();
+    page.sync(&fixture.cx(None));
+    assert!(page.keys.register_probes() >= 10, "duplicate rows use complete registration");
+    let group = page.shelves[0].group;
+    let group_key = page.keys.key(group.0).unwrap();
+    assert_eq!(group_key.last_index, 1, "the last registered group place is retained");
+}

@@ -111,6 +111,24 @@ struct Shelf {
     elems: Vec<u32>,
     landscape: bool,
     motion: CardRow,
+    // Exact inputs to key registration. Metadata is drawn from the current store view.
+    basis: ShelfBasis,
+}
+
+#[derive(Default)]
+struct ShelfBasis {
+    valid: bool,
+    query: u32,
+    items: Vec<(crate::catalog::ServerId, String)>,
+}
+impl ShelfBasis {
+    fn of(shelf: &crate::browse::section_hubs::Shelf, query: u32) -> Self {
+        Self { valid: true, query, items: shelf.items.iter().map(|item| (item.sid, item.rk.clone())).collect() }
+    }
+    fn matches(&self, shelf: &crate::browse::section_hubs::Shelf, query: u32) -> bool {
+        self.valid && self.items.len() == shelf.items.len() && self.items.iter().zip(&shelf.items)
+            .all(|((sid, rk), item)| *sid == item.sid && *rk == item.rk && (!rk.is_empty() || self.query == query))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +246,10 @@ impl LibraryScreen {
     pub(crate) fn restore(&mut self, memory: &LibraryMemory) {
         self.wanted_kind = None;
         self.keys = KeyRegistry::restore(memory);
+        // A projection over the replaced registry cannot be retained, even if its basis matches.
+        // Retain row motion while invalidating every key projection, as on a normal rebuild.
+        for shelf in &mut self.shelves { shelf.basis.valid = false; }
+        self.shelf_publication = None;
         self.pair.detail.restore_keys(&self.keys);
         self.section = memory.section.clone();
         self.epoch = memory.epoch;
@@ -388,9 +410,19 @@ impl LibraryScreen {
         let hubs = H::section_hubs(cx);
         let publication = hubs.id().zip(hubs.revision());
         if self.shelf_publication != publication {
-            let mut old = std::mem::take(&mut self.shelves);
+            let mut old = super::registry::RowSeats::new(std::mem::take(&mut self.shelves), hubs.shelves().len());
             if let Some(section) = &identity {
+                let mut identities = std::collections::HashSet::new();
+                let duplicate = hubs.shelves().iter().take(MAX_SHELVES).any(|shelf| !identities.insert(&shelf.id));
                 for (index, shelf) in hubs.shelves().iter().take(MAX_SHELVES).enumerate() {
+                    let same = old.at(index).is_some_and(|row: &Shelf| row.id == shelf.id);
+                    if same && !duplicate && old.at(index).is_some_and(|row|
+                        row.landscape == shelf.landscape && row.heading.is_some() == shelf.link.is_some()
+                            && row.basis.matches(shelf, self.query.unwrap_or(0))) {
+                        self.shelves.push(old.keep(index));
+                        continue;
+                    }
+                    let from = old.locate(index, same, &shelf.id, |row| row.id.clone());
                     let group = GroupId(self.keys.register(
                         LibraryIdentity::Control { section: section.clone(), kind: "shelf-group".into(), key: shelf.id.clone() },
                         GroupId(0), index));
@@ -402,8 +434,7 @@ impl LibraryScreen {
                         };
                         self.keys.register(identity, group, col)
                     }).collect();
-                    let motion = old.iter().position(|row| row.id == shelf.id)
-                        .map(|i| old.remove(i).motion).unwrap_or_else(|| {
+                    let motion = from.and_then(|at| old.take(at)).map(|row| row.motion).unwrap_or_else(|| {
                             let mut motion = CardRow::new();
                             let saved = self.viewports.iter().find(|view| Some(view.epoch) == epoch && view.section == *section)
                                 .and_then(|view| view.shelves.iter().find(|(id, _)| *id == shelf.id));
@@ -420,7 +451,9 @@ impl LibraryScreen {
                             let elem = self.keys.register(control("shelf-heading"), heading_group, 0);
                             (heading_group, elem)
                         });
-                    self.shelves.push(Shelf { id: shelf.id.clone(), group, heading, elems, landscape: shelf.landscape, motion });
+                    old.rebuilt(from);
+                    self.shelves.push(Shelf { id: shelf.id.clone(), group, heading, elems,
+                        landscape: shelf.landscape, motion, basis: ShelfBasis::of(shelf, self.query.unwrap_or(0)) });
                 }
             }
             self.shelf_publication = publication;
@@ -1324,7 +1357,7 @@ impl LogicalState for LibraryScreen {
         for viewport in &self.viewports { viewport.write(c); }
         c.seq(self.shelves.len());
         for row in &self.shelves {
-            let Shelf { id, group, heading, elems, landscape, motion } = row;
+            let Shelf { id, group, heading, elems, landscape, motion, basis: _ } = row;
             c.str(id).u32(group.0);
             c.option(*heading, |c, (group, elem)| { c.u32(group.0).u32(elem); });
             c.bool(*landscape).seq(elems.len());
