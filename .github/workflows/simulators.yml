@@ -70,6 +70,14 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
         run: make sim-linux SIM_TDIR=rust-modules/target-sim-ci
+      - name: Offscreen texture warm-up regression
+        env:
+          CARGO_INCREMENTAL: "0"
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          xvfb-run -a -s '-screen 0 1920x1080x24' cargo test \
+            --manifest-path rust-modules/Cargo.toml --target-dir rust-modules/target-sim-ci \
+            -p nj_gfx --lib --features hostsim,devtriggers warm_tex_gl_tests -- --ignored
       - name: Route core dumps to the runner's temp directory
         # The runner's default core_pattern pipes to apport, which discards a crash in a binary
         # that no package owns. A launch that dies on a signal must leave a core that
