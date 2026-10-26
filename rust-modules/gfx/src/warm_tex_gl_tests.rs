@@ -115,3 +115,103 @@ fn warming_a_texture_preserves_window_and_redirected_page_pixels() {
         assert_eq!(*std::ptr::addr_of!(WARM_TARGET), Some(None), "a refusal stays latched");
     }
 }
+
+/// Compare actual GLES pixels, not only the pure route/partition helpers. Explicitly exercise
+/// the optional-program fallback and keep the caller's clip across the multi-draw card path.
+#[test]
+#[ignore = "requires a real SDL/OpenGL context; run with xvfb-run on Linux"]
+fn card_split_and_optional_programs_preserve_pixels_and_clips() {
+    let _serial = nj_base::testlock::serial();
+    unsafe {
+        let _context = Context::new();
+        assert!(RPROG != 0, "the ramp specialization compiled");
+        let plain = std::ptr::addr_of!(PLAIN_IMAGE).read();
+        assert!(plain.is_some(), "the plain texture specialization compiled");
+        let data: Vec<u8> = (0..64 * 64).flat_map(|i|
+            [(i % 64 * 4) as u8, (i / 64 * 4) as u8, ((i * 37) % 256) as u8, 210]).collect();
+        let tex = upload_rgba(0, 64, 64, data.as_ptr());
+        let tint = [0.8, 0.7, 0.9, 0.85];
+        let rim = [0.5, 0.6, 0.7, 0.3];
+        let shadow = [0.0, 0.0, 0.0, 0.4];
+        let scissor = || {
+            let mut enabled = 0; let mut bounds = [0; 4];
+            glGetIntegerv(GL_SCISSOR_TEST, &mut enabled);
+            glGetIntegerv(0x0C10, bounds.as_mut_ptr()); // GL_SCISSOR_BOX
+            (enabled, bounds)
+        };
+        let compare = |a: Vec<u8>, b: Vec<u8>, label: &str| {
+            let max = a.iter().zip(&b).map(|(&a, &b)| a.abs_diff(b)).max().unwrap();
+            assert!(max <= 1, "{label}: greatest channel delta {max}");
+        };
+        let cards = |split: bool, use_plain: bool, clipped: bool, still: bool| {
+            crate::overdraw::set_card_split(split);
+            PLAIN_IMAGE = if use_plain { plain } else { None };
+            clip_clear(); frame_clear(0.17, 0.25, 0.33);
+            if clipped { clip_set(150.25, 140.75, 800.5, 500.25); }
+            let before = scissor();
+            for (x, y, w, h, radius) in [(123.25, 152.5, 250.0, 375.0, 14.0),
+                (430.75, 223.25, 324.0, 182.0, 14.0), (800.25, 350.75, 190.0, 190.0, 95.0)] {
+                if still {
+                    assert!(draw_tex_carded_still(tex, [0.1, 0.05, 0.8, 0.9], x, y, w, h, radius,
+                        [1.0; 4], 1.0, rim, 15.0, 14.0, shadow, 60.0, [0.01, 0.02, 0.03, 0.8], 0.0, 0.0));
+                } else {
+                    draw_tex_carded(tex, [0.1, 0.05, 0.8, 0.9], x, y, w, h, radius,
+                        tint.as_ptr(), 1.0, rim.as_ptr(), 15.0, 14.0, shadow.as_ptr(), 0.0, 0.0);
+                }
+            }
+            let after = scissor();
+            assert_eq!(before.0, after.0, "restore the caller's scissor enable");
+            if before.0 != 0 { assert_eq!(before.1, after.1, "restore the caller's clip box"); }
+            let result = pixels(); clip_clear(); result
+        };
+        // The same partition must work on the window and a redirected full-resolution page.
+        let (page_tex, page_fbo) = fbo_target(1920, 1080, "card comparison").unwrap();
+        for redirected in [false, true] {
+            let page = redirected.then(|| nj_base::surface::PageTarget::enter(page_fbo));
+            for clipped in [false, true] {
+                for still in [false, true] {
+                    let old = cards(false, false, clipped, still);
+                    compare(old.clone(), cards(true, false, clipped, still), "split with legacy program");
+                    compare(old, cards(true, true, clipped, still), "split with optional plain program");
+                }
+            }
+            drop(page);
+        }
+        // A source pass uses a quarter-resolution viewport. Splitting is refused there, and
+        // the original source clip must survive every card draw and clip_clear.
+        glBindFramebuffer(GL_FRAMEBUFFER, page_fbo);
+        glViewport(-10, -20, 480, 270);
+        let source = |split| {
+            // The target allocation exceeds the live source region; initialize its unused
+            // pixels as well so readback does not compare residue from the previous draw.
+            CLIP_TARGET = None; clip_clear(); frame_clear(0.17, 0.25, 0.33);
+            CLIP_TARGET = Some((-10, -20, 0.25, 300, 180));
+            cards(split, split, true, false)
+        };
+        compare(source(false), source(true), "reduced source-pass fallback");
+        assert_eq!(scissor(), (1, [0, 0, 300, 180]), "source clip_clear restores the region clamp");
+        drop(DirectPass);
+        glDeleteFramebuffers(1, &page_fbo);
+        delete_tex(page_tex);
+        // A plain image (including a tinted, cropped image) follows exactly the old shader exit.
+        let image = |enabled| {
+            PLAIN_IMAGE = if enabled { plain } else { None };
+            frame_clear(0.17, 0.25, 0.33);
+            draw_tex_uv(tex, [0.1, 0.05, 0.8, 0.9], 100.25, 125.5, 900.0, 700.0, 0.0, tint.as_ptr());
+            pixels()
+        };
+        compare(image(false), image(true), "plain image specialization");
+        let ramp = RPROG;
+        let gradient = |enabled| {
+            RPROG = if enabled { ramp } else { 0 };
+            frame_clear(0.17, 0.25, 0.33);
+            draw_rect(71.25, 23.5, 1700.0, 970.0, 0.0, 0.0,
+                [0.1, 0.2, 0.3, 0.7].as_ptr(), [0.4, 0.2, 0.1, 0.1].as_ptr(), 0.0, 0.0);
+            pixels()
+        };
+        compare(gradient(false), gradient(true), "ramp specialization and fallback");
+        RPROG = ramp; PLAIN_IMAGE = plain;
+        crate::overdraw::set_card_split(true);
+        delete_tex(tex);
+    }
+}
