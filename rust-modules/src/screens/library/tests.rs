@@ -1026,6 +1026,22 @@ impl Fixture {
         fixture
     }
 
+    /// 1200 cards, each with a poster (`/poster/{i}`) and a still (`/still/{i}`): a grid that scrolls
+    /// far past its window. `episodes` makes it an Episodes library (stills), else Primary (posters).
+    fn art_listing(episodes: bool) -> Self {
+        let sid = crate::catalog::ServerId::from_raw(0);
+        let mut fixture = Self::new();
+        fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
+            (0..1200).map(|i| Some(crate::catalog_fetch::PmsMovie {
+                sid, rk: i.to_string(), kind: if episodes { 3 } else { 0 },
+                thumb: format!("/poster/{i}"), still: format!("/still/{i}"),
+                ..Default::default()
+            })).collect(), Vec::new()).with_library_type(if episodes {
+                crate::browse::LibraryType::Episodes
+            } else { crate::browse::LibraryType::Primary });
+        fixture
+    }
+
     pub(super) fn new() -> Self {
         let sid = crate::catalog::ServerId::from_raw(0);
         let listing = crate::browse::view::ListingSnapshot::fixture(sid, (0..36).map(|i|
@@ -1436,5 +1452,6 @@ fn the_page_glyph_and_the_librarys_live_tab_strip_never_overlap() {
 mod type_tests { include!("type_tests.rs"); }
 
 mod art_admission_tests { include!("art_admission_tests.rs"); }
+mod lookahead_tests { include!("lookahead_tests.rs"); }
 
 mod grid_motion_tests { include!("grid_motion_tests.rs"); }

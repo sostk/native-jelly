@@ -135,6 +135,7 @@ pub(super) struct GridPart {
     bands: GridBands,
     snapshot: Option<crate::stores::browse::ListingSnapshot>,
     indexes: GridIndexes,
+    rest: super::lookahead::Rest,
     #[cfg(test)]
     test_ops: PublicationOps,
 }
@@ -153,7 +154,7 @@ impl GridPart {
         // The retained snapshot is a read-publication cache, not another cursor. Its placement
         // projection and identity are traversed below; its Arc address never enters logical state.
         let Self { entry: _, group, elems, known, identity, layout, scroll, target_layout,
-            scroll_target, pop, shrink, bands, snapshot: _, indexes: _, #[cfg(test)] test_ops: _ } = self;
+            scroll_target, pop, shrink, bands, snapshot: _, indexes: _, rest: _, #[cfg(test)] test_ops: _ } = self;
         c.u32(group.0).seq(elems.len());
         for elem in elems { c.u32(*elem); }
         c.seq(known.len());
@@ -187,6 +188,7 @@ impl GridPart {
             bands: GridBands::new(),
             snapshot: None,
             indexes: GridIndexes::default(),
+            rest: Default::default(),
             #[cfg(test)] test_ops: PublicationOps::default(),
         }
     }
@@ -420,6 +422,33 @@ impl GridPart {
         self.pop_scale(index) * if press > 0.0 { press } else { 1.0 }
     }
 
+    /// The contiguous artwork run actually painted, excluding buffered metadata rows.
+    pub(super) fn painted(&self) -> Range<usize> {
+        let (lo, hi) = self.visible_window();
+        let p = crate::ui::Painter::root();
+        let visible = |index: &usize| card_row::paint_visible(p,
+            self.rect_at(*index, false, 1.0), self.tile_scale(*index, false, 1.0), false);
+        let Some(first) = (lo..hi).find(visible) else { return 0..0 };
+        let last = (first..hi).rfind(visible).unwrap_or(first);
+        first..last + 1
+    }
+
+    /// At rest, ask for one nearby poster behind all visible source and upload work.
+    pub(super) fn prepare_ahead<H: LibraryLike>(&mut self, ahead: usize, cx: &Cx<'_, H>) {
+        use crate::ui::tex::{self, Warm};
+        if ahead == 0 { return; }
+        let resting = self.rest.observe(self.scroll, self.scroll_target);
+        if !resting || self.elems.is_empty() || !tex::source_idle() { return; }
+        let view = H::listing(cx);
+        let (len, cols) = (self.elems.len(), self.layout.cols());
+        let rows = len.div_ceil(cols).min(self.layout.rows);
+        for index in super::lookahead::candidates(self.painted(), cols, rows, len, ahead, self.rest.forward()) {
+            let Some(item) = view.item(index) else { continue };
+            let Some((srv, path, w, h)) = crate::ui::widgets::card_art_request(&grid_art(item)) else { continue };
+            if tex::warm_ahead_on(srv, path, w, h, false) != Warm::Known { return; }
+        }
+    }
+
     pub(super) fn visible_window(&self) -> (usize, usize) {
         let (lo, hi) = self.layout.visible_rows(self.scroll);
         let cols = self.layout.cols();
@@ -564,7 +593,9 @@ impl<H: LibraryLike> Focusable<H> for GridPart {
 }
 
 impl<H: LibraryLike> Part<H> for GridPart {
-    fn prepare(&mut self, _budget: &mut Budget, _cx: &Cx<'_, H>) {}
+    fn prepare(&mut self, _budget: &mut Budget, cx: &Cx<'_, H>) {
+        self.prepare_ahead(super::lookahead::rows(), cx);
+    }
 
     fn draw(&mut self, f: &mut crate::ui::screen::DrawFrame<'_, '_, H>, _rect: Rect) {
         let view = H::listing(f.cx);
@@ -579,7 +610,7 @@ impl<H: LibraryLike> Part<H> for GridPart {
             let rect = self.rect_at(index, false, 1.0);
             let scale = self.tile_scale(index, false, 1.0);
             // Metadata still pages ahead via LibraryWork::Want. Hidden artwork must wait
-            // until visible: repeated warms recycle cold cache slots and keep idle uploading.
+            // until visible. The bounded at-rest prepare pass alone may warm nearby hidden rows.
             if !card_row::paint_visible(p, rect, scale, false) {
                 continue;
             }
