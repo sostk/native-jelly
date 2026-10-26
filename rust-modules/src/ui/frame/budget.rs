@@ -1,5 +1,10 @@
-/// ≈25 % of the measured ~7.8 ms discretionary headroom on a Home frame.
-pub const PREPARE_MAX_US: u64 = 2000;
+/// Ordinary prepare-window ceiling, adapted from PlxNative #563's offscreen-warm measurements.
+/// Upstream measured roughly 1.7-2 ms per poster and chose a 2500 us admission price under a
+/// 5000 us window. These are provisional Native Jelly settings until measured on its target TV.
+/// Keep `Poster.worst_us() <= PREPARE_MAX_US < Residency.worst_us()`: posters remain ordinary
+/// work and a large backdrop still takes a solo frame. The quota remains three; the clock may
+/// admit fewer when upload work has already consumed the window.
+pub const PREPARE_MAX_US: u64 = 5000;
 
 /// The ceiling a SOLO frame runs under (§8.1). A class whose worst case cannot fit
 /// [`PREPARE_MAX_US`] is not ordinary prepare work: it is admitted at most once per frame, only
@@ -17,7 +22,8 @@ const SOLO_LOG_GAP_US: u64 = 1_000_000;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Class {
-    /// One decoded poster's GL upload (a 250x375 poster is ≈375 KB). Quota 3 per frame.
+    /// One decoded poster's GL upload (a 250x375 poster is ≈375 KB). Quota 3 per frame; the clock
+    /// ([`PREPARE_MAX_US`]) usually admits two.
     Poster,
     /// The GL upload + `warm_tex` pair for a LARGE decoded image — a 1280x720 backdrop (≈3.7 MB)
     /// or a hero logo (up to 1.44 MB; `app/adapters/poster.rs`'s request boxes). A SOLO class:
@@ -26,52 +32,13 @@ pub enum Class {
 }
 
 impl Class {
-    /// The device-measured worst case. Two of them, and they are not the same KIND of number:
-    ///
-    /// * `Poster` — **[?] still unmeasured cleanly; TV session 7 legs 2-4 tried and the attempt is
-    ///   the finding.** 400 µs remains the placeholder — **not applied by choice**, because the
-    ///   naive derivation this session ran breaks the admission system it would feed. Derivation
-    ///   attempted: every `FRAMEDROP` line across legs 2/3/4 (both A and B passes, ~2400 lines)
-    ///   filtered to `up=1 cards=1` with `px` matching a poster's decoded size (90000-93750, the
-    ///   240x375/250x375 dims this variant's own doc names) — 16 clean, single-upload, single-card
-    ///   samples, `prepare=` 7.8-26.4 ms (median 13.1 ms; excluding `page-panel`, the one scene
-    ///   with its own per-frame glass/blur source pass as a plausible confound, still 7.8-18.1 ms,
-    ///   n=8, median 12.0 ms — not a page-panel artifact). An `up=0` baseline sanity-checked it:
-    ///   median 0.0 ms of `prepare=` across ~2500 no-upload frames, so the nonzero values are not
-    ///   baseline noise.
-    ///
-    ///   **Why the raw number was not pinned here.** 26400 µs is over not only [`PREPARE_MAX_US`]
-    ///   but [`SOLO_MAX_US`] as well (8000 µs) — and [`Class::is_solo`]'s admission rule for a solo
-    ///   class is `elapsed + worst_us() <= SOLO_MAX_US` with **no forward-progress escape** (see
-    ///   [`Budget::take`]'s doc, rule 2: "not first means wait for a frame of your own"). A class
-    ///   whose OWN `worst_us()` already exceeds `SOLO_MAX_US`, independent of `elapsed`, is refused
-    ///   on every frame, forever — setting this constant to the raw measurement would make the app
-    ///   stop loading posters entirely, which was caught only by running the existing test suite
-    ///   (`a_class_over_the_ceiling_is_a_solo_frame` and the two per-frame-quota tests all fail,
-    ///   the first by design — `Poster` really would become solo — the other two because the
-    ///   admission path a solo `Poster` takes has no working case left at this magnitude). That is
-    ///   strong evidence for reading (b) below, not a green light to apply the number anyway.
-    ///
-    ///   Two readings of the data, left open rather than picked under a TV-session deadline: (a)
-    ///   the placeholder undersold the real GL-upload-plus-decode cost and `Poster` genuinely
-    ///   belongs in the solo tier, which would also mean its quota (currently 3) and every screen's
-    ///   assumption of batched poster admission need redesigning together, not a one-line constant
-    ///   edit; (b) `prepare=` times more than the upload itself (layout/hit-test/animation resolve
-    ///   for the WHOLE frame the upload happened to land on, not the upload in isolation), so 7.8-
-    ///   26.4 ms is an upper bound on the upload proper rather than a clean isolate of it, and the
-    ///   true `Poster` cost may still be well under [`PREPARE_MAX_US`]. Settling which reading is
-    ///   right needs an isolated micro-benchmark (one upload with nothing else changing on the
-    ///   page, e.g. a scene that seeds exactly one new poster and nothing else per frame) rather
-    ///   than another heartbeat grep across mixed scenes — flagged for whoever picks this up next,
-    ///   with the raw samples and this reasoning rather than a number that was never cleanly
-    ///   isolated.
-    /// * `Residency` — **[M-dev]** 6 ms, device-measured 2026-09-02 with `nativejelly-framedrop`:
-    ///   a 1280x720 backdrop landing cost 6 ms in the pump and 116 ms in the NEXT frame's draw
-    ///   without the `warm_tex` that now follows it (`gfx.rs`'s `warm_tex`, whose doc is the
-    ///   record). That 6 ms is the pair this class prices.
+    /// Admission prices. `Poster` is 2500 us from PlxNative #563 (2026-10-08): moving the
+    /// warm into an offscreen target removed the back-buffer wait from the measured upload.
+    /// This port has host functional coverage; Native Jelly TV timing remains pending.
+    /// `Residency` retains the existing 6000 us price for a large image's upload + warm pair.
     pub const fn worst_us(self) -> u64 {
         match self {
-            Class::Poster => 400,
+            Class::Poster => 2500,
             Class::Residency => 6000,
         }
     }
@@ -354,6 +321,33 @@ mod tests {
         assert!(!old.take(Class::Poster, PREPARE_WINDOW_US + 440), "and only one");
         let s = old.take_frame_stats();
         assert_eq!((s.admitted, s.refused), (1, 1), "a quota of three that was really one");
+    }
+
+    /// The pricing invariant `is_solo` depends on (`>`): a Poster fits the ceiling, a Residency
+    /// does not, and the solo ceiling holds a Residency.
+    #[test]
+    fn the_prices_keep_a_poster_ordinary_and_a_backdrop_solo() {
+        assert!(Class::Poster.worst_us() <= PREPARE_MAX_US, "a poster must fit an ordinary frame");
+        assert!(PREPARE_MAX_US < Class::Residency.worst_us(), "a backdrop must stay a solo frame");
+        assert!(Class::Residency.worst_us() <= SOLO_MAX_US, "and the solo ceiling must hold it");
+        assert!(!Class::Poster.is_solo() && Class::Residency.is_solo());
+    }
+
+    /// A fresh frame admits two measured-cost posters (about 2 ms each) and refuses the third, and
+    /// the same takes with a virtual clock that does not advance admit the whole quota.
+    #[test]
+    fn a_fresh_frame_admits_two_posters_and_refuses_the_third_when_the_clock_says_so() {
+        let mut b = Budget::new();
+        b.begin_frame(10_000);
+        assert!(b.take(Class::Poster, 10_000), "first: fresh clock");
+        assert!(b.take(Class::Poster, 10_000 + 2_200), "second: 2.2 ms spent, 2.5 ms still fits");
+        assert!(!b.take(Class::Poster, 10_000 + 4_400), "third: 4.4 ms spent, no room for 2.5 ms");
+
+        let mut b = Budget::new();
+        b.begin_frame(10_000);
+        let admitted = (0..4).filter(|_| b.take(Class::Poster, 10_000)).count();
+        assert_eq!(admitted, usize::from(Class::Poster.quota()), "a stopped clock admits the full quota");
+        assert!(usize::from(Class::Poster.quota()) >= 2);
     }
 
     /// §15.1.
