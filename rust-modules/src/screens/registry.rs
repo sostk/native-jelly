@@ -697,9 +697,21 @@ pub(crate) struct FilmographyMemory {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HomeHubIdentity {
     ContinueWatching,
-    Identifier { sid: crate::catalog::ServerId, id: String, key: String },
-    Key { sid: crate::catalog::ServerId, key: String },
+    Identifier { sid: crate::catalog::ServerId, id: Arc<str>, key: Arc<str> },
+    Key { sid: crate::catalog::ServerId, key: Arc<str> },
     Ephemeral { generation: u32, ordinal: u32 },
+}
+
+impl HomeHubIdentity {
+    pub(crate) fn borrowed(&self) -> Option<crate::catalog_fetch::HubIdentity<'_>> {
+        use crate::catalog_fetch::HubIdentity;
+        match self {
+            Self::ContinueWatching => Some(HubIdentity::ContinueWatching),
+            Self::Identifier { sid, id, key } => Some(HubIdentity::Identifier { sid: *sid, id, key }),
+            Self::Key { sid, key } => Some(HubIdentity::Key { sid: *sid, key }),
+            Self::Ephemeral { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -710,7 +722,7 @@ pub(crate) struct HomeGroupKey {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum HomeItemIdentity {
-    Item { hub: HomeHubIdentity, sid: crate::catalog::ServerId, rk: String },
+    Item { hub: HomeHubIdentity, sid: crate::catalog::ServerId, rk: Arc<str> },
     Slot { hub: HomeHubIdentity, generation: u32, ordinal: u32 },
 }
 
@@ -2358,5 +2370,113 @@ mod arg_tests {
         assert!(!a.same_instance(&AppArg::Content(ContentArg::Detail {
             sid: crate::catalog::ServerId::UNSET, rk: "50001".into(),
         })));
+    }
+}
+
+
+/// Order-preserving compaction of key tables. Indexes follow surviving positions without
+/// cloning and rehashing every retained identity (adapted from plx-native #858).
+pub(crate) struct Compaction { removed: Vec<usize> }
+impl Compaction {
+    pub(crate) fn remove<T>(table: &mut Vec<T>, mut positions: Vec<usize>) -> Option<Self> {
+        positions.retain(|&at| at < table.len());
+        positions.sort_unstable(); positions.dedup();
+        if positions.is_empty() { return None; }
+        let (mut next, mut at) = (0, 0);
+        table.retain(|_| {
+            let drop = positions.get(next) == Some(&at);
+            next += usize::from(drop); at += 1; !drop
+        });
+        Some(Self { removed: positions })
+    }
+    pub(crate) fn follow(&self, at: &mut usize) -> bool {
+        match self.removed.binary_search(at) {
+            Ok(_) => false,
+            Err(before) => { *at -= before; true }
+        }
+    }
+}
+
+/// Match publications without repeatedly shifting large row structs. The positional fast path
+/// avoids hashing unchanged rows; a lazy index handles reorder. Duplicate identities consume
+/// old rows in order, at most once. Rebuilt rows remain available in `unclaimed` for map removal.
+pub(crate) struct RowSeats<R, K> {
+    old: Vec<Option<R>>,
+    claimed: Vec<bool>,
+    by_identity: Option<std::collections::HashMap<K, Vec<usize>>>,
+    matched: Vec<Option<usize>>,
+    rebuilt: Vec<usize>,
+}
+pub(crate) struct RowDiff<R> {
+    pub(crate) same_rows: bool,
+    pub(crate) matched: Vec<Option<usize>>,
+    pub(crate) rebuilt: Vec<usize>,
+    pub(crate) unclaimed: Vec<R>,
+}
+impl<R, K: std::hash::Hash + Eq> RowSeats<R, K> {
+    pub(crate) fn new(old: Vec<R>, len: usize) -> Self {
+        Self { claimed: vec![false; old.len()], old: old.into_iter().map(Some).collect(),
+            by_identity: None, matched: Vec::with_capacity(len), rebuilt: Vec::new() }
+    }
+    pub(crate) fn at(&self, at: usize) -> Option<&R> {
+        if *self.claimed.get(at)? { return None; }
+        self.old.get(at)?.as_ref()
+    }
+    pub(crate) fn keep(&mut self, at: usize) -> R {
+        assert!(!self.claimed[at]); self.claimed[at] = true;
+        self.matched.push(Some(at)); self.old[at].take().expect("matched row")
+    }
+    pub(crate) fn locate(&mut self, at: usize, same: bool, key: &K, key_of: impl Fn(&R) -> K) -> Option<usize> {
+        if same { return Some(at); }
+        let index = self.by_identity.get_or_insert_with(|| {
+            let mut map: std::collections::HashMap<K, Vec<usize>> = Default::default();
+            for (at, row) in self.old.iter().enumerate() {
+                if let Some(row) = row { map.entry(key_of(row)).or_default().push(at); }
+            }
+            map
+        });
+        index.get(key)?.iter().copied().find(|&at| !self.claimed[at])
+    }
+    pub(crate) fn rebuilt(&mut self, from: Option<usize>) {
+        if let Some(at) = from { assert!(!self.claimed[at]); self.claimed[at] = true; }
+        self.rebuilt.push(self.matched.len()); self.matched.push(from);
+    }
+    pub(crate) fn take(&mut self, at: usize) -> Option<R> { self.old.get_mut(at)?.take() }
+    pub(crate) fn finish(self) -> RowDiff<R> {
+        let same_rows = self.old.len() == self.matched.len()
+            && self.matched.iter().enumerate().all(|(at, old)| *old == Some(at));
+        RowDiff { same_rows, matched: self.matched, rebuilt: self.rebuilt,
+            unclaimed: self.old.into_iter().flatten().collect() }
+    }
+}
+
+#[cfg(test)]
+mod incremental_registry_tests {
+    use super::{Compaction, RowSeats};
+    #[test]
+    fn incremental_republication_matches_duplicate_rows_once_and_preserves_order() {
+        let mut seats = RowSeats::new(vec![("a", 0), ("a", 1), ("b", 2)], 3);
+        let key = "a";
+        let at = seats.locate(0, false, &key, |r| r.0).unwrap();
+        assert_eq!(seats.keep(at), ("a", 0));
+        let at = seats.locate(1, false, &key, |r| r.0).unwrap();
+        assert_eq!(seats.keep(at), ("a", 1));
+        assert_eq!(seats.locate(2, false, &key, |r| r.0), None);
+        let from = seats.locate(2, true, &"b", |r| r.0);
+        seats.rebuilt(from);
+        let diff = seats.finish();
+        assert!(diff.same_rows);
+        assert_eq!(diff.rebuilt, vec![2]);
+        assert_eq!(diff.unclaimed, vec![("b", 2)]);
+    }
+    #[test]
+    fn incremental_compaction_follows_survivors_and_ignores_invalid_positions() {
+        let mut table: Vec<_> = "abcdefgh".chars().collect();
+        let moved = Compaction::remove(&mut table, vec![5, 1, 5, 6, 99]).unwrap();
+        assert_eq!(table, vec!['a', 'c', 'd', 'e', 'h']);
+        for (old, new) in [(0, 0), (2, 1), (3, 2), (4, 3), (7, 4)] {
+            let mut at = old; assert!(moved.follow(&mut at)); assert_eq!(at, new);
+        }
+        for mut at in [1, 5, 6] { assert!(!moved.follow(&mut at)); }
     }
 }

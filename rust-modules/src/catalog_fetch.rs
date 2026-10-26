@@ -2289,3 +2289,14 @@ impl nj_base::tile::Tile for PmsMovie {
         self.unwatched
     }
 }
+
+/// Change one card of one retained source and publish through the real catalog commit.
+#[cfg(test)]
+pub(crate) fn edit_test_hub_card(state: &mut PmsState, row: usize, col: usize, rk: &str, title: &str) {
+    nj_base::testlock::assert_held("the incremental Home publication fixture");
+    let item = &mut state.srcs[0].last.as_mut().unwrap().shelves[row].items[col];
+    item.rk = rk.into();
+    item.title = title.into();
+    let build = merge(&state.srcs);
+    commit(state, build);
+}

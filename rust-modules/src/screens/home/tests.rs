@@ -1370,6 +1370,7 @@ fn down_from_the_first_shelf_chooses_the_next_shelf_not_the_folded_hero() {
         group: GroupId(FIRST_HUB_GROUP + 1),
         elems: vec![second_elem],
         link: None,
+        basis: Vec::new(),
     });
     s.elem_at.insert(second_elem, (1, 0));
     s.snap.jump(1.0);
@@ -3173,4 +3174,83 @@ fn stable_keys_are_bounded_oldest_first() {
     assert!(elems.windows(2).all(|w| w[0] < w[1]));
     assert_eq!(elems.last().copied(), s.rows[0].elems.last().copied());
     assert_indexes_agree(&s);
+}
+
+#[test]
+fn incremental_republication_keeps_unchanged_home_row_storage() {
+    let _guard = nj_base::testlock::serial();
+    let mut state = crate::catalog_fetch::PmsState::default();
+    let adapter = Arc::new(crate::catalog_fetch::PmsAdapter::default());
+    let mut page = HomeScreen::new(EntryId(7), InstanceId(9));
+    republish(&mut page, &mut state, &adapter, 80, 12);
+    let before: Vec<_> = page.rows.iter().map(|r| (r.elems.as_ptr(), r.elems.clone())).collect();
+    republish(&mut page, &mut state, &adapter, 80, 12);
+    for (row, (ptr, elems)) in before.iter().enumerate() {
+        assert_eq!(&page.rows[row].elems, elems);
+        assert_eq!(page.rows[row].elems.as_ptr(), *ptr,
+            "an unchanged publication must retain row {row}'s projection");
+    }
+    assert_indexes_agree(&page);
+}
+
+#[test]
+fn incremental_republication_changes_only_one_home_row_and_keeps_old_memory() {
+    let _guard = nj_base::testlock::serial();
+    let mut state = crate::catalog_fetch::PmsState::default();
+    let adapter = Arc::new(crate::catalog_fetch::PmsAdapter::default());
+    let mut page = HomeScreen::new(EntryId(7), InstanceId(9));
+    republish(&mut page, &mut state, &adapter, 80, 12);
+    let before: Vec<_> = page.rows.iter().map(|r| r.elems.as_ptr()).collect();
+    let PageMemory::Home(saved) = <HomeScreen as Screen<TestHost>>::memory(&page) else { panic!() };
+    let old_hash = PageMemory::Home(saved.clone()).hash();
+    let focus = FocusKey { entry: page.entry, elem: page.rows[7].elems[5] };
+    crate::catalog_fetch::edit_test_hub_card(&mut state, 7, 5, "replacement", "changed");
+    let snapshot = crate::catalog_fetch::hubs_snapshot(&state);
+    page.sync_catalog(&cx(snapshot.view(), Some(focus)));
+    for (row, ptr) in before.iter().enumerate() {
+        if row != 7 { assert_eq!(page.rows[row].elems.as_ptr(), *ptr); }
+    }
+    assert_eq!(page.locate(focus.elem), None);
+    let recovered = Focusable::<TestHost>::reconcile(&page, focus, &cx(snapshot.view(), Some(focus)));
+    assert!(page.rows[7].elems.contains(&recovered.elem));
+    assert_indexes_agree(&page);
+    assert_eq!(PageMemory::Home(saved.clone()).hash(), old_hash);
+    // A metadata-only update is read from the new view without rebuilding a key projection.
+    let ptr = page.rows[7].elems.as_ptr();
+    crate::catalog_fetch::edit_test_hub_card(&mut state, 7, 5, "replacement", "new metadata");
+    let snapshot = crate::catalog_fetch::hubs_snapshot(&state);
+    page.sync_catalog(&cx(snapshot.view(), Some(recovered)));
+    assert_eq!(page.rows[7].elems.as_ptr(), ptr);
+    assert_eq!(snapshot.view().hub(7).unwrap().items[5].title, "new metadata");
+    // A restore must reapply remembered positions even when every published identity matches.
+    page.restore(&saved);
+    page.sync_catalog(&cx(snapshot.view(), None));
+    assert_indexes_agree(&page);
+    for (row, hub) in page.rows.iter().enumerate() {
+        for (col, &elem) in hub.elems.iter().enumerate() {
+            assert_eq!(page.locate(elem), Some(Located::Item(row, col)));
+            let key = page.items.iter().find(|key| key.elem == elem).unwrap();
+            assert_eq!((key.last_row, key.last_col), (row as u32, col as u32));
+        }
+    }
+}
+
+
+#[test]
+fn incremental_republication_duplicate_home_rows_keep_last_key_places_and_first_draw() {
+    let _guard = nj_base::testlock::serial();
+    let mut state = crate::catalog_fetch::PmsState::default();
+    let adapter = Arc::new(crate::catalog_fetch::PmsAdapter::default());
+    let mut page = HomeScreen::new(EntryId(7), InstanceId(9));
+    republish_named(&mut page, &mut state, &adapter, &["same", "same"], 4, None);
+    crate::catalog_fetch::edit_test_hub_card(&mut state, 0, 0, "replacement", "changed");
+    let snapshot = crate::catalog_fetch::hubs_snapshot(&state);
+    page.sync_catalog(&cx(snapshot.view(), None));
+    for &elem in &page.rows[1].elems {
+        let key = page.items.iter().find(|key| key.elem == elem).unwrap();
+        assert_eq!(key.last_row, 1, "registration retains the existing last-row recovery rule");
+    }
+    let elem = page.rows[0].elems[1];
+    assert_eq!(page.locate(elem), Some(Located::Item(0, 1)), "the first drawn row wins");
+    assert_indexes_agree(&page);
 }

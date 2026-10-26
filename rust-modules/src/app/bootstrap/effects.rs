@@ -40,8 +40,8 @@ fn home_hub(identity: &crate::screens::registry::HomeHubIdentity) -> Value {
     use crate::screens::registry::HomeHubIdentity;
     match identity {
         HomeHubIdentity::ContinueWatching => json!([0]),
-        HomeHubIdentity::Identifier { sid, id, key } => json!([1, sid.raw(), id, key]),
-        HomeHubIdentity::Key { sid, key } => json!([2, sid.raw(), key]),
+        HomeHubIdentity::Identifier { sid, id, key } => json!([1, sid.raw(), id.as_ref(), key.as_ref()]),
+        HomeHubIdentity::Key { sid, key } => json!([2, sid.raw(), key.as_ref()]),
         HomeHubIdentity::Ephemeral { generation, ordinal } => json!([3, generation, ordinal]),
     }
 }
@@ -49,7 +49,7 @@ fn home_hub(identity: &crate::screens::registry::HomeHubIdentity) -> Value {
 fn home_item(identity: &crate::screens::registry::HomeItemIdentity) -> Value {
     use crate::screens::registry::HomeItemIdentity;
     match identity {
-        HomeItemIdentity::Item { hub, sid, rk } => json!([0, home_hub(hub), sid.raw(), rk]),
+        HomeItemIdentity::Item { hub, sid, rk } => json!([0, home_hub(hub), sid.raw(), rk.as_ref()]),
         HomeItemIdentity::Slot { hub, generation, ordinal } =>
             json!([1, home_hub(hub), generation, ordinal]),
     }
