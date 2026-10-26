@@ -2226,7 +2226,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // pin was 0x6dfe_4a98_8543_1a82.
 // Unencrypted connection consent: `screens::jf_login::SHAPE` gains the *Connect without
 // encryption?* step; the previous pin was 0x4a03_df99_a613_4199.
-const SCREEN_SHAPES_PIN: u64 = 0xc8e2_ec7c_baec_7537;
+// Card rendering: LibraryGrid replaces its single index-based shrink with identity-keyed
+// released springs; the previous pin was 0xc8e2_ec7c_baec_7537. Synthetic anchors are rerecorded.
+const SCREEN_SHAPES_PIN: u64 = 0x25225533d7b73f9f;
 
 #[cfg(test)]
 mod arg_tests {

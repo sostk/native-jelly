@@ -167,6 +167,10 @@ pub struct Size {
     pub h: f32,
 }
 
+/// Relative distance and per-frame travel below which a released card lands exactly.
+/// 2^-14 is below the ordinary idle threshold and above the f32 fixed-point residue.
+pub const LAND_REL: f32 = 1.0 / 16384.0;
+
 /// One animated scalar, delegating to the existing critically-damped C spring so
 /// motion is byte-identical. "Springs live in views": a view owns one per value.
 #[derive(Clone, Copy, Default)]
@@ -188,6 +192,16 @@ impl Spring {
     #[inline]
     pub fn step_zeta(&mut self, target: f32, k: f32, zeta: f32, dt: f32) {
         nj_gfx::gfx::spring_zeta(&mut self.pos, &mut self.vel, target, k, zeta, dt);
+    }
+    /// Snap only an arrived spring to its exact target. Callers choose released cells;
+    /// focused springs retain their existing timing. `jump` reports a changed landing once.
+    pub fn land(&mut self, target: f32, dt: f32) -> bool {
+        if self.pos == target && self.vel == 0.0 { return true; }
+        let near = LAND_REL * (1.0 + self.pos.abs().max(target.abs()));
+        if (self.pos - target).abs() <= near && (self.vel * dt).abs() <= near {
+            self.jump(target); return true;
+        }
+        false
     }
     /// Teleport, with no motion in between. Reports to [`nj_machine::idle`](nj_machine::idle) — a jump
     /// changes the drawn value without ever reaching a spring integrator, so nothing else would
@@ -1978,6 +1992,25 @@ mod spring_tests {
     //! above do not (`nj_machine::idle`'s gate state is process-wide).
     use super::Spring;
     use nj_machine::idle::{frame_begin, note_present, reset_for_test, should_present};
+
+    #[test]
+    fn landing_presents_the_final_change_once_and_preserves_motion_until_arrival() {
+        let _g = nj_base::testlock::serial();
+        reset_for_test();
+        let dt = 1.0 / 60.0;
+        let mut s = Spring { pos: 1.00001, vel: 1.0 };
+        assert!(!s.land(1.0, dt), "near position alone must not stop a moving card");
+        s.vel = 0.00001;
+        note_present(10_000);
+        frame_begin(dt);
+        assert!(s.land(1.0, dt));
+        assert_eq!((s.pos, s.vel), (1.0, 0.0));
+        assert!(should_present(10_016), "the exact landing changes the final picture");
+        note_present(10_016);
+        frame_begin(dt);
+        assert!(s.land(1.0, dt));
+        assert!(!should_present(10_032), "an already landed spring must let the page idle");
+    }
 
     /// A jump reports only when it actually moved — `home.rs` jumps to the same value every frame
     /// while the hub list is empty, and an unguarded report would pin 60fps on that exact screen.

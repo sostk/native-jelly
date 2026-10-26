@@ -276,8 +276,8 @@ fn draw_cell(
 ) {
     let x = strip_x(i);
     let still_focused = focused == Some((i, Row::Still));
-    let focused_here = still_focused || scale > 1.001;
     let pop = widgets::pop_factor(scale, theme::EP_CARD_FOCUS_SCALE);
+    let focused_here = still_focused || pop > 0.0;
     let card = Rect::new(x, -theme::EP_CARD_FOCUS_LIFT * pop, W, H);
     widgets::draw_card_peaked(
         p,

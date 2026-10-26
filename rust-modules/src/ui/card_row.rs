@@ -229,6 +229,7 @@ impl CardRow {
                 1.0
             };
             sp.step(target, sty.k_scale, dt);
+            if focused != Some(i) { sp.land(1.0, dt); }
         }
         // the shared overflow spring pops only while focus is actually out past the array
         let ot = if focused.is_some_and(|f| f >= MAX_ROW_ITEMS) {
@@ -237,6 +238,7 @@ impl CardRow {
             1.0
         };
         self.overflow.step(ot, sty.k_scale, dt);
+        if !focused.is_some_and(|f| f >= MAX_ROW_ITEMS) { self.overflow.land(1.0, dt); }
         if let Some(fc) = focused {
             if n > 0 {
                 self.scroll_x
@@ -2120,6 +2122,22 @@ mod tests {
                     sty.w, sty.h,
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod exact_rest_regressions {
+    use super::*;
+    #[test]
+    fn a_released_card_lands_exactly_while_the_row_keeps_focus() {
+        let dt = 1.0 / 60.0;
+        for style in [RowStyle::HOME, RowStyle::EPISODE, RowStyle::CAST] {
+            let mut row = CardRow::new();
+            for _ in 0..60 { row.update(12, Some(3), &style, dt); }
+            assert!(row.scale(3) > 1.0);
+            for _ in 0..120 { row.update(12, Some(4), &style, dt); }
+            assert_eq!(row.scale(3), 1.0, "a released cell must leave the focus shader exactly");
         }
     }
 }

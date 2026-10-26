@@ -97,7 +97,18 @@ answers 0.0, and state, presents, effects and Focus/Hit are still graded on ever
 held-page walk measures Flow 12's focused cast caption, which that anchor never drew, because the
 Person page is pushed before Detail's replacement capture.
 
-**Current migration:** Home, Settings, and Flow 12 Filmography anchors are accepted
+**Card-settling migration (27 October 2026):** Library's single index-based shrink spring is
+replaced by a counted sequence of identity-keyed released springs. The screen shape inventory
+changes from `0xc8e2ec7cbaec7537` to `0x25225533d7b73f9f`; product `state_fp` changes from
+`4072208413546603830` to `2275743306554654546` within schema 3. All three prior anchors were
+observed refused and captured afresh through the typed synthetic initializer and mock server,
+then replaced using `tools/nativejelly-rec rerecord`, preserving their anchor flags. No state
+hashes or manifests were hand-migrated. Home uses the ordinary Xvfb capture; Settings and Flow 12
+use the existing Linux host software pacing (`WSL_DISTRO_NAME=synthetic-recording`,
+`SDL_VIDEODRIVER=x11`) to hold recording at 60 Hz. Unpaced captures of those longer flows exceeded
+the reader's decoded-data budget and were discarded; its limits are unchanged.
+
+**Earlier migration:** Home, Settings, and Flow 12 Filmography anchors are accepted
 controlled-replay coverage. Flow 12 has typed initial state, exact synchronous admissions,
 recorded content results, and denied resource execution. This bounded support does not imply
 all-domain acceptance. Editing manifest fingerprints or state hashes is never a replacement for

@@ -438,6 +438,11 @@ fn detail_focus_places_and_hit_map_agree_for_all_three_scrolled_strips() {
             screen.related.update(12, None, &crate::ui::card_row::RowStyle::HOME, 1.0 / 60.0);
             screen.cast.update(12, None, &crate::ui::card_row::RowStyle::CAST, 1.0 / 60.0);
         }
+        // Exact rest removes the fractional enlargement that used to make an edge-aligned
+        // tile count as clipped. Deliberately straddle the viewport instead of testing residue.
+        let partial = 137.0 + focus as f32 * 11.0;
+        screen.related.restore_scroll(partial, 12, &crate::ui::card_row::RowStyle::HOME);
+        screen.cast.restore_scroll(partial, 12, &crate::ui::card_row::RowStyle::CAST);
         scroll_to(&mut screen, 3);
         assert_strip_hit_geometry(&screen, &related_elems, &measure);
         scroll_to(&mut screen, 4);

@@ -1,7 +1,7 @@
 {
  "anchor": true,
  "blobs": false,
- "build": "0.8.0-dev",
+ "build": "0.9.0-dev",
  "clock": {
   "start": 0
  },
@@ -53,8 +53,8 @@
        "address": "127.0.0.1",
        "machine_id": "",
        "name": "",
-       "origin": "http://127.0.0.1:32498",
-       "port": 32498,
+       "origin": "http://127.0.0.1:32514",
+       "port": 32514,
        "tier": "local",
        "token": "s00000002"
       }
@@ -169,11 +169,11 @@
    ],
    "version": 1
   },
-  "hash": 18417354958855243554,
+  "hash": 16524077102450748028,
   "probe": "controlled=home version=1"
  },
  "schema": 3,
- "state_fp": 4072208413546603830,
+ "state_fp": 2275743306554654546,
  "triggers": [
   "nativejelly-app-init",
   "nativejelly-rec",

@@ -233,6 +233,23 @@ fn step(
     (handled, effects)
 }
 
+#[test]
+fn released_episode_cards_land_at_exact_rest() {
+    let guard = install(detail(ServerId::UNSET, "show"));
+    let mut screen = bare(&guard, ServerId::UNSET, "show");
+    screen.episode_scale[0] = Spring::at(crate::ui::theme::EP_CARD_FOCUS_SCALE);
+    screen.episode_scale[1] = Spring::at(crate::ui::theme::EP_CARD_FOCUS_SCALE);
+    for frame in 1..=180 {
+        step(&mut screen, &ScreenEvent::Tick(nj_machine::machine::Tick {
+            ms: frame * 17, dt_us: 16_667,
+        }), None);
+    }
+    for spring in &screen.episode_scale {
+        assert_eq!((spring.pos, spring.vel), (1.0, 0.0));
+    }
+    clear();
+}
+
 /// `DetailScreen::pump_restore` now takes the same `fx: &mut Effects<'_, H>` every other
 /// dispatch path does; this test file drives it with a throwaway sink, mirroring `step`'s own
 /// scaffold, since none of the call sites below inspect the pushed effects.

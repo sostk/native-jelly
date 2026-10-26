@@ -112,6 +112,12 @@ struct PublicationOps {
     known_probes: usize,
 }
 
+struct LetGo {
+    elem: u32,
+    index: usize,
+    spring: Spring,
+}
+
 pub(super) struct GridPart {
     entry: EntryId,
     group: GroupId,
@@ -128,10 +134,10 @@ pub(super) struct GridPart {
     /// for `By::Dir` / `By::Pointer`); every other way a cell becomes focused — a restore, a
     /// reconcile, a command seating the cursor — is adopted at full scale by [`tick`](Self::tick),
     /// because a page coming back from a Detail push must land exactly as it was left.
-    pop: (Option<usize>, Spring),
-    /// The previously focused cell shrinking back to 1.0 (the legacy `PREV_S`); its index
-    /// clears once it has settled, so a settled grid pays for no shrinking tile.
-    shrink: (Option<usize>, Spring),
+    pop: (Option<(u32, usize)>, Spring),
+    /// Every released card keeps its own spring until exact rest. Identity follows publications;
+    /// the cell is resolved once after a landing, never by hashing every card during draw.
+    let_gos: Vec<LetGo>,
     bands: GridBands,
     snapshot: Option<crate::stores::browse::ListingSnapshot>,
     indexes: GridIndexes,
@@ -146,15 +152,17 @@ impl GridPart {
         self.indexes.elems.clear();
         self.identity = None;
         self.snapshot = None;
+        self.pop = (None, Spring::at(1.0));
+        self.let_gos.clear();
     }
 
-    pub(super) const SHAPE: &'static str = "LibraryGrid{group:u32,elems:[u32],known:[(elem:u32,index:u32)],identity:Option<(epoch:u32,sid:u32,section:u64,query:u32)>,layout:LibraryLayout,scroll:f32,target_layout:LibraryLayout,scroll_target:f32,pop:(index:Option<u32>,sp:Spring{pos:f32,vel:f32}),shrink:(index:Option<u32>,sp:Spring{pos:f32,vel:f32}),bands:{focus:Option<u32>,slots:[(row:u32,sp:Spring{pos:f32,vel:f32})]}}";
+    pub(super) const SHAPE: &'static str = "LibraryGrid{group:u32,elems:[u32],known:[(elem:u32,index:u32)],identity:Option<(epoch:u32,sid:u32,section:u64,query:u32)>,layout:LibraryLayout,scroll:f32,target_layout:LibraryLayout,scroll_target:f32,pop:(card:Option<(elem:u32,index:u32)>,sp:Spring{pos:f32,vel:f32}),let_gos:[(elem:u32,index:u32,sp:Spring{pos:f32,vel:f32})],bands:{focus:Option<u32>,slots:[(row:u32,sp:Spring{pos:f32,vel:f32})]}}";
 
     pub(super) fn write(&self, c: &mut nj_machine::machine::Canon) {
         // The retained snapshot is a read-publication cache, not another cursor. Its placement
         // projection and identity are traversed below; its Arc address never enters logical state.
         let Self { entry: _, group, elems, known, identity, layout, scroll, target_layout,
-            scroll_target, pop, shrink, bands, snapshot: _, indexes: _, rest: _, #[cfg(test)] test_ops: _ } = self;
+            scroll_target, pop, let_gos, bands, snapshot: _, indexes: _, rest: _, #[cfg(test)] test_ops: _ } = self;
         c.u32(group.0).seq(elems.len());
         for elem in elems { c.u32(*elem); }
         c.seq(known.len());
@@ -166,9 +174,12 @@ impl GridPart {
         target_layout.write(c); c.f32(*scroll_target);
         // canonical animation state, as `PageGround::write_motion`: a spring mid-flight decides
         // the next frames even when two grids draw the same rects
-        for (index, sp) in [pop, shrink] {
-            c.option(*index, |c, i| { c.u32(i as u32); });
-            c.f32(sp.pos).f32(sp.vel);
+        c.option(pop.0, |c, (elem, index)| { c.u32(elem).u32(index as u32); });
+        c.f32(pop.1.pos).f32(pop.1.vel);
+        c.seq(let_gos.len());
+        for released in let_gos {
+            c.u32(released.elem).u32(released.index as u32)
+                .f32(released.spring.pos).f32(released.spring.vel);
         }
         bands.write(c);
     }
@@ -184,7 +195,7 @@ impl GridPart {
             target_layout: Layout::new(false, &[], 0, false),
             scroll_target: 0.0,
             pop: (None, Spring::at(1.0)),
-            shrink: (None, Spring::at(1.0)),
+            let_gos: Vec::new(),
             bands: GridBands::new(),
             snapshot: None,
             indexes: GridIndexes::default(),
@@ -194,40 +205,61 @@ impl GridPart {
     }
 
     /// Arm the pop from REST: the cell at `index` starts at 1.0 and grows over the frames that
-    /// follow, while whatever held the pop before is handed to the shrink spring — one tile
-    /// growing as its neighbour lets go, the treatment every shelf gets from `RowMotion` and the
+    /// follow, while whatever held the pop before keeps its own release spring — one tile
+    /// growing as its neighbours let go, the treatment every shelf gets from `RowMotion` and the
     /// one the poster wall had as the legacy grid's `FOCUS_S`/`PREV_S` pair before phase 8 applied
     /// the scale as a step. Called from the `FocusMoved` arm for `By::Dir` / `By::Pointer` and
     /// from nowhere else: a deliberate move is the only focus change the eye should see travel.
     pub(super) fn pop_from_rest(&mut self, index: usize) {
-        self.shrink = self.pop;
-        self.pop = (Some(index), Spring::at(1.0));
+        self.follow_motion();
+        let Some(elem) = self.elem_at(index) else { return };
+        if self.pop.0.is_some_and(|(old, _)| old == elem) { return; }
+        self.release();
+        let spring = self.let_gos.iter().position(|l| l.elem == elem)
+            .map(|at| self.let_gos.remove(at).spring).unwrap_or(Spring::at(1.0));
+        self.pop = (Some((elem, index)), spring);
     }
 
-    /// Advance the focus pop by one tick. `focused` is the focused cell's index, if focus is in
-    /// the grid at all.
-    ///
-    /// **Order within a frame.** Inputs and the `FocusMoved` they deliver run BEFORE the screen's
-    /// `Tick`, so a D-pad step has already called [`pop_from_rest`](Self::pop_from_rest) by the
-    /// time this runs, and this only steps that spring on from 1.0. A cell that arrives here
-    /// unannounced — a restore, a reconcile, a command that seated the cursor — is ADOPTED AT FULL
-    /// SCALE with no animation, which is what makes a page returning from a Detail push draw the
-    /// rect it was left at on its first frame back (`LibraryScreen::restore` jumps the scroll
-    /// spring for the same reason).
+    fn release(&mut self) {
+        if let Some((elem, index)) = self.pop.0 {
+            self.let_gos.retain(|l| l.elem != elem);
+            if self.pop.1.pos != 1.0 || self.pop.1.vel != 0.0 {
+                self.let_gos.push(LetGo { elem, index, spring: self.pop.1 });
+            }
+        }
+    }
+
+    /// The full retained key index already resolves a moved card without a bounded source scan.
+    fn follow_motion(&mut self) {
+        let locate = |elem, index| if self.elems.get(index) == Some(&elem) { Some(index) }
+            else { self.indexes.index_of(elem) };
+        self.let_gos.retain_mut(|l| match locate(l.elem, l.index) {
+            Some(index) => { l.index = index; true }
+            None => false,
+        });
+        if let Some((elem, index)) = self.pop.0 {
+            self.pop.0 = locate(elem, index).map(|index| (elem, index));
+        }
+    }
+
+    /// Deliberate moves start from rest; restores/reconciliation adopt full scale. Every card
+    /// released by a held key continues on its own spring, and exact rest removes its entry.
     pub(super) fn tick(&mut self, focused: Option<usize>, dt: f32) {
+        self.follow_motion();
         let style = self.layout.style();
         self.focus_row(focused.map(|index| index / self.layout.cols()), false);
         self.bands.tick(style.k_scroll, dt);
-        if focused != self.pop.0 {
-            self.shrink = self.pop;
-            self.pop = (focused, Spring::at(if focused.is_some() { style.focus_scale } else { 1.0 }));
+        let card = focused.and_then(|index| self.elem_at(index).map(|elem| (elem, index)));
+        if card != self.pop.0 {
+            self.release();
+            if let Some((elem, _)) = card { self.let_gos.retain(|l| l.elem != elem); }
+            self.pop = (card, Spring::at(if card.is_some() { style.focus_scale } else { 1.0 }));
         }
-        let k = style.k_scale;
-        self.pop.1.step(if self.pop.0.is_some() { style.focus_scale } else { 1.0 }, k, dt);
-        self.shrink.1.step(1.0, k, dt);
-        if self.shrink.1.pos < 1.003 {
-            self.shrink.0 = None;
-        }
+        self.pop.1.step(if card.is_some() { style.focus_scale } else { 1.0 }, style.k_scale, dt);
+        self.let_gos.retain_mut(|l| {
+            l.spring.step(1.0, style.k_scale, dt);
+            !l.spring.land(1.0, dt)
+        });
     }
 
     pub(super) fn focus_row(&mut self, row: Option<usize>, animate: bool) {
@@ -269,6 +301,7 @@ impl GridPart {
             self.elems.clear();
             self.indexes.elems.clear();
             self.identity = None;
+            self.follow_motion();
             return;
         };
         let section = LibrarySectionIdentity { sid: id.sid, key: id.section };
@@ -307,6 +340,7 @@ impl GridPart {
                 }
             }
         }
+        self.follow_motion();
     }
 
     fn publish_slot(&mut self, view: crate::stores::browse::ListingView<'_>,
@@ -392,10 +426,8 @@ impl GridPart {
     fn tile_scale(&self, index: usize, focused: bool, press: f32) -> f32 {
         if focused {
             self.treatment_scale(index, press)
-        } else if self.shrink.0 == Some(index) {
-            self.shrink.1.pos
         } else {
-            1.0
+            self.let_gos.iter().find(|l| l.index == index).map_or(1.0, |l| l.spring.pos)
         }
     }
 
@@ -405,7 +437,7 @@ impl GridPart {
     /// [`tick`](Self::tick) — and those land finished rather than animating, so drawing them at
     /// rest would be a one-frame collapse of the very card being returned to.
     fn pop_scale(&self, index: usize) -> f32 {
-        if self.pop.0 == Some(index) { self.pop.1.pos } else { self.layout.style().focus_scale }
+        if self.pop.0.is_some_and(|(elem, _)| self.elem_at(index) == Some(elem)) { self.pop.1.pos } else { self.layout.style().focus_scale }
     }
 
     /// The scale the focused cell's TREATMENT is drawn at — what
@@ -777,5 +809,76 @@ mod pop_tests {
         assert!(ring(1.0) > 0.99, "a resting focused tile wears the whole shadow and sheen");
         assert!(ring(0.918) < 0.1,
             "…and lets go of them under a full press, as Home's does: {}", ring(0.918));
+    }
+}
+
+#[cfg(test)]
+mod held_focus_regressions {
+    use super::*;
+
+    fn publish(grid: &mut GridPart, elems: &[u32]) {
+        grid.elems = elems.to_vec();
+        grid.indexes.elems.clear();
+        for (index, &elem) in elems.iter().enumerate() { grid.indexes.add_elem(elem, index); }
+        grid.follow_motion();
+    }
+
+    #[test]
+    fn returning_to_a_moving_card_resumes_its_scale_then_all_releases_land() {
+        let _guard = nj_base::testlock::serial();
+        let mut grid = GridPart::new(EntryId(7), GroupId(3));
+        publish(&mut grid, &[1, 2, 3, 4]);
+        let dt = 1.0 / 60.0;
+        grid.tick(Some(0), dt);
+        grid.pop_from_rest(1);
+        for _ in 0..6 { grid.tick(Some(1), dt); }
+        let before = grid.tile_scale(0, false, 1.0);
+        grid.pop_from_rest(0);
+        assert_eq!(grid.pop.1.pos, before, "returning must not restart at rest");
+        grid.pop_from_rest(2);
+        assert_eq!(grid.let_gos.len(), 2);
+        for _ in 0..180 { grid.tick(Some(2), dt); }
+        assert!(grid.let_gos.is_empty());
+        assert_eq!(grid.tile_scale(0, false, 1.0), 1.0);
+        assert_eq!(grid.tile_scale(1, false, 1.0), 1.0);
+        use nj_machine::idle::{frame_begin, note_present, reset_for_test, should_present};
+        reset_for_test(); note_present(10_000); frame_begin(dt);
+        grid.tick(Some(2), dt);
+        assert!(!should_present(10_016), "settled grid motion must stop requesting presents");
+    }
+
+    #[test]
+    fn published_moves_follow_identity_and_removed_cards_cannot_lend_their_scale() {
+        let mut grid = GridPart::new(EntryId(7), GroupId(3));
+        publish(&mut grid, &[10, 20, 30]);
+        let dt = 1.0 / 60.0;
+        grid.tick(Some(0), dt);
+        grid.pop_from_rest(1); grid.tick(Some(1), dt);
+        let released = grid.tile_scale(0, false, 1.0);
+        let focused = grid.pop.1.pos;
+        publish(&mut grid, &[30, 20, 40, 10]);
+        assert_eq!(grid.tile_scale(3, false, 1.0), released);
+        assert_eq!(grid.tile_scale(0, false, 1.0), 1.0);
+        grid.pop_from_rest(1);
+        assert_eq!(grid.pop.1.pos, focused, "a repeated focus event must not repop the same card");
+        publish(&mut grid, &[30, 40]);
+        assert!(grid.pop.0.is_none());
+        assert!(grid.let_gos.is_empty());
+        grid.pop_from_rest(1);
+        assert_eq!(grid.pop.1.pos, 1.0, "replacement art must not inherit a removed card's scale");
+    }
+    #[test]
+    fn a_second_press_preserves_the_first_cards_running_release() {
+        let mut grid = GridPart::new(EntryId(7), GroupId(3));
+        grid.elems = (1..=36).collect();
+        let dt = 1.0 / 60.0;
+        grid.tick(Some(3), dt);
+        grid.pop_from_rest(4);
+        for _ in 0..6 { grid.tick(Some(4), dt); }
+        let before = grid.tile_scale(3, false, 1.0);
+        assert!(before > 1.003, "the first release is still visibly moving");
+        grid.pop_from_rest(5);
+        assert_eq!(grid.tile_scale(3, false, 1.0), before,
+            "another press must not throw away a card still shrinking");
     }
 }

@@ -3211,6 +3211,7 @@ impl DetailScreen {
                 300.0,
                 dt,
             );
+            if episode_focus != Some(i) { spring.land(1.0, dt); }
         }
         let text_focus = match focused {
             Some(Located::Episode(i, episodes::Row::Text)) => Some(i),
