@@ -69,6 +69,25 @@ def _overlay(items):
     return {"pms": {"host": "10.0.0.2", "port": 32400}, "tv": "10.0.0.3", "items": items}
 
 
+class VideoPlaneBindingTests(unittest.TestCase):
+    def test_acb_metadata_is_binding_evidence(self):
+        self.assertTrue(run.a_video_bound(['acb: setMediaVideoData sent'])[0])
+
+    def test_exported_window_requires_placement_and_binding(self):
+        lines = ['vplane: SDL exported window (webOS 5+)',
+                 'vplane: exported window placed src=1920x1080 rv=1',
+                 'videoplane: BOUND — the gate presents unconditionally']
+        self.assertTrue(run.a_video_bound(lines)[0])
+
+    def test_window_creation_or_refused_placement_is_not_binding(self):
+        for lines in [[], ['vplane: exported windowId=_Window_Id_1'],
+                      ['vplane: exported window placed src=1920x1080 rv=1'],
+                      ['videoplane: BOUND'],
+                      ['vplane: exported window placed src=1920x1080 rv=0', 'videoplane: BOUND']]:
+            with self.subTest(lines=lines):
+                self.assertFalse(run.a_video_bound(lines)[0])
+
+
 class RequireLogTests(unittest.TestCase):
     """`require_log`: a scene proves its own stimulus ran (more-quality-osc must push the page)."""
 

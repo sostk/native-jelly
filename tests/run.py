@@ -1595,7 +1595,17 @@ def a_offline_pick(lines):
 
 def a_video_bound(lines):
     ln = find(lines, "setMediaVideoData sent")
-    return (ln is not None), (ln.strip() if ln else "no `setMediaVideoData sent` (video plane never bound)")
+    if ln is not None:
+        return True, ln.strip()
+    # webOS 5+ binds the compositor's exported window instead of using libAcbAPI.
+    # Creating a window is insufficient: placement must succeed and the player must
+    # publish its bound gate. Both witnesses are emitted by the production path.
+    placed = next((ln for ln in lines if re.search(
+        r"vplane: exported window placed src=\d+x\d+ rv=1(?:\s|$)", ln)), None)
+    bound = find(lines, "videoplane: BOUND")
+    if placed is not None and bound is not None:
+        return True, placed.strip() + " :: " + bound.strip()
+    return False, "no ACB metadata binding or successfully placed/bound exported window"
 
 
 def a_timeline_climb(lines, min_climb, dense_only=False):
