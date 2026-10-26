@@ -2360,6 +2360,27 @@ struct AvioState {
     /// a segment body is already complete before feed.
     bounce: Vec<u8>,
     bounce_pos: usize,
+    /// Reopens spent at one offset, shared across libavformat's read retries.
+    heal: HealBudget,
+}
+
+#[derive(Clone, Copy, Default)]
+struct HealBudget {
+    at: i64,
+    spent: u8,
+}
+
+impl HealBudget {
+    fn take(&mut self, at: i64) -> bool {
+        if self.at != at {
+            *self = HealBudget { at, spent: 0 };
+        }
+        if self.spent >= BODY_HEAL_ATTEMPTS {
+            return false;
+        }
+        self.spent += 1;
+        true
+    }
 }
 
 // TEST ONLY: a deterministic stand-in for the two `Instant::elapsed()` calls that measure
@@ -2479,6 +2500,19 @@ impl AvioState {
             Src::Socket { hs, .. } => nj_net::stream::http_body_done(*hs),
             Src::Curl(cs) => cs.body_complete(),
         }
+    }
+
+    /// Whether a cut at the byte reached may be healed by reopening there: a direct-play
+    /// (no acquisition, so not an HLS segment) plaintext socket with a known length and `off`
+    /// still inside it. Unsized transcodes cannot be reopened at a byte, curl heals on its own
+    /// terms, and a position at or past the end is a position, not a cut. One predicate for every
+    /// heal site, so the drain path cannot drift from the read path.
+    fn may_heal_at_offset(&self) -> bool {
+        self.acquisition.is_none()
+            && self.size > 0
+            && self.off >= 0
+            && self.off < self.size
+            && matches!(self.src, Src::Socket { .. })
     }
 
     /// Drain the live media socket into [`Self::bounce`] without blocking. Called from
@@ -2636,6 +2670,23 @@ fn avio_stopped(s: &mut AvioState) -> c_int {
     AVERROR_IO
 }
 
+/// Reopens [`read_cb`] tries at one byte, after the transfer is cut mid-body, before the cut is a
+/// transport failure.
+const BODY_HEAL_ATTEMPTS: u8 = 3;
+
+/// How long a direct-play socket read waits for a byte before the transfer counts as cut.
+#[cfg(not(test))]
+const BODY_SILENCE: std::time::Duration = std::time::Duration::from_secs(15);
+#[cfg(test)]
+const BODY_SILENCE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Reopen the source at the byte reached, through the same path a seek takes.
+fn heal_at_offset(s: &mut AvioState) -> bool {
+    let at = s.off;
+    crate::player::log(&format!("ff: body ended early at byte {at} of {}, reopening there", s.size));
+    seek_cb(s as *mut AvioState as *mut c_void, at, SEEK_SET) == at
+}
+
 extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
     unsafe {
         let s = &mut *(op as *mut AvioState);
@@ -2655,6 +2706,15 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                 return bounced as c_int;
             }
             if park_read_fails_closed(s.bounce_remaining(), s.io_failed) {
+                // The failure was parked by `drain_wire` (the demuxer waits in
+                // `aq_push_with_drain` almost all the time, so it is the drain that meets a LAN
+                // reset or an early close), not by this read. The bounce is empty, so `s.off` is
+                // the first byte not yet delivered: reopen there as a cut read would. `seek_cb`
+                // clears `io_failed` on success and refuses a reopen that is not a 206 from the
+                // byte; the per-offset budget bounds a server that keeps cutting.
+                if s.may_heal_at_offset() && s.heal.take(s.off) && heal_at_offset(s) {
+                    continue;
+                }
                 return AVERROR_IO;
             }
             // The abort rule, evaluated where the numbers are — through the same runtime check
@@ -2681,7 +2741,14 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                         owner: BlockingDeadlineOwner::Reserve,
                     })
                 });
-            let live_deadline = blocking_deadline.map(|deadline| deadline.at);
+            // A direct-play socket read has no other clock, so a server that stops sending without
+            // closing would block it forever. Silence this long is answered like a cut: a reopen.
+            // Sized bodies only: a progressive transcode (`start.mkv`) has no length, may be
+            // silent that long while the PMS catches up, and cannot be reopened at a byte (its
+            // restart would answer 200 from the head). It keeps the pre-heal behaviour.
+            let direct_play = s.acquisition.is_none();
+            let silence_deadline = (s.may_heal_at_offset() && blocking_deadline.is_none()).then(|| std::time::Instant::now() + BODY_SILENCE);
+            let live_deadline = blocking_deadline.map(|deadline| deadline.at).or(silence_deadline);
             // Both sources use the same three-way return — >0 bytes, 0 clean end, <0 error — so
             // the EOF decision below stays one branch rather than one per transport.
             let read_started = std::time::Instant::now();
@@ -2765,8 +2832,46 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
                 continue;
             }
             if r < 0 {
+                // A server that drops the connection mid-body (a PMS that reaps the socket while
+                // the viewer is paused, a reset from the LAN) is answered by reopening at the byte
+                // we stopped at. libavformat only heals through `seek_cb` when the demuxer itself
+                // seeks; a plain read failure reaches `av_read_frame` as EIO and ends the session,
+                // which is how pausing for the subtitle menu stopped playback on a webOS 3.4 set.
+                // Stall timeouts (rc=28) stay with the stall guard; only cut transfers heal here.
+                // Direct play only: an HLS segment read carries an acquisition runtime whose
+                // checkpoint and deadlines bound the transfer, but `cs.seek` reopens through
+                // `start()` with neither, and a failed segment is the HLS retry policy's to answer.
+                // The plaintext socket heals sized bodies only (see the silence deadline above).
+                if s.may_heal_at_offset() && s.heal.take(s.off) && heal_at_offset(s) {
+                    continue;
+                }
+                if let Src::Curl(cs) = &mut s.src {
+                    let cut = cs
+                        .body_failure()
+                        .is_some_and(|f| matches!(f.rc, 18 | 55 | 56 | 92));
+                    let inside = s.off >= 0 && (s.size < 0 || s.off < s.size);
+                    if direct_play && cut && inside && s.heal.take(s.off) {
+                        if cs.seek(s.off) {
+                            continue;
+                        }
+                    }
+                }
                 // Teardown was handled above through the AU flag and remains EOF. A negative
                 // result here is therefore a real transport/range failure.
+                s.io_failed = true;
+                return AVERROR_IO;
+            }
+            // A clean close before the length is a cut too (a server that ends the response early
+            // rather than resetting it): reopen at the byte reached. One that no reopen crosses is
+            // still not the end of the file: it is the transfer failing, for the pump to answer.
+            if r == 0 && direct_play && s.size > 0 && s.off >= 0 && s.off < s.size {
+                if s.heal.take(s.off) && heal_at_offset(s) {
+                    continue;
+                }
+                crate::player::log(&format!(
+                    "ff: body cut at byte {} of {} and no reopen crossed it; transport failure, not EOF",
+                    s.off, s.size
+                ));
                 s.io_failed = true;
                 return AVERROR_IO;
             }
@@ -2779,6 +2884,7 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             if let Some(watchdog) = &mut s.transport_watchdog {
                 watchdog.reset();
             }
+            s.heal = HealBudget::default();
             s.body_active_us = s
                 .body_active_us
                 .saturating_add(elapsed_since(read_started).as_micros().max(1) as u64);
@@ -2828,6 +2934,7 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
             return -1;
         }
         let aq = s.aq;
+        let sized = s.size > 0;
         let mut hopped_to_tls = None;
         let ok = match &mut s.src {
             // Redirects are followed here too (`stream::redirect`), and the effective target is
@@ -2864,7 +2971,24 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
                             *port = t.origin.port() as c_int;
                             *path = p;
                         }
-                        true
+                        // `stream.rs` takes any 2xx, so a server that ignored the Range answers
+                        // 200 from byte 0 and would be spliced in as the bytes at `target`:
+                        // corruption that looks like success (the curl arm refuses it below). A
+                        // sized body knows where it is going, so it is held to the same rule: a
+                        // 206 that starts at the byte asked for, or a 200 for a request from 0.
+                        // An unsized body (a transcode) has no such position to hold it to.
+                        let start = nj_net::stream::hs_range_start(*hs);
+                        let status = nj_net::stream::hs_status(*hs);
+                        let crossed = !sized
+                            || (status == 206 && start == target)
+                            || (status == 200 && target == 0);
+                        if !crossed {
+                            crate::player::log(&format!(
+                                "ff: seek_cb reopen refused: status={status} range_start={start} wanted={target}"
+                            ));
+                            nj_net::stream::http_close(*hs);
+                        }
+                        crossed
                     }
                     Ok(nj_net::stream::redirect::Opened::Tls(t)) => {
                         match open_curl_hop(&t.url(), target, aq) {
@@ -4438,6 +4562,7 @@ unsafe fn hls_input(
             acquisition: Some(acquisition),
             bounce: Vec::new(),
             bounce_pos: 0,
+            heal: HealBudget::default(),
         }),
         avio: std::ptr::null_mut(),
         fmt: std::ptr::null_mut(),
@@ -8398,6 +8523,7 @@ pub(crate) fn demux(
                     acquisition: None,
                     bounce: Vec::new(),
                     bounce_pos: 0,
+                    heal: HealBudget::default(),
                 });
                 let buf = av_malloc(65536) as *mut u8;
                 if buf.is_null() {
@@ -9195,3 +9321,6 @@ mod audio_codec_name_tests {
         assert!(!audio_name_matches("ac3", "eac3"));
     }
 }
+#[cfg(test)]
+#[path = "ff_body_heal_tests.rs"]
+mod body_heal_tests;

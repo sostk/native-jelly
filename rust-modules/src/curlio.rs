@@ -547,6 +547,13 @@ impl Xfer {
     }
 }
 
+/// A libcurl body-transfer failure eligible for a bounded direct-play reopen.
+/// Multi-handle failures and deliberate cancellation are different failure domains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BodyFailure {
+    pub(crate) rc: c_int,
+}
+
 /// One remote file, pulled over http(s) by byte range.
 ///
 /// Lives on the demux thread for its whole life — created there, read there, dropped there. Only
@@ -1547,6 +1554,21 @@ impl CurlSource {
     #[cfg(test)]
     pub(crate) fn fail_multi_for_test(&mut self) {
         self.fail_multi_wait(1);
+    }
+
+    /// The current validated body failed in libcurl, rather than in the local multi
+    /// machinery or because teardown interrupted it. A successful reopen clears the
+    /// transfer's failure flags, so a later error cannot inherit this result.
+    pub(crate) fn body_failure(&self) -> Option<BodyFailure> {
+        (self.failed && self.readable && !self.multi_failed && !self.abort.is_set())
+            .then_some(BodyFailure { rc: self.rc })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_body_for_test(&mut self, rc: c_int) {
+        self.rc = rc;
+        self.failed = true;
+        self.done = true;
     }
 }
 

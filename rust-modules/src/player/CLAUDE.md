@@ -238,6 +238,12 @@ something.
 
 ## Verifying playback changes
 
+Direct-play AVIO retries cut sized HTTP bodies at the next unread byte, with a shared
+per-offset retry bound; curl body retries are limited to recoverable transfer errors.
+Range answers for sized bodies must start at the requested byte. Unsized progressive
+conversions keep their existing policy, and HLS acquisition retains its own deadlines.
+`ff_body_heal_tests` covers those boundaries with loopback servers.
+
 **Start with `make check`** — the host unit suite (`cargo test --lib`, ~28 s for 3,639 tests,
 measured 2026-09-17; do not re-quote that number, `time` it) covers a real
 slice of this pipeline's pure logic: `ff.rs`'s `nal_end` bounds guard and AVCC→Annex-B conversion,
