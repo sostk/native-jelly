@@ -3356,10 +3356,13 @@ def op_seek_inplace(lines, target_s):
     started = find(lines, "seek(in-place)")
     if started is None:
         return False, "no `seek(in-place)` line (in-place seek did not fire)"
-    seg_ok = any("sendSegment=1" in ln for ln in lines if "in-place seek:" in ln)
-    if not seg_ok:
-        ln = find(lines, "in-place seek:")
-        return False, f"in-place seek lacked sendSegment=1 :: {ln.strip() if ln else 'no in-place seek: line'}"
+    after_seek = lines[lines.index(started) + 1:]
+    seg_ok = any("sendSegment=1" in ln for ln in after_seek if "in-place seek:" in ln)
+    native_ok = any(re.search(r"in-place seek\(native\): Seek\(\d+\) rv=1(?:\s|$)", ln)
+                    for ln in after_seek)
+    native_landed = find(after_seek, "rebase: first post-seek keyframe") is not None
+    if not seg_ok and not (native_ok and native_landed):
+        return False, "in-place seek lacked sendSegment=1 or accepted native Seek with a landed keyframe"
     # Only a reload AFTER the seek fired is the seek falling back to one. A reload before it is
     # some other transition's -- handing playback to Auto restarts the source
     # (`route transition: adaptive direct reload` -> `reload_at: fresh Load`) a minute before

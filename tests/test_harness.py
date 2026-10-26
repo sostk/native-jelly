@@ -88,6 +88,21 @@ class VideoPlaneBindingTests(unittest.TestCase):
                 self.assertFalse(run.a_video_bound(lines)[0])
 
 
+class NativeSeekEvidenceTests(unittest.TestCase):
+    def test_public_native_seek_is_an_in_place_seek(self):
+        lines = ['seek(in-place): av_seek t=40000000000 coalesced=0',
+                 'in-place seek(native): Seek(40000) rv=1',
+                 'rebase: first post-seek keyframe pts=40000000000 -> pts_shift=0',
+                 'loop=60 route=player pos=40s', 'loop=60 route=player pos=42s']
+        self.assertTrue(run.op_seek_inplace(lines, 40)[0])
+        for changed in [lines[:1] + lines[2:],
+                        [ln.replace('rv=1', 'rv=0') for ln in lines],
+                        [ln for ln in lines if not ln.startswith('rebase:')],
+                        lines + ['reload_at: fresh Load']]:
+            with self.subTest(lines=changed):
+                self.assertFalse(run.op_seek_inplace(changed, 40)[0])
+
+
 class RequireLogTests(unittest.TestCase):
     """`require_log`: a scene proves its own stimulus ran (more-quality-osc must push the page)."""
 
