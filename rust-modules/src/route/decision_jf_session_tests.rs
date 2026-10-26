@@ -522,6 +522,35 @@ fn a_short_playback_reports_its_start_before_its_stop() {
     assert_eq!(stopped["PositionTicks"], 30_000_000_i64);
 }
 
+/// Releasing a terminal native pipeline keeps the logical Jellyfin playback alive under
+/// the error readout. Leaving it must send one stop at the retained position, even though
+/// the Engine (and therefore the live clock and reporter) is already gone.
+#[test]
+fn leaving_a_released_failed_engine_reports_the_saved_position_once() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let lb = loopback(remux_info());
+    let contract = crate::catalog::EncodeContract { remux: true, ..Default::default() };
+    encode(&lb, "jf-failed", "", 0, contract);
+    ps.cur_rk = jf_rk();
+    ps.cur_sid = lb.sid;
+    ps.sess = "jf-failed".into();
+    // A backward seek can leave the actual failure position before the original resume.
+    ps.requested_resume_ns = 120_000_000_000;
+    note_engine_failure(&mut ps, crate::player::RuntimeFailure::PlaybackInterrupted, 60_000_000_000);
+    assert_eq!(unpresented_resume_ns(&ps), 60_000_000_000);
+    crate::player::SHARED.duration_ns.store(7_200_000_000_000, Ordering::Relaxed);
+    let mut pa = crate::player::adapter::PlayerAdapter::new(unsafe { nj_base::task::MainThread::assume() });
+    crate::player::stop_bufferfeed(&mut ps, &mut pa);
+    crate::player::stop_bufferfeed(&mut ps, &mut pa);
+    drain_scrobble();
+    let seen = lb.finish();
+    let stopped = posts(&seen, "/Sessions/Playing/Stopped");
+    assert_eq!(stopped.len(), 1, "{seen:?}");
+    assert_eq!(stopped[0].json()["PositionTicks"], 600_000_000_i64);
+    assert!(engine_failure(&ps).is_none());
+}
+
 /// A playback that never put a picture on the panel (a load that failed, a BACK during loading)
 /// is no playback: it reports neither a start nor a stop — whose position would overwrite the
 /// resume point — and only its encoder is ended.

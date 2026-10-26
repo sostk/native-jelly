@@ -628,7 +628,8 @@ pub(crate) fn state(ps: &crate::route::PlaybackSession) -> shared::PlaybackState
     // that owns `pb_state` never runs. Deriving it in the one reader keeps a single writer — the
     // alternative is poking `Error` into the player's state from the frame loop. It sits BELOW the
     // resolve check because a fresh resolve is the thing that retires the last verdict.
-    if ps.jail_load_blocked || crate::route::play_refused(ps) || crate::route::play_resolution_failed(ps) {
+    if ps.jail_load_blocked || crate::route::play_refused(ps) || crate::route::play_resolution_failed(ps)
+        || crate::route::engine_failure(ps).is_some() {
         return shared::PlaybackState::Error;
     }
     // A seek in flight is derived HERE too, not only published by the pump's own ladder (which
@@ -915,7 +916,7 @@ pub(crate) struct ErrorShape {
 /// variant is backed by a distinct signal the worker already publishes, so the HUD never parses
 /// log strings or guesses from elapsed time.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum RuntimeFailure {
+pub(crate) enum RuntimeFailure {
     /// No worker supplied a cause. Say that honestly rather than leaving the reason slot blank.
     Unknown,
     /// The producer never opened a usable media stream or produced a video access unit.
@@ -1122,6 +1123,16 @@ fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorSha
     shape
 }
 
+/// The standing session error outlives the worker flags reset by Engine teardown.
+fn live_runtime_failure(ps: &crate::route::PlaybackSession) -> RuntimeFailure {
+    crate::route::engine_failure(ps).unwrap_or_else(|| runtime_failure(
+        SHARED.demux_failed.load(std::sync::atomic::Ordering::Acquire),
+        SHARED.demux_io_failed.load(std::sync::atomic::Ordering::Acquire),
+        SHARED.load_failed.load(Relaxed),
+        SHARED.load_timed_out.load(Relaxed),
+    ))
+}
+
 /// The live [`ErrorShape`] for `PlaybackState::Error` (main thread — `route::is_transcoding` and
 /// `route::play_verdict` read main-thread state).
 pub(crate) fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
@@ -1134,23 +1145,12 @@ pub(crate) fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
     if ps.jail_load_blocked {
         return jail_error_shape();
     }
-    let demux_failed = SHARED
-        .demux_failed
-        .load(std::sync::atomic::Ordering::Acquire);
-    let demux_io_failed = SHARED
-        .demux_io_failed
-        .load(std::sync::atomic::Ordering::Acquire);
     with_forced_playback_context(error_shape(
         SHARED.demux_no_video.load(Relaxed),
         crate::route::is_transcoding(ps),
         playing_subscription(&ps),
         crate::route::play_verdict(ps),
-        runtime_failure(
-            demux_failed,
-            demux_io_failed,
-            SHARED.load_failed.load(Relaxed),
-            SHARED.load_timed_out.load(Relaxed),
-        ),
+        live_runtime_failure(ps),
     ), crate::route::forced_direct_play(ps))
 }
 

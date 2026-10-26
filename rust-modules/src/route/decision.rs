@@ -85,6 +85,8 @@ pub(crate) struct PlaybackSession {
     /// This playback was refused by the cached device sandbox preflight. No Engine exists.
     /// Cleared with the playback verdict on exit/reset, never a process-global error latch.
     pub(crate) jail_load_blocked: bool,
+    /// Error retained after releasing a terminal Engine; retired by a new request or stop.
+    engine_failure: Option<crate::player::RuntimeFailure>,
     /// Read-only publication of Player.repair for the HUD. Never authorizes a resource effect.
     pub(crate) repair_status: nj_platform::tv::sandbox::State,
     /// The request which produced this attempt, retained for terminal Retry / Choose quality.
@@ -404,6 +406,7 @@ impl PlaybackSession {
     pub(crate) const IDLE: PlaybackSession = PlaybackSession {
         direct_play_mode: DirectPlayMode::Auto,
         jail_load_blocked: false,
+        engine_failure: None,
         repair_status: nj_platform::tv::sandbox::State::Idle,
         request: None,
         requested_resume_ns: 0,
@@ -478,6 +481,7 @@ impl PlaybackSession {
         let PlaybackSession {
             direct_play_mode,
             jail_load_blocked,
+            engine_failure,
             repair_status,
             request,
             requested_resume_ns,
@@ -533,6 +537,7 @@ impl PlaybackSession {
         PlaybackSession {
             direct_play_mode: *direct_play_mode,
             jail_load_blocked: *jail_load_blocked,
+            engine_failure: *engine_failure,
             repair_status: *repair_status,
             request: request.clone(),
             requested_resume_ns: *requested_resume_ns,
@@ -4307,6 +4312,21 @@ pub(crate) fn play_verdict(ps: &PlaybackSession) -> Option<&str> {
 pub(crate) fn server_refused(ps: &PlaybackSession) -> bool {
     matches!(ps.play_verdict, Some(PlayVerdict::Server(_)))
 }
+pub(crate) fn engine_failure(ps: &PlaybackSession) -> Option<crate::player::RuntimeFailure> {
+    ps.engine_failure
+}
+
+/// A real stop consumes the retained failure once, even if teardown is asked again.
+pub(crate) fn take_engine_failure(ps: &mut PlaybackSession) -> Option<crate::player::RuntimeFailure> {
+    ps.engine_failure.take()
+}
+
+/// Keep the failed playback's cause and exact retry position after its native Engine is gone.
+pub(crate) fn note_engine_failure(ps: &mut PlaybackSession, cause: crate::player::RuntimeFailure, resume_ns: i64) {
+    ps.engine_failure = Some(cause);
+    ps.requested_resume_ns = resume_ns.max(0);
+}
+
 /// Retire the refusal — "this playback request is withdrawn", the one thing besides a fresh
 /// resolve that ends a verdict's life. [`request_play`] clears it because a NEW item is being
 /// resolved; this is the other half, for leaving the player entirely.
@@ -4318,6 +4338,7 @@ fn clear_play_verdict(ps: &mut PlaybackSession) {
     { let s = &mut *ps; {
         s.play_verdict = None;
         s.jail_load_blocked = false;
+        s.engine_failure = None;
         s.resolve_failed = false;
         s.requested_resume_ns = 0;
     } }
@@ -6310,6 +6331,7 @@ fn request_play_inner(
         // a resolve that never lands (a refused spawn) would leave nothing else to clear it.
         s.play_verdict = None;
         s.jail_load_blocked = false;
+        s.engine_failure = None;
         s.resolve_failed = false;
     } };
     // …and the outgoing item's track/marker/chapter store, for exactly the reason above: it stays
@@ -6841,6 +6863,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
         *s = PlaybackSession {
             direct_play_mode: plan.direct_play_mode,
             jail_load_blocked: false,
+            engine_failure: None,
             repair_status: nj_platform::tv::sandbox::State::Idle,
             request,
             requested_resume_ns,

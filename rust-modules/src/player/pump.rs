@@ -805,6 +805,9 @@ fn rejected_tail(
 
 pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, now: u32) {
     use super::shared::PlaybackState;
+    if super::engine::release_failed_engine(ps, pa) {
+        return;
+    }
     // ONE `&mut PlayerAdapter`, split into the live session and the seam token. Everything below
     // that replaces the session (`reload_*`) takes `pa` back, which the borrow checker only allows
     // where neither half is read afterwards — the "`eng` dangles after it, return immediately"
@@ -843,6 +846,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             return;
         }
         crate::route::fail_current_engine();
+        eng.release_after_error = true;
         set_state(PlaybackState::Error);
         return;
     }
@@ -901,6 +905,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             return;
         }
         crate::route::fail_current_engine();
+        eng.release_after_error = true;
         set_state(PlaybackState::Error);
         return;
     }
@@ -918,6 +923,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             return;
         }
         crate::route::fail_current_engine();
+        eng.release_after_error = true;
         set_state(PlaybackState::Error);
         return;
     }
@@ -2004,6 +2010,45 @@ mod native_seek_pump_tests {
 
     fn reloads() -> Vec<i64> {
         super::super::engine::RELOAD_AT_LOG.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    #[test]
+    fn a_terminal_error_releases_the_pipeline_and_keeps_the_readout() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        SHARED.frames.store(10, Relaxed);
+        SHARED.seen_frame.store(true, Relaxed);
+        SHARED.demux_io_failed.store(true, Release);
+        let cause = crate::player::error_now(&rig.ps).kind;
+        rig.frame();
+        assert_eq!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
+        rig.frame();
+        assert!(!rig.pa.is_live(), "the failed pipeline is released");
+        assert_eq!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
+        assert_eq!(crate::player::error_now(&rig.ps).kind, cause, "the error survives release");
+        assert_eq!(crate::route::unpresented_resume_ns(&rig.ps), 60_000_000_000);
+        rig.frame();
+        assert_eq!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
+        crate::player::stop_bufferfeed(&mut rig.ps, &mut rig.pa);
+        crate::route::cancel_play(&mut rig.ps);
+        assert_ne!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
+    }
+
+    #[test]
+    fn a_terminal_error_during_a_seek_still_releases_a_previously_presented_pipeline() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        // A seek resets frames, but the TV has already presented video this session.
+        SHARED.frames.store(0, Relaxed);
+        SHARED.seen_frame.store(true, Relaxed);
+        SHARED.seeking.store(true, Relaxed);
+        SHARED.demux_io_failed.store(true, Release);
+        rig.frame();
+        rig.frame();
+        assert!(!rig.pa.is_live(), "seek-scoped frames must not retain the failed pipeline");
+        assert_eq!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
+        crate::player::stop_bufferfeed(&mut rig.ps, &mut rig.pa);
+        crate::route::cancel_play(&mut rig.ps);
     }
 
     #[test]

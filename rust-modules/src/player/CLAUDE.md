@@ -249,6 +249,11 @@ lets it reach late-starting audio, and audio's soft cap can expand while video i
 Both have hard bounds, teardown/seek handling and real-demux fixtures in
 `ff_late_audio_tests` (`make check-ffmpeg`; requires the ffmpeg and ffprobe CLIs).
 
+A terminal Engine that has presented video releases its pipeline on the next pump frame.
+The session retains its failure cause and retry position; a real stop consumes that error
+once and sends Jellyfin the retained position. The deferred flag belongs to the Engine,
+so a replacement Engine cannot inherit a previous one's pending release.
+
 **Start with `make check`** — the host unit suite (`cargo test --lib`, ~28 s for 3,639 tests,
 measured 2026-09-17; do not re-quote that number, `time` it) covers a real
 slice of this pipeline's pure logic: `ff.rs`'s `nal_end` bounds guard and AVCC→Annex-B conversion,

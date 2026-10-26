@@ -166,6 +166,8 @@ pub(crate) struct Engine {
     pub route_start: crate::route::RouteStartAttempt,
     /// Firmware callback context for this exact native `Load`.
     pub native_epoch: u32,
+    /// Release this exact Engine on the frame after its terminal error.
+    pub release_after_error: bool,
     pub stage: Stage,
     pub video_info_sent: bool, // videoInfoSent
     /// webOS 5+ only: the source size the exported window was last placed with, so a corrective
@@ -1485,6 +1487,7 @@ fn start_bufferfeed_inner(
         seek_armed_at: 0,
         seek_retries: 0,
         flushed: false,
+        release_after_error: false,
         presentation_rearm_pending: false,
         max_fed_video_pts: 0,
         max_fed_audio_pts: 0,
@@ -1784,6 +1787,23 @@ pub(crate) fn suspend_bufferfeed(ps: &mut crate::route::PlaybackSession, pa: &mu
     teardown(ps, pa, true);
 }
 
+/// Release the failed video pipeline while preserving the error readout and retry position.
+/// Deferred to the next frame so the failing pump no longer borrows the Engine being destroyed.
+pub(super) fn release_failed_engine(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter) -> bool {
+    let armed = pa.engine().is_some_and(|eng| eng.release_after_error);
+    if !armed || crate::route::is_preview(ps) || crate::route::claim_in_flight()
+        || SHARED.pb_state.load(Ordering::Relaxed) != super::shared::PlaybackState::Error as u8
+        || !SHARED.seen_frame.load(Ordering::Relaxed)
+    {
+        return false;
+    }
+    let cause = super::live_runtime_failure(ps);
+    crate::route::note_engine_failure(ps, cause, super::intended_pos_ns(ps));
+    log("player: releasing the failed pipeline under the error readout");
+    teardown(ps, pa, true);
+    true
+}
+
 /// Retire a failed foreground Engine only if it still owns the exact Load the foreground reducer
 /// observed. A later route action may have replaced it between `player::pump` and the app poll;
 /// tearing down unconditionally there would destroy the healthy replacement.
@@ -1810,7 +1830,17 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // returning here used to leak the candidate forever while the reducer remained Failed.
     if !pa.is_live() {
         if !for_reload {
-            crate::route::scrobble_stop(ps, None, None, false);
+            let failed = crate::route::take_engine_failure(ps).is_some();
+            let final_report = if failed {
+                let pos = crate::route::unpresented_resume_ns(ps);
+                let dur = SHARED.duration_ns.load(Ordering::Relaxed);
+                crate::player::report::ended(ps, pos, dur);
+                let rk = crate::route::cur_rk(ps);
+                (!rk.is_empty() && dur > 0).then(|| (rk, pos / 1_000_000, dur / 1_000_000))
+            } else {
+                None
+            };
+            crate::route::scrobble_stop(ps, final_report, None, failed);
             crate::route::begin_engine_teardown(false);
             crate::route::drop_original_recovery(ps);
             crate::route::clear_url(ps);
@@ -3635,6 +3665,7 @@ mod prime_livelock_tests {
             seek_armed_at: 0,
             seek_retries: 0,
             flushed: false,
+        release_after_error: false,
             presentation_rearm_pending: false,
             max_fed_video_pts: 0,
             max_fed_audio_pts: 0,
