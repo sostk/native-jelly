@@ -162,8 +162,9 @@ pub trait Tap<H: Host> {
     fn result(&mut self, _f: u64, _addr: &Addr, _msg: &H::Msg) {}
     fn effect(&mut self, _f: u64, _s: &Stamped<H>) {}
     fn present(&mut self, _f: u64, _bit: bool, _why: Option<nj_machine::present::Provenance>) {}
-    /// After the frame's drains, on a frame that had events: the logical-state hash.
-    fn state(&mut self, _f: u64, _hash: u64) {}
+    /// Event-frame state, evaluated only if the observer calls the thunk. Live frames with
+    /// NoTap avoid walking every instance's key table; recorder/replay readers still request it.
+    fn state(&mut self, _f: u64, _hash: &mut dyn FnMut() -> u64) {}
     /// After the drains: the engine's resolved focus for the input owner, as
     /// `(entry, index, group)`.
     fn focus(&mut self, _f: u64, _focus: Option<(u32, u32, Option<u32>)>) {}
@@ -316,7 +317,7 @@ pub struct FrameReport {
     /// Bodies that DREW this frame, in draw order — the cold-open clock's STOP.
     pub drawn: Vec<InstanceId>,
     pub dropped_deliveries: u32,
-    /// The logical-state hash, on an event frame.
+    /// The logical-state hash on an event frame whose observer requested it.
     pub state_hash: Option<u64>,
     /// The host fold this frame (§8.3): what the page beneath the surfaces did.
     pub host_update: Option<HostUpdate>,
@@ -1052,9 +1053,10 @@ where
         tap.focus(f, self.focus_record());
         let timers_fired = report.steps_pre > 0 && event_frame;
         if event_frame || timers_fired {
-            let h = nj_base::diag::spans::span("dhash", || self.state_hash());
-            tap.state(f, h);
-            report.state_hash = Some(h);
+            let mut hashed = None;
+            tap.state(f, &mut || *hashed.get_or_insert_with(||
+                nj_base::diag::spans::span("dhash", || self.state_hash())));
+            report.state_hash = hashed;
         }
 
         // carry accounting: nothing is ever dropped from this queue

@@ -387,8 +387,8 @@ pub(crate) struct HomeScreen {
     elem_at: HashMap<u32, (u32, u32)>,
     /// `items` / `groups` looked up by identity, so keying a card is a hash probe rather than a
     /// scan of the whole table. Positions into the two `Vec`s; kept in step by `push_item` /
-    /// `push_group`, the only places either grows, and rebuilt whole by `rebuild_indexes` after a
-    /// prune compacts them. Derived, not canon.
+    /// `push_group`, the only places either grows. A prune compacts the tables and follows the
+    /// surviving index positions in place through `registry::Compaction`. Derived, not canon.
     item_index: HashMap<HomeHubIdentity, HubKeys>,
     group_index: HashMap<HomeHubIdentity, usize>,
     projected_generation: Option<u32>,

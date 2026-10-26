@@ -91,6 +91,15 @@ Every Settings drill-down is a family-stack push through `family::form_activate`
 `NavOp::Push`); a page never owns a private submenu or a `RoutePush` (grep-gated in
 `settings_nav_structure_tests.rs`). A picker is its own page, `SettingsPage::Picker(PickerKind)`.
 
+## Incremental publications
+
+Home and Library retain unchanged row key projections; see
+[the implementation record](../../../docs/incremental-catalog-updates.md). Compare every input
+that determines registration, including the query of placeholder identities. Read metadata from
+the current store view. A restore must invalidate projections over the old key registry; moved
+rows must update recovery places, and duplicate provider identities must preserve first-draw and
+last-registration behavior. Keep these caches outside canonical state.
+
 ## Verifying a screen change
 
 Captures are the check — see the `ui-sim` and `which-tier` skills, and `../ui/CLAUDE.md`'s

@@ -1407,9 +1407,15 @@ fn prepare_does_not_change_the_logical_state_hash() {
     let (mut d, mut rig, _) = booted();
     // an event frame that presents: `r.state_hash` is taken after the drains and BEFORE prepare
     // and draw; the hash after the frame must be the same number
-    let r = d.frame(&mut rig, tick(16), vec![key(Key::Ok, tick(16))], vec![], &mut NoTap);
+    struct HashReader;
+    impl crate::ui::dispatch::Tap<FixtureHost> for HashReader {
+        fn state(&mut self, _: u64, hash: &mut dyn FnMut() -> u64) {
+            assert_eq!(hash(), hash(), "repeated reads use the same event-frame hash");
+        }
+    }
+    let r = d.frame(&mut rig, tick(16), vec![key(Key::Ok, tick(16))], vec![], &mut HashReader);
     assert!(r.presented, "the key invalidated");
-    let pre_prepare = r.state_hash.expect("an event frame hashes");
+    let pre_prepare = r.state_hash.expect("the observer requested the event-frame hash");
     assert_eq!(d.state_hash(), pre_prepare);
 }
 
@@ -2171,4 +2177,12 @@ fn frozen_dispatch_modal_takes_the_single_snapshot() {
     open_modal(&mut d, &mut rig, Style::Sheet, 16);
     d.draw(&mut rig, true);
     assert!(!d.page_snapshot.valid(), "page-only pixels cannot serve a modal's chrome prefix");
+}
+
+#[test]
+fn incremental_republication_without_a_reader_skips_the_state_hash() {
+    let (mut dispatcher, mut rig, _) = booted();
+    let report = dispatcher.frame(&mut rig, tick(16), vec![key(Key::Ok, tick(16))], vec![], &mut NoTap);
+    assert!(report.presented);
+    assert_eq!(report.state_hash, None, "a frame with no hash reader must skip the catalog walk");
 }
