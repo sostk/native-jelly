@@ -967,6 +967,7 @@ pub(crate) unsafe fn construct(
     if !controlled {
         crate::dev::scenarios::arm_overdraw();
         crate::dev::scenarios::arm_drawmask();
+        crate::dev::scenarios::arm_cardsplit();
     }
     // dev: /tmp/nativejelly-heroground — draw the hero's photograph and BOTH of its scrim fields
     // in one pass instead of the art plus four blended gradient quads over it. Absent, the

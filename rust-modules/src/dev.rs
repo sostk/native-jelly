@@ -62,7 +62,7 @@ pub(crate) mod scenarios;
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 40] = [
+const DIAG: [&str; 41] = [
     "nativejelly-diag.log",
     "nativejelly-events.log",
     "nativejelly-stderr.log",
@@ -93,6 +93,7 @@ const DIAG: [&str; 40] = [
     // That is the exact failure this list exists to stop, and it is invisible in the numbers.
     "nativejelly-overdraw",
     "nativejelly-drawmask",
+    "nativejelly-nocardsplit",
     "nativejelly-heroground",
     // The FRAME BUDGET's A/B control leg (`ui/frame/budget.rs`, spec §8.1): admission as it was
     // before phase 11 — quota only, no time ceiling, no solo rule. DIAG for exactly the argument

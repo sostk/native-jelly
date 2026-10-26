@@ -541,7 +541,11 @@ unsafe fn present_and_swap(
             #[cfg(feature = "threadcheck")]
             let _present_scope = nj_base::task::watchdog::present_scope();
             #[cfg(feature = "hostsim")]
-            nj_base::surface::present_supersampled();
+            {
+                // Keep the renderer's clip mirror in step with the window-copy helper.
+                nj_gfx::gfx::clip_clear();
+                nj_base::surface::present_supersampled();
+            }
             // dev (`/tmp/nativejelly-framecb`): this frame's compositor callback, requested before
             // the swap that commits it. One latched bool unarmed.
             nj_platform::tv::window::frame_probe_request();

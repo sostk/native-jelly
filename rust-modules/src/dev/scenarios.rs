@@ -297,6 +297,12 @@ pub(crate) fn arm_drawmask() {
     }
 }
 
+/// Developer-only control leg for the resting-card split; shipping builds cannot read it.
+pub(crate) fn arm_cardsplit() {
+    if nj_base::devtrig::flag("nocardsplit") { nj_gfx::overdraw::set_card_split(false); }
+}
+
+
 /// `/tmp/nativejelly-heroground` — the one-pass hero ground A/B.
 pub(crate) fn arm_heroground() {
     if nj_base::devtrig::flag("heroground") {
