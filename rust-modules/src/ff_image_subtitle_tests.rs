@@ -18,7 +18,7 @@ fn host_ffmpeg_dir() -> std::path::PathBuf {
 
 /// Bind the three libraries exactly as `load_libraries` does — dependency order, one directory —
 /// and hold the build to the ABI table this file's offsets were checked against.
-fn bind_host_ffmpeg() {
+pub(super) fn bind_host_ffmpeg() {
     let dir = host_ffmpeg_dir();
     for (what, verdict) in [
         ("avutil", avutil::load(Some(&dir))),

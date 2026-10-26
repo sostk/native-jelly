@@ -1981,6 +1981,8 @@ $(FFMPEG_HOST_STAGED): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci
 check-ffmpeg: $(FFMPEG_HOST_STAGED)
 	cd rust-modules && CARGO_INCREMENTAL=0 NJ_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib ff::image_subtitle_tests -- --ignored
+	cd rust-modules && CARGO_INCREMENTAL=0 NJ_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
+	  cargo +$(RUST_NIGHTLY) test --lib ff::late_audio_tests -- --ignored
 
 # The same ABI gate the cross build runs, at the other pointer width. ci/ffabi-assert.c `#if`s on
 # `__SIZEOF_POINTER__` and carries both tables, so this compile is what holds ff.rs's 64-bit

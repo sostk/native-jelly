@@ -502,6 +502,14 @@ pub(crate) struct Shared {
     /// see `appkit::player_hud::busy_surface`. Monotone within a session (false→true only), which is
     /// what lets two readers in one frame sample it independently without disagreeing.
     pub seen_frame: AtomicBool,
+    /// **The raw pts of the first audio AU the demuxer pushed since its last open or seek**.
+    /// Written by `ff::demux` BEFORE that push, so the feed thread that pops the AU
+    /// sees it. The audio lane uses it to tell the real start of a late audio track (an MKV
+    /// audio `Delay` of several seconds) from stale pre-seek audio, which looks the same — far
+    /// ahead of the video — but never carries this pts (see `engine::feed_audio_lane`). `i64::MIN`
+    /// before one, since a real pts may be negative.
+    pub first_audio_pts: AtomicI64,
+
     pub load_completed: AtomicBool,          // bf_loaded signal
     pub media_id: Mutex<Option<CString>>,    // bf_mediaId (captured once)
     pub source_info: Mutex<Option<Vec<u8>>>, // sourceInfoRaw, VERBATIM incl NUL
@@ -907,6 +915,7 @@ impl Shared {
             pres_fed: AtomicI64::new(0),
             frames: AtomicI32::new(0),
             seen_frame: AtomicBool::new(false),
+            first_audio_pts: AtomicI64::new(i64::MIN),
             load_completed: AtomicBool::new(false),
             media_id: Mutex::new(None),
             source_info: Mutex::new(None),
@@ -1496,6 +1505,7 @@ impl Shared {
         // places (declaration, `new`, here): a reload that forgot the bit would silently suppress
         // the centred read-out for the rest of the app's life.
         self.seen_frame.store(false, Ordering::Relaxed);
+        self.first_audio_pts.store(i64::MIN, Ordering::Relaxed);
         self.load_completed.store(false, Ordering::Relaxed);
         // issue #74 D.1: both are only ever cleared by the loadCompleted arm that consumes them
         // (pump.rs), so a session torn down after logging the deferral but before that arm runs
