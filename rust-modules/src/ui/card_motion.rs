@@ -8,6 +8,11 @@
 //! card scope; a popover translating its one selected image does not reveal new tiles.
 //! Unknown placement defers a miss until the next drawn sample;
 //! the source wakes that sample only when it actually declines work (hits stay cheap).
+//! A card judged `Moving` (faster than [`MOVING_SPEED`]) is NOT deferred by default: the Library's
+//! upstream PR #583 reported fewer placeholder tiles with that gate disabled on its TV mock.
+//! Native Jelly device performance remains to be measured. The classification is still
+//! made, because `card_motion_metrics` and the poster-gate scenes count it; the dev trigger
+//! `nativejelly-cardspeed=<px/s>` brings the old decline back ([`declines_request`]).
 //!
 //! This is render history, never LogicalState. Two reused vectors retain only the
 //! previous/current drawn frame; walking a 1000-item document does not retain 1000
@@ -16,8 +21,22 @@
 use crate::ui::Rect;
 use std::cell::{Cell, RefCell};
 
-const MAX_SPEED: f32 = 120.0;
+/// The speed (px/s) above which a card is classified `Moving`. A MEASUREMENT, not a gate: by
+/// default a `Moving` card still gets its poster work ([`declines_request`]). The dev trigger
+/// `nativejelly-cardspeed` replaces it ([`moving_limit`]) and turns the classification back into the
+/// decline the shipping app used to apply.
+const MOVING_SPEED: f32 = 120.0;
 const MAX_SAMPLE_MS: u32 = 250;
+
+#[cfg(test)]
+mod moving_default_regression {
+    use super::*;
+    #[test]
+    fn moving_cards_keep_their_visible_poster_requests_by_default() {
+        let _scope = Scope::moving_for_test();
+        assert!(!declines_request(), "moving cards should fetch while they cross the viewport");
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Verdict { Unknown, Moving, Settled }
@@ -43,6 +62,12 @@ impl History {
     pub(crate) fn begin(&mut self) { self.frame = self.frame.wrapping_add(1); }
 
     pub(crate) fn observe(&mut self, id: Identity, rect: Rect, ms: u32) -> Verdict {
+        self.observe_at(id, rect, ms, moving_limit())
+    }
+
+    /// [`observe`](Self::observe) against an explicit speed limit (px/s). Only the `Moving`
+    /// threshold depends on it: a card with no previous sample is `Unknown` at any limit.
+    fn observe_at(&mut self, id: Identity, rect: Rect, ms: u32, limit: f32) -> Verdict {
         if self.drawn_frame != self.frame {
             std::mem::swap(&mut self.previous, &mut self.current);
             self.current.clear();
@@ -62,7 +87,7 @@ impl History {
                 }
                 let speed = (x - old.x).abs().max((y - old.y).abs()) * 1000.0 / dt as f32;
                 if !speed.is_finite() { Verdict::Unknown }
-                else if speed > MAX_SPEED { Verdict::Moving }
+                else if speed > limit { Verdict::Moving }
                 else { Verdict::Settled }
             });
         self.current.push(Sample { id, occurrence, x, y, ms });
@@ -70,11 +95,52 @@ impl History {
     }
 }
 
+/// The speed limit the dev trigger `nativejelly-cardspeed=<px/s>` imposed, if it did: while it is
+/// `Some`, a card faster than it is `Moving` AND declines poster work ([`declines_request`]), which
+/// reproduces the gate this app shipped with (`cardspeed=120`) for an A/B on the device. Read ONCE
+/// (at the first card drawn, i.e. before any measured frame) so the hot path is an atomic load,
+/// never a `/tmp` stat. `devtrig::read` is `None` at COMPILE time without the `devtriggers`
+/// feature, so a release build is always `None` and this carries no `#[cfg]` pair.
+///
+/// This crate's own unit tests never read the host's trigger file (a leftover
+/// `/tmp/nativejelly-cardspeed` on a dev machine would change every speed they classify): they see
+/// no trigger, and [`parse_limit`] is the pure rule they grade.
+fn enforced_limit() -> Option<f32> {
+    static SEEN: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *SEEN.get_or_init(|| {
+        #[cfg(test)]
+        let text: Option<String> = None;
+        #[cfg(not(test))]
+        let text = nj_base::devtrig::read("cardspeed");
+        let text = text?;
+        let limit = parse_limit(&text);
+        match limit {
+            Some(limit) => nj_base::eventlog::log(&format!(
+                "card_motion: moving cards above {limit} px/s decline poster work (nativejelly-cardspeed)")),
+            None => nj_base::eventlog::log(&format!(
+                "card_motion: nativejelly-cardspeed {:?} ignored (want px/s > 0); moving cards keep their poster work",
+                text.trim())),
+        }
+        limit
+    })
+}
+
+/// The speed above which a card is `Moving`: the trigger's limit, else [`MOVING_SPEED`].
+fn moving_limit() -> f32 { enforced_limit().unwrap_or(MOVING_SPEED) }
+
+/// A trigger's content as a limit: a finite number > 0 in px/s; anything else is `None` (the
+/// trigger is ignored and the default stands).
+fn parse_limit(text: &str) -> Option<f32> {
+    text.trim().parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
 thread_local! {
     static HISTORY: RefCell<History> = RefCell::new(History::default());
     static FRAME_MS: Cell<u32> = const { Cell::new(0) };
     static ADMISSION: Cell<Option<Verdict>> = const { Cell::new(None) };
 }
+#[cfg(test)]
+thread_local! { static ENFORCE_FOR_TEST: Cell<Option<bool>> = const { Cell::new(None) }; }
 
 /// The actual loop timestamp (or replay timestamp), before spring integration
 /// clamps its dt. Pixel speed must not inherit the spring's 50ms stall clamp.
@@ -100,14 +166,47 @@ impl Scope {
     fn enter(v: Verdict) -> Self { Self(ADMISSION.with(|s| s.replace(Some(v)))) }
     #[cfg(test)]
     pub(crate) fn moving_for_test() -> Self { Self::enter(Verdict::Moving) }
+    #[cfg(test)]
+    pub(crate) fn unknown_for_test() -> Self { Self::enter(Verdict::Unknown) }
+}
+
+#[cfg(test)]
+pub(crate) struct EnforceGuard(Option<bool>);
+#[cfg(test)]
+pub(crate) fn enforce_for_test() -> EnforceGuard {
+    EnforceGuard(ENFORCE_FOR_TEST.with(|c| c.replace(Some(true))))
+}
+#[cfg(test)]
+pub(crate) fn default_for_test() -> EnforceGuard {
+    EnforceGuard(ENFORCE_FOR_TEST.with(|c| c.replace(Some(false))))
+}
+#[cfg(test)]
+impl Drop for EnforceGuard {
+    fn drop(&mut self) { ENFORCE_FOR_TEST.with(|c| c.set(self.0)); }
 }
 impl Drop for Scope {
     fn drop(&mut self) { ADMISSION.with(|s| s.set(self.0)); }
 }
 
 pub(crate) fn verdict() -> Option<Verdict> { ADMISSION.with(|s| s.get()) }
+
+fn declines_moving() -> bool {
+    #[cfg(test)]
+    if let Some(forced) = ENFORCE_FOR_TEST.with(Cell::get) { return forced; }
+    enforced_limit().is_some()
+}
+
+/// Unknown placement waits one sample. Moving placement fetches unless the dev override says otherwise.
 pub(crate) fn declines_request() -> bool {
-    matches!(verdict(), Some(Verdict::Unknown | Verdict::Moving))
+    declines_in(verdict(), declines_moving())
+}
+
+fn declines_in(verdict: Option<Verdict>, moving_declines: bool) -> bool {
+    match verdict {
+        Some(Verdict::Unknown) => true,
+        Some(Verdict::Moving) => moving_declines,
+        Some(Verdict::Settled) | None => false,
+    }
 }
 
 /// A declined miss has no worker whose completion could wake it. The next sample
@@ -120,6 +219,42 @@ mod tests {
     const ID: Identity = Identity { owner: 1, asset: 7 };
     fn sample(h: &mut History, x: f32, y: f32, ms: u32) -> Verdict {
         h.begin(); h.observe(ID, Rect::new(x, y, 250.0, 375.0), ms)
+    }
+    /// A card that moves `px` pixels in one second, judged against `limit`.
+    fn step_verdict(px: f32, limit: f32) -> Verdict {
+        let mut h = History::default();
+        h.begin(); h.observe_at(ID, Rect::new(0.0, 0.0, 250.0, 375.0), 0, limit);
+        h.begin(); h.observe_at(ID, Rect::new(px, 0.0, 250.0, 375.0), 200, limit)
+    }
+    #[test]
+    fn the_classification_limit_is_120_and_an_absent_trigger_declines_no_moving_card() {
+        assert_eq!(MOVING_SPEED, 120.0);
+        // The pure rule, not the latched /tmp read: a leftover trigger file on the host must not
+        // change what the default is.
+        assert_eq!(parse_limit("junk"), None, "an unusable trigger is ignored and the default stands");
+        assert_eq!(parse_limit("480"), Some(480.0));
+        assert!(!declines_in(Some(Verdict::Moving), false), "no nativejelly-cardspeed trigger");
+        let _default = default_for_test();
+        assert!(!declines_moving());
+    }
+    #[test]
+    fn an_override_moves_only_the_moving_threshold() {
+        // 60 px in 200 ms = 300 px/s.
+        assert_eq!(step_verdict(60.0, 120.0), Verdict::Moving);
+        assert_eq!(step_verdict(60.0, 480.0), Verdict::Settled);
+        assert_eq!(step_verdict(0.0, 120.0), Verdict::Settled);
+        // A card with no previous sample still declines at any limit.
+        let mut h = History::default();
+        h.begin();
+        assert_eq!(h.observe_at(ID, Rect::new(0.0, 0.0, 250.0, 375.0), 0, 1.0e9), Verdict::Unknown);
+    }
+    #[test]
+    fn limit_parsing_accepts_positive_numbers_and_rejects_everything_else() {
+        assert_eq!(parse_limit("480"), Some(480.0));
+        assert_eq!(parse_limit(" 300.5\n"), Some(300.5));
+        for bad in ["", "abc", "0", "-5", "-0", "nan", "inf", "-inf", "1e999", "12px", "off"] {
+            assert_eq!(parse_limit(bad), None, "{bad:?} must leave the default (no moving decline)");
+        }
     }
     #[test]
     fn arbitrary_derived_displacement_is_seen_and_settle_admits() {
@@ -204,10 +339,11 @@ mod tests {
     #[test]
     fn scopes_exclude_hero_work_restore_on_exit_and_unknown_misses_wake() {
         let _guard = nj_base::testlock::serial();
+        let _enforce = enforce_for_test();
         assert!(!declines_request());
         {
             let _scope = Scope::moving_for_test();
-            assert!(declines_request());
+            assert!(declines_request(), "under nativejelly-cardspeed a moving card declines");
             let _inner = Scope::enter(Verdict::Settled);
             assert!(!declines_request());
         }
