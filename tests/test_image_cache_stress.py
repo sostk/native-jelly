@@ -89,6 +89,27 @@ def legs():
     return cold, warm
 
 
+class PlaceholderTest(unittest.TestCase):
+    def test_complete_intervals_are_summed_and_arming_is_not_a_sample(self):
+        result = stress.placeholder_summary([
+            "phcount: armed", "phcount: frames=60 ph_frames=10 draws=600 ph=25",
+            "[1234] phcount: frames=60 ph_frames=2 draws=300 ph=5"])
+        self.assertEqual(result, dict(samples=2, frames=120, ph_frames=12, draws=900,
+                                     ph=30, placeholder_draw_percent=3.333))
+
+    def test_missing_or_idle_measurement_is_not_zero_percent(self):
+        self.assertIsNone(stress.placeholder_summary([])["placeholder_draw_percent"])
+        result = stress.placeholder_summary(["phcount: frames=0 ph_frames=0 draws=0 ph=0"])
+        self.assertEqual(result["samples"], 1)
+        self.assertIsNone(result["placeholder_draw_percent"])
+
+    def test_impossible_counts_are_rejected(self):
+        for line in ["phcount: frames=1 ph_frames=2 draws=6 ph=2",
+                     "phcount: frames=1 ph_frames=1 draws=6 ph=7"]:
+            with self.assertRaises(ValueError):
+                stress.placeholder_summary([line])
+
+
 class EvidenceTest(unittest.TestCase):
     def test_real_restart_evidence_passes_but_missing_hits_requests_or_duration_fail(self):
         access = {"cold": {"unique_image_ids": 1200, "image_failures": 0},

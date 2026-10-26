@@ -1,5 +1,11 @@
 # Poster request scheduling: typed state, explicit demand, bounded speculation
 
+> Current policy update (2026-10-26): Library at-rest lookahead and drawn-frame priority are now
+> implemented; see [image-cache.md](image-cache.md#library-prefetch-and-visible-requests).
+> Moving-card refusal described below is historical and available only with the developer
+> `nativejelly-cardspeed` override. Unknown placement still defers one sample. The typed scheduler
+> remains a design proposal; its historical device timings do not measure this port.
+
 Design proposal, 2026-09-21. Source observations below are from this live worktree, not from the historical filenames in the July audit. No implementation or performance verification accompanies this document. The reported TV sequence—visible art queued 47th and dropped frames increasing from 68 to 247—is the task's supplied incident evidence, not a measurement reproduced here.
 
 ## 1. Problem and scope
@@ -242,7 +248,7 @@ This is not a live viewport tracker. Images once requested visibly can remain hi
 
 Retain the point fix's conservative behavior and make its reservations explicit:
 
-1. No new speculative admission while any Visible acquisition is Queued, Running, or Decoded. A visible request remains eligible for whatever capacity and slots exist — **except when its drawn card has unknown placement or moves faster than the card admission threshold**, where `ui::card_motion`'s scoped verdict declines it in `poster.rs` before source admission. Featured hero/backdrop/logo images and the Info panel's single still are outside this card scope: translating those images reveals no scrolling tile identities. That refusal is deliberate and measured, and the typed queue must keep it rather than merely rank it: pacing the visible request instead (one in flight, perfect pacing — zero refusals recorded) still cost twice the ungated baseline's dropped frames, because by the time a request is being ordered its fetch and decode are already owed. See the measured table at that gate in `lookup`.
+1. No new speculative admission while any Visible acquisition is Queued, Running, or Decoded. A visible request remains eligible for whatever capacity and slots exist — **except when its drawn card has unknown placement, or moves faster than the optional developer `nativejelly-cardspeed` threshold**, where `ui::card_motion`'s scoped verdict declines it in `poster.rs` before source admission. Featured hero/backdrop/logo images and the Info panel's single still are outside this card scope: translating those images reveals no scrolling tile identities. That refusal is deliberate and measured, and the typed queue must keep it rather than merely rank it: pacing the visible request instead (one in flight, perfect pacing — zero refusals recorded) still cost twice the ungated baseline's dropped frames, because by the time a request is being ordered its fetch and decode are already owed. See the measured table at that gate in `lookup`.
 2. At most **one** speculative obligation exists across queued warms, still-unpromoted decoded warms, file refresh, and speculative-started busy workers. Count an attempt once, even if both its slot and flight describe it. Hold a speculative-start reservation until that worker actually finishes, even if the request is promoted, retired, or its cached pixels were published. A promotion therefore cannot accidentally authorize a second speculative fetch while the first worker is still busy.
 3. A surviving-worker count below two disables speculation entirely. With zero workers, return `NoWorker` rather than parking forever in Queued. This improves the refusal behavior explicitly; it does not retry thread creation on each draw.
 4. Before starting queued speculation, `claim_next` rechecks that no visible acquisition is outstanding. Admission and claim are distinct: visible work may have arrived in between. A queued speculative request occupies no worker and is bounded to one record. Do not spawn another worker to evade this policy.

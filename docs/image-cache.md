@@ -34,11 +34,42 @@ the old image. Changed versioned source paths miss immediately rather than waiti
 RAM residency remains independent of library size: 64 source slots and a 44 MiB GPU texture
 budget. Demand workers stop claiming requests when combined decoded and pending-upload pixels
 reach 8 MiB; already active decodes can temporarily exceed this admission threshold. If the GPU evicts an image while its source slot survives, the next draw requests its
-pixels again through the same disk-first path, respecting scrolling deferral and the source's
+pixels again through the same disk-first path, respecting the initial placement sample and the source's
 residency backoff. Sign-out advances the cache epoch and sweeps all
 candidate directories; requests capture that epoch when queued, so old work cannot read, remove,
 write or publish images after account erasure. Profile switching within one account retains
 reusable artwork. Filesystem deletion failures remain best effort, like the existing avatar cache.
+
+## Library prefetch and visible requests
+
+The Library warms three rows ahead of its last travel direction and one row behind when its
+scroll spring is at rest. It waits two unchanged target frames, visible fetch/decode work and
+pending texture uploads before claiming at most one new image per frame. The lookahead contains
+at most 30 cards. Its source slots protect the 32 most recently used ordinary entries, and its
+own 32-entry limit lets a completed lookahead stop fetching. Active fetches and decodes are never
+recycled. The existing two workers, 8 MiB decode admission threshold, 64 source slots and 44 MiB
+GPU budget remain in force.
+
+Visible requests are ordered by their most recent drawn frame, then oldest use within that frame.
+Unstarted visible requests untouched for eight frames can be recycled when settled slots are
+unavailable. Moving cards request art by default; unknown placement still waits for one sample.
+Prefetch and drawing share the same artwork-key helper, including Jellyfin poster/still sizing.
+Sign-out epochs and token generation checks apply to prefetched work as they do to visible work.
+
+For device A/B measurements in a developer build, `nativejelly-lookahead=0` disables lookahead;
+`nativejelly-cardspeed=120` also restores the earlier moving-card refusal policy. Remove both for
+the default behavior. `nativejelly-lookahead` accepts a row count capped at four. These controls
+and `nativejelly-phcount` are diagnostics and do not change the boot route; shipping builds do
+not read them. Native Jelly TV latency, placeholder reduction and memory stability still need
+measurement.
+
+Arm `nativejelly-phcount` alongside the fixture stress triggers below. Its once-per-second line
+reports presented frames with placeholders (`ph_frames`) and placeholder tile draws (`ph`). The
+stress report includes complete interval totals and a placeholder-draw percentage; missing or
+idle instrumentation has no percentage. Compare identical traversal and cache conditions, retain
+the raw logs, and inspect boundary screenshots. Counts span the recorded intervals, including
+startup; they are separate from the pacing summary's startup exclusion. Do not arm `phcount`
+with the poster-gate scenes, which own and reset the same counters.
 
 ## Reproducible television stress test
 

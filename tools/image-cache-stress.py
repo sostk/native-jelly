@@ -669,6 +669,19 @@ def quantiles(values):
                 p95=ordered[math.floor((len(ordered)-1)*.95)], max=ordered[-1])
 
 
+def placeholder_summary(lines):
+    """Sum complete measurement intervals; absent instrumentation is not zero placeholders."""
+    fields = ("frames", "ph_frames", "draws", "ph")
+    rows = [tuple(map(int, match.groups())) for line in lines
+            if (match := re.search(r"\bphcount: frames=(\d+) ph_frames=(\d+) draws=(\d+) ph=(\d+)\s*$", line))]
+    if any(pf > f or ph > d for f, pf, d, ph in rows):
+        raise ValueError("inconsistent placeholder interval")
+    result = dict(zip(fields, (sum(row[i] for row in rows) for i in range(4))))
+    result["samples"] = len(rows)
+    result["placeholder_draw_percent"] = round(100 * result["ph"] / result["draws"], 3) if result["draws"] else None
+    return result
+
+
 def event_summary(path):
     lines = Path(path).read_text().splitlines()
     metrics = [dict((key, int(value)) for key, value in re.findall(r"([a-z_]+)=([0-9]+)", match[1]))
@@ -709,7 +722,7 @@ def event_summary(path):
     return dict(cache=metrics[-1] if metrics else {}, cache_samples=len(metrics),
                 library_samples=len(frames), loop=quantiles([value[0] for value in frames[5:]]),
                 fps=quantiles([value[1] for value in frames[5:]]), worstframe_ms=quantiles(worst),
-                pacing=pacing, slow_cpu_work=work,
+                pacing=pacing, slow_cpu_work=work, placeholders=placeholder_summary(lines),
                 invalid_pacing=any(re.search(r"\bsim=1\b|\brec=\d+us\b|(?:GPU|CPU)PROF|HWCNT", line) for line in lines))
 
 

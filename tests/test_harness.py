@@ -5950,6 +5950,8 @@ class PosterGateCoverage(unittest.TestCase):
         for scene in scenes.values():
             self.assertGreaterEqual(scene['poster_gate']['moving_fps_floor'], 55)
             self.assertIn('nativejelly-postergate', scene['triggers'])
+            self.assertEqual(scene['triggers']['nativejelly-cardspeed'], '120')
+            self.assertEqual(scene['triggers']['nativejelly-lookahead'], '0')
 
     def test_poster_grade_requires_real_work_and_complete_settle(self):
         import poster_gate

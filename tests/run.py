@@ -141,6 +141,7 @@ ALL_TRIGGERS = [
     "nativejelly-detailosc", "nativejelly-homeosc", "nativejelly-heroosc", "nativejelly-homefoldosc",
     "nativejelly-info", "nativejelly-chapters", "nativejelly-profile",
     "nativejelly-hwcnt",
+    "nativejelly-phcount", "nativejelly-lookahead", "nativejelly-cardspeed",
     # the track's material and the instruments that override or narrate it. `flattabs` is the one
     # that MUST be cleared: it swaps the shipped material for the flat capsule, so a leftover turns
     # every glass assertion into a measurement of something else.

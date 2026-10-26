@@ -62,7 +62,7 @@ pub(crate) mod scenarios;
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 37] = [
+const DIAG: [&str; 40] = [
     "nativejelly-diag.log",
     "nativejelly-events.log",
     "nativejelly-stderr.log",
@@ -133,6 +133,10 @@ const DIAG: [&str; 37] = [
     // the one it was armed to explain.
     "nativejelly-imagecache-stats",
     "nativejelly-imgtrace",
+    // Poster A/B controls and placeholder counts must observe the same boot route.
+    "nativejelly-phcount",
+    "nativejelly-lookahead",
+    "nativejelly-cardspeed",
     "nativejelly-imagecache-bypass",
     // The deterministic RECORDER and its replay trigger (`ui/rec.rs`, NOT YET IN THE TREE — reserved
     // here first so the recorder cannot land as a non-DIAG trigger and move the boot screen out
@@ -899,7 +903,8 @@ mod tests {
             fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
         }
         let _cleanup = Cleanup(root.clone());
-        for name in ["nativejelly-imgtrace", "nativejelly-imagecache-stats"] {
+        for name in ["nativejelly-imgtrace", "nativejelly-imagecache-stats", "nativejelly-phcount",
+            "nativejelly-lookahead", "nativejelly-cardspeed"] {
             std::fs::write(root.join(name), b"").unwrap();
         }
         // `is_armed_trigger` is the predicate `any_trigger_present` (the picker suppression) applies
