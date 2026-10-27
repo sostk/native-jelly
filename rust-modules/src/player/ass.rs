@@ -223,6 +223,9 @@ pub(crate) fn request(
         return Some(mailbox.publish_error(key, error_frame(key, Fault::StartFailed)));
     }
     let requested = mailbox.request(key, now_ms, &source);
+    if requested.promoted {
+        super::ass_perf::note_ahead_hit();
+    }
     if requested.wake {
         runtime().wake();
     }
@@ -278,6 +281,7 @@ fn worker() {
         .worker
         .set(std::thread::current())
         .expect("one styled subtitle worker");
+    super::ass_perf::log_worker_tid();
     let mut engine = Engine::default();
     loop {
         let job = {
@@ -286,6 +290,7 @@ fn worker() {
                 if let Some(retired) = retire_off(runtime(), &mut mailbox, &mut engine) {
                     // Native destruction can be slow too: release the mailbox first.
                     drop(mailbox);
+                    super::ass_perf::flush();
                     drop(retired);
                     mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
                     continue;
@@ -301,9 +306,15 @@ fn worker() {
                 mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
             }
         };
+        if let Some(queued) = job.queued {
+            super::ass_perf::note_nwait(queued.elapsed());
+        }
+        super::ass_perf::begin_call();
         let live = || runtime().epoch.load(Ordering::Acquire) == job.key.epoch;
         let rendered = live().then(|| {
+            let started = std::time::Instant::now();
             let rendered = engine.render(&job);
+            super::ass_perf::record_job(started.elapsed(), job.kind != Kind::Normal);
             rendered
         });
         let finished = {
@@ -315,6 +326,7 @@ fn worker() {
             ran.then_some(finished)
         };
         let Some(finished) = finished else { continue };
+        super::ass_perf::finish_call(finished.changed, finished.pub_bytes);
         if finished.wake {
             nj_machine::present::wake_from_worker();
         }
@@ -717,6 +729,7 @@ impl Native {
 
     fn render(&mut self, key: Key, now_ms: i64, previous: &[Rect]) -> Result<Option<Vec<Rect>>, Fault> {
         let mut frame = NativeFrame::default();
+        let started = std::time::Instant::now();
         let result = unsafe {
             plx_ass_render(
                 self.0,
@@ -728,6 +741,7 @@ impl Native {
                 &mut frame,
             )
         };
+        super::ass_perf::record_render(started.elapsed());
         if result < 0 {
             return Err(Fault::RenderFailed);
         }

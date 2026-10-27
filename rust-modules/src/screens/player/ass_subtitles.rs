@@ -85,12 +85,15 @@ impl AssSubtitles {
             for (slot, rect) in next.iter_mut().zip(&frame.rects) {
                 if slot.is_none() {
                     let previous = old.iter_mut().find_map(Option::take);
-                    let id = nj_gfx::gfx::upload_rgba(
+                    let id = nj_base::diag::spans::span("assup", || nj_gfx::gfx::upload_rgba(
                         previous.as_ref().map_or(0, |t| t.id),
                         rect.width,
                         rect.height,
                         rect.rgba.as_ptr(),
-                    );
+                    ));
+                    if id != 0 {
+                        crate::player::ass_perf::note_upload(rect.rgba.len());
+                    }
                     *slot = Some(CachedTexture {
                         id,
                         width: rect.width,

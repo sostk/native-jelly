@@ -60,6 +60,17 @@ player screen’s `ass_subtitles` cache reuses their GL uploads. Changed regions
 remaining textures; gaps, Off and unmount release them. The cache reports all retained texture
 bytes to the shared render accounting.
 
+`assperf:` diagnostics report worker/render p95 and maximum time, Normal+Ahead job counts,
+ahead promotions, wait behind a running Ahead job, and publication/upload bytes. `window_ms`
+is the actual span covered by each line, including idle gaps; a line closes on a worker job
+after at least one second, rather than on a periodic timer. Off flushes a partial window. Ahead
+frames count as changed publications when their pixels differ, but do not wake the screen before
+promotion. Cycles discarded by a selection epoch change are omitted. `FRAMEDROP spans=assup` measures the UI upload when the developer frame instrument is
+armed. These counters contain no subtitle text, filenames or account identifiers.
+
+Host tests verify scheduler decisions and actual pinned-libass pixel parity. Native Jelly TV
+CPU/frame-rate gains and on-device subtitle acceptance remain unmeasured for this port.
+
 The subtitle clock interpolates between the pipeline's sparse position callbacks, with at most
 250 ms of extrapolation. Pause, seek and discontinuities re-anchor it. Output dimensions and the
 original coded video dimensions are passed separately to libass. The output canvas fits the
