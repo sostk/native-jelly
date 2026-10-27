@@ -58,6 +58,8 @@ fn a_seek_identity_reuses_matching_embedded_header_and_fonts() {
 #[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
 fn repeated_seeks_reuse_the_native_renderer_and_publish_the_current_source() {
     let mut engine = Engine::default();
+    let runtime = Runtime::new();
+    let mut mailbox = Mailbox::new();
     let opened = NATIVE_OPENS.with(|n| n.get());
     let mut selected = source(vec![event(0, 0, 4000)]);
     if let Content::Embedded { header, .. } = &mut selected.content {
@@ -69,9 +71,36 @@ fn repeated_seeks_reuse_the_native_renderer_and_publish_the_current_source() {
         let frame = render(&mut engine, &selected, 100);
         assert_eq!(frame.source_id, selected.id, "reuse cannot publish an old timeline");
         assert!(!frame.rects.is_empty());
+        runtime.source_id.store(selected.id, Ordering::Release);
+        suspend_runtime(&runtime);
+        assert!(retire_off(&runtime, &mut mailbox, &mut engine).is_none(),
+            "the seek's temporary loading state must preserve the native renderer");
     }
     assert_eq!(NATIVE_OPENS.with(|n| n.get()) - opened, 1,
         "matching headers and fonts must only be parsed once");
+}
+
+#[test]
+fn temporary_loading_fences_old_frames_but_only_off_retires_resources() {
+    let runtime = Runtime::new();
+    let source = Arc::new(source(vec![event(0, 0, 2000)]));
+    let key = request_key(&source);
+    let frame = error_frame(key, Fault::RenderFailed);
+    let mut engine = Engine { source: Some(source.clone()), frame: Some(frame.clone()), ..Engine::default() };
+    runtime.source_id.store(source.id, Ordering::Release);
+    let mut mailbox = runtime.mailbox.lock().unwrap();
+    mailbox.publish_error(key, frame);
+    // Like clear(), suspension must return while the worker owns its mailbox lock.
+    suspend_runtime(&runtime);
+    let current = Key { epoch: runtime.epoch.load(Ordering::Acquire), ..key };
+    assert_ne!(current.epoch, key.epoch);
+    assert!(mailbox.view(&current).is_none(), "a busy seek must hide the old raster immediately");
+    assert!(retire_off(&runtime, &mut mailbox, &mut engine).is_none(),
+        "temporary loading must keep font/header resources for reuse");
+    clear_runtime(&runtime);
+    assert!(retire_off(&runtime, &mut mailbox, &mut engine).is_some(),
+        "Off after a suspended seek must still release resources");
+    assert!(engine.is_empty());
 }
 
 #[test]

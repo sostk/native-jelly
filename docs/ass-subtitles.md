@@ -25,6 +25,8 @@ Embedded timelines with identical complete headers and font attachments reuse th
 renderer across seeks and track switches, replacing its events while retaining font caches.
 Publications still name the current timeline, and a failed render retires its native renderer
 before another source can reuse it.
+Temporary seek/buffering states fence and hide old frames while preserving the bounded native
+cache. Off, a missing source and unmount release that cache, including after a suspended seek.
 Reload-based seeks and demux reopens also retain known events, after revalidating the exact
 delivery identity and complete ASS header inventory. A different file or a new playback cannot
 inherit them. This matters when an in-place seek falls back to a fresh native Load.
@@ -66,7 +68,9 @@ is the actual span covered by each line, including idle gaps; a line closes on a
 after at least one second, rather than on a periodic timer. Off flushes a partial window. Ahead
 frames count as changed publications when their pixels differ, but do not wake the screen before
 promotion. Cycles discarded by a selection epoch change are omitted. `FRAMEDROP spans=assup` measures the UI upload when the developer frame instrument is
-armed. These counters contain no subtitle text, filenames or account identifiers.
+armed. A fixed `assperf: native renderer opened` event records each fully loaded native object,
+making resource reuse observable on device. These counters contain no subtitle text, filenames
+or account identifiers.
 
 Host tests verify scheduler decisions and actual pinned-libass pixel parity. Native Jelly TV
 CPU/frame-rate gains and on-device subtitle acceptance remain unmeasured for this port.

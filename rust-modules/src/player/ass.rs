@@ -237,6 +237,20 @@ pub(crate) fn clear() {
     clear_runtime(runtime());
 }
 
+/// MAIN THREAD: hide a transient seek/buffering raster while retaining the bounded native cache.
+/// Off and unmount must still call clear(), including after a suspension.
+pub(crate) fn suspend() {
+    suspend_runtime(runtime());
+}
+
+fn suspend_runtime(runtime: &Runtime) {
+    if runtime.source_id.load(Ordering::Acquire) == 0 {
+        return;
+    }
+    runtime.epoch.fetch_add(1, Ordering::AcqRel);
+    runtime.wake();
+}
+
 fn clear_runtime(runtime: &Runtime) {
     if runtime.source_id.swap(0, Ordering::AcqRel) == 0 {
         return;
@@ -696,6 +710,7 @@ impl Native {
             return Err(Fault::Unreadable);
         }
         native.append(source, 0)?;
+        super::ass_perf::note_native_open();
         Ok(native)
     }
 

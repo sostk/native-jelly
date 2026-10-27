@@ -298,6 +298,11 @@ pub(super) fn log_worker_tid() {
     nj_base::eventlog::log(&format!("assperf: worker tid={tid}"));
 }
 
+/// WORKER: a fully loaded native object; one fixed-label event makes reuse observable on device.
+pub(super) fn note_native_open() {
+    nj_base::eventlog::log("assperf: native renderer opened");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

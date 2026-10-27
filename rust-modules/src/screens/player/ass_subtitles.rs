@@ -20,16 +20,25 @@ pub(crate) struct AssSubtitles {
 
 impl AssSubtitles {
     pub(crate) fn update(&mut self, ps: &crate::route::PlaybackSession, now: u32) {
-        let source = if !crate::route::client_renders_subtitle(ps) || crate::player::loading(ps) {
+        let renderable = crate::route::client_renders_subtitle(ps);
+        if renderable && crate::player::loading(ps) {
+            if self.source != 0 {
+                ass::suspend();
+            }
+            self.source = 0;
+            self.frame = None;
+            return;
+        }
+        let source = if !renderable {
             None
         } else {
             sidecar::ass_source(false)
                 .or_else(|| ass_source::selected(crate::player::desired_sub_idx()))
         };
         let Some(source) = source else {
-            if self.source != 0 {
-                ass::clear();
-            }
+            // A preceding busy interval may already have cleared self.source while keeping
+            // native resources. A real Off/no-source transition must release those too.
+            ass::clear();
             self.source = 0;
             self.frame = None;
             return;
