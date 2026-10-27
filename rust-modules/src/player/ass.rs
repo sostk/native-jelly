@@ -52,7 +52,7 @@ pub(crate) struct Source {
     pub content: Content,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Rect {
     pub x: i32,
     pub y: i32,
@@ -465,7 +465,7 @@ fn same_embedded_resources(old: &Source, new: &Source) -> bool {
     matches!((&old.content, &new.content), (
         Content::Embedded { header: oh, fonts: of, .. },
         Content::Embedded { header: nh, fonts: nf, .. }
-    ) if old.id == new.id && oh == nh && of == nf)
+    ) if oh == nh && of == nf)
 }
 
 #[derive(Default)]
@@ -554,12 +554,19 @@ impl Engine {
             .expect("loaded ASS source")
             .render(key, previous);
         let frame = match result {
-            Ok(None) => {
-                if let Some(frame) = &self.frame {
-                    return frame.clone();
+            Ok(None) => match &self.frame {
+                Some(frame) if frame.error.is_none() => {
+                    if frame.source_id == key.source_id && frame.width == key.width && frame.height == key.height {
+                        return frame.clone();
+                    }
+                    // A reused renderer may keep identical pixels across a seek or track switch.
+                    // The publication must still name the new timeline that it answers for.
+                    Arc::new(Frame { source_id: key.source_id, serial: next_serial(),
+                        width: key.width, height: key.height, rects: frame.rects.clone(), error: None })
                 }
-                error_frame(key, Fault::RenderFailed)
-            }
+                Some(frame) => return frame.clone(),
+                None => error_frame(key, Fault::RenderFailed),
+            },
             Ok(Some(rects)) => {
                 if let Some(old) = &self.frame {
                     if old.source_id == key.source_id
@@ -581,6 +588,8 @@ impl Engine {
                 })
             }
             Err(error) => {
+                // A refused native draw must not serve a later reuse from the error frame.
+                self.native = None;
                 self.error = Some(error);
                 nj_base::eventlog::log(&format!("subtitle: ASS render failed: {error:?}"));
                 error_frame(key, error)
@@ -625,6 +634,11 @@ nj_base::dynlib! {
 
 struct Native(*mut c_void);
 
+#[cfg(test)]
+thread_local! {
+    static NATIVE_OPENS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
 fn asset_dir() -> &'static std::path::Path {
     // Host unit tests execute in target/debug/deps; their bundled native fixture
     // and fonts live in pkg. This override cannot enter the television binary.
@@ -661,6 +675,8 @@ impl Native {
             return Err(Fault::InitFailed);
         }
         let mut native = Self(ptr);
+        #[cfg(test)]
+        NATIVE_OPENS.with(|n| n.set(n.get() + 1));
         for name in ["appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf"] {
             let bytes = std::fs::read(asset_dir().join(name))
                 .map_err(|_| Fault::FontsUnavailable)?;

@@ -42,6 +42,56 @@ fn append_preserves_readorder_but_replacement_cannot_append() {
 }
 
 #[test]
+fn a_seek_identity_reuses_matching_embedded_header_and_fonts() {
+    let old = source(vec![event(0, 0, 1000)]);
+    let mut seek = source(vec![event(1, 20_000, 1000)]);
+    seek.id = old.id + 1;
+    assert!(same_embedded_resources(&old, &seek),
+        "a new timeline must replace events without rebuilding the same header and font caches");
+    if let Content::Embedded { header, .. } = &mut seek.content {
+        *header = b"different header".as_slice().into();
+    }
+    assert!(!same_embedded_resources(&old, &seek), "a different header must open a fresh renderer");
+}
+
+#[test]
+#[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
+fn repeated_seeks_reuse_the_native_renderer_and_publish_the_current_source() {
+    let mut engine = Engine::default();
+    let opened = NATIVE_OPENS.with(|n| n.get());
+    let mut selected = source(vec![event(0, 0, 4000)]);
+    if let Content::Embedded { header, .. } = &mut selected.content {
+        *header = HEADER.as_bytes().into();
+    }
+    for _ in 0..10 {
+        selected.id = next_source_id();
+        let selected = Arc::new(selected.clone());
+        let frame = render(&mut engine, &selected, 100);
+        assert_eq!(frame.source_id, selected.id, "reuse cannot publish an old timeline");
+        assert!(!frame.rects.is_empty());
+    }
+    assert_eq!(NATIVE_OPENS.with(|n| n.get()) - opened, 1,
+        "matching headers and fonts must only be parsed once");
+}
+
+#[test]
+#[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
+fn a_refused_native_render_is_reopened_before_source_reuse() {
+    let mut engine = Engine::default();
+    let source = script("Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,hello\n");
+    let opened = NATIVE_OPENS.with(|n| n.get());
+    render(&mut engine, &source, 100);
+    let refused = engine.render(&Request { source: source.clone(), key: Key {
+        width: 0, ..request_key(&source)
+    }});
+    assert_eq!(refused.error, Some(Fault::RenderFailed));
+    assert!(engine.native.is_none(), "the failed native renderer must be retired");
+    let recovered = Arc::new(Source { id: next_source_id(), ..(*source).clone() });
+    render(&mut engine, &recovered, 100);
+    assert_eq!(NATIVE_OPENS.with(|n| n.get()) - opened, 2);
+}
+
+#[test]
 fn rejects_unbounded_and_invalid_events_before_native_parsing() {
     let mut invalid = event(0, i64::MAX, 1);
     assert!(validate(&source(vec![invalid.clone()])).is_err());
