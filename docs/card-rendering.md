@@ -35,7 +35,10 @@ pixels, optional programs and fallbacks, caller clips, redirected page targets a
 source passes. Synthetic replay anchors are rerecorded through `tools/nativejelly-rec rerecord`
 because Library's counted identity-keyed release sequence changes the logical state shape.
 
-Host/ARM verification does not establish TV performance or LG pixel equivalence. Device
-acceptance remains pending: compare uninstrumented navigation/frame pacing, separately measure
-GPU work with splitting enabled/disabled, inspect card seams/shadows and modal glass captures,
-and confirm settled pages stop presenting. Upstream measurements are not Native Jelly results.
+Host/ARM verification does not establish TV performance or LG pixel equivalence. The
+[27 October device record](verification/2026-10-27-playback-ui-ports.md) covers scoped
+full-resolution comparisons, settled idle behavior and separate pacing/GPU measurements.
+No new visual defects were seen in those scenes, but no measurable split-card benefit was
+demonstrated on the Mali-G51. The combined baseline/current workload was slower, including
+its warmed static GPU control; individual-port attribution remains open. Upstream measurements
+are not Native Jelly results.

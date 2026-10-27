@@ -1744,7 +1744,9 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   the samples across the scene, including warm-up, and fails if evidence is missing. Simulator
   and recorder logs are refused for device timing. `library-scroll` uses a provisional floor
   of 1.25 uploads per upload frame and a 0.35 late-share backstop, imported from PlxNative #563;
-  Native Jelly TV measurements remain pending. The matching ordinary prepare budget is
+  The [27 October TV record](verification/2026-10-27-playback-ui-ports.md) reports a passing
+  throughput floor but a failing late-share backstop on Mali-G51; performance acceptance
+  remains open and the imported thresholds are unchanged. The matching ordinary prepare budget is
   5000 us with a 2500 us poster price; large-image residency keeps its existing solo-frame price.
 - **Dev trigger files (read once at boot, in the install's RUNTIME ROOT).** There are ~40; this
   lists the ones worth knowing by name. **The ROOT moved for flavoured installs and ONLY for
