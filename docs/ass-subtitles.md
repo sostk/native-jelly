@@ -72,8 +72,10 @@ armed. A fixed `assperf: native renderer opened` event records each fully loaded
 making resource reuse observable on device. These counters contain no subtitle text, filenames
 or account identifiers.
 
-Host tests verify scheduler decisions and actual pinned-libass pixel parity. Native Jelly TV
-CPU/frame-rate gains and on-device subtitle acceptance remain unmeasured for this port.
+Host tests verify scheduler decisions and actual pinned-libass pixel parity. Scoped TV
+acceptance and static-caption CPU results are recorded in
+[the device verification](verification/2026-10-28-subtitle-scheduling.md). Those measurements
+establish no whole-app CPU or hardware-video frame-rate gain.
 
 The subtitle clock interpolates between the pipeline's sparse position callbacks, with at most
 250 ms of extrapolation. Pause, seek and discontinuities re-anchor it. Output dimensions and the
