@@ -40,7 +40,7 @@
         "nativejelly-lookahead": "0",
         "nativejelly-library": true
       },
-      "comment": "Warm the grid head, a middle row and the deepest row (rows 0, 6 and 12 at most; sized to the booted Library grid) under an explicit texture ceiling of 1.5x the measured warm window, never above 12 MiB (`phase=ceiling`), reverse quickly across the actually evicted rows, then require them to rearm and render fully. The source retains 64 slots; this scene exercises real byte-LRU eviction before source identity recycling, and the grade requires real evictions, evicted refusals in the reversal and rearms at rest. Needs 2x rows_per_screen grid rows (6 rows = 31+ items at six columns, 1080p); a smaller grid fails as UNFIT CATALOG. No activation or viewing-history writes."
+      "comment": "Warm the grid head, a middle row and the deepest row (rows 0, 6 and 12 at most; sized to the booted Library grid) under an explicit texture ceiling of 2x the measured warm window, never above 12 MiB (`phase=ceiling`), reverse quickly across the actually evicted rows, then require them to rearm and render fully. The source retains 64 slots; this scene exercises real byte-LRU eviction before source identity recycling, and the grade requires real evictions, evicted refusals in the reversal and rearms at rest. Needs 2x rows_per_screen grid rows (6 rows = 31+ items at six columns, 1080p); a smaller grid fails as UNFIT CATALOG. No activation or viewing-history writes."
     },
     {
       "name": "poster-hero-grid-dive",

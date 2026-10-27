@@ -9,16 +9,13 @@ use crate::ui::card_motion_metrics::{self as metrics, Stats};
 // 12 MiB fits that window while evicting old windows before 64 source slots recycle.
 const PRESSURE_MIB: usize = 12;
 
-/// The eviction scene's ceiling once its warm window has been measured: room for one window and a
-/// half, never more than [`PRESSURE_MIB`]. A deeper grid window shows more cards than the head one
-/// under its heading band — measured on the dev set, a 6.1 MiB head window against an 8.6 MiB
-/// mid-grid one (1.42x) — so one and a half still holds any single window, while the seeds' newer
-/// windows push the head's art out. The fixed 12 MiB alone was sized
-/// for seeds six rows apart; on a shallow catalog, whose seeds are closer and bring fewer new bytes,
-/// it holds nearly the whole grid, and the reversal crosses no evicted art until focus has already
-/// landed. Authored bytes in and out, as [`crate::ui::tex::scene_residency_budget`] takes.
+/// The eviction scene's ceiling after measuring the head window. A middle grid can expose
+/// twice the head's artwork: on the webOS 6 Jellyfin layout the measured windows were
+/// 4.3 MiB and 8.6 MiB. Allow two head windows, capped at 12 MiB, so a single middle
+/// window can finish loading while the distinct seed windows still force byte-LRU eviction.
+/// The grade separately requires actual evictions, refused evicted slots and rearming.
 fn pressure_ceiling(window_bytes: usize) -> usize {
-    (window_bytes + window_bytes / 2).min(PRESSURE_MIB << 20)
+    window_bytes.saturating_mul(2).min(PRESSURE_MIB << 20)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -470,10 +467,11 @@ mod tests {
         assert!(plan_for(Mode::Dive, Content::Grid { rows: 26, per_screen: 3 }).is_err());
     }
     #[test]
-    fn the_pressure_ceiling_holds_a_window_and_a_half_and_never_exceeds_twelve_mib() {
+    fn the_pressure_ceiling_holds_a_double_density_grid_and_never_exceeds_twelve_mib() {
         let mib = 1 << 20;
-        assert_eq!(pressure_ceiling(4 * mib), 6 * mib, "a shallow catalog's small window: 1.5x");
+        assert_eq!(pressure_ceiling(4 * mib), 8 * mib, "the middle grid can show twice the head window");
         assert_eq!(pressure_ceiling(8 * mib), PRESSURE_MIB << 20, "the deep plan keeps its 12 MiB");
         assert_eq!(pressure_ceiling(20 * mib), PRESSURE_MIB << 20);
+        assert_eq!(pressure_ceiling(usize::MAX), PRESSURE_MIB << 20);
     }
 }
