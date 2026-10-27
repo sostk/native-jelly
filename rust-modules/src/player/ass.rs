@@ -6,6 +6,10 @@ use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+mod mailbox;
+use mailbox::{Job, Kind, Mailbox};
+use super::ass_timing::{self, Validity};
+
 const MAX_SCRIPT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EVENTS: usize = 20_000;
@@ -136,23 +140,10 @@ struct Key {
     epoch: u64,
     source_id: u64,
     revision: u64,
-    now_ms: i64,
     width: i32,
     height: i32,
     storage_width: i32,
     storage_height: i32,
-}
-
-struct Request {
-    key: Key,
-    source: Arc<Source>,
-}
-
-#[derive(Default)]
-struct Mailbox {
-    pending: Option<Request>,
-    requested: Option<Key>,
-    published: Option<(u64, Arc<Frame>)>,
 }
 
 pub(crate) struct Runtime {
@@ -170,11 +161,7 @@ impl Runtime {
             epoch: AtomicU64::new(1),
             started: OnceLock::new(),
             worker: OnceLock::new(),
-            mailbox: Mutex::new(Mailbox {
-                pending: None,
-                requested: None,
-                published: None,
-            }),
+            mailbox: Mutex::new(Mailbox::new()),
         }
     }
 
@@ -193,7 +180,7 @@ fn runtime() -> &'static Runtime {
     &super::SHARED.ass_renderer
 }
 
-/// MAIN THREAD: replace the latest request and return only this selection's last
+/// MAIN THREAD: ask for the frame right for `now_ms` and return only this selection's last
 /// completed frame. Contention drops this tick's request rather than waiting.
 pub(crate) fn request(
     source: Arc<Source>,
@@ -215,7 +202,6 @@ pub(crate) fn request(
         epoch: runtime().epoch.load(Ordering::Acquire),
         source_id: source.id,
         revision: source.revision,
-        now_ms,
         width,
         height,
         storage_width: if storage_width > 0 {
@@ -232,30 +218,15 @@ pub(crate) fn request(
     let started = *runtime()
         .started
         .get_or_init(|| nj_base::task::spawn("styled subtitles", worker).is_some());
-    if !started {
-        let mut mailbox = runtime().mailbox.try_lock().ok()?;
-        if let Some((epoch, frame)) = &mailbox.published {
-            if *epoch == key.epoch && frame.width == width && frame.height == height {
-                return Some(frame.clone());
-            }
-        }
-        let frame = error_frame(key, Fault::StartFailed);
-        mailbox.published = Some((key.epoch, frame.clone()));
-        return Some(frame);
-    }
     let mut mailbox = runtime().mailbox.try_lock().ok()?;
-    if mailbox.requested != Some(key) {
-        mailbox.pending = Some(Request { key, source });
-        mailbox.requested = Some(key);
+    if !started {
+        return Some(mailbox.publish_error(key, error_frame(key, Fault::StartFailed)));
+    }
+    let requested = mailbox.request(key, now_ms, &source);
+    if requested.wake {
         runtime().wake();
     }
-    mailbox.published.as_ref().and_then(|(epoch, frame)| {
-        (*epoch == key.epoch
-            && frame.source_id == key.source_id
-            && frame.width == width
-            && frame.height == height)
-            .then(|| frame.clone())
-    })
+    mailbox.view(&key)
 }
 
 /// MAIN THREAD: cancellation is immediate even while libass is rendering.
@@ -280,12 +251,7 @@ fn retire_off(
     mailbox: &mut Mailbox,
     engine: &mut Engine,
 ) -> Option<(Mailbox, Engine)> {
-    if runtime.source_id.load(Ordering::Acquire) != 0
-        || (engine.is_empty()
-            && mailbox.pending.is_none()
-            && mailbox.requested.is_none()
-            && mailbox.published.is_none())
-    {
+    if runtime.source_id.load(Ordering::Acquire) != 0 || (engine.is_empty() && mailbox.is_empty()) {
         return None;
     }
     Some((std::mem::take(mailbox), std::mem::take(engine)))
@@ -314,7 +280,7 @@ fn worker() {
         .expect("one styled subtitle worker");
     let mut engine = Engine::default();
     loop {
-        let request = {
+        let job = {
             let mut mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
             loop {
                 if let Some(retired) = retire_off(runtime(), &mut mailbox, &mut engine) {
@@ -324,8 +290,8 @@ fn worker() {
                     mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
                     continue;
                 }
-                if let Some(request) = mailbox.pending.take() {
-                    break request;
+                if let Some(job) = mailbox.take() {
+                    break job;
                 }
                 drop(mailbox);
                 // A queue/cancel between the check above and this park leaves a
@@ -335,25 +301,21 @@ fn worker() {
                 mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
             }
         };
-        if runtime().epoch.load(Ordering::Acquire) != request.key.epoch {
-            continue;
-        }
-        let frame = engine.render(&request);
-        if runtime().epoch.load(Ordering::Acquire) != request.key.epoch {
-            continue;
-        }
-        let changed = {
+        let live = || runtime().epoch.load(Ordering::Acquire) == job.key.epoch;
+        let rendered = live().then(|| {
+            let rendered = engine.render(&job);
+            rendered
+        });
+        let finished = {
             let mut mailbox = runtime().mailbox.lock().unwrap_or_else(|e| e.into_inner());
-            if runtime().epoch.load(Ordering::Acquire) != request.key.epoch {
-                continue;
-            }
-            let changed = mailbox.published.as_ref().is_none_or(|(epoch, old)| {
-                *epoch != request.key.epoch || old.serial != frame.serial
-            });
-            mailbox.published = Some((request.key.epoch, frame));
-            changed
+            // Every exit finishes the job, so the mailbox never believes one is still in flight.
+            let outcome = rendered.filter(|_| live());
+            let ran = outcome.is_some();
+            let finished = mailbox.finish(&job, outcome);
+            ran.then_some(finished)
         };
-        if changed {
+        let Some(finished) = finished else { continue };
+        if finished.wake {
             nj_machine::present::wake_from_worker();
         }
     }
@@ -472,6 +434,7 @@ fn same_embedded_resources(old: &Source, new: &Source) -> bool {
 struct Engine {
     source: Option<Arc<Source>>,
     native: Option<Native>,
+    script: Option<ass_timing::ScriptTimings>,
     frame: Option<Arc<Frame>>,
     error: Option<Fault>,
 }
@@ -480,11 +443,28 @@ impl Engine {
     fn is_empty(&self) -> bool {
         self.source.is_none()
             && self.native.is_none()
+            && self.script.is_none()
             && self.frame.is_none()
             && self.error.is_none()
     }
 
-    fn render(&mut self, request: &Request) -> Arc<Frame> {
+    /// The frame and the playheads for which its pixels remain right.
+    fn render(&mut self, job: &Job) -> (Arc<Frame>, Validity) {
+        let frame = self.render_frame(job);
+        let validity = if frame.error.is_some() { Validity::ALWAYS } else {
+            match (&job.source.content, &self.script) {
+                (Content::Embedded { events, .. }, _) => ass_timing::validity(events.iter().map(|e| ass_timing::Span {
+                    start_ms: e.start_ms, end_ms: e.start_ms.saturating_add(e.duration_ms),
+                    motion: ass_timing::Motion::Packet(&e.payload),
+                }), job.now_ms),
+                (Content::Script { .. }, Some(index)) => ass_timing::validity(index.spans(), job.now_ms),
+                _ => Validity { from_ms: i64::MIN, until_ms: i64::MAX, animated: true },
+            }
+        };
+        (frame, validity)
+    }
+
+    fn render_frame(&mut self, request: &Job) -> Arc<Frame> {
         let key = request.key;
         let source_changed = self.source.as_ref().is_none_or(|old| {
             old.id != request.source.id || old.revision != request.source.revision
@@ -515,7 +495,14 @@ impl Engine {
                     native.append(&request.source, 0)
                 } else {
                     self.native = None;
-                    Native::open(&request.source).map(|native| self.native = Some(native))
+                    self.script = None;
+                    Native::open(&request.source).map(|native| {
+                        self.native = Some(native);
+                        if let Content::Script { bytes, .. } = &request.source.content {
+                            // Parse only after the native facade accepts the bounded script.
+                            self.script = Some(ass_timing::ScriptTimings::parse(bytes));
+                        }
+                    })
                 };
                 self.error = result.err();
             }
@@ -552,7 +539,7 @@ impl Engine {
             .native
             .as_mut()
             .expect("loaded ASS source")
-            .render(key, previous);
+            .render(key, request.now_ms, previous);
         let frame = match result {
             Ok(None) => match &self.frame {
                 Some(frame) if frame.error.is_none() => {
@@ -728,12 +715,12 @@ impl Native {
         Ok(())
     }
 
-    fn render(&mut self, key: Key, previous: &[Rect]) -> Result<Option<Vec<Rect>>, Fault> {
+    fn render(&mut self, key: Key, now_ms: i64, previous: &[Rect]) -> Result<Option<Vec<Rect>>, Fault> {
         let mut frame = NativeFrame::default();
         let result = unsafe {
             plx_ass_render(
                 self.0,
-                key.now_ms,
+                now_ms,
                 key.width,
                 key.height,
                 key.storage_width,
@@ -814,3 +801,7 @@ impl Native {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "ass/mailbox_tests.rs"]
+mod mailbox_tests;

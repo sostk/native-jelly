@@ -35,8 +35,21 @@ retains the entire script. It also incorporates the video's font attachments, in
 those arrive after the external file. Source reuse includes server identity, stream identity,
 delivery key and codec. Backward seeks and Off→On do not re-download a loaded script.
 
-`player::ass` owns the native objects on one worker. A single latest-request slot coalesces clock
-updates; a completed frame is accepted only for the current source/selection epoch. The UI never
+`player::ass` owns the native objects on one worker. A completed frame carries the interval of
+playheads for which it remains valid. Ticks inside a static cue or gap queue no render job. The
+worker pre-renders one next boundary, held separately until the playhead reaches it. A current
+Normal job takes priority over an Ahead job; selection epochs and job sequences reject cancelled
+or superseded results. Animated cues still render as their clock moves, and an animated Ahead
+frame is reusable only at its exact rendered time. Pause reuses the same time; seeks, subtitle
+delay, source revisions and canvas/storage dimensions are part of request handling.
+
+The timing index reads the complete sidecar already accepted by the pinned native facade; existing
+script, event and font limits remain unchanged. It follows libass's centisecond timestamps and
+event-format order. Unrecognized scripts fall back to per-tick rendering. This adapts
+[upstream #721](https://github.com/GLinnik21/plx-native/pull/721) without importing its separate
+long-script windowing or font-budget changes.
+
+The UI never
 waits for font parsing or rasterization. Native change detection avoids work for unchanged output. Overlapping libass images are composed
 in order into disjoint regions, with a maximum of 64 regions and one bounded pixel arena.
 Consecutive libass image identities also retain native region pixels, so a moving or karaoke

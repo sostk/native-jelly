@@ -17,6 +17,7 @@
 #![allow(non_upper_case_globals)]
 pub(crate) mod adapter;
 pub(crate) mod claim_hold;
+pub(crate) mod ass_timing; // subtitle event windows and conservative animation detection
 pub(crate) mod ass; // pinned libass worker and immutable rendered frames
 pub(crate) mod ass_source; // bounded embedded scripts and subtitle presentation clock
 pub(crate) mod engine;

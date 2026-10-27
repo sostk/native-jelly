@@ -76,12 +76,58 @@ fn repeated_seeks_reuse_the_native_renderer_and_publish_the_current_source() {
 
 #[test]
 #[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
+fn scheduled_pixels_match_rendering_every_tick_including_animation_boundaries() {
+    let source = script(concat!(
+        "Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,static\n",
+        "Dialogue: 0,0:00:02.00,0:00:03.00,Default,,0,0,0,,{\\move(0,0,100,0)}move\n",
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{\\fad(250,250)}fade\n",
+        "Dialogue: 0,0:00:04.00,0:00:05.00,Default,,0,0,0,,{\\kf50}first {\\kf50}second\n",
+    ));
+    let key = request_key(&source);
+    let (mut scheduled, mut reference) = (Engine::default(), Engine::default());
+    let mut mailbox = Mailbox::new();
+    for now_ms in (0..5200).step_by(16) {
+        mailbox.request(key, now_ms, &source);
+        while let Some(job) = mailbox.take() {
+            let outcome = scheduled.render(&job);
+            mailbox.finish(&job, Some(outcome));
+        }
+        let expected = render(&mut reference, &source, now_ms);
+        let got = mailbox.view(&key).expect("the completed current frame");
+        assert!(got.rects == expected.rects, "scheduled pixels at {now_ms}ms differ");
+    }
+}
+
+#[test]
+#[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
+fn a_static_native_caption_needs_one_current_job_and_one_boundary_job() {
+    let source = script("Dialogue: 0,0:00:00.00,0:00:20.00,Default,,0,0,0,,static\n");
+    let key = request_key(&source);
+    let mut engine = Engine::default();
+    let mut mailbox = Mailbox::new();
+    let (mut normal, mut ahead) = (0, 0);
+    for now_ms in (0..9600).step_by(16) {
+        mailbox.request(key, now_ms, &source);
+        while let Some(job) = mailbox.take() {
+            if job.kind == Kind::Normal { normal += 1; } else { ahead += 1; }
+            let outcome = engine.render(&job);
+            mailbox.finish(&job, Some(outcome));
+        }
+        assert!(!mailbox.view(&key).unwrap().rects.is_empty());
+    }
+    assert_eq!((normal, ahead), (1, 1), "600 ticks must not queue 600 native jobs");
+    println!("subtitle scheduling: 600 UI ticks, normal={normal}, ahead={ahead}");
+}
+
+#[test]
+#[ignore = "requires the pinned host libass and staged fonts; make check-ass"]
 fn a_refused_native_render_is_reopened_before_source_reuse() {
     let mut engine = Engine::default();
     let source = script("Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,hello\n");
     let opened = NATIVE_OPENS.with(|n| n.get());
     render(&mut engine, &source, 100);
-    let refused = engine.render(&Request { source: source.clone(), key: Key {
+    let refused = engine.render_frame(&Job {
+        kind: Kind::Normal, seq: 1, queued: None, now_ms: 100, source: source.clone(), key: Key {
         width: 0, ..request_key(&source)
     }});
     assert_eq!(refused.error, Some(Fault::RenderFailed));
@@ -117,7 +163,6 @@ fn request_key(source: &Source) -> Key {
         epoch: 1,
         source_id: source.id,
         revision: source.revision,
-        now_ms: 100,
         width: 320,
         height: 180,
         storage_width: 320,
@@ -141,15 +186,11 @@ fn off_retires_a_racing_publication_and_pending_source_outside_the_mailbox_lock(
     runtime.source_id.store(source.id, Ordering::Release);
     {
         let mut mailbox = runtime.mailbox.lock().unwrap();
-        mailbox.pending = Some(Request {
-            key,
-            source: source.clone(),
-        });
-        mailbox.requested = Some(key);
+        mailbox.request(key, 100, &source);
         // The worker owns the lock and has already accepted this epoch. Cancel
         // must return while the lock is held; the old publication then races in.
         clear_runtime(&runtime);
-        mailbox.published = Some((key.epoch, frame.clone()));
+        mailbox.publish_error(key, frame.clone());
     }
     drop(source);
     drop(frame);
@@ -165,10 +206,10 @@ fn off_retires_a_racing_publication_and_pending_source_outside_the_mailbox_lock(
     {
         let mailbox = runtime.mailbox.lock().unwrap();
         assert!(
-            mailbox.pending.is_none(),
+            mailbox.pending_job().is_none(),
             "retire stale work before considering it for rendering"
         );
-        assert!(mailbox.requested.is_none());
+        assert!(mailbox.is_empty());
         assert!(
             mailbox.published.is_none(),
             "a publication after cancellation must not be retained"
@@ -197,7 +238,7 @@ fn cancellation_before_worker_parks_is_remembered_and_releases_resources() {
     let frame = error_frame(key, Fault::RenderFailed);
     let witness = Arc::downgrade(&frame);
     runtime.source_id.store(source.id, Ordering::Release);
-    runtime.mailbox.lock().unwrap().published = Some((key.epoch, frame.clone()));
+    runtime.mailbox.lock().unwrap().publish_error(key, frame.clone());
     let observed_idle = Arc::new(AtomicBool::new(false));
     let may_park = Arc::new(AtomicBool::new(false));
     let (done_tx, done_rx) = mpsc::channel();
@@ -214,7 +255,7 @@ fn cancellation_before_worker_parks_is_remembered_and_releases_resources() {
             };
             {
                 let mailbox = runtime.mailbox.lock().unwrap();
-                assert!(mailbox.pending.is_none());
+                assert!(mailbox.pending_job().is_none());
                 assert_ne!(runtime.source_id.load(Ordering::Acquire), 0);
             }
             // Main will cancel only AFTER the idle observation and BEFORE park.
@@ -273,13 +314,13 @@ fn script(lines: &str) -> Arc<Source> {
 }
 
 fn render(engine: &mut Engine, source: &Arc<Source>, now_ms: i64) -> Arc<Frame> {
-    let frame = engine.render(&Request {
+    let frame = engine.render_frame(&Job {
+        kind: Kind::Normal, seq: 1, queued: None, now_ms,
         source: source.clone(),
         key: Key {
             epoch: 1,
             source_id: source.id,
             revision: source.revision,
-            now_ms,
             width: 320,
             height: 180,
             storage_width: 320,
@@ -319,13 +360,13 @@ fn native_pixels_preserve_position_layers_alpha_motion_karaoke_and_readorder() {
     assert_eq!(pixel(&first, 25, 25), [255, 0, 0, 255]);
     assert_eq!(pixel(&first, 45, 35), [128, 0, 127, 255]);
     assert_eq!(pixel(&first, 75, 35), [0, 0, 255, 127]);
-    let coded = engine.render(&Request {
+    let coded = engine.render_frame(&Job {
+        kind: Kind::Normal, seq: 1, queued: None, now_ms: 100,
         source: source.clone(),
         key: Key {
             epoch: 1,
             source_id: source.id,
             revision: source.revision,
-            now_ms: 100,
             width: 320,
             height: 180,
             storage_width: 720,
@@ -572,13 +613,13 @@ fn native_fragmented_script_stays_bounded_without_dropping_signs() {
             "Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{{\\an7\\pos({x},{y})\\p1}}m 0 0 l 4 0 4 4 0 4\n"));
     }
     let source = script(&lines);
-    let frame = Engine::default().render(&Request {
+    let frame = Engine::default().render_frame(&Job {
+        kind: Kind::Normal, seq: 1, queued: None, now_ms: 100,
         source: source.clone(),
         key: Key {
             epoch: 1,
             source_id: source.id,
             revision: 1,
-            now_ms: 100,
             width: 1920,
             height: 1080,
             storage_width: 1920,
