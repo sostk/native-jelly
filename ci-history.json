@@ -1,4 +1,4 @@
-{"updated":"2026-10-27T20:59:22Z",
+{"updated":"2026-10-27T21:13:14Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
 {"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}},
@@ -17,5 +17,6 @@
 {"id":39098946602,"at":"2026-10-18T04:58:45Z","sha":"88148cfff","title":"Fix converted playback: text subtitles as PGS, and seek/track-switch hangs","pr":null,"jobs":{"Windows launcher syntax":22,"Linux simulator build + launch":290,"macOS simulator build + launch":843}},
 {"id":40089416007,"at":"2026-10-24T11:19:07Z","sha":"3a1a97b65","title":"Merge pull request #23 from ppichinenko/add-russian-locale","pr":null,"jobs":{"macOS simulator build + launch":860,"Windows launcher syntax":17,"Linux simulator build + launch":247}},
 {"id":40132448154,"at":"2026-10-24T21:02:22Z","sha":"133c1de13","title":"Merge pull request #26 from sostk/ccr-f34a4b74-4kuzva","pr":null,"jobs":{"macOS simulator build + launch":748,"Linux simulator build + launch":332,"Windows launcher syntax":18}},
-{"id":40450040380,"at":"2026-10-27T04:29:46Z","sha":"ff9576d59","title":"docs: record playback and UI device acceptance findings","pr":null,"jobs":{"Linux simulator build + launch":276,"Windows launcher syntax":15,"macOS simulator build + launch":1027}}
+{"id":40450040380,"at":"2026-10-27T04:29:46Z","sha":"ff9576d59","title":"docs: record playback and UI device acceptance findings","pr":null,"jobs":{"Linux simulator build + launch":276,"Windows launcher syntax":15,"macOS simulator build + launch":1027}},
+{"id":40581973205,"at":"2026-10-27T20:53:05Z","sha":"93c0417bf","title":"docs: record subtitle scheduling TV acceptance and CPU limits","pr":null,"jobs":{"macOS simulator build + launch":1191,"Linux simulator build + launch":237,"Windows launcher syntax":36}}
 ]}
