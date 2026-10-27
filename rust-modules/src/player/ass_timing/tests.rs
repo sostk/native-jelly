@@ -102,3 +102,16 @@ fn unknown_section_lines_do_not_change_libass_event_parsing_state() {
     assert_eq!(validity(index.spans(), 750).until_ms, 1000,
         "libass ignores an unknown section line and still reads the following event");
 }
+
+#[test]
+fn ambiguous_event_formats_keep_the_per_tick_path() {
+    for (format, event) in [
+        ("Start, End, Effect, Effect, Text", "0:00:00.00,0:00:02.00,,Banner;1;0;0,caption"),
+        ("Start, End, Text, Text", "0:00:00.00,0:00:02.00,{\\kf20}animated,caption"),
+        ("Start, End, Duration, Text", "0:00:00.00,0:00:02.00,0:00:01.00,caption"),
+    ] {
+        let raw = format!("[Events]\nFormat: {format}\nDialogue: {event}\n");
+        assert!(validity(ScriptTimings::parse(raw.as_bytes()).spans(), 500).animated,
+            "ambiguous event format must preserve per-tick rendering: {format}");
+    }
+}

@@ -4,7 +4,8 @@
 //! Pure: no native call, no thread. The window is computed from event timings alone, with
 //! libass's activity rule `start <= now < start + duration` for both edges.
 
-/// `string2timecode` of libass 0.17.5 (`ass.c`), byte for byte: `sscanf("%d:%d:%d.%d")` then
+/// Ordinary 32-bit timestamps follow `string2timecode` of libass 0.17.5 (`ass.c`):
+/// `sscanf("%d:%d:%d.%d")` then
 /// `((h * 60 + m) * 60 + s) * 1000 + frac * 10`. The fraction is read as an integer count of
 /// CENTISECONDS whatever its digit count (`0:00:01.5` is 1050 ms, `0:00:01.123` is 2230 ms), and a
 /// timestamp that does not yield all four numbers (no fraction, junk) is 0. `%d` skips leading
@@ -184,6 +185,12 @@ impl ScriptTimings {
             } else if let Some(body) = line.strip_prefix("Dialogue:") {
                 let Some(names) = &format else { return unknown() };
                 if names.last().map(String::as_str) != Some("text") { return unknown(); }
+                // libass stops at the first Text, overwrites repeated Effect fields and treats
+                // Duration as an alias of End. Ambiguous formats keep the per-tick path.
+                if names.iter().filter(|name| name.as_str() == "text").count() != 1
+                    || names.iter().filter(|name| name.as_str() == "effect").count() > 1
+                    || names.iter().any(|name| name == "duration")
+                { return unknown(); }
                 let position = |name| {
                     let mut found = names.iter().enumerate().filter(|(_, n)| n.as_str() == name);
                     let (index, _) = found.next()?;
