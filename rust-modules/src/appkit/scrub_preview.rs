@@ -57,6 +57,9 @@ impl Memo {
                         }
                     }
                     self.pending = None;
+                    // Movement can outpace the worker. Age the newly available still from
+                    // this completion, not from an older image (or an empty first request).
+                    self.stale_since = None;
                 }
                 Look::Failed => {
                     self.pending = None;
@@ -305,6 +308,44 @@ mod tests {
             Some(30_000)
         );
         assert_eq!(&*retired.borrow(), &[0]);
+    }
+    #[test]
+    fn scrub_preview_fresh_completions_remain_visible_during_continuous_movement() {
+        let mut m = Memo::default();
+        m.step(0, 0, Some(spec()), |_| Look::Waiting, |_| {});
+        // The first sheet arrives after the grace period, while the destination keeps moving.
+        assert_eq!(
+            m.step(
+                20_000,
+                500,
+                Some(spec()),
+                |ms| if ms == 0 { Look::Ready } else { Look::Waiting },
+                |_| {}
+            ),
+            Some(0)
+        );
+        assert_eq!(m.pending, Some((20_000, 500)));
+        // A fresh completion gets its own finite grace period, even if it trails the cursor.
+        assert_eq!(
+            m.step(
+                40_000,
+                1_000,
+                Some(spec()),
+                |ms| if ms == 20_000 {
+                    Look::Ready
+                } else {
+                    Look::Waiting
+                },
+                |_| {}
+            ),
+            Some(20_000)
+        );
+        assert_eq!(m.pending, Some((40_000, 1_000)));
+        assert_eq!(
+            m.step(60_000, 1_401, Some(spec()), |_| Look::Waiting, |_| {}),
+            None,
+            "an unchanged stale still must still expire"
+        );
     }
     #[test]
     fn scrub_preview_uses_manifest_intervals_and_hides_stale_scenes() {

@@ -34,7 +34,8 @@ sheet is never a GPU texture. Previews have no disk-cache entries.
 
 A bounded four-entry render-fact cache gives the UI the true manifest interval. One logical
 request remains pending while movement coalesces to the newest destination. The previous still
-can remain briefly while the next arrives; a mismatched still hides after 400 ms. Missing tiles
+can remain briefly while the next arrives; each newly completed still gets its own 400 ms grace
+period while the destination moves, and an unchanged mismatched still then hides. Missing tiles
 stay quiet rather than requesting again every frame. Deferred/stuck requests retire after seven
 seconds. Finite network reads bound work already inside the transport.
 
