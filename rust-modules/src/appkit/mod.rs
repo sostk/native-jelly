@@ -25,6 +25,7 @@ pub mod chapters_panel;
 pub mod info_panel;
 pub mod more_menu; // the player's `…` overflow popover (holds the Stats for nerds toggle)
 pub mod player_hud;
+pub(crate) mod scrub_preview;
 pub(crate) mod skip_pill; // the Skip Intro / Skip Credits pill — a `ControlSlot` occupant of the player HUD's control row
 pub mod source_list; // the Sources ROW MODEL, shared by the Library panel and that route
 pub mod timing_capsule; // the on-video Subtitle Timing capsule (plan `subtitle-menu-capsule` §4)

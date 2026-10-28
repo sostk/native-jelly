@@ -85,6 +85,7 @@ pub(crate) struct PlayerRender {
     /// The decoded image-subtitle display set and its cache key (`player_hud`'s `SET`/`KEY`/`SEL`).
     pub(crate) subs: SubtitleBitmaps,
     pub(crate) ass: ass_subtitles::AssSubtitles,
+    preview: crate::appkit::scrub_preview::ScrubPreview,
 }
 
 impl Default for SubtitleBitmaps {
@@ -223,6 +224,7 @@ impl PlayerScreen {
     /// countdown go with it.
     pub(crate) fn transport_reset(&mut self, for_reload: bool) {
         self.row.reset_title();
+        self.render.preview.release();
         self.transport_tap = false;
         self.scrub.ns = -1;
         self.scrub.disengage();
@@ -255,6 +257,7 @@ impl PlayerScreen {
         crate::appkit::player_hud::draw_hud(
             ps,
             &mut self.row,
+            &mut self.render.preview,
             &self.up_next,
             self.slot,
             self.busy,
@@ -578,6 +581,9 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 self.step_scrub_hold(tick.ms, fx);
                 self.step_tap_commit(tick.ms, fx);
                 self.step_queued_jump(H::session(cx), fx);
+                if self.scrub.ns<0 || !self.transport || !self.hud_drawn(H::session(cx),tick.ms) {
+                    self.render.preview.release();
+                }
                 self.publish();
                 Handled::Yes
             }
@@ -586,6 +592,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // playback had ended; an instance is told exactly once.
                 self.render.subs.release();
                 self.render.ass.release();
+                self.render.preview.release();
                 Handled::Yes
             }
             ScreenEvent::Input(input) => {

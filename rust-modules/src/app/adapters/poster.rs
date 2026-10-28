@@ -45,6 +45,7 @@
 mod fan;
 mod refresh;
 mod trace;
+mod trickplay;
 
 #[cfg(test)]
 mod priority_regression_tests {
@@ -616,6 +617,7 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
         if let Some(fan) = fan::fan_key(path) {
             return fan;
         }
+        if crate::jf::trickplay::Request::parse(path).is_some() { return path.to_owned(); }
         transcode_request(c, path, w, h, png)
     });
     if s.len() > KEY_MAX {
@@ -1382,6 +1384,36 @@ impl tex::Source for PosterSource {
             log_residency();
         }
     }
+    fn peek(&self,srv:u16,path:&str,w:i32,h:i32,png:bool)->Option<PosterKey> {
+        let sid=ServerId::from_raw(srv);let key=built_key(sid,path,w,h,png)?;
+        let c=crate::catalog::client_for(sid)?;let cache=nj_platform::imgcache::generation();
+        let ready=store().slots.iter().any(|s|s.srv==sid && s.cache_gen==cache && s.token_gen==c.token_gen()
+            && key_bytes(s)==key.as_bytes() && s.state==P_READY);
+        if ready {lookup(sid,key,Touch::Draw).0}else{None}
+    }
+    fn failed(&self, srv: u16, path: &str, w: i32, h: i32, png: bool) -> bool {
+        let sid=ServerId::from_raw(srv);
+        let Some(key)=built_key(sid,path,w,h,png) else {return false;};
+        let Some(c)=crate::catalog::client_for(sid) else {return false;};
+        let cache=nj_platform::imgcache::generation();
+        store().slots.iter().any(|s|s.srv==sid && s.cache_gen==cache && s.token_gen==c.token_gen()
+            && key_bytes(s)==key.as_bytes() && s.state==P_FAILED)
+    }
+    fn forget(&self, srv:u16,path:&str,w:i32,h:i32,png:bool) {
+        let sid=ServerId::from_raw(srv);
+        let Some(key)=built_key(sid,path,w,h,png) else {return;};
+        let retired={
+            let mut g=store();
+            g.slots.iter().position(|s|s.srv==sid && key_bytes(s)==key.as_bytes())
+                .map(|i| {let s=&mut g.slots[i];let px=s.px;let gen=s.gen.wrapping_add(1);
+                    *s=Pslot {gen,..Pslot::ZERO};(i,px)})
+        };
+        if let Some((i,px))=retired {
+            // Main thread: discard queued uploads and residency as well as unstarted fetches.
+            tex::free(PosterKey(i as u32),&mut GfxUploader);
+            if px!=0 {img::img_free(px as *mut c_uchar);}
+        }
+    }
     fn idle(&self) -> bool {
         store_idle()
     }
@@ -1861,6 +1893,7 @@ fn bake_fan(
 /// BACKGROUND worker: claim a request, read disk or fetch and decode off-lock, publish pixels.
 /// RAM/GPU residency stays bounded independently of the number of persistent images.
 fn poster_worker() {
+    let mut previews=trickplay::Cache::default();
     loop {
         let (idx, key_s, srv, gen, cache_gen, token_gen) = {
             let mut g = store();
@@ -1887,7 +1920,21 @@ fn poster_worker() {
         if let Some(client) = crate::catalog::client_for(srv)
             .filter(|c| cache_gen == nj_platform::imgcache::generation() && c.token_gen() == token_gen)
         {
-            if let Some((rk, stamp)) = fan::parse_fan_key(&key_s) {
+            if let Some(req)=crate::jf::trickplay::Request::parse(&key_s) {
+                let id=crate::jf::trickplay::LayoutId {srv:srv.raw(),token:token_gen,cache:cache_gen,owner:req.owner.clone()};
+                let current=|| {
+                    let valid=nj_platform::imgcache::generation()==cache_gen && client.token_gen()==token_gen;
+                    let g=store(); valid && g.slots[idx].gen==gen && g.slots[idx].state==P_LOADING
+                };
+                match previews.load(client,id,&req,current) {
+                    trickplay::Got::Ready(dw,dh,rgba)=>{
+                        px=img::img_malloc_copy(&rgba,||format!("{dw}x{dh} trickplay tile"));
+                        (w,h)=(dw as c_int,dh as c_int);
+                    }
+                    trickplay::Got::Transient=>transient=true,
+                    trickplay::Got::Final|trickplay::Got::Cancelled=>{}
+                }
+            } else if let Some((rk, stamp)) = fan::parse_fan_key(&key_s) {
                 match bake_fan(client, srv, rk, stamp, cache_gen, token_gen) {
                     fan::Got::Ok(out) => {
                         px = img::img_malloc_copy(&out.px, || format!("{}x{} collection {rk} fan", out.w, out.h));

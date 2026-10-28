@@ -1886,6 +1886,7 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn nj_machine::m
 pub(crate) fn draw_hud(
     ps: &crate::route::PlaybackSession,
     row: &mut TransportRow,
+    preview: &mut crate::appkit::scrub_preview::ScrubPreview,
     up: &crate::appkit::up_next::Countdown,
     slot: ControlSlot,
     busy: Busy,
@@ -1987,7 +1988,12 @@ pub(crate) fn draw_hud(
             }
         }
 
-        draw_playbar(p, Playbar::live(ps, busy, focus, row.since_play_ms(now), now), measure);
+        let bar=Playbar::live(ps,busy,focus,row.since_play_ms(now),now);
+        draw_playbar(p,bar,measure);
+        let scrub=crate::player::TX.scrub_ns.load(Relaxed);
+        if scrub>=0 {
+            preview.draw(ps,scrub,bar.dur_ns,now,Rect::new(SB_X,SB_Y,sb_w(),SB_H),BTN_Y-theme::size::TITLE as f32);
+        } else {preview.release();}
     } // end `if transport`
 
     // bottom tabs as pills — Chapters only appears when the item actually has chapters

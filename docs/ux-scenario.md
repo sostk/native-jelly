@@ -620,6 +620,13 @@ prime finish. A paused viewer remains paused.
 
 The pointer can drag the scrubber directly, under the same commit rule.
 
+When Jellyfin has generated trickplay images for the played version, a still follows the preview
+position above the title/control row. The card stays within the playbar's safe margins. It appears
+for visible D-pad preview, held scrubbing and pointer drags; immediate hidden-HUD taps retain their
+existing behavior. Missing or unavailable trickplay leaves the ordinary clocks and seeking intact.
+The preview never commits a seek or changes Pause. See [Jellyfin trickplay](jellyfin-trickplay.md).
+
+
 ### 6.7 The control row — subtitles and audio, and what replaces them
 
 The row at the HUD's top right has **three mutually exclusive occupants**, decided by what is under

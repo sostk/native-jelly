@@ -88,6 +88,12 @@ pub trait Source {
     /// An item's clearLogo, at the source's one logo request box.
     fn logo(&self, srv: u16, rk: &str) -> Option<PosterKey>;
     fn logo_warm(&self, srv: u16, rk: &str) -> Warm;
+    /// Already delivered art only: never claim a slot or start a fetch.
+    fn peek(&self, _srv:u16,_path:&str,_w:i32,_h:i32,_png:bool)->Option<PosterKey> {None}
+    /// A pure peek: did this optional image settle as unavailable? Waiting is not absence.
+    fn failed(&self, _srv:u16,_path:&str,_w:i32,_h:i32,_png:bool)->bool {false}
+    /// Main-thread retirement of ephemeral art. Late worker results must not publish it.
+    fn forget(&self, _srv:u16,_path:&str,_w:i32,_h:i32,_png:bool) {}
     /// The render cache cannot keep this key resident: its decoded result was rejected, an
     /// already-resident texture was released under count/byte pressure, or a brand-new arrival was
     /// refused outright because pressure left nothing evictable that was not on screen a moment
@@ -251,6 +257,20 @@ pub fn resolve_wh_on(srv: u16, path: &str, w: i32, h: i32, png: bool) -> (u32, f
         return (0, 0.0, 0.0);
     };
     resolve_key(key)
+}
+
+/// Resolve already resident art, without starting work if the old texture was evicted.
+pub fn peek_wh_on(srv:u16,path:&str,w:i32,h:i32,png:bool)->(u32,f32,f32) {
+    with_source(|s|s.peek(srv,path,w,h,png),None).map_or((0,0.0,0.0),resolve_key)
+}
+
+/// Whether optional art is known to be absent, as distinct from still loading.
+pub fn failed_on(srv:u16,path:&str,w:i32,h:i32,png:bool)->bool {
+    !path.is_empty() && with_source(|s|s.failed(srv,path,w,h,png),false)
+}
+/// End a transient image's lifetime, including pending work and any uploaded texture.
+pub fn forget_on(srv:u16,path:&str,w:i32,h:i32,png:bool) {
+    if !path.is_empty() {with_source(|s|s.forget(srv,path,w,h,png),());}
 }
 
 fn resolve_key(key: PosterKey) -> (u32, f32, f32) {

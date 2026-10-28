@@ -14,6 +14,14 @@ claim by finding an existing implementation under another name, in another file,
 trigger, or in the data layer. 209 gaps claimed, 209 confirmed, 0 refuted. Three claims were then
 spot-checked by hand (`widgets.rs:511`, `metadata.rs:64`, `detail.rs:1180`) and all held.
 
+## Native Jelly update — 29 October 2026
+
+The BIF/scrub-thumbnail entries below are historical Plex audit findings. Native Jelly now
+implements seek previews through Jellyfin trickplay sheets, with worker-side tile cropping and
+bounded optional-image work. It does not download or parse a Plex BIF. Missing trickplay preserves
+ordinary seeking. See [Jellyfin trickplay](jellyfin-trickplay.md) for the implementation contract;
+hardware acceptance is recorded separately when completed.
+
 ## Parity means the capability, never the presentation
 
 The reference clients put nearly every action behind a **full-screen modal sheet** — a title, a
