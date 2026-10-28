@@ -36,9 +36,10 @@ use nj_base::eventlog::log;
 /// | `app/adapters/poster.rs` clearLogo (PNG) | 600×240 (`app::adapters::poster::LOGO_REQ_W`/`LOGO_REQ_H`) |
 /// | `appkit/info_panel.rs` episode still | 480×270 |
 /// | `ui/widgets.rs` catalog poster | 250×375 |
+/// | Jellyfin trickplay sheet | up to 4096 per axis and 6,291,456 pixels; typically 3200×1800 |
 ///
-/// — plus the plex.tv sign-in QR PNG, a few hundred pixels square. 1920×1080 is thus the largest
-/// thing we ever ASK for, but the cap cannot be set there: `minSize=1` means *cover*, not *fit*, so
+/// — plus the plex.tv sign-in QR PNG, a few hundred pixels square. Ordinary artwork asks at most
+/// 1920×1080, while trickplay uses its separately validated sheet layout. `minSize=1` means *cover*, not *fit*, so
 /// the server scales until the box is filled and an extreme source aspect comes back longer on its
 /// long edge (a 2.4:1 backdrop into a 16:9 box → ~2592×1080; a 2:3 poster into it → 1920×2880).
 /// **4096 on each axis** is over twice the requested box, so no legitimate cover-scaled result can
@@ -49,7 +50,7 @@ use nj_base::eventlog::log;
 /// **32 MiB** is the byte budget and the tighter of the two gates (4096² would need ~50 MiB even at
 /// 3 bytes/px, so a bomb that squeaks under the dimension caps still dies here). It sits against a
 /// largest-legitimate decode of ~21 MiB (1920×2880 RGBA, the cover-scaled poster case) and ~6 MiB
-/// for the common 1920×1080 RGB JPEG. Note it bounds the DECODER's allocations only — the
+/// for the common 1920×1080 RGB JPEG, or ~16.5 MiB for a default trickplay sheet. Note it bounds the DECODER's allocations only — the
 /// `to_rgba8()` conversion and the `malloc`'d copy handed back to the caller are ours and sit
 /// outside it, which is a second reason to keep this well under the device's headroom, not at it.
 fn decode_limits() -> image::Limits {
@@ -84,19 +85,24 @@ pub fn img_decode_owned(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     // "no image came back" covers both a corrupt file and one this device refuses to decode, and
     // those want opposite responses (ignore it vs. re-open the numbers in `decode_limits`). Same
     // `img: decode-none` prefix, so anything grepping the event log for it still matches.
-    let decoded = catch_unwind(AssertUnwindSafe(|| -> Result<(u32, u32, Vec<u8>), String> {
-        let mut rdr = image::ImageReader::new(std::io::Cursor::new(data))
-            .with_guessed_format()
-            .map_err(|e| format!("unreadable: {e}"))?;
-        rdr.limits(decode_limits());
-        let img = rdr.decode().map_err(|e| e.to_string())?;
-        let r = img.to_rgba8();
-        Ok((r.width(), r.height(), r.into_raw()))
-    }));
+    let decoded = catch_unwind(AssertUnwindSafe(
+        || -> Result<(u32, u32, Vec<u8>), String> {
+            let mut rdr = image::ImageReader::new(std::io::Cursor::new(data))
+                .with_guessed_format()
+                .map_err(|e| format!("unreadable: {e}"))?;
+            rdr.limits(decode_limits());
+            let img = rdr.decode().map_err(|e| e.to_string())?;
+            let r = img.to_rgba8();
+            Ok((r.width(), r.height(), r.into_raw()))
+        },
+    ));
     match decoded {
         Ok(Ok(t)) => Some(t),
         Ok(Err(why)) => {
-            log(&format!("img: decode-none len={len} magic={} — {why}", magic(data)));
+            log(&format!(
+                "img: decode-none len={len} magic={} — {why}",
+                magic(data)
+            ));
             None
         }
         Err(_) => {
@@ -150,7 +156,10 @@ pub fn img_malloc_copy(rgba: &[u8], detail: impl FnOnce() -> String) -> *mut c_u
 /// is dropped (a quarter of the pixels to deflate, none of them information) and
 /// [`img_decode_owned`] restores it as 255. `None` if the encoder refuses.
 pub fn img_encode_png(w: u32, h: u32, rgba: &[u8]) -> Option<Vec<u8>> {
-    let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let rgb: Vec<u8> = rgba
+        .chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
     let mut out = Vec::new();
     let enc = image::codecs::png::PngEncoder::new(&mut out);
     image::ImageEncoder::write_image(enc, &rgb, w, h, image::ExtendedColorType::Rgb8).ok()?;
@@ -170,7 +179,9 @@ pub fn img_decode_rgba(
     let Some((iw, ih, raw)) = img_decode_owned(data) else {
         return ptr::null_mut();
     };
-    let px = img_malloc_copy(&raw, || format!("{iw}x{ih} len={len} magic={}", magic(data)));
+    let px = img_malloc_copy(&raw, || {
+        format!("{iw}x{ih} len={len} magic={}", magic(data))
+    });
     if px.is_null() {
         return ptr::null_mut();
     }
@@ -199,18 +210,8 @@ pub fn img_upload_rgba(px: *const c_uchar, w: c_int, h: c_int) -> c_uint {
     crate::gfx::upload_rgba(0, w, h, px)
 }
 
-/// Worker-only decode of a thumbnail region, bounded by the validated sheet's dimensions.
-/// The sheet remains compressed in the caller's cache. Only the selected region becomes RGBA.
-pub fn img_decode_region(
-    data: &[u8],
-    max_w: u32,
-    max_h: u32,
-    region: (u32, u32, u32, u32),
-) -> Option<(u32, u32, Vec<u8>)> {
-    let (x, y, w, h) = region;
+fn decode_sheet(data: &[u8], max_w: u32, max_h: u32) -> Option<image::DynamicImage> {
     if data.is_empty()
-        || w == 0
-        || h == 0
         || max_w == 0
         || max_h == 0
         || max_w > 4096
@@ -219,14 +220,14 @@ pub fn img_decode_region(
     {
         return None;
     }
-    catch_unwind(AssertUnwindSafe(|| -> Option<(u32, u32, Vec<u8>)> {
+    catch_unwind(AssertUnwindSafe(|| {
         let reader = || {
             image::ImageReader::new(std::io::Cursor::new(data))
                 .with_guessed_format()
                 .ok()
         };
         let (iw, ih) = reader()?.into_dimensions().ok()?;
-        if iw > max_w || ih > max_h || x.checked_add(w)? > iw || y.checked_add(h)? > ih {
+        if iw > max_w || ih > max_h {
             return None;
         }
         let mut rdr = reader()?;
@@ -234,12 +235,52 @@ pub fn img_decode_region(
         limits.max_image_width = Some(max_w);
         limits.max_image_height = Some(max_h);
         rdr.limits(limits);
-        let img = rdr.decode().ok()?;
-        let tile = img.crop_imm(x, y, w, h).to_rgba8();
-        Some((w, h, tile.into_raw()))
+        rdr.decode().ok()
     }))
     .ok()
     .flatten()
+}
+
+/// Bounded opaque CPU sheet, at most 6,291,456 RGB pixels (18 MiB). Never a GPU texture.
+/// Trickplay JPEGs have no alpha; keeping RGB avoids a full-sheet RGBA allocation.
+pub struct RgbSheet(image::RgbImage);
+impl RgbSheet {
+    pub fn decode(data: &[u8], max_w: u32, max_h: u32) -> Option<Self> {
+        Some(Self(decode_sheet(data, max_w, max_h)?.into_rgb8()))
+    }
+    pub fn crop(&self, region: (u32, u32, u32, u32)) -> Option<(u32, u32, Vec<u8>)> {
+        let (x, y, w, h) = region;
+        if w == 0
+            || h == 0
+            || x.checked_add(w)? > self.0.width()
+            || y.checked_add(h)? > self.0.height()
+        {
+            return None;
+        }
+        let mut rgba = Vec::with_capacity(w as usize * h as usize * 4);
+        for row in y..y + h {
+            let start = ((row * self.0.width() + x) * 3) as usize;
+            for rgb in self.0.as_raw()[start..start + w as usize * 3].chunks_exact(3) {
+                rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            }
+        }
+        Some((w, h, rgba))
+    }
+}
+
+/// Worker-only one-off region decode with the same header and allocation limits.
+pub fn img_decode_region(
+    data: &[u8],
+    max_w: u32,
+    max_h: u32,
+    region: (u32, u32, u32, u32),
+) -> Option<(u32, u32, Vec<u8>)> {
+    let (x, y, w, h) = region;
+    let img = decode_sheet(data, max_w, max_h)?;
+    if w == 0 || h == 0 || x.checked_add(w)? > img.width() || y.checked_add(h)? > img.height() {
+        return None;
+    }
+    Some((w, h, img.crop_imm(x, y, w, h).to_rgba8().into_raw()))
 }
 
 #[cfg(test)]
@@ -255,5 +296,14 @@ mod preview_region_tests {
         assert!(img_decode_region(&png, 1, 1, (0, 0, 1, 1)).is_none());
         assert!(img_decode_region(&png, 4096, 4096, (0, 0, 1, 1)).is_none());
         assert!(img_decode_region(b"broken", 2, 2, (0, 0, 1, 1)).is_none());
+        let sheet = RgbSheet::decode(&png, 2, 2).unwrap();
+        assert_eq!(sheet.0.as_raw().len(), 2 * 2 * 3);
+        assert_eq!(&sheet.crop((1, 1, 1, 1)).unwrap().2[..3], &rgba[12..15]);
+        assert!(sheet.crop((u32::MAX, 0, 1, 1)).is_none());
+        assert!(sheet.crop((0, 0, 0, 1)).is_none());
+        assert!(sheet.crop((1, 1, 2, 1)).is_none());
+        assert!(RgbSheet::decode(&png, 1, 1).is_none());
+        assert!(RgbSheet::decode(&png, 4096, 4096).is_none());
+        assert!(RgbSheet::decode(b"broken", 2, 2).is_none());
     }
 }

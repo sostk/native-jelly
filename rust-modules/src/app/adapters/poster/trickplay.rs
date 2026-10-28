@@ -1,15 +1,56 @@
 //! Optional trickplay jobs on the existing poster workers. No disk entries or full-sheet uploads.
 use crate::catalog::{ArtFetch, Client};
 use crate::jf::trickplay::{self, LayoutId, Request, Spec};
+use std::sync::{Mutex, OnceLock};
 
-/// One compressed sheet per worker (at most two workers), each bounded to 4 MiB.
-/// Repeated tiles in the same sheet reuse network bytes. Decoded sheets are not retained.
+/// Compressed responses are temporary. Both workers share one decoded RGB sheet, at most 18 MiB.
 const SHEET_BYTES_MAX: usize = 4 * 1024 * 1024;
 const MANIFEST_BYTES_MAX: usize = 512 * 1024;
-#[derive(Default)]
 pub(super) struct Cache {
-    owner: Option<LayoutId>,
-    sheet: Option<(u64, Vec<u8>)>,
+    decoded: &'static Mutex<DecodedCache>,
+}
+impl Default for Cache {
+    fn default() -> Self {
+        static CACHE: OnceLock<Mutex<DecodedCache>> = OnceLock::new();
+        Self {
+            decoded: CACHE.get_or_init(Default::default),
+        }
+    }
+}
+struct Sheet {
+    owner: LayoutId,
+    index: u64,
+    spec: Spec,
+    pixels: nj_gfx::img::RgbSheet,
+}
+#[derive(Default)]
+struct DecodedCache(Option<Sheet>);
+impl DecodedCache {
+    fn get(
+        &mut self,
+        owner: &LayoutId,
+        index: u64,
+        spec: Spec,
+        load: impl FnOnce() -> Result<nj_gfx::img::RgbSheet, Got>,
+    ) -> Result<&nj_gfx::img::RgbSheet, Got> {
+        if !self
+            .0
+            .as_ref()
+            .is_some_and(|s| s.owner == *owner && s.index == index && s.spec == spec)
+        {
+            // Drop the old allocation before fetching/decoding its replacement. The lock is
+            // worker-only and prevents the second worker from decoding the same sheet again.
+            self.0 = None;
+            let pixels = load()?;
+            self.0 = Some(Sheet {
+                owner: owner.clone(),
+                index,
+                spec,
+                pixels,
+            });
+        }
+        Ok(&self.0.as_ref().unwrap().pixels)
+    }
 }
 pub(super) enum Got {
     Ready(u32, u32, Vec<u8>),
@@ -31,10 +72,6 @@ impl Cache {
     ) -> Got {
         if !current() {
             return Got::Cancelled;
-        }
-        if self.owner.as_ref() != Some(&id) {
-            self.owner = Some(id.clone());
-            self.sheet = None;
         }
         let Some(j) = c.jf() else {
             return Got::Final;
@@ -88,32 +125,44 @@ impl Cache {
         if !current() {
             return Got::Cancelled;
         }
-        if self.sheet.as_ref().is_none_or(|(n, _)| *n != tile.sheet) {
-            self.sheet = None;
+        let Ok(mut cache) = self.decoded.lock() else {
+            return Got::Transient;
+        };
+        if c.token_gen() != id.token || !current() {
+            return Got::Cancelled;
+        }
+        let pixels = match cache.get(id, tile.sheet, spec, || {
             let j = c.jf().expect("checked by load");
             let path = trickplay::sheet_path(&req.owner, spec, tile.sheet);
             let bytes = match j.preview_bytes(&path, SHEET_BYTES_MAX) {
                 ArtFetch::Bytes(b) => b,
-                ArtFetch::Status(s) if !transient(s) => return Got::Final,
-                _ => return Got::Transient,
+                ArtFetch::Status(s) if !transient(s) => return Err(Got::Final),
+                _ => return Err(Got::Transient),
             };
-            if !current() {
-                return Got::Cancelled;
+            if c.token_gen() != id.token || !current() {
+                return Err(Got::Cancelled);
             }
-            self.sheet = Some((tile.sheet, bytes));
-        }
+            let pixels = nj_gfx::img::RgbSheet::decode(
+                &bytes,
+                spec.width * spec.tile_width,
+                spec.height * spec.tile_height,
+            )
+            .ok_or(Got::Final)?;
+            if c.token_gen() != id.token || !current() {
+                return Err(Got::Cancelled);
+            }
+            Ok(pixels)
+        }) {
+            Ok(pixels) => pixels,
+            Err(got) => return got,
+        };
         if c.token_gen() != id.token || !current() {
             return Got::Cancelled;
         }
-        match nj_gfx::img::img_decode_region(
-            &self.sheet.as_ref().unwrap().1,
-            spec.width * spec.tile_width,
-            spec.height * spec.tile_height,
-            (tile.x, tile.y, tile.w, tile.h),
-        ) {
+        match pixels.crop((tile.x, tile.y, tile.w, tile.h)) {
             Some((w, h, px)) => Got::Ready(w, h, px),
             None => {
-                self.sheet = None;
+                cache.0 = None;
                 Got::Final
             }
         }
@@ -248,7 +297,7 @@ mod tests {
         )
     }
     #[test]
-    fn trickplay_worker_authenticates_crops_and_reuses_a_compressed_sheet() {
+    fn trickplay_worker_authenticates_crops_and_reuses_sheet_pixels() {
         let _g = nj_base::testlock::serial();
         let server = Server::new(manifest());
         let c = server.client();
@@ -276,6 +325,75 @@ mod tests {
         assert!(got[0].contains("Fields=Trickplay"));
         assert!(got[1].contains("/2/0.jpg"));
         assert!(got[2].contains("/2/1.jpg"));
+    }
+    #[test]
+    fn trickplay_decoded_cache_loads_once_and_drops_old_owner_before_a_failed_replacement() {
+        let id = LayoutId {
+            srv: 0,
+            token: 1,
+            cache: 0,
+            owner: trickplay::Owner::new(ITEM, SOURCE, "decoded fixture").unwrap(),
+        };
+        let spec = trickplay::select(&manifest(), &id.owner).unwrap();
+        let bytes = nj_gfx::img::img_encode_png(4, 2, &[255; 32]).unwrap();
+        let mut cache = DecodedCache::default();
+        let mut loads = 0;
+        for _ in 0..3 {
+            let pixels = cache
+                .get(&id, 0, spec, || {
+                    loads += 1;
+                    nj_gfx::img::RgbSheet::decode(&bytes, 4, 2).ok_or(Got::Final)
+                })
+                .unwrap_or_else(|_| panic!("sheet decode"));
+            assert_eq!(pixels.crop((2, 0, 2, 2)).unwrap().2, vec![255; 16]);
+        }
+        assert_eq!(loads, 1, "cached tiles must not re-enter the decoder");
+        let mut changed = id.clone();
+        changed.token += 1;
+        assert!(matches!(
+            cache.get(&changed, 0, spec, || Err(Got::Cancelled)),
+            Err(Got::Cancelled)
+        ));
+        assert!(
+            cache.0.is_none(),
+            "failed replacement cannot retain another account's sheet"
+        );
+        cache
+            .get(&id, 0, spec, || {
+                nj_gfx::img::RgbSheet::decode(&bytes, 4, 2).ok_or(Got::Final)
+            })
+            .unwrap_or_else(|_| panic!("reload"));
+        assert!(matches!(
+            cache.get(&id, 1, spec, || Err(Got::Final)),
+            Err(Got::Final)
+        ));
+        assert!(
+            cache.0.is_none(),
+            "sheet changes also evict before decoding"
+        );
+    }
+    #[test]
+    fn trickplay_two_workers_reuse_one_decoded_sheet() {
+        let _g = nj_base::testlock::serial();
+        let server = Server::new(manifest());
+        let c = server.client();
+        let mut first = Cache::default();
+        let mut second = Cache::default();
+        for (worker, ms, rgb) in [
+            (&mut first, 0, [255, 0, 0]),
+            (&mut second, 10_000, [0, 255, 0]),
+        ] {
+            let (id, req) = request(c, ms);
+            match worker.load(c, id, &req, || true) {
+                Got::Ready(_, _, p) => assert!(p.chunks_exact(4).all(|v| v[..3] == rgb)),
+                _ => panic!("expected decoded tile"),
+            }
+        }
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            2,
+            "one manifest and one sheet even when different workers serve the tiles"
+        );
     }
     #[test]
     fn trickplay_worker_missing_manifest_is_quiet_and_cancellation_skips_the_sheet() {

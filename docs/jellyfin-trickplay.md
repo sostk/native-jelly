@@ -27,10 +27,16 @@ malformed or version-mismatched manifests produce no card. Oversized sheet layou
 The UI probes the installed poster source; it performs no network requests or image decoding.
 Existing poster workers handle optional previews with three-second reads, a 512 KiB manifest
 limit and 4 MiB compressed-sheet limit. Validated sheets are bounded to 4096 pixels per axis and
-6,291,456 pixels in total. A worker keeps at most one compressed sheet; the existing two-worker
-pool bounds their combined retained compressed bytes to 8 MiB. Decoding crops before RGBA
-conversion. Only the chosen tile enters the ordinary texture cache and upload budget; the full
-sheet is never a GPU texture. Previews have no disk-cache entries.
+6,291,456 pixels in total. Both poster workers share one decoded RGB sheet, bounded to 18 MiB,
+keyed by playback/account/cache generation, layout and sheet index. Repeated crops reuse that
+decode across workers; changing sheets evicts the old allocation before fetching/decoding its
+replacement. Compressed responses are temporary rather than retained per worker. This trades
+the former 8 MiB compressed-cache bound for an 18 MiB decoded-cache bound, avoiding repeated
+whole-sheet decoding during rapid scrubbing without reducing thumbnail resolution. Decoder
+working buffers, the temporary response and tile allocations are additional transient memory;
+these are cache bounds, not a whole-process memory ceiling. Cropping converts only the chosen
+tile to RGBA. Only that tile enters the ordinary texture cache and upload budget; the full sheet
+is never a GPU texture. Previews have no disk-cache entries.
 
 A bounded four-entry render-fact cache gives the UI the true manifest interval. One logical
 request remains pending while movement coalesces to the newest destination. The previous still
