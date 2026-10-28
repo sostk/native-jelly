@@ -54,7 +54,7 @@ transport, focus or replay expectations.
 ## Verification scope
 
 Host checks cover interval/sheet mapping, last-thumbnail clamps, validation, source-version
-isolation, authenticated HTTP, compressed-sheet reuse, pixel crops, absence, cancellation,
+isolation, authenticated HTTP, shared decoded-sheet reuse, pixel crops, absence, cancellation,
 request coalescing, stale hiding, timeout wrap and card geometry. Device captures and the final
 committed host/ARM/replay results are recorded in [U4 verification](verification/2026-10-29-scrub-previews.md). No frame
 pacing or performance improvement is claimed by the implementation alone.
