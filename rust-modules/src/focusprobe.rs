@@ -285,7 +285,7 @@ fn push_player(ps: &crate::route::PlaybackSession, s: &mut String, overlay: &str
     // `upnext` is the PLAYER INSTANCE's countdown since phase 9, so it arrives on `content` with
     // the panels' fields rather than being read off a module global here.
     let slot = match ctrl {
-        ControlSlot::Discs => "discs",
+        ControlSlot::Discs(_) => "discs",
         ControlSlot::Skip(_) => "skip",
         ControlSlot::UpNext(_) => "upnext",
     };
@@ -447,8 +447,8 @@ mod tests {
         let ps = crate::route::PlaybackSession::IDLE;
         let _g = nj_base::testlock::serial();
         for (rn, sc) in every_screen() {
-            let a = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
-            let b = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
+            let a = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view());
+            let b = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view());
             assert_eq!(a, b, "{rn} fingerprinted differently twice in a row");
         }
     }
@@ -461,7 +461,7 @@ mod tests {
         let ps = crate::route::PlaybackSession::IDLE;
         let _g = nj_base::testlock::serial();
         for (rn, sc) in every_screen() {
-            let line = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs, test_store().view());
+            let line = fingerprint(&ps, rn, sc, hud(), ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view());
             assert!(
                 !line.contains('\n'),
                 "{rn}: a fingerprint is ONE line: {line}"
@@ -509,7 +509,7 @@ mod tests {
         let discs = keys(
             "player",
             Screen::Player { overlay: "none" },
-            ControlSlot::Discs,
+            ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE),
         );
         let up = keys(
             "player",
@@ -530,7 +530,7 @@ mod tests {
                 tab: 1,
                 visible: true,
             },
-            ControlSlot::Discs, test_store().view(),
+            ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view(),
         );
         let moved_keys: Vec<String> = moved
             .split(' ')
@@ -556,7 +556,7 @@ mod tests {
                     tab,
                     visible: true,
                 },
-                ControlSlot::Discs, test_store().view(),
+                ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view(),
             )
         };
         assert_ne!(
@@ -585,7 +585,7 @@ mod tests {
                     tab: 0,
                     visible: true
                 },
-                ControlSlot::Discs, test_store().view()
+                ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view()
             ),
             "the overlay tag is not observable"
         );
@@ -603,8 +603,8 @@ mod tests {
     fn the_login_screens_stalled_control_appearing_is_observable() {
         let ps = crate::route::PlaybackSession::IDLE;
         let _g = nj_base::testlock::serial();
-        let without = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: false }, hud(), ControlSlot::Discs, test_store().view());
-        let with = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: true }, hud(), ControlSlot::Discs, test_store().view());
+        let without = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: false }, hud(), ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view());
+        let with = fingerprint(&ps, "login", Screen::Login { phase: crate::auth::Phase::Idle, has_control: true }, hud(), ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), test_store().view());
         assert_ne!(
             without, with,
             "the login screen's escape/retry/restart control appearing is not observable"

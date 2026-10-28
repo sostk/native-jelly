@@ -4,6 +4,9 @@
 //! route::title_cptr/ctxline_cptr. The video-overlay subtitle draws below stay on the raw text/tex
 //! primitives (they composite directly over the video plane, outside the transport HUD).
 #![allow(dead_code)]
+mod seek_jump;
+pub(crate) use seek_jump::SeekBurst;
+
 use nj_gfx::gfx::{delete_tex, upload_rgba};
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::theme;
@@ -481,14 +484,14 @@ const BTN_N: i32 = 3;
 /// **One array for all three slot occupants**, not one per module. The transport discs, the Skip
 /// pill and the Up Next pair are the same row at the same right edge, only ever one at a time, and
 /// the cursor walking them is `hud_nav.btn` for all three ([`ControlSlot::items`]) — so the pop is a
-/// property of that row and not of whichever module happens to draw it this frame. `BTN_N` 3 is the
-/// widest occupant. `up_next` and `skip_pill` read theirs through [`row_pop`].
+/// property of that row and not of whichever module happens to draw it this frame. Five springs
+/// cover the episode pair plus the three ordinary discs. `up_next` and `skip_pill` read theirs through [`row_pop`].
 ///
 /// A field of [`TransportRow`], which the player's instance owns: the HUD keeps no view struct
 /// — it is drawn entirely from the caller's arguments — so this and the resume clock beside it are
 /// the whole of the route's retained motion state, and phase 9 gave them the one owner the rest of
 /// the route already has.
-pub(crate) type RowPop = crate::ui::widgets::CtlPop<{ BTN_N as usize }>;
+pub(crate) type RowPop = crate::ui::widgets::CtlPop<5>;
 
 /// **Everything the transport row remembers between frames**: the control row's per-item focus pop
 /// and the paused→playing edge the state read-out's `Play` mark is timed from.
@@ -652,6 +655,32 @@ fn ctrl_slot_measure(label: &str, measure: &dyn nj_machine::machine::Measure) ->
     (measure.width_str(label, theme::size::BODY, true) + 2.0 * PAD_X).max(CTRL_ROW_W)
 }
 
+/// Independent episode navigation state, sampled with the row once per frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Controls { pub(crate) visible: bool, pub(crate) previous: bool,
+    pub(crate) next: bool, pub(crate) restart: bool }
+impl Controls {
+    pub(crate) const NONE: Self = Self { visible: false, previous: false, next: false, restart: false };
+    pub(crate) fn for_item(enabled: bool, previous: bool, next: bool, restart: bool) -> Self {
+        let visible = enabled && (previous || next);
+        Self { visible, previous: visible && (previous || restart), next: visible && next,
+            restart: visible && restart }
+    }
+    fn live(ps: &crate::route::PlaybackSession) -> Self {
+        let (previous, next) = crate::route::episode_neighbours(ps);
+        Self::for_item(crate::route::episode_navigation() == crate::route::EpisodeNavigation::On,
+            previous, next, crate::player::intended_pos_ns(ps) >= 5_000_000_000)
+    }
+    pub(crate) fn enabled(self, index: i32) -> bool {
+        match index { 0..=2 => true, BTN_PREVIOUS => self.previous, BTN_NEXT => self.next, _ => false }
+    }
+    pub(crate) fn fingerprint(self) -> u64 {
+        u64::from(self.visible) | u64::from(self.previous) << 1 | u64::from(self.next) << 2 | u64::from(self.restart) << 3
+    }
+}
+pub(crate) const BTN_PREVIOUS: i32 = 3;
+pub(crate) const BTN_NEXT: i32 = 4;
+
 /// What currently occupies the transport's right-hand control row.
 ///
 /// This is the one concept the skip / Up Next feature introduces, and it exists as a TYPE because
@@ -660,8 +689,8 @@ fn ctrl_slot_measure(label: &str, measure: &dyn nj_machine::machine::Measure) ->
 /// separate if-chains, with nothing to keep them agreeing and nothing to test.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ControlSlot {
-    /// the ordinary Subtitles + Audio pair
-    Discs,
+    /// Subtitles, Audio and More, optionally preceded by episode navigation
+    Discs(Controls),
     /// a marker segment is under the playhead
     Skip(crate::appkit::skip_pill::Prompt),
     /// …and the show has another episode queued, which outranks skipping the credits. Carries the
@@ -670,29 +699,42 @@ pub(crate) enum ControlSlot {
 }
 
 impl ControlSlot {
-    /// How many focusable items the row holds — what the LEFT/RIGHT clamp needs, as DATA instead of
-    /// a hand-written `btn = 0` pin beside a `clamp(0, 1)`.
+    /// How many slots the row reserves (disabled episode neighbours keep their geometry).
+    /// `enabled` is the common focus/hit eligibility predicate.
     pub(crate) fn items(self) -> c_int {
         match self {
-            ControlSlot::Discs => BTN_N,
+            ControlSlot::Discs(c) => if c.visible { 5 } else { BTN_N },
             // Watch Credits + Next Episode — the one stand-in with a pair
             ControlSlot::UpNext(_) => 2,
             ControlSlot::Skip(_) => 1,
         }
     }
-    /// Where the focus ring parks when this row APPEARS. It is 0 everywhere except Up Next, whose
-    /// primary is drawn on the RIGHT — and getting that wrong is not cosmetic: the countdown's
+    /// Where the focus ring parks when this row APPEARS. Episode discs prefer Next, then Previous;
+    /// other disc rows start at 0. Up Next's primary is on the RIGHT: the countdown's
     /// cancel rule is a steady state (`up_next::countdown_may_run`), so parking on item 0 there
     /// would disarm the timer on the frame after it armed.
     pub(crate) fn primary_btn(self) -> c_int {
         match self {
             ControlSlot::UpNext(_) => crate::appkit::up_next::PRIMARY_BTN,
+            ControlSlot::Discs(c) if c.next => BTN_NEXT,
+            ControlSlot::Discs(c) if c.previous => BTN_PREVIOUS,
             _ => 0,
         }
     }
+    pub(crate) fn enabled(self, index: i32) -> bool {
+        index >= 0 && index < self.items() && match self { Self::Discs(c) => c.enabled(index), _ => true }
+    }
+    /// Physical order preserves the identity and placement of Subtitles/Audio/More.
+    pub(crate) fn neighbour(self, from: i32, forward: bool) -> i32 {
+        let order: &[i32] = if self.is_discs() { &[BTN_PREVIOUS, BTN_NEXT, 0, 1, 2] } else { &[0, 1] };
+        let Some(at) = order.iter().position(|&i| i == from) else { return self.primary_btn(); };
+        let next = if forward { order[at + 1..].iter().copied().find(|&i| self.enabled(i)) }
+            else { order[..at].iter().rev().copied().find(|&i| self.enabled(i)) };
+        next.unwrap_or(from)
+    }
     /// whether the Subtitles/Audio discs are the current occupant
     pub(crate) fn is_discs(self) -> bool {
-        matches!(self, ControlSlot::Discs)
+        matches!(self, ControlSlot::Discs(_))
     }
     /// Which SEGMENT this row is offering, if any — the row's identity for "have I already offered
     /// this?". Deliberately not the `ControlSlot` itself: `active_marker` is gated on `is_playing`,
@@ -701,7 +743,7 @@ impl ControlSlot {
     /// slot, it was — and every flicker re-raised the HUD over an intro the user was just watching.
     pub(crate) fn offer(self) -> Option<(crate::metadata::MarkerKind, i64)> {
         match self {
-            ControlSlot::Discs => None,
+            ControlSlot::Discs(_) => None,
             ControlSlot::Skip(pr) => Some((pr.marker.kind, pr.marker.start_ms)),
             ControlSlot::UpNext(m) => Some((m.kind, m.start_ms)),
         }
@@ -718,7 +760,7 @@ impl ControlSlot {
             return None;
         }
         Some(match self {
-            ControlSlot::Discs => disc_hit_rect(idx),
+            ControlSlot::Discs(_) => disc_hit_rect(idx),
             ControlSlot::Skip(pr) => {
                 let w = ctrl_slot_w(row, pr.label(), measure);
                 Rect::new(CTRL_RIGHT - w, CTRL_Y, w, CTRL_H)
@@ -749,13 +791,13 @@ pub(crate) fn slot_for(marker: Option<crate::metadata::Marker>, has_next: bool, 
             if has_next && m.kind == crate::metadata::MarkerKind::Credits && m.final_seg {
                 match mode {
                     crate::route::NextEpisodeMode::Countdown => ControlSlot::UpNext(m),
-                    crate::route::NextEpisodeMode::AfterCredits | crate::route::NextEpisodeMode::Off => ControlSlot::Discs,
+                    crate::route::NextEpisodeMode::AfterCredits | crate::route::NextEpisodeMode::Off => ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE),
                 }
             } else {
                 ControlSlot::Skip(pr)
             }
         }
-        None => ControlSlot::Discs,
+        None => ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE),
     }
 }
 
@@ -780,7 +822,10 @@ pub(crate) fn slot(ps: &crate::route::PlaybackSession, meta: crate::metadata::Me
             .then(|| meta.synthesized_tail_marker(head, has_next))
             .flatten()
     });
-    slot_for(m, has_next, mode)
+    match slot_for(m, has_next, mode) {
+        ControlSlot::Discs(_) => ControlSlot::Discs(Controls::live(ps)),
+        slot => slot,
+    }
 }
 
 /// PURE edge: has a stand-in just vanished OUT FROM UNDER the focus ring, so the ring has to go
@@ -1332,7 +1377,11 @@ fn draw_failed_readout(
 /// the existing ones left instead of moving the row's right margin, which is what keeps the discs
 /// and every stand-in (`ctrl_slot`) sharing one edge.
 fn btn_x(idx: i32) -> f32 {
-    CTRL_RIGHT - BTN_S - (BTN_N - 1 - idx) as f32 * (BTN_S + BTN_GAP)
+    match idx {
+        BTN_PREVIOUS => btn_x(0) - 2.0 * BTN_S - 3.0 * BTN_GAP,
+        BTN_NEXT => btn_x(0) - BTN_S - 2.0 * BTN_GAP,
+        _ => CTRL_RIGHT - BTN_S - (BTN_N - 1 - idx) as f32 * (BTN_S + BTN_GAP),
+    }
 }
 
 /// which control button a pointer at (cx,cy) is over: 0 = Subtitles, 1 = Audio, 2 = More, or None.
@@ -1344,9 +1393,9 @@ pub(crate) fn icon_hit(slot: ControlSlot, cx: f32, cy: f32) -> Option<i32> {
     if !slot.is_discs() || cy < BTN_Y || cy > BTN_Y + BTN_S {
         return None;
     }
-    (0..BTN_N).find(|&idx| {
+    (0..slot.items()).find(|&idx| {
         let x = btn_x(idx);
-        cx >= x && cx <= x + BTN_S
+        slot.enabled(idx) && cx >= x && cx <= x + BTN_S
     })
 }
 
@@ -1921,11 +1970,12 @@ pub(crate) fn draw_hud(
             ControlSlot::Skip(pr) => {
                 crate::appkit::skip_pill::draw(row, p, pr, focus == 1, measure);
             }
-            ControlSlot::Discs => {
-                for i in 0..BTN_N {
+            ControlSlot::Discs(_) => {
+                for i in 0..slot.items() {
                     let pop = row.scale(i);
                     TransportButton::new(i, Rect::new(btn_x(i), BTN_Y, BTN_S, BTN_S))
-                        .focused(focus == 1 && btn == i)
+                        .focused(slot.enabled(i) && focus == 1 && btn == i)
+                        .enabled(slot.enabled(i))
                         // The whole control row stands on the VIDEO PLANE — see `ControlGround`. It is
                         // the HUD's own bottom ramp (drawn at the top of this function) that makes the
                         // unkeyed face legal: the picture is unreadable, but the ground under these
@@ -2106,7 +2156,7 @@ mod tests {
         for i in 0..BTN_N {
             let cx = btn_x(i) + BTN_S * 0.5;
             assert_eq!(
-                icon_hit(ControlSlot::Discs, cx, cy),
+                icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), cx, cy),
                 Some(i),
                 "disc {i} centre"
             );
@@ -2145,19 +2195,19 @@ mod tests {
     fn gaps_and_the_row_ends_belong_to_no_disc() {
         let cy = BTN_Y + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, btn_x(0) - 1.0, cy),
+            icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), btn_x(0) - 1.0, cy),
             None,
             "left of the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, CTRL_RIGHT + 1.0, cy),
+            icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), CTRL_RIGHT + 1.0, cy),
             None,
             "right of the row"
         );
         for i in 1..BTN_N {
             let mid = btn_x(i) - BTN_GAP * 0.5;
             assert_eq!(
-                icon_hit(ControlSlot::Discs, mid, cy),
+                icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), mid, cy),
                 None,
                 "gap before disc {i}"
             );
@@ -2165,12 +2215,12 @@ mod tests {
         // and the band itself is bounded vertically
         let cx = btn_x(0) + BTN_S * 0.5;
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y - 1.0),
+            icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), cx, BTN_Y - 1.0),
             None,
             "above the row"
         );
         assert_eq!(
-            icon_hit(ControlSlot::Discs, cx, BTN_Y + BTN_S + 1.0),
+            icon_hit(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), cx, BTN_Y + BTN_S + 1.0),
             None,
             "below the row"
         );

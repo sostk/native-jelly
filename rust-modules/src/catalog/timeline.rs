@@ -1,6 +1,6 @@
 //! Playback-session ops (impl Client): the progress reports Jellyfin keeps the resume point and
 //! the dashboard's session from (`/Sessions/Playing{,/Progress,/Stopped}`), the server identity,
-//! and the queue a play starts (the item, plus a series' following episodes).
+//! and the queue a play starts (the item and its adjacent episodes).
 use super::client::Client;
 use super::params::TimelineReport;
 use super::servers::ServerId;
@@ -25,9 +25,9 @@ impl Client {
     }
 
     /// The queue a play starts. Best-effort: None on failure — the reports still work, just
-    /// without queue positions (and the player without an Up Next). `continuous` adds a series'
-    /// episodes after the one being played; trailer extras omit it so EOS never Up-Nexts into a
-    /// featurette. The whole window is kept as [`QueueRow`]s for the queue list.
+    /// without queue positions (and the player without an Up Next). `continuous` asks Jellyfin
+    /// for the preceding/current/following episodes; trailer extras omit it so EOS never advances
+    /// into a featurette. Each start refreshes this bounded window, retained as [`QueueRow`]s.
     pub fn create_play_queue(&self, rating_key: &str, continuous: bool) -> Option<PlayQueueResult> {
         let j = self.jf()?;
         Some(PlayQueueResult::of(j.create_play_queue(rating_key, continuous)?, self.id(), rating_key))

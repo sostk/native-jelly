@@ -19,7 +19,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::sync::mpsc::{self, Receiver};
 use crate::catalog::account::{AudioPreferences, PreferenceError, PreferenceRequest, PreferenceSnapshot, PreferenceUpdate};
-use crate::route::{DirectPlayMode, NextEpisodeMode, Quality, SkipInterval, SubtitlePosition, SubtitleSize};
+use crate::route::{DirectPlayMode, NextEpisodeMode, Quality, SkipInterval, InstantDpadSeeking, EpisodeNavigation, SubtitlePosition, SubtitleSize};
 use crate::ui::form::{Form, FormId, FormSection, FormTable, RowKey, RowKind};
 use crate::ui::frame::Budget;
 use nj_machine::machine::{Canon, Cx, Delivery, Edge, Effects, EntryId, FocusKey, Fx, GroupId,
@@ -45,6 +45,8 @@ impl PickerKind {
         Self::Quality => nj_platform::i18n::msg::settings_playback_quality(), Self::DirectPlay => nj_platform::i18n::msg::settings_playback_direct_play(),
         Self::SubtitleSize => nj_platform::i18n::msg::settings_playback_subtitle_size(), Self::SubtitlePosition => nj_platform::i18n::msg::settings_playback_subtitle_position(),
         Self::NextEpisode => nj_platform::i18n::msg::settings_playback_next_episode(),
+        Self::InstantDpadSeeking => nj_platform::i18n::msg::settings_playback_instant_dpad_seeking(),
+        Self::EpisodeNavigation => nj_platform::i18n::msg::settings_playback_episode_navigation(),
         Self::SkipInterval => nj_platform::i18n::msg::settings_playback_skip_interval(),
         Self::AudioLanguage => nj_platform::i18n::msg::settings_audio_language(), Self::SubtitleMode => nj_platform::i18n::msg::settings_audio_subtitles(),
         Self::SubtitleLanguage => nj_platform::i18n::msg::settings_audio_subtitle_language(), Self::ForcedSubtitles => nj_platform::i18n::msg::settings_audio_forced_subtitles(),
@@ -57,13 +59,15 @@ impl PickerKind {
         Self::SubtitleSize => nj_platform::i18n::msg::settings_playback_subtitle_size_copy(),
         Self::SubtitlePosition => nj_platform::i18n::msg::settings_playback_subtitle_position_copy(),
         Self::NextEpisode => nj_platform::i18n::msg::settings_playback_next_episode_copy(),
+        Self::InstantDpadSeeking => nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_copy(),
+        Self::EpisodeNavigation => nj_platform::i18n::msg::settings_playback_episode_navigation_copy(),
         Self::SkipInterval => nj_platform::i18n::msg::settings_playback_skip_interval_copy(),
         Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => nj_platform::i18n::msg::settings_audio_account_note(),
     }}
     /// The field-list page this field belongs to.
     fn kind(self) -> Kind {
         match self {
-            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::SkipInterval => Kind::Playback,
+            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::SkipInterval | Self::InstantDpadSeeking | Self::EpisodeNavigation => Kind::Playback,
             Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::ForcedSubtitles => Kind::AudioSubtitles,
         }
     }
@@ -79,7 +83,7 @@ impl Kind {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), SkipInterval(SkipInterval), Language(String), Mode(i64), Forced(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), SkipInterval(SkipInterval), EpisodeNavigation(EpisodeNavigation), InstantDpadSeeking(InstantDpadSeeking), Language(String), Mode(i64), Forced(i64) }
 
 /// The hashed half of a transaction: what the page shows while a load or save is in flight.
 struct Io { busy: bool, status: String }
@@ -206,6 +210,8 @@ impl Txn {
             Value::SubtitleSize(size) => PreferenceCmd::SubtitleSize { size, reply },
             Value::SubtitlePosition(position) => PreferenceCmd::SubtitlePosition { position, reply },
             Value::NextEpisode(mode) => PreferenceCmd::NextEpisode { mode, reply },
+            Value::InstantDpadSeeking(value) => PreferenceCmd::InstantDpadSeeking { value, reply },
+            Value::EpisodeNavigation(value) => PreferenceCmd::EpisodeNavigation { value, reply },
             Value::SkipInterval(interval) => PreferenceCmd::SkipInterval { interval, reply },
             _ => return,
         };
@@ -279,6 +285,8 @@ impl FormId for RowId {
             Self::Field(PickerKind::SubtitlePosition | PickerKind::ForcedSubtitles) => 3,
             Self::Field(PickerKind::NextEpisode) => 4,
             Self::Field(PickerKind::SkipInterval) => 5,
+            Self::Field(PickerKind::InstantDpadSeeking) => 7,
+            Self::Field(PickerKind::EpisodeNavigation) => 8,
             Self::Retry => 6,
         })
     }
@@ -315,6 +323,8 @@ pub(crate) struct PreferencesPage {
     /// state, like `look`).
     next_episode: NextEpisodeMode,
     skip_interval: SkipInterval,
+    episode_navigation: EpisodeNavigation,
+    instant_dpad_seeking: InstantDpadSeeking,
 }
 impl PreferencesPage {
     pub(crate) fn new(entry: EntryId, kind: Kind) -> Self {
@@ -323,7 +333,7 @@ impl PreferencesPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(), values: Vec::new() },
             copy: String::new(), txn: Txn::new(false),
             look: (crate::route::subtitle_size(), crate::route::subtitle_position()),
-            next_episode: crate::route::next_episode_mode(), skip_interval: crate::route::skip_interval() };
+            next_episode: crate::route::next_episode_mode(), skip_interval: crate::route::skip_interval(), instant_dpad_seeking: crate::route::instant_dpad_seeking(), episode_navigation: crate::route::episode_navigation() };
         s.rebuild(None);
         s
     }
@@ -349,6 +359,8 @@ impl PreferencesPage {
         self.state.direct_play = crate::route::direct_play_mode();
         self.look = (crate::route::subtitle_size(), crate::route::subtitle_position());
         self.next_episode = crate::route::next_episode_mode();
+        self.instant_dpad_seeking = crate::route::instant_dpad_seeking();
+        self.episode_navigation = crate::route::episode_navigation();
         self.skip_interval = crate::route::skip_interval();
         self.copy = copy_text(Subject::Page(self.state.kind), &self.state.io.status, self.state.direct_play).into_owned();
         let inputs = FieldListInputs {
@@ -382,7 +394,7 @@ impl PreferencesPage {
 /// Which fields `kind`'s list shows: Audio & Subtitles has none until a snapshot has loaded.
 fn fields_of(inputs: &FieldListInputs<'_>) -> &'static [PickerKind] {
     match inputs.kind {
-        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::SkipInterval],
+        Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::SkipInterval, PickerKind::InstantDpadSeeking, PickerKind::EpisodeNavigation],
         Kind::AudioSubtitles if inputs.prefs.is_some() => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::ForcedSubtitles],
         _ => &[],
     }
@@ -396,6 +408,8 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::SubtitleSize => Value::SubtitleSize(crate::route::subtitle_size()),
         PickerKind::SubtitlePosition => Value::SubtitlePosition(crate::route::subtitle_position()),
         PickerKind::NextEpisode => Value::NextEpisode(crate::route::next_episode_mode()),
+        PickerKind::InstantDpadSeeking => Value::InstantDpadSeeking(crate::route::instant_dpad_seeking()),
+        PickerKind::EpisodeNavigation => Value::EpisodeNavigation(crate::route::episode_navigation()),
         PickerKind::SkipInterval => Value::SkipInterval(crate::route::skip_interval()),
         // A deprecated code (`pb`) resolves to its replacement so the picker checks that entry.
         PickerKind::AudioLanguage => Value::Language(prefs.and_then(|p| p.stated_language.as_deref()).map(crate::catalog::languages::canonical).unwrap_or_default().to_string()),
@@ -417,6 +431,12 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
             .map(|p| (subtitle_position_label(p).into(), Value::SubtitlePosition(p))).collect(),
         PickerKind::NextEpisode => NextEpisodeMode::LADDER.into_iter()
             .map(|m| (next_episode_label(m).into(), Value::NextEpisode(m))).collect(),
+        PickerKind::InstantDpadSeeking => InstantDpadSeeking::LADDER.into_iter()
+            .map(|v| ((if v == InstantDpadSeeking::On { nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_on() }
+                else { nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_off() }).into(), Value::InstantDpadSeeking(v))).collect(),
+        PickerKind::EpisodeNavigation => EpisodeNavigation::LADDER.into_iter()
+            .map(|v| ((if v == EpisodeNavigation::On { nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_on() }
+                else { nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_off() }).into(), Value::EpisodeNavigation(v))).collect(),
         PickerKind::SkipInterval => SkipInterval::LADDER.into_iter()
             .map(|i| (skip_interval_label(i), Value::SkipInterval(i))).collect(),
         PickerKind::SubtitleMode => [(nj_platform::i18n::msg::settings_audio_manual(), 0), (nj_platform::i18n::msg::settings_audio_foreign(), 1), (nj_platform::i18n::msg::settings_audio_always(), 2)]
@@ -543,6 +563,8 @@ impl Machine<InnerHost> for PreferencesPage {
                     || self.state.direct_play != crate::route::direct_play_mode()
                     || self.look != (crate::route::subtitle_size(), crate::route::subtitle_position())
                     || self.next_episode != crate::route::next_episode_mode()
+                    || self.instant_dpad_seeking != crate::route::instant_dpad_seeking()
+                    || self.episode_navigation != crate::route::episode_navigation()
                     || self.skip_interval != crate::route::skip_interval() {
                     self.rebuild_keeping();
                     // An empty loading table had no engine seat. Give its first landing (or

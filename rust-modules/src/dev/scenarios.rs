@@ -994,6 +994,8 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
                 "picker-quality" => crate::screens::family::SettingsPage::Picker(crate::screens::family::PickerKind::Quality),
                 "picker-next-episode" => crate::screens::family::SettingsPage::Picker(crate::screens::family::PickerKind::NextEpisode),
                 "picker-skip-interval" => crate::screens::family::SettingsPage::Picker(crate::screens::family::PickerKind::SkipInterval),
+                "picker-instant-dpad-seeking" => crate::screens::family::SettingsPage::Picker(crate::screens::family::PickerKind::InstantDpadSeeking),
+                "picker-episode-navigation" => crate::screens::family::SettingsPage::Picker(crate::screens::family::PickerKind::EpisodeNavigation),
                 "audio" => crate::screens::family::SettingsPage::AudioSubtitles,
                 _other => {
                     #[cfg(feature = "devtriggers")]

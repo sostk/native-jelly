@@ -793,7 +793,7 @@ pub(crate) fn activate_ctrl_row(
                 }
             }
         }
-        ControlSlot::Discs => false,
+        ControlSlot::Discs(_) => false,
     }
 }
 
@@ -818,6 +818,19 @@ pub(crate) fn play_up_next(
     let Some(u) = super::bridge::player_mut(pages).and_then(|player| player.up_next.take(ps)) else {
         return false;
     };
+    play_queue_episode(ps, pa, hud_ms, pages, bridge, u)
+}
+
+/// Shared hand-off for automatic Up Next and explicit episode navigation. The owned descriptor
+/// outlives teardown, and the old session is stopped/reported before any new request replaces it.
+fn play_queue_episode(
+    ps: &mut crate::route::PlaybackSession,
+    pa: &mut crate::player::adapter::PlayerAdapter,
+    hud_ms: u32,
+    pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
+    bridge: &mut super::bridge::Bridge,
+    u: crate::route::UpNext,
+) -> bool {
     // The ratingKey, not the episode title: `rk` is the handle every other line and every harness
     // assertion already uses, and the title is LG's "Content Viewing Information" — the one
     // category this app's Data Safety declaration answers "Not collected" to. `eventlog::scrub` is a
@@ -1036,6 +1049,19 @@ pub(crate) unsafe fn activate_player_row(
             pages,
             bridge,
         );
+    } else if !ctrl.enabled(btn) {
+        return;
+    } else if btn == crate::appkit::player_hud::BTN_PREVIOUS || btn == crate::appkit::player_hud::BTN_NEXT {
+        let forward = btn == crate::appkit::player_hud::BTN_NEXT;
+        // Recheck at activation: a queued press must not navigate an outgoing item's neighbour.
+        let current = crate::appkit::player_hud::slot(ps, bridge.metadata_view());
+        if !current.is_discs() || !current.enabled(btn) { return; }
+        if !forward && crate::player::intended_pos_ns(ps) >= 5_000_000_000 {
+            request_seek(0);
+            resume_if_paused(pa);
+        } else if let Some(u) = crate::route::adjacent_episode(ps, forward) {
+            let _ = play_queue_episode(ps, pa, HUD_LINGER_MS, pages, bridge, u);
+        }
     } else if btn == crate::appkit::player_hud::BTN_MORE {
         // …so the discs are what row 1 holds — the complement of the arm above, and the row's only
         // other occupant. OK on a control disc PRESENTS its panel on this page's own stack.

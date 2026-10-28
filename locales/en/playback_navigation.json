@@ -1,0 +1,26 @@
+{
+  "settings.playback.instant_dpad_seeking": {
+    "value": "Instant D-pad seeking",
+    "description": "Playback navigation preference title or choice."
+  },
+  "settings.playback.instant_dpad_seeking.copy": {
+    "value": "With controls hidden, Left/Right jumps by the skip interval. Off shows the controls first. Visible controls keep the usual seek behaviour.",
+    "description": "Playback preference explanation."
+  },
+  "settings.playback.instant_dpad_seeking.off": {
+    "value": "Off",
+    "description": "Playback navigation preference title or choice."
+  },
+  "settings.playback.instant_dpad_seeking.on": {
+    "value": "On",
+    "description": "Playback navigation preference title or choice."
+  },
+  "settings.playback.episode_navigation": {
+    "value": "Previous/Next buttons",
+    "description": "Playback navigation preference title or choice."
+  },
+  "settings.playback.episode_navigation.copy": {
+    "value": "Show episode navigation beside Subtitles and Audio. This setting is independent of automatic next-episode playback.",
+    "description": "Playback preference explanation."
+  }
+}

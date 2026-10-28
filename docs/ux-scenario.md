@@ -593,7 +593,7 @@ front of QA:
 
 ### 6.6 Seeking
 
-Seeking is a **preview-then-commit** gesture, not one immediate jump per press.
+Ordinary D-pad seeking uses a **preview-then-commit** gesture by default.
 
 - **With the HUD hidden, a LEFT/RIGHT press is spent raising it and moves nothing.** The HUD sits on
   a 4.5 s timer over full-screen video, so *"where am I"* and *"take me back ten seconds"* are two
@@ -606,10 +606,17 @@ Seeking is a **preview-then-commit** gesture, not one immediate jump per press.
 - **Holding engages a continuous scrub that accelerates** — from 10× up to 140× playback speed — and
   the key release commits it. A lost key-up is caught by a 400 ms watchdog, so a dropped release
   cannot leave the scrub running.
-- **Quick repeated taps accumulate into one seek.** The commit waits ~450 ms after the last tap, so
+- **Quick repeated D-pad preview taps accumulate into one seek.** The commit waits ~450 ms after the last tap, so
   "back thirty seconds" is three presses at the default 10 s step and a single seek rather than three. That matters beyond
   feel: back-to-back in-flight seeks are what stress the demux pipeline.
 - The seek target is clamped to the item, stopping 3 s short of the end.
+
+Dedicated FF/REW taps commit the Skip interval on release and keep the HUD hidden. Holding either
+key uses the same continuous scrub above. Settings > Playback > Instant D-pad seeking (Off by
+default) also makes a hidden-HUD arrow press jump immediately; a visible HUD retains its preview.
+Immediate taps accumulate from the requested target for 1.5 s. While a seek is still landing,
+only the latest additional target is retained and submitted after that seek and its paused-frame
+prime finish. A paused viewer remains paused.
 
 The pointer can drag the scrubber directly, under the same commit rule.
 
@@ -619,6 +626,12 @@ The row at the HUD's top right has **three mutually exclusive occupants**, decid
 the playhead. It is one row, not three stacked controls, and the choice is made once per frame.
 
 **1. Normally: three round discs — Subtitles, Audio, More (`…`).**
+
+For an episode with a neighbour, Previous and Next episode discs precede these three. Unavailable
+directions are dim and cannot take focus. Previous restarts the current episode at or after 5 s;
+before 5 s it opens the preceding episode. Next opens the following episode, including across a
+season boundary. Settings > Playback > Episode navigation (On by default) controls this pair
+independently of automatic Up Next. Movies and episodes without neighbours keep the three discs.
 
 Each opens a **popover over the live picture** — the same idiom as the library's sort menu, never a
 full-screen sheet. All three are modal while open: they take every key, and BACK closes them.

@@ -4222,6 +4222,7 @@ pub struct TransportButton {
     pub frame: Rect,
     pub which: i32,
     pub focused: bool,
+    pub enabled: bool,
     /// WHICH GROUND this disc stands on — see [`ControlGround`]. It defaults to
     /// [`Keyed`](ControlGround::Keyed) like every other control face, even though this family's one
     /// caller is the player HUD: the default belongs to the WIDGET, and a widget that assumed its
@@ -4239,11 +4240,13 @@ impl TransportButton {
             frame,
             which,
             focused: false,
+            enabled: true,
             ground: ControlGround::Keyed,
             palette: ControlPalette::default(),
             scale: 1.0,
         }
     }
+    pub fn enabled(mut self, enabled: bool) -> Self { self.enabled = enabled; self }
     pub fn focused(mut self, f: bool) -> Self {
         self.focused = f;
         self
@@ -4270,6 +4273,7 @@ impl View for TransportButton {
         // control face rather than spelling one of its own: the two used to be the same three
         // tokens written twice, which is how a ground (or a palette) reaches one and not the other.
         let face = ControlStyle::Accent.face(self.focused, self.ground, self.palette);
+        let p = if self.enabled { p } else { p.alpha(theme::INK_DISABLED[3]) };
         let ink = face.ink;
         // **The same edge every other control wears** — [`control_rim`], not a bare `rect`. This was
         // the one control family the rim missed: `Button` and `CircleButton` both took it and these
@@ -4299,6 +4303,8 @@ impl View for TransportButton {
         let id = match self.which {
             1 => Icon::Audio,
             2 => Icon::More,
+            3 => Icon::Previous,
+            4 => Icon::Next,
             _ => Icon::Cc,
         };
         let s = (r.w * DISC_ICON_RATIO).round();

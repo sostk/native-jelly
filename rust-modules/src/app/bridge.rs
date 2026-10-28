@@ -2547,6 +2547,8 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         crate::route::restore_subtitle_position(saved.subtitle_position());
         crate::route::restore_next_episode_mode(saved.next_episode_mode());
         crate::route::restore_skip_interval(saved.skip_interval());
+        crate::route::restore_instant_dpad_seeking(saved.instant_dpad_seeking());
+        crate::route::restore_episode_navigation(saved.episode_navigation());
         crate::player::restore_subtitle_tone(saved.subtitle_tone());
         crate::player::restore_audio_enhancements(saved.audio_enhancements());
         let endpoints = super::boot::install_pms_owned(bridge, &c.origin,
@@ -3187,8 +3189,8 @@ pub(crate) fn key_input(sym: u32, wcode: u32, state: u32, now: Tick, source: Sou
     let key = match classify(sym, wcode) {
         K::Up => Key::Up,
         K::Down => Key::Down,
-        K::Left { .. } => Key::Left,
-        K::Right { .. } => Key::Right,
+        K::Left { alt: false } => Key::Left,
+        K::Right { alt: false } => Key::Right,
         K::Ok => Key::Ok,
         K::Back => Key::Back,
         _ => Key::Other,
@@ -3473,5 +3475,23 @@ mod preference_effect_tests {
         assert_eq!(crate::route::quality(), quality);
         assert_eq!(crate::route::direct_play_mode(), mode);
         assert_eq!(std::fs::read(temp.path()).unwrap(), before);
+    }
+}
+
+#[cfg(test)]
+mod transport_key_identity_tests {
+    use super::*;
+    #[test]
+    fn ff_rew_keep_raw_identity_through_dispatch() {
+        use crate::ui::consts::{self, Key as K};
+        for (sym, wcode, expected) in [
+            (consts::WCODE_FASTFORWARD, 0, K::Right { alt: true }),
+            (0, consts::WCODE_REWIND, K::Left { alt: true }),
+            (consts::SDLK_RIGHT, 0, K::Right { alt: false }),
+        ] {
+            let event = key_input(sym, wcode, 1, Tick::default(), Source::Sdl);
+            let InputKind::Key { key, sym, wcode, .. } = event.kind else { panic!("key event") };
+            assert_eq!(consts::classify_input(key, sym, wcode), expected);
+        }
     }
 }

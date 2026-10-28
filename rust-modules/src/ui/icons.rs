@@ -86,6 +86,8 @@ pub enum Icon {
     /// Two `<path>` ELEMENTS rather than one path's subpaths, which the module doc's rule 1 would
     /// normally forbid — permitted for exactly [`Icon::Crowd`]'s reason: the triangles do not touch
     /// (0.8 units apart), so there is no join for the alpha composite to crease along.
+    Previous,
+    Next,
     Rewind,
     /// See [`Icon::Rewind`].
     FastForward,
@@ -303,6 +305,8 @@ fn src(id: Icon) -> &'static str {
         Icon::Collection => include_str!("../../../assets/icons/collection.svg"),
         Icon::PlayStart => include_str!("../../../assets/icons/play-start.svg"),
         Icon::Close => include_str!("../../../assets/icons/close.svg"),
+        Icon::Previous => include_str!("../../../assets/icons/previous.svg"),
+        Icon::Next => include_str!("../../../assets/icons/next.svg"),
         Icon::More => include_str!("../../../assets/icons/more.svg"),
         Icon::Search => include_str!("../../../assets/icons/search.svg"),
         Icon::Tomato => include_str!("../../../assets/icons/tomato.svg"),

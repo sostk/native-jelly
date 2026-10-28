@@ -277,7 +277,9 @@ presentation in a design pass.
    paused, a seek spinner while the transport owns the busy signal, nothing at all while playing.
    Transport is driven by REMOTE KEYS, which must genuinely work. Any `<<` / `>>` added must be a
    small glyph in that same indicator slot at the clock's cap height — never a control, and never a
-   fourth entry in the HUD control row (`appkit/player_hud.rs`'s `BTN_N`, currently 3).
+   transport-seeking control in the HUD row. Previous/Next episode discs are queue navigation:
+   they may precede Subtitles, Audio and More when an episode has a neighbour, and their setting
+   is independent of automatic Up Next. They must not become FF/REW controls.
 
 4. **Failure read-outs are never red — the app does not scold.** A failed verdict is inked bold at
    `size::TITLE` in `theme::TEXT_SECONDARY`, per the design system's `StatusOverlay` contract.

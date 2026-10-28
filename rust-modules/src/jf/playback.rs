@@ -1078,8 +1078,9 @@ impl Jf<'_> {
         })
     }
 
-    /// The queue a play starts: the item, and — for an episode — the series' episodes from it
-    /// onward.
+    /// A bounded episode neighbourhood in the server's series order. Every episode start
+    /// refreshes it, so Previous survives Next/Up Next without retaining a stale Plex queue.
+    /// Movies, extras and unavailable neighbourhoods remain a one-item queue.
     pub fn create_play_queue(&self, rk: &str, continuous: bool) -> Option<MediaContainer> {
         let guid = self.guid(rk)?;
         let uid = self.user_id()?;
@@ -1089,21 +1090,26 @@ impl Jf<'_> {
         if continuous && it.kind == "Episode" {
             if let Some(series) = it.series_id.as_deref().map(ids::normalize).filter(|s| !s.is_empty()) {
                 let r: Option<QueryResult<BaseItemDto>> = self.get(&super::api::Q::new(format!("/Shows/{series}/Episodes"))
-                    .s("userId", &uid).s("StartItemId", &guid).s("Fields", "MediaSources").i("Limit", 50).build());
-                if let Some(r) = r.filter(|r| r.items.first().is_some_and(|e| ids::normalize(&e.id) == guid)) {
+                    .s("userId", &uid).s("AdjacentTo", &guid).b("IsMissing", false).s("Fields", "MediaSources").i("Limit", 3).build());
+                if let Some(r) = r.filter(|r| r.items.len() <= 3
+                    && r.items.iter().any(|e| ids::normalize(&e.id) == guid)
+                    && r.items.iter().all(|e| e.kind == "Episode"
+                        && e.series_id.as_deref().is_some_and(|s| ids::normalize(s) == series))) {
                     rows = r.items.iter().map(|e| convert::item(e, 0)).collect();
                 }
             }
         }
-        for (i, m) in rows.iter_mut().enumerate() {
-            m.play_queue_item_id = i as i64 + 1;
-        }
+        // GUID-derived identities survive a sliding neighbourhood; the selected row is not
+        // necessarily first. PlaylistItemId is an opaque client queue identity, not a position.
+        for m in &mut rows { m.play_queue_item_id = m.rating_key.parse().unwrap_or(0); }
+        let selected = rows.iter().position(|m| m.rating_key == rk).unwrap_or(0) as i64;
+        let selected_id = rows[selected as usize].play_queue_item_id;
         let n = rows.len() as i64;
         Some(MediaContainer {
             play_queue_id: ids::intern(&guid),
-            play_queue_selected_item_id: 1,
+            play_queue_selected_item_id: selected_id,
             play_queue_total_count: n,
-            play_queue_selected_item_offset: 0,
+            play_queue_selected_item_offset: selected,
             size: n,
             metadata: rows,
             ..Default::default()
@@ -1523,3 +1529,6 @@ mod tests {
         assert_eq!(direct_path(g, &mkv), format!("/Videos/{g}/stream.mkv?static=true&MediaSourceId=d"));
     }
 }
+
+#[cfg(test)]
+mod queue_tests;

@@ -17,7 +17,8 @@ fn long_hud_titles_fit_before_the_control_row() {
     for language in nj_platform::i18n::SHIPPED {
         let _lang = nj_platform::i18n::language_on_this_thread_for_test(language);
         let marker = |kind, final_seg| crate::metadata::Marker { kind, start_ms: 1000, end_ms: 2000, final_seg };
-        let slots = [ControlSlot::Discs,
+        let slots = [ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE),
+            ControlSlot::Discs(Controls::for_item(true, false, true, false)),
             slot_for(Some(marker(crate::metadata::MarkerKind::Intro, false)), false, crate::route::NextEpisodeMode::Countdown),
             slot_for(Some(marker(crate::metadata::MarkerKind::Credits, true)), true, crate::route::NextEpisodeMode::Countdown)];
         for slot in slots {
@@ -52,7 +53,7 @@ fn short_hud_titles_keep_their_position_typography_and_ink() {
         let original = capture_runs(|| draw_title(Painter::recording(), kicker, c"Short title".as_ptr()));
         for paused in [false, true] {
             let row = TransportRow::new();
-            let bounded = runs(kicker, c"Short title", title_right(ControlSlot::Discs, &row, &FM), &FM, paused, &row.title_clock);
+            let bounded = runs(kicker, c"Short title", title_right(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), &row, &FM), &FM, paused, &row.title_clock);
             assert_eq!(original, bounded);
         }
     }
@@ -63,7 +64,7 @@ fn paused_title_reveals_once_and_resume_restores_ellipsis() {
     let _serial = nj_base::testlock::serial();
     let row = TransportRow::new();
     let long = c"A very long movie title that should slowly reveal its final words after pausing";
-    let right = title_right(ControlSlot::Discs, &row, &FM);
+    let right = title_right(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), &row, &FM);
     let paint = |paused| runs(Kicker::Context(c"Movie".as_ptr()), long, right, &FM, paused, &row.title_clock);
     assert!(paint(true)[1].text.ends_with('…'));
     nj_machine::idle::frame_begin(2.0);
@@ -82,7 +83,7 @@ fn hidden_titles_restart_and_null_titles_release_the_clock() {
     let _serial = nj_base::testlock::serial();
     let row = TransportRow::new();
     let long = c"A very long movie title that should slowly reveal its final words after pausing";
-    let right = title_right(ControlSlot::Discs, &row, &FM);
+    let right = title_right(ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), &row, &FM);
     let paint = || runs(Kicker::Context(c"Movie".as_ptr()), long, right, &FM, true, &row.title_clock);
     paint();
     nj_machine::idle::frame_begin(2.0);

@@ -24,6 +24,7 @@
 
 mod ass_subtitles;
 pub(crate) mod input;
+mod seek_jump;
 pub(crate) mod overlay;
 #[cfg(test)]
 mod overlay_tests;
@@ -62,7 +63,7 @@ pub(crate) const WORD: &str = "player";
 pub(crate) const SHAPE: &str =
     "PlayerScreen{hud:{focus:i32,btn:i32,tab:i32,until:u32,dismissed:bool,visible_at_press:bool,\
      offer:Option<(u32,i64)>,was_standin:bool},scrub:{dir:i32,hold:bool,reveal:bool,drag:bool,\
-     ns:i64,commit_at:u32},origin:Option<u32>,repair_alert:{open:bool,confirm:bool,scroll:u32}}";
+     ns:i64,commit_at:u32},transport_tap:bool,seek_burst:Option<(i64,u32)>,queued_jump:Option<i64>,origin:Option<u32>,repair_alert:{open:bool,confirm:bool,scroll:u32}}";
 
 /// **The page this playback was launched from**, as the container's own identity.
 ///
@@ -118,6 +119,10 @@ pub(crate) struct PlayerScreen {
     pub(crate) hud: HudState,
     /// The scrub-seek gesture, including its preview position.
     pub(crate) scrub: Scrub,
+    transport_tap: bool,
+    seek_burst: player_hud::SeekBurst,
+    /// Latest immediate jump waiting for the previous seek to finish; never a second demux seek.
+    queued_jump: Option<i64>,
     // (`held: HeldKey` stood here — "the client-side hold-repeat for the bare transport's
     // directions". Nothing armed it after phase 9 put the panels' input on the dispatcher, so it
     // wrote two constant zeros into this screen's canonical state; the type is deleted with the
@@ -168,9 +173,12 @@ impl PlayerScreen {
             entry,
             hud: HudState::IDLE,
             scrub: Scrub::IDLE,
+            transport_tap: false,
+            seek_burst: player_hud::SeekBurst::IDLE,
+            queued_jump: None,
             row: TransportRow::new(),
             up_next: Countdown::default(),
-            slot: ControlSlot::Discs,
+            slot: ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE),
             busy: crate::appkit::player_hud::Busy::None,
             transport: true,
             hud_policy: HudPolicy::Normal,
@@ -215,10 +223,13 @@ impl PlayerScreen {
     /// countdown go with it.
     pub(crate) fn transport_reset(&mut self, for_reload: bool) {
         self.row.reset_title();
+        self.transport_tap = false;
         self.scrub.ns = -1;
         self.scrub.disengage();
         self.scrub.commit_at = 0;
         if !for_reload {
+            self.seek_burst.reset();
+            self.queued_jump = None;
             self.hud.until = 0;
             self.hud.dismissed = false;
             self.hud.last_offer = None;
@@ -394,7 +405,7 @@ impl PlayerScreen {
                 .is_some_and(|d| d < crate::appkit::player_hud::PLAY_MARK_MS),
         ));
         mix(match self.slot {
-            ControlSlot::Discs => 1,
+            ControlSlot::Discs(c) => 1 | (c.fingerprint() << 8),
             ControlSlot::Skip(_) => 2,
             ControlSlot::UpNext(_) => 3,
         });
@@ -552,6 +563,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // never from `draw_hud` — this row is not drawn on every frame of the route, so a
                 // spring advanced in the draw would run at a rate that depended on which overlay
                 // was open (`TransportRow::step`'s own doc).
+                if !self.slot.enabled(self.hud.nav.btn) { self.hud.nav.btn = self.slot.primary_btn(); }
                 self.row
                     .step(self.slot, self.hud.nav.focus, self.hud.nav.btn, tick.dt(), tick.ms);
                 // …and the Up Next countdown, which arms on APPEARANCE and is dropped with the
@@ -565,6 +577,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // armed by a real release must not then be answered twice.
                 self.step_scrub_hold(tick.ms, fx);
                 self.step_tap_commit(tick.ms, fx);
+                self.step_queued_jump(H::session(cx), fx);
                 self.publish();
                 Handled::Yes
             }
@@ -593,6 +606,8 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                     // video. `app/run.rs`'s own motion arm did this and then RETURNED, so the page
                     // never saw a pointer event at all.
                     InputKind::Pointer { .. } => {
+                        self.drop_transport_tap();
+                        self.seek_burst.reset();
                         self.hud.dismissed = false;
                         self.hud.extend(input.at.ms, input::HUD_LINGER_MS);
                         self.publish();
@@ -675,6 +690,8 @@ impl PlayerScreen {
         fx: &mut Effects<'_, H>,
     ) -> Handled {
         use player_hud::{ELEM_FAILURE_BASE, ELEM_FAILURE_END, ELEM_ROW_BASE, ELEM_SCRUB, ELEM_TAB_BASE};
+        self.drop_transport_tap();
+        self.seek_burst.reset();
         let failed = crate::appkit::player_hud::transport_hidden(ps);
         let Some(elem) = hit else {
             // **A click that lands on no control at all toggles play/pause** — the `else` arm of
@@ -709,6 +726,7 @@ impl PlayerScreen {
             e if e == ELEM_SCRUB => {
                 let dur = crate::player::duration_ns();
                 if dur > 0 {
+                    self.queued_jump = None;
                     self.hud.nav.focus = 0;
                     self.scrub.ns = self.pointed_ns(x, dur);
                     self.scrub.drag = true;
@@ -832,6 +850,11 @@ impl PlayerScreen {
             // Swallowed either way: that is what "the read-out owns the frame" means.
             return Handled::Yes;
         }
+        if !matches!(key, Key::Left { .. } | Key::Right { .. }) && edge == Edge::Down {
+            self.drop_transport_tap();
+            self.seek_burst.reset();
+        }
+        if self.jump_key(ps, key, edge, now, fx) { return Handled::Yes; }
         match key {
             Key::Play | Key::Pause | Key::PlayPause => {
                 if edge == Edge::Down {
@@ -916,7 +939,7 @@ impl PlayerScreen {
             self.hud.nav.focus = 0;
         } else if matches!(key, consts::Key::Up) {
             match self.hud.nav.focus {
-                0 => self.hud.nav.focus = 1,
+                0 => { self.hud.nav.focus = 1; self.hud.nav.btn = self.slot.primary_btn(); },
                 2 => self.hud.nav.focus = 0,
                 _ => {
                     hide = true;
@@ -968,12 +991,11 @@ impl PlayerScreen {
                 if dur > 0 {
                     self.scrub.begin(now, fwd);
                     self.scrub.reveal = true;
-                    self.scrub.ns = crate::player::intended_pos_ns(ps);
+                    self.scrub.ns = self.jump_position(ps);
                 }
             }
             input::ScrubPress::Row => {
-                self.hud.nav.btn =
-                    (self.hud.nav.btn + if fwd { 1 } else { -1 }).clamp(0, self.slot.items() - 1);
+                self.hud.nav.btn = self.slot.neighbour(self.hud.nav.btn, fwd);
             }
             input::ScrubPress::Tabs => {
                 let max_tab = if crate::appkit::chapters_panel::has_chapters(meta) { 1 } else { 0 };
@@ -989,8 +1011,9 @@ impl PlayerScreen {
                 self.scrub.alive = now;
                 self.scrub.reveal = false; // a visible press is a real gesture whatever raised the HUD
                 if self.scrub.dir == 0 && self.scrub.ns < 0 {
-                    self.scrub.ns = crate::player::intended_pos_ns(ps);
+                    self.scrub.ns = self.jump_position(ps);
                 }
+                self.queued_jump = None;
                 if !self.scrub.hold {
                     let step = if fwd { input::scrub_step_ns() } else { -input::scrub_step_ns() };
                     self.scrub.ns = Scrub::clamp_target(self.scrub.ns.max(0) + step, dur);
@@ -1007,6 +1030,7 @@ impl PlayerScreen {
     /// two different clocks).
     fn key_scrub_repeat(&mut self, now: u32) {
         if self.hud.nav.focus == 0 && self.scrub.dir != 0 {
+            self.queued_jump = None;
             self.scrub.alive = now;
             self.scrub.commit_at = 0;
             if !self.scrub.hold {
@@ -1244,6 +1268,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Focusable<H> for Pl
         let rect = match *key {
             e if e == ELEM_SCRUB => player_hud::scrub_hit_rect(),
             e if (ELEM_ROW_BASE..ELEM_TAB_BASE).contains(&e) => {
+                if !self.slot.enabled((e - ELEM_ROW_BASE) as i32) { return None; }
                 self.slot.item_rect(&self.row, (e - ELEM_ROW_BASE) as i32, cx.measure)?
             }
             e if (ELEM_TAB_BASE..ELEM_FAILURE_BASE).contains(&e) => player_hud::tab_hit_rect(
@@ -1259,12 +1284,15 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Focusable<H> for Pl
         Some(Placed { rect, rest_rect: rect, clip: Rect::FULL, index: None })
     }
     fn reconcile(&self, want: FocusKey<u32>, _cx: &Cx<'_, H>) -> FocusKey<u32> {
-        want
+        let base = player_hud::ELEM_ROW_BASE;
+        if (base..player_hud::ELEM_TAB_BASE).contains(&want.elem) && !self.slot.enabled((want.elem - base) as i32) {
+            FocusKey { entry: self.entry, elem: base + self.slot.primary_btn() as u32 }
+        } else { want }
     }
     fn seat(&self, g: GroupId, _from: Placed, _cx: &Cx<'_, H>) -> FocusKey<u32> {
         let elem = match g {
             GROUP_SCRUB => player_hud::ELEM_SCRUB,
-            GROUP_ROW => player_hud::ELEM_ROW_BASE,
+            GROUP_ROW => player_hud::ELEM_ROW_BASE + self.slot.primary_btn() as u32,
             GROUP_TABS => player_hud::ELEM_TAB_BASE,
             GROUP_FAILURE => player_hud::ELEM_FAILURE_BASE,
             GROUP_REPAIR => REPAIR_CANCEL,
@@ -1292,6 +1320,11 @@ impl LogicalState for PlayerScreen {
             .bool(self.scrub.drag)
             .u64(self.scrub.ns as u64)
             .u32(self.scrub.commit_at);
+        c.bool(self.transport_tap);
+        c.option(self.seek_burst.snapshot().as_ref(), |c, (target, at)| {
+            c.u64(*target as u64).u32(*at);
+        });
+        c.option(self.queued_jump.as_ref(), |c, target| { c.u64(*target as u64); });
         c.option(self.origin.as_ref(), |c, o| {
             c.u32(o.entry.0);
         });
@@ -1842,10 +1875,10 @@ mod step_ladder_tests {
         let failure_n = player_hud::FailureReadout::now(TestHost::session(&cx())).actions().len() as u32;
         assert!(failure_n >= 1, "Back is always offered");
         let cases: [(&str, ControlSlot, Busy, Vec<u32>); 4] = [
-            ("discs", ControlSlot::Discs, Busy::None, [row(3), vec![ELEM_TAB_BASE]].concat()),
+            ("discs", ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), Busy::None, [row(3), vec![ELEM_TAB_BASE]].concat()),
             ("skip", skip, Busy::None, [row(1), vec![ELEM_TAB_BASE]].concat()),
             ("up next", up_next, Busy::None, [row(2), vec![ELEM_TAB_BASE]].concat()),
-            ("failed", ControlSlot::Discs, failed, (0..failure_n).map(|i| ELEM_FAILURE_BASE + i).collect()),
+            ("failed", ControlSlot::Discs(crate::appkit::player_hud::Controls::NONE), failed, (0..failure_n).map(|i| ELEM_FAILURE_BASE + i).collect()),
         ];
         for (name, slot, busy, controls) in cases {
             let mut page = PlayerScreen::new(ENTRY);
@@ -2098,7 +2131,7 @@ mod scrub_ownership_tests {
 
     /// The playback globals these cases read, restored on the way out. Held together with
     /// `testlock::serial()` by every caller: `duration_ns`/`playpos_ns`/`paused` are crate-wide.
-    struct Fixture(i64, i64, bool);
+    struct Fixture(i64, i64, bool, u8, bool);
     impl Fixture {
         fn new(paused: bool) -> Self {
             use std::sync::atomic::Ordering::Relaxed;
@@ -2106,6 +2139,8 @@ mod scrub_ownership_tests {
                 crate::player::SHARED.duration_ns.load(Relaxed),
                 crate::player::SHARED.playpos_ns.load(Relaxed),
                 crate::player::TX.paused.load(Relaxed),
+                crate::player::swap_state_for_test(crate::player::PlaybackState::Playing),
+                crate::player::SHARED.seeking.swap(false, Relaxed),
             );
             crate::player::SHARED.duration_ns.store(DUR, Relaxed);
             crate::player::SHARED.playpos_ns.store(0, Relaxed);
@@ -2119,6 +2154,8 @@ mod scrub_ownership_tests {
             crate::player::SHARED.duration_ns.store(self.0, Relaxed);
             crate::player::SHARED.playpos_ns.store(self.1, Relaxed);
             crate::player::TX.paused.store(self.2, Relaxed);
+            crate::player::restore_state_for_test(self.3);
+            crate::player::SHARED.seeking.store(self.4, Relaxed);
         }
     }
 
@@ -2204,6 +2241,174 @@ mod scrub_ownership_tests {
     fn on_the_bar(frac: f32) -> (f32, f32) {
         let r = player_hud::scrub_hit_rect();
         (r.x + r.w * frac, r.y + r.h * 0.5)
+    }
+
+    #[test]
+    fn transport_taps_commit_once_on_release_and_accumulate_requested_targets() {
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(true);
+        let _i = player_hud::SkipIntervalGuard::set(crate::catalog::session::SkipInterval::Seconds10);
+        let mut page = PlayerScreen::new(ENTRY);
+        for (sym, at, want) in [
+            (consts::WCODE_FASTFORWARD, 1_000, 10_000_000_000),
+            (consts::WCODE_FASTFORWARD, 1_300, 20_000_000_000),
+            (consts::WCODE_REWIND, 1_600, 10_000_000_000),
+        ] {
+            assert!(seeks(key(&mut page, sym, Edge::Down, at).1).is_empty());
+            assert_eq!(seeks(key(&mut page, sym, Edge::Up, at + 40).1),
+                vec![PlayerReq::CommitSeek(want)]);
+            assert!(page.hud.dismissed, "transport taps keep the picture unobstructed");
+            assert!(seeks(tick(&mut page, at + 41).1).is_empty());
+        }
+        assert!(crate::player::TX.paused.load(std::sync::atomic::Ordering::Relaxed), "taps use the pause-preserving seek request");
+    }
+
+    #[test]
+    fn rapid_transport_taps_wait_for_the_prior_seek_and_keep_the_latest_target() {
+        use crate::player::{self, PlaybackState};
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(true);
+        let _i = player_hud::SkipIntervalGuard::set(crate::catalog::session::SkipInterval::Seconds10);
+        struct Restore(u8);
+        impl Drop for Restore { fn drop(&mut self) { player::restore_state_for_test(self.0); } }
+        let _state = Restore(player::swap_state_for_test(PlaybackState::Playing));
+        let mut page = PlayerScreen::new(ENTRY);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_000);
+        assert_eq!(seeks(key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_001).1),
+            vec![PlayerReq::CommitSeek(DEFAULT_HOP)]);
+        player::swap_state_for_test(PlaybackState::Seeking);
+        for at in [1_017, 1_033, 5_000] {
+            key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, at);
+            assert!(seeks(key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, at + 1).1).is_empty(),
+                "a newer target must not race the demuxer's in-flight seek");
+        }
+        assert!(seeks(tick(&mut page, 5_010).1).is_empty());
+        player::swap_state_for_test(PlaybackState::Buffering);
+        assert!(seeks(tick(&mut page, 5_020).1).is_empty());
+        player::swap_state_for_test(PlaybackState::Playing);
+        assert!(player::TX.begin_paused_seek());
+        assert!(seeks(tick(&mut page, 5_025).1).is_empty(), "wait for the paused frame to be restored too");
+        player::TX.finish_seek_preroll();
+        assert_eq!(seeks(tick(&mut page, 5_030).1), vec![PlayerReq::CommitSeek(4 * DEFAULT_HOP)],
+            "only the latest target is submitted, including a tap after the burst timer expired");
+        assert!(seeks(tick(&mut page, 5_040).1).is_empty());
+        assert!(player::TX.paused.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn queued_jump_survives_same_item_reload_and_is_consumed_by_background_or_stop() {
+        use crate::player::{self, PlaybackState};
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(true);
+        let _i = player_hud::SkipIntervalGuard::set(crate::catalog::session::SkipInterval::Seconds10);
+        let mut page = PlayerScreen::new(ENTRY);
+        player::swap_state_for_test(PlaybackState::Seeking);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_000);
+        assert!(seeks(key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_001).1).is_empty());
+        page.transport_reset(true);
+        player::swap_state_for_test(PlaybackState::Idle);
+        assert!(seeks(tick(&mut page, 1_010).1).is_empty(), "reload's brief Idle must retain the target");
+        assert_eq!(page.take_queued_jump(), Some(DEFAULT_HOP), "background saves the latest requested position");
+        player::swap_state_for_test(PlaybackState::Playing);
+        assert!(seeks(tick(&mut page, 1_020).1).is_empty(), "resume uses the saved offset without a duplicate seek");
+        player::swap_state_for_test(PlaybackState::Seeking);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_100);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_101);
+        page.transport_reset(false);
+        assert_eq!(page.take_queued_jump(), None, "another item cannot inherit the target");
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_200);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_201);
+        player::swap_state_for_test(PlaybackState::Error);
+        tick(&mut page, 1_210);
+        assert_eq!(page.take_queued_jump(), None, "a failed pipeline must not dispatch deferred seeks");
+    }
+
+    #[test]
+    fn a_new_scrub_supersedes_the_queued_jump_and_starts_from_its_requested_position() {
+        use crate::player::{self, PlaybackState};
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(false);
+        let _i = player_hud::SkipIntervalGuard::set(crate::catalog::session::SkipInterval::Seconds10);
+        for held in [true, false] {
+            let mut page = page_on_the_bar();
+            player::swap_state_for_test(PlaybackState::Seeking);
+            key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_000);
+            key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_001);
+            if held {
+                key(&mut page, consts::WCODE_REWIND, Edge::Down, 1_100);
+                assert_eq!(page.scrub.ns, DEFAULT_HOP);
+                key(&mut page, consts::WCODE_REWIND, Edge::Repeat, 1_150);
+            } else {
+                page.hud.visible_at_press = true;
+                key(&mut page, SDLK_RIGHT, Edge::Down, 1_100);
+                assert_eq!(page.scrub.ns, 2 * DEFAULT_HOP);
+            }
+            assert_eq!(page.take_queued_jump(), None, "the newer preview owns the next seek");
+            player::swap_state_for_test(PlaybackState::Playing);
+            assert!(seeks(tick(&mut page, 1_160).1).is_empty());
+        }
+    }
+
+    #[test]
+    fn transport_hold_has_no_initial_jump_and_commits_the_travelled_preview() {
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(false);
+        let mut page = PlayerScreen::new(ENTRY);
+        assert!(seeks(key(&mut page, consts::WCODE_FASTFORWARD, Edge::Down, 1_000).1).is_empty());
+        assert_eq!(page.scrub.ns, 0);
+        key(&mut page, consts::WCODE_FASTFORWARD, Edge::Repeat, 1_500);
+        tick(&mut page, 1_600);
+        let target = page.scrub.ns;
+        assert!(target > 0);
+        assert!(!page.hud.dismissed);
+        assert_eq!(seeks(key(&mut page, consts::WCODE_FASTFORWARD, Edge::Up, 1_610).1),
+            vec![PlayerReq::CommitSeek(target)]);
+    }
+
+    #[test]
+    fn instant_dpad_is_opt_in_and_never_arms_a_repeat_or_release_seek() {
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(true);
+        let _i = player_hud::SkipIntervalGuard::set(crate::catalog::session::SkipInterval::Seconds10);
+        struct Restore(crate::route::InstantDpadSeeking);
+        impl Drop for Restore { fn drop(&mut self) { crate::route::restore_instant_dpad_seeking(self.0); } }
+        let _restore = Restore(crate::route::instant_dpad_seeking());
+        crate::route::restore_instant_dpad_seeking(crate::route::InstantDpadSeeking::On);
+        let mut page = PlayerScreen::new(ENTRY);
+        assert_eq!(seeks(key(&mut page, SDLK_RIGHT, Edge::Down, 1_000).1), vec![PlayerReq::CommitSeek(DEFAULT_HOP)]);
+        assert!(seeks(key(&mut page, SDLK_RIGHT, Edge::Repeat, 1_050).1).is_empty());
+        assert!(seeks(key(&mut page, SDLK_RIGHT, Edge::Up, 1_080).1).is_empty());
+        assert_eq!(page.scrub.ns, -1);
+        page.transport_reset(true);
+        assert_eq!(seeks(key(&mut page, SDLK_RIGHT, Edge::Down, 1_300).1), vec![PlayerReq::CommitSeek(2 * DEFAULT_HOP)]);
+        page.transport_reset(false);
+        assert_eq!(seeks(key(&mut page, SDLK_RIGHT, Edge::Down, 1_400).1), vec![PlayerReq::CommitSeek(DEFAULT_HOP)]);
+        crate::route::restore_instant_dpad_seeking(crate::route::InstantDpadSeeking::Off);
+        page.transport_reset(false);
+        assert!(seeks(key(&mut page, SDLK_RIGHT, Edge::Down, 2_000).1).is_empty());
+        assert!(page.scrub.reveal);
+    }
+
+    #[test]
+    fn episode_controls_have_matching_focus_and_hit_eligibility() {
+        let _g = nj_base::testlock::serial();
+        let _f = Fixture::new(false);
+        let mut page = page_on_the_bar();
+        for (previous, next, restart, primary) in [(false, true, false, 4), (true, false, false, 3), (false, true, true, 4)] {
+            let controls = player_hud::Controls::for_item(true, previous, next, restart);
+            page.slot = ControlSlot::Discs(controls);
+            page.hud.nav.focus = 0;
+            key(&mut page, consts::SDLK_UP, Edge::Down, 1_000);
+            assert_eq!(page.hud.nav.btn, primary);
+            for i in 0..page.slot.items() {
+                let hit = <PlayerScreen as Focusable<TestHost>>::place(&page,
+                    &(player_hud::ELEM_ROW_BASE + i as u32), &cx(), At::Drawn);
+                assert_eq!(hit.is_some(), page.slot.enabled(i));
+            }
+            page.hud.nav.btn = 0;
+            key(&mut page, consts::SDLK_LEFT, Edge::Down, 1_100);
+            assert_eq!(page.hud.nav.btn, if next { 4 } else { 3 });
+        }
     }
 
     /// **(a) ONE tap, ONE seek — and the seek arrives on the DEBOUNCE, not on the press.**

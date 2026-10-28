@@ -21,7 +21,8 @@ use std::os::raw::c_int;
 
 /// Is the transport HUD on screen? Its timer is live, OR playback is paused, OR the pipeline is
 /// BUSY — unless the user explicitly dismissed it (UP from the top row), which holds until the
-/// next key but cannot hide a stalled pipeline's read-out.
+/// next key but cannot hide a stalled pipeline's read-out. Immediate dismissed seeks stay bare
+/// through their first new picture; ordinary buffering still shows the read-out.
 ///
 /// **The `loading()` term is load-bearing and there must be exactly ONE predicate.** The draw path
 /// and the pointer path used to spell it out inline while the three KEY sites and the focus PARKER
@@ -36,7 +37,8 @@ use std::os::raw::c_int;
 /// obvious one to reach for. One predicate, no wrong choice.
 #[inline]
 pub(crate) fn hud_visible(ps: &crate::route::PlaybackSession, now: u32, until: u32, is_paused: bool, dismissed: bool) -> bool {
-    ((now < until || is_paused) && !dismissed) || crate::player::loading(ps)
+    ((now < until || is_paused) && !dismissed)
+        || (crate::player::loading(ps) && !super::seek_jump::seek_stays_hidden(ps, dismissed))
 }
 
 // (`struct HeldKey` stood here — WHICH key the remote is holding, as one value: the sym the
@@ -161,7 +163,7 @@ impl Scrub {
 #[derive(Clone, Copy)]
 pub(crate) struct HudNav {
     pub(crate) focus: i32, // 0 = scrubber, 1 = right buttons (Subtitles/Audio/More), 2 = bottom tabs
-    pub(crate) btn: i32,   // 0 = Subtitles, 1 = Audio, 2 = More (within the buttons row)
+    pub(crate) btn: i32,   // 0 = Subtitles, 1 = Audio, 2 = More, 3 = Previous, 4 = Next
     pub(crate) tab: i32,   // 0 = Info, 1 = Chapters (within the tabs row)
 }
 impl HudNav {
@@ -428,6 +430,26 @@ mod hud_visibility_tests {
         let out = f();
         crate::player::restore_state_for_test(prev);
         out
+    }
+
+    #[test]
+    fn dismissed_seeks_stay_bare_but_rebuffering_keeps_its_readout() {
+        use std::sync::atomic::Ordering::Relaxed;
+        with_state(PlaybackState::Buffering, || {
+            let ps = crate::route::PlaybackSession::IDLE;
+            struct Restore(i64, bool);
+            impl Drop for Restore { fn drop(&mut self) {
+                crate::player::SHARED.seek_display_ns.store(self.0, Relaxed);
+                crate::player::SHARED.hls_rebuffering.store(self.1, Relaxed);
+            } }
+            let _restore = Restore(crate::player::SHARED.seek_display_ns.swap(-1, Relaxed),
+                crate::player::SHARED.hls_rebuffering.swap(false, Relaxed));
+            assert!(hud_visible(&ps, 10_000, 0, false, true));
+            crate::player::SHARED.seek_display_ns.store(10_000_000_000, Relaxed);
+            assert!(!hud_visible(&ps, 10_000, 0, true, true));
+            crate::player::SHARED.hls_rebuffering.store(true, Relaxed);
+            assert!(hud_visible(&ps, 10_000, 0, true, true));
+        });
     }
 
     /// THE regression. Stuck in `Buffering` with the linger long expired and nothing paused, the

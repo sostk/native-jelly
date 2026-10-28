@@ -135,6 +135,8 @@ pub(crate) enum PreferenceCmd {
     Quality { quality: crate::catalog::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
     DirectPlay { mode: crate::catalog::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
     NextEpisode { mode: crate::catalog::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
+    InstantDpadSeeking { value: crate::catalog::session::InstantDpadSeeking, reply: std::sync::mpsc::Sender<bool> },
+    EpisodeNavigation { value: crate::catalog::session::EpisodeNavigation, reply: std::sync::mpsc::Sender<bool> },
     SkipInterval { interval: crate::catalog::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
     SubtitleSize { size: crate::catalog::session::SubtitleSize, reply: std::sync::mpsc::Sender<bool> },
     SubtitlePosition { position: crate::catalog::session::SubtitlePosition, reply: std::sync::mpsc::Sender<bool> },
@@ -2228,7 +2230,11 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // encryption?* step; the previous pin was 0x4a03_df99_a613_4199.
 // Card rendering: LibraryGrid replaces its single index-based shrink with identity-keyed
 // released springs; the previous pin was 0xc8e2_ec7c_baec_7537. Synthetic anchors are rerecorded.
-const SCREEN_SHAPES_PIN: u64 = 0x25225533d7b73f9f;
+// Playback navigation records its pending transport tap and relative target burst.
+// Previous pin: 0x25225533d7b73f9f. Synthetic anchors are rerecorded.
+// Rapid taps also record their latest deferred jump while a previous seek lands.
+// Previous pin: 0xc64a75618ef316c8. Synthetic anchors are rerecorded.
+const SCREEN_SHAPES_PIN: u64 = 0x682dd283a9d69632;
 
 #[cfg(test)]
 mod arg_tests {

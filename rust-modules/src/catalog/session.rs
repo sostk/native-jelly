@@ -627,6 +627,10 @@ pub struct Session {
     /// field — committed replay fixtures included — serializes exactly as it did before.
     #[serde(default, deserialize_with = "de_soft_skip_interval", skip_serializing_if = "is_default_skip_interval")]
     pub(crate) skip_interval: SkipInterval,
+    #[serde(default, deserialize_with = "de_soft_instant_dpad_seeking", skip_serializing_if = "is_default_instant_dpad_seeking")]
+    pub(crate) instant_dpad_seeking: InstantDpadSeeking,
+    #[serde(default, deserialize_with = "de_soft_episode_navigation", skip_serializing_if = "is_default_episode_navigation")]
+    pub(crate) episode_navigation: EpisodeNavigation,
     /// **Device-wide ambient memory**: the last hero `UltraBlurColors` envelope Home actually
     /// rendered on this television, so a route in the Settings/first-run family that opens
     /// BEFORE Home has fetched anything this boot — first-run consent moved ahead of the
@@ -736,6 +740,10 @@ struct CanonicalSessionPreferences {
     next_episode_mode: NextEpisodeMode,
     #[serde(default, deserialize_with = "de_soft_skip_interval", skip_serializing_if = "is_default_skip_interval")]
     skip_interval: SkipInterval,
+    #[serde(default, deserialize_with = "de_soft_instant_dpad_seeking", skip_serializing_if = "is_default_instant_dpad_seeking")]
+    instant_dpad_seeking: InstantDpadSeeking,
+    #[serde(default, deserialize_with = "de_soft_episode_navigation", skip_serializing_if = "is_default_episode_navigation")]
+    episode_navigation: EpisodeNavigation,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     plaintext_consent: Vec<PlaintextConsent>,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
@@ -773,6 +781,8 @@ impl Default for CanonicalSessionPreferences {
             subtitle_position: SubtitlePosition::Low,
             next_episode_mode: NextEpisodeMode::Countdown,
             skip_interval: SkipInterval::Seconds10,
+            instant_dpad_seeking: InstantDpadSeeking::Off,
+            episode_navigation: EpisodeNavigation::On,
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
             audio_enhancements: crate::catalog::AudioEnhancements::NONE,
@@ -834,6 +844,8 @@ fn split_public(session: &Session) -> Result<nj_platform::storage::state::Public
         subtitle_position: session.subtitle_position,
         next_episode_mode: session.next_episode_mode,
         skip_interval: session.skip_interval,
+        instant_dpad_seeking: session.instant_dpad_seeking,
+        episode_navigation: session.episode_navigation,
         plaintext_consent: session.plaintext_consent.clone(),
         server_key_pins: session.server_key_pins.clone(),
         audio_enhancements: session.audio_enhancements,
@@ -907,6 +919,8 @@ pub(crate) fn join_canonical(
         subtitle_position: preferences.subtitle_position,
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
+        instant_dpad_seeking: preferences.instant_dpad_seeking,
+        episode_navigation: preferences.episode_navigation,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -939,6 +953,8 @@ fn public_session(public: &nj_platform::storage::state::PublicPayload) -> Sessio
         subtitle_position: preferences.subtitle_position,
         next_episode_mode: preferences.next_episode_mode,
         skip_interval: preferences.skip_interval,
+        instant_dpad_seeking: preferences.instant_dpad_seeking,
+        episode_navigation: preferences.episode_navigation,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
@@ -1380,6 +1396,46 @@ impl SkipInterval {
         self.seconds() * 1_000_000_000
     }
 }
+
+/// Install-wide playback navigation option; unknown persisted values use the safe default.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum InstantDpadSeeking {
+    #[default]
+    Off,
+    
+    On,
+}
+impl InstantDpadSeeking {
+    pub(crate) const LADDER: [Self; 2] = [Self::Off, Self::On];
+    pub(crate) fn from_index(i: u8) -> Self { Self::LADDER.get(i as usize).copied().unwrap_or_default() }
+    pub(crate) fn index(self) -> u8 { if self == Self::On { 1 } else { 0 } }
+}
+fn de_soft_instant_dpad_seeking<'de, D: Deserializer<'de>>(d: D) -> Result<InstantDpadSeeking, D::Error> {
+    let Ok(v) = serde_json::Value::deserialize(d) else { return Ok(InstantDpadSeeking::default()); };
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+fn is_default_instant_dpad_seeking(value: &InstantDpadSeeking) -> bool { *value == InstantDpadSeeking::default() }
+
+/// Install-wide playback navigation option; unknown persisted values use the safe default.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum EpisodeNavigation {
+    
+    Off,
+    #[default]
+    On,
+}
+impl EpisodeNavigation {
+    pub(crate) const LADDER: [Self; 2] = [Self::Off, Self::On];
+    pub(crate) fn from_index(i: u8) -> Self { Self::LADDER.get(i as usize).copied().unwrap_or_default() }
+    pub(crate) fn index(self) -> u8 { if self == Self::On { 1 } else { 0 } }
+}
+fn de_soft_episode_navigation<'de, D: Deserializer<'de>>(d: D) -> Result<EpisodeNavigation, D::Error> {
+    let Ok(v) = serde_json::Value::deserialize(d) else { return Ok(EpisodeNavigation::default()); };
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+fn is_default_episode_navigation(value: &EpisodeNavigation) -> bool { *value == EpisodeNavigation::default() }
 
 /// One profile's search history.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
@@ -2465,6 +2521,16 @@ impl Session {
         let mut next = self.clone();
         next.next_episode_mode = mode;
         next
+    }
+
+    pub(crate) fn episode_navigation(&self) -> EpisodeNavigation { self.episode_navigation }
+    pub(crate) fn with_episode_navigation(&self, value: EpisodeNavigation) -> Self {
+        let mut next = self.clone(); next.episode_navigation = value; next
+    }
+
+    pub(crate) fn instant_dpad_seeking(&self) -> InstantDpadSeeking { self.instant_dpad_seeking }
+    pub(crate) fn with_instant_dpad_seeking(&self, value: InstantDpadSeeking) -> Self {
+        let mut next = self.clone(); next.instant_dpad_seeking = value; next
     }
 
     pub(crate) fn skip_interval(&self) -> SkipInterval {
@@ -6012,5 +6078,33 @@ mod server_key_pin_tests {
         nj_base::storage_worker::drain_for_test();
         let _ = peek();
         assert_eq!(nj_net::net::keypin::pin_for_test(&key), None, "the late probe did not repopulate it");
+    }
+}
+
+#[cfg(test)]
+mod playback_navigation_preferences_tests {
+    use super::*;
+    #[test]
+    fn defaults_omit_and_unknown_values_preserve_the_session() {
+        for raw in ["null", "42", "\"future\""] {
+            let s: Session = serde_json::from_str(&format!("{{\"instant_dpad_seeking\":{raw},\"episode_navigation\":{raw}}}")).unwrap();
+            assert_eq!(s.instant_dpad_seeking(), InstantDpadSeeking::Off);
+            assert_eq!(s.episode_navigation(), EpisodeNavigation::On);
+        }
+        let s = Session::default();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("instant_dpad_seeking"));
+        assert!(!json.contains("episode_navigation"));
+    }
+    #[test]
+    fn both_options_survive_public_protected_split_and_join() {
+        let s = Session::default().with_instant_dpad_seeking(InstantDpadSeeking::On)
+            .with_episode_navigation(EpisodeNavigation::Off);
+        let (public, protected) = split_canonical(&s).unwrap();
+        for restored in [join_canonical(&public, &protected).unwrap(), public_session(&public),
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap()] {
+            assert_eq!(restored.instant_dpad_seeking(), InstantDpadSeeking::On);
+            assert_eq!(restored.episode_navigation(), EpisodeNavigation::Off);
+        }
     }
 }

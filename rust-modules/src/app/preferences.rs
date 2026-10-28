@@ -53,6 +53,18 @@ pub(super) fn execute(command: PreferenceCmd) {
                 nj_machine::idle::invalidate();
             });
         }
+        PreferenceCmd::InstantDpadSeeking { value, reply } => {
+            let _ = nj_base::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_instant_dpad_seeking(value));
+                nj_machine::idle::invalidate();
+            });
+        }
+        PreferenceCmd::EpisodeNavigation { value, reply } => {
+            let _ = nj_base::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_episode_navigation(value));
+                nj_machine::idle::invalidate();
+            });
+        }
         PreferenceCmd::SkipInterval { interval, reply } => {
             let _ = nj_base::storage_worker::submit_retained(move || {
                 let _ = reply.send(crate::route::set_skip_interval(interval));

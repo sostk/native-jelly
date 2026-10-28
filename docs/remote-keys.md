@@ -101,7 +101,7 @@ before `SDL_Init` (§5).
 | `450` | `wcode` only | `Play` | resume, or start playback off a card | evdev 207 `KEY_PLAYCD` |
 | `72` | `wcode` only | `Pause` | pause | evdev 119 `KEY_PAUSE` |
 | `261` | either | `PlayPause` | toggles — its own variant, since `key_play`/`key_pause` are each one direction | evdev 164 `KEY_PLAYPAUSE` |
-| `451` | either | `Right { alt: true }` | fast-forward: scrubs in the player, does nothing elsewhere | evdev 208 `KEY_FASTFORWARD` |
+| `451` | either | `Right { alt: true }` | fast-forward: a tap jumps on release; a hold scrubs in the player; inert elsewhere | evdev 208 `KEY_FASTFORWARD` |
 | `452` | either | `Left { alt: true }` | rewind, likewise | evdev 168 `KEY_REWIND` |
 | `120` | `wcode` only | `Stop` | player only: stop and leave | evdev 128 `KEY_STOP` |
 | `260` | `wcode` only | `Stop` | player only: stop and leave | evdev 166 `KEY_STOPCD` |
@@ -150,8 +150,9 @@ from two different namespaces (§1, §4), so "make them consistent" is not the t
 **`Left`/`Right` carry an `alt` flag, and the two horizontal tests accept different sets.** `alt`
 is `false` for a press that arrived as the plain `SDLK_LEFT`/`SDLK_RIGHT` sym and `true` for one
 that arrived only as `WCODE_REWIND`/`WCODE_FASTFORWARD`. The non-player four-way nav dispatch
-matches `alt: false` alone, so a transport key does nothing on Home; the player's scrub arm and the
-Chapters strip match both. A press carrying BOTH stays plain — `classify` asks `sym` first — which
+matches `alt: false` alone, so a transport key does nothing on Home. The player distinguishes
+transport taps from arrow preview gestures; both keys can hold-scrub. The Chapters strip matches
+both. A press carrying BOTH stays plain — `classify` asks `sym` first — which
 is what keeps Home's navigation answering an ordinary arrow that happens to ride beside a transport
 code.
 

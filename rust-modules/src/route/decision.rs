@@ -8748,3 +8748,85 @@ mod subtitle_style_tests;
 #[path = "carried_audio_tests.rs"]
 mod carried_audio_tests;
 
+
+/// Cached after durable storage; no session IO occurs on the input/frame path.
+static INSTANT_DPAD_SEEKING: AtomicU8 = AtomicU8::new(0);
+pub(crate) fn instant_dpad_seeking() -> InstantDpadSeeking { InstantDpadSeeking::from_index(INSTANT_DPAD_SEEKING.load(Ordering::Relaxed)) }
+pub(crate) fn restore_instant_dpad_seeking(value: InstantDpadSeeking) {
+    #[cfg(test)]
+    nj_base::testlock::assert_held("playback navigation preference");
+    INSTANT_DPAD_SEEKING.store(value.index(), Ordering::Relaxed);
+}
+pub(crate) fn set_instant_dpad_seeking(value: InstantDpadSeeking) -> bool {
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_instant_dpad_seeking(value)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_instant_dpad_seeking(value); nj_machine::idle::invalidate(); }
+    saved
+}
+
+/// Cached after durable storage; no session IO occurs on the input/frame path.
+static EPISODE_NAVIGATION: AtomicU8 = AtomicU8::new(1);
+pub(crate) fn episode_navigation() -> EpisodeNavigation { EpisodeNavigation::from_index(EPISODE_NAVIGATION.load(Ordering::Relaxed)) }
+pub(crate) fn restore_episode_navigation(value: EpisodeNavigation) {
+    #[cfg(test)]
+    nj_base::testlock::assert_held("playback navigation preference");
+    EPISODE_NAVIGATION.store(value.index(), Ordering::Relaxed);
+}
+pub(crate) fn set_episode_navigation(value: EpisodeNavigation) -> bool {
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_episode_navigation(value)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_episode_navigation(value); nj_machine::idle::invalidate(); }
+    saved
+}
+
+/// Neighbours of the current episode in this server's refreshed neighbourhood.
+/// Extras/movies and unresolved selections offer no episode controls.
+pub(crate) fn episode_neighbours(ps: &PlaybackSession) -> (bool, bool) {
+    let Some(at) = crate::catalog::queue_index_of(&ps.queue, ps.pq_item_id.parse().unwrap_or(0),
+        cur_sid(ps), &cur_rk(ps)) else { return (false, false); };
+    if ps.queue[at].kind != "episode" || ps.preview { return (false, false); }
+    let episode = |row: Option<&crate::catalog::QueueRow>| row.is_some_and(|r| r.kind == "episode"
+        && r.sid == cur_sid(ps) && !r.rk.is_empty());
+    (episode(at.checked_sub(1).and_then(|i| ps.queue.get(i))), episode(ps.queue.get(at + 1)))
+}
+
+/// Clone at the activation boundary, before teardown retires the outgoing queue.
+pub(crate) fn adjacent_episode(ps: &PlaybackSession, forward: bool) -> Option<UpNext> {
+    let available = episode_neighbours(ps);
+    if !(if forward { available.1 } else { available.0 }) { return None; }
+    let at = crate::catalog::queue_index_of(&ps.queue, ps.pq_item_id.parse().unwrap_or(0),
+        cur_sid(ps), &cur_rk(ps))?;
+    up_next_of(ps.queue.get(if forward { at + 1 } else { at - 1 })?)
+}
+
+#[cfg(test)]
+mod playback_navigation_settings_tests {
+    use super::*;
+    #[test]
+    fn independent_settings_publish_only_after_a_durable_write() {
+        let _g = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("playback-navigation");
+        struct Restore(InstantDpadSeeking, EpisodeNavigation);
+        impl Drop for Restore { fn drop(&mut self) { restore_instant_dpad_seeking(self.0); restore_episode_navigation(self.1); } }
+        let _restore = Restore(instant_dpad_seeking(), episode_navigation());
+        assert!(set_instant_dpad_seeking(InstantDpadSeeking::On));
+        assert!(set_episode_navigation(EpisodeNavigation::Off));
+        assert_eq!(instant_dpad_seeking(), InstantDpadSeeking::On);
+        assert_eq!(episode_navigation(), EpisodeNavigation::Off);
+        let saved = crate::catalog::session::load();
+        assert_eq!(saved.instant_dpad_seeking(), InstantDpadSeeking::On);
+        assert_eq!(saved.episode_navigation(), EpisodeNavigation::Off);
+        let blocker = std::env::temp_dir().join(format!("nj-navigation-blocker-{}", std::process::id()));
+        std::fs::write(&blocker, b"x").unwrap();
+        crate::catalog::session::redirect_for_test(Some(blocker.join("auth.json")));
+        let failed_dpad = set_instant_dpad_seeking(InstantDpadSeeking::Off);
+        let failed_buttons = set_episode_navigation(EpisodeNavigation::On);
+        crate::catalog::session::redirect_for_test(None);
+        std::fs::remove_file(blocker).unwrap();
+        assert!(!failed_dpad && !failed_buttons);
+        assert_eq!(instant_dpad_seeking(), InstantDpadSeeking::On);
+        assert_eq!(episode_navigation(), EpisodeNavigation::Off);
+    }
+}

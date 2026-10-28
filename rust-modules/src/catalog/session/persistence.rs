@@ -394,7 +394,17 @@ fn preserve_unknown_preferences(current: &serde_json::Value, next: &mut serde_js
         return;
     };
     for (key, value) in current {
-        if key != "playback_quality" && !next.contains_key(key) {
+        if next.contains_key(key) { continue; }
+        // Omitted known fields mean their DEFAULT, not "retain the old value". Ask the canonical
+        // decoder about the name so new preferences cannot be forgotten in a parallel key list.
+        // Unknown names accept null into extensions; a known name either soft-defaults or rejects
+        // null. Probe one name at a time so malformed known values cannot erase opaque neighbours.
+        let mut probe = serde_json::Map::new();
+        probe.insert(key.clone(), serde_json::Value::Null);
+        let unknown = serde_json::from_value::<super::CanonicalSessionPreferences>(
+            serde_json::Value::Object(probe))
+            .is_ok_and(|preferences| preferences.extensions.contains_key(key));
+        if unknown {
             next.insert(key.clone(), value.clone());
         }
     }
@@ -793,6 +803,36 @@ mod db8_policy_tests {
             protection_for_auth_write(4, false, false, true),
             ProtectionRequest::KeymanagerRequired
         ));
+    }
+
+    #[test]
+    fn restoring_navigation_defaults_does_not_resurrect_the_old_public_values() {
+        let current = serde_json::json!({
+            "instant_dpad_seeking": "on", "episode_navigation": "off",
+            "future_preference": {"enabled": true}
+        });
+        let (mut public, _) = super::super::split_canonical(&super::super::Session::default()).unwrap();
+        preserve_unknown_preferences(&current, &mut public.preferences);
+        let restored = super::super::public_session(&public);
+        assert_eq!(restored.instant_dpad_seeking(), super::super::InstantDpadSeeking::Off);
+        assert_eq!(restored.episode_navigation(), super::super::EpisodeNavigation::On);
+        assert_eq!(public.preferences["future_preference"], current["future_preference"]);
+    }
+
+    #[test]
+    fn omitted_known_defaults_are_cleared_while_opaque_values_survive() {
+        let known = ["subtitle_size", "subtitle_position", "next_episode_mode", "skip_interval",
+            "instant_dpad_seeking", "episode_navigation", "server_key_pins", "audio_enhancements"];
+        let mut current = serde_json::json!({
+            "language": 42, "future_null": null, "future_array": [1, {"enabled": true}]
+        });
+        for key in known { current[key] = serde_json::json!("old-or-malformed-value"); }
+        let (mut public, _) = super::super::split_canonical(&super::super::Session::default()).unwrap();
+        preserve_unknown_preferences(&current, &mut public.preferences);
+        for key in known { assert!(public.preferences.get(key).is_none(), "{key} was resurrected"); }
+        assert_eq!(public.preferences["future_array"], current["future_array"]);
+        assert_eq!(public.preferences.get("future_null"), Some(&serde_json::Value::Null));
+        assert_ne!(public.preferences["language"], current["language"], "the new recognized value wins");
     }
 
     #[test]
