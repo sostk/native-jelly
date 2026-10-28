@@ -223,6 +223,11 @@ impl<'a> Jf<'a> {
         self.send(path, method, body).is_some_and(|r| r.ok())
     }
 
+    /// Worker-only bounded preview request. Header authentication also works on private libraries.
+    pub(crate) fn preview_bytes(&self, path: &str, max: usize) -> crate::catalog::ArtFetch {
+        self.c.jf_preview_get(path, &[&self.auth_header()], max)
+    }
+
     pub(crate) fn get<T: DeserializeOwned>(&self, path: &str) -> Option<T> {
         let r = self.send(path, Method::Get, None)?;
         if !r.ok() {

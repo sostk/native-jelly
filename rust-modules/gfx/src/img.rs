@@ -198,3 +198,62 @@ pub fn img_upload_rgba(px: *const c_uchar, w: c_int, h: c_int) -> c_uint {
     }
     crate::gfx::upload_rgba(0, w, h, px)
 }
+
+/// Worker-only decode of a thumbnail region, bounded by the validated sheet's dimensions.
+/// The sheet remains compressed in the caller's cache. Only the selected region becomes RGBA.
+pub fn img_decode_region(
+    data: &[u8],
+    max_w: u32,
+    max_h: u32,
+    region: (u32, u32, u32, u32),
+) -> Option<(u32, u32, Vec<u8>)> {
+    let (x, y, w, h) = region;
+    if data.is_empty()
+        || w == 0
+        || h == 0
+        || max_w == 0
+        || max_h == 0
+        || max_w > 4096
+        || max_h > 4096
+        || u64::from(max_w) * u64::from(max_h) > 6_291_456
+    {
+        return None;
+    }
+    catch_unwind(AssertUnwindSafe(|| -> Option<(u32, u32, Vec<u8>)> {
+        let reader = || {
+            image::ImageReader::new(std::io::Cursor::new(data))
+                .with_guessed_format()
+                .ok()
+        };
+        let (iw, ih) = reader()?.into_dimensions().ok()?;
+        if iw > max_w || ih > max_h || x.checked_add(w)? > iw || y.checked_add(h)? > ih {
+            return None;
+        }
+        let mut rdr = reader()?;
+        let mut limits = decode_limits();
+        limits.max_image_width = Some(max_w);
+        limits.max_image_height = Some(max_h);
+        rdr.limits(limits);
+        let img = rdr.decode().ok()?;
+        let tile = img.crop_imm(x, y, w, h).to_rgba8();
+        Some((w, h, tile.into_raw()))
+    }))
+    .ok()
+    .flatten()
+}
+
+#[cfg(test)]
+mod preview_region_tests {
+    use super::*;
+    #[test]
+    fn trickplay_decode_crops_the_correct_pixels_and_rejects_bounds() {
+        let rgba: Vec<u8> = (0..16).collect();
+        let png = img_encode_png(2, 2, &rgba).unwrap();
+        let (_, _, tile) = img_decode_region(&png, 2, 2, (1, 1, 1, 1)).unwrap();
+        assert_eq!(&tile[..3], &rgba[12..15]);
+        assert!(img_decode_region(&png, 2, 2, (2, 0, 1, 1)).is_none());
+        assert!(img_decode_region(&png, 1, 1, (0, 0, 1, 1)).is_none());
+        assert!(img_decode_region(&png, 4096, 4096, (0, 0, 1, 1)).is_none());
+        assert!(img_decode_region(b"broken", 2, 2, (0, 0, 1, 1)).is_none());
+    }
+}

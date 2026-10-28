@@ -4451,6 +4451,12 @@ fn adopt_subtitle_delivery(ps: &mut PlaybackSession) {
 pub(crate) fn cur_sub_pref_lang(ps: &PlaybackSession) -> Option<&str> {
     ps.cur_sub_pref_lang.as_deref()
 }
+/// Render-resource identity for optional seek thumbnails. No query or image work here.
+pub(crate) fn scrub_preview_owner(ps: &PlaybackSession) -> Option<(ServerId, crate::jf::trickplay::Owner)> {
+    let key = if ps.tsession.is_empty() { &ps.sess } else { &ps.tsession };
+    crate::jf::playback::preview_owner(key, &ps.cur_rk, &ps.sess).map(|owner| (ps.cur_sid, owner))
+}
+
 /// ratingKey of the currently-playing item (for /:/timeline progress reports).
 pub(crate) fn cur_rk(ps: &PlaybackSession) -> String {
     ps.cur_rk.clone()

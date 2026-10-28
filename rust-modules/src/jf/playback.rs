@@ -238,6 +238,15 @@ fn session(key: &str) -> Option<Session> {
     sessions().lock().ok()?.get(key).cloned()
 }
 
+/// A preview belongs to the actual negotiated source, including alternate versions.
+/// Match the item as well: a stale encoder receipt cannot supply another episode's images.
+pub(crate) fn preview_owner(key: &str, rk: &str, generation: &str) -> Option<super::trickplay::Owner> {
+    let s = session(key)?;
+    let item = ids::guid_of_key(rk)?;
+    if ids::normalize(&s.item_guid) != item { return None; }
+    super::trickplay::Owner::new(&item, &s.media_source_id, generation)
+}
+
 fn put_session(key: &str, mut s: Session) {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     s.seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

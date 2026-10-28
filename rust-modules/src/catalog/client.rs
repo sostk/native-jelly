@@ -843,6 +843,16 @@ impl Client {
         crate::jf::seat::is_jf(&self.origin).then(|| crate::jf::Jf::new(self))
     }
 
+    /// Optional Jellyfin images/metadata: a bounded read under the ordinary credential policy.
+    pub(crate) fn jf_preview_get(&self, path: &str, headers: &[&str], max: usize) -> ArtFetch {
+        if !self.may_send() { return ArtFetch::NoResponse; }
+        match http::request_probe(&self.origin, path, Method::Get, headers, max, 3, self.resolve_pin.as_ref()) {
+            Ok(r) if r.ok() => ArtFetch::Bytes(r.body),
+            Ok(r) => ArtFetch::Status(r.status),
+            Err(_) => ArtFetch::NoResponse,
+        }
+    }
+
     /// One Jellyfin request: same origin, resolve pin, data-io gate and credential policy as
     /// [`Self::send`], but the credential rides the caller's `Authorization` header rather than
     /// the query string, and a write may carry a JSON body.

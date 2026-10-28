@@ -29,6 +29,7 @@ pub mod plaintext;
 pub mod seat;
 pub mod store;
 pub mod ticks;
+pub(crate) mod trickplay;
 pub(crate) mod url;
 
 pub use api::{Jf, JfPage, JfSearch, JfShelf, SEARCH_GROUPS};
