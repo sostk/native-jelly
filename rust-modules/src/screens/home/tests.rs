@@ -3254,3 +3254,38 @@ fn incremental_republication_duplicate_home_rows_keep_last_key_places_and_first_
     assert_eq!(page.locate(elem), Some(Located::Item(0, 1)), "the first drawn row wins");
     assert_indexes_agree(&page);
 }
+
+/// Grade the production Jellyfin DTO -> catalog row -> tile caption path, including resume edges.
+#[test]
+fn continue_watching_uses_jellyfin_episode_numbers_and_resume_metadata() {
+    let _serial = nj_base::testlock::serial();
+    let _lang = nj_platform::i18n::language_on_this_thread_for_test(nj_platform::i18n::Preference::En);
+    let episode = |offset, index: Option<i64>, season: Option<i64>| {
+        let dto: crate::jf::models::BaseItemDto = serde_json::from_value(serde_json::json!({
+            "Id":"00000000002010000000000000000000", "Type":"Episode", "Name":"Pilot",
+            "SeriesName":"A very long series title whose poster already identifies the show",
+            "SeriesId":"00000000002000000000000000000000",
+            "IndexNumber":index, "ParentIndexNumber":season, "RunTimeTicks":27_000_000_000_i64,
+            "UserData":{"PlaybackPositionTicks":offset}
+        })).unwrap();
+        crate::catalog_fetch::parse_item(&crate::jf::convert::item(&dto, 0), crate::catalog::ServerId::default())
+    };
+    let caption = |m: &PmsMovie| card_row::focused_caption(&tile_facts::of(m), true).unwrap().to_str().unwrap().to_string();
+    let m = episode(12_000_000_000_i64, Some(5), Some(2));
+    assert_eq!((m.ep_index, m.season_index, m.resume_ms), (5, 2, 1_200_000));
+    assert!(m.resume_frac().is_some());
+    assert_eq!(caption(&m), "S2 · E5 · 25 min left");
+    assert_eq!(caption(&episode(0, Some(5), Some(2))), "S2 · E5 · New episode");
+    assert_eq!(caption(&episode(12_000_000_000_i64, Some(5), Some(0))), "E5 · 25 min left");
+    assert_eq!(caption(&episode(12_000_000_000_i64, Some(5), None)), "E5 · 25 min left");
+    assert!(caption(&episode(12_000_000_000_i64, None, Some(2))).starts_with("A very long series title"));
+    for offset in [27_000_000_000_i64, 36_000_000_000_i64] {
+        let finished = episode(offset, Some(5), Some(2));
+        assert!(finished.resume_frac().is_none());
+        assert_eq!(caption(&finished), "S2 · E5 · New episode", "no time promised without a resume bar");
+    }
+    let movie = PmsMovie { title: "Movie".into(), dur_ns: 45 * 60 * 1_000_000_000,
+        resume_ms: 20 * 60_000, ..Default::default() };
+    assert_eq!(caption(&movie), "25 min left");
+    assert!(card_row::focused_caption(&tile_facts::of(&PmsMovie::default()), true).is_none());
+}

@@ -931,9 +931,10 @@ pub(crate) fn focused_caption(m: &TileFacts<'_>, is_continue: bool) -> Option<st
     std::ffi::CString::new(s).ok()
 }
 
-/// The focused Continue-Watching card's secondary line (Home Screen.dc): an in-progress item reads
-/// "<show> · 8 min left" (episodes) or just the time-remaining (a resumed movie); a next-up episode
-/// (no resume point yet) reads "<show> · New episode". `title` above it carries the episode name.
+/// Continue Watching's focused state line: a numbered episode reads "S2 · E5 · 8 min left"
+/// (or "S2 · E5 · New episode" without a resume point). The poster identifies the show, and
+/// the title above names the episode. Unnumbered episodes retain the show-name fallback;
+/// a resumed movie shows its remaining time alone. The existing label band stays two lines.
 ///
 /// "In progress" is `PmsMovie::resume_frac` — THE resume rule, which the caller applies when it
 /// fills [`TileFacts::resume`], and the same call `Grid::draw` makes for the BAR in the pass that
@@ -945,20 +946,22 @@ pub(crate) fn focused_caption(m: &TileFacts<'_>, is_continue: bool) -> Option<st
 /// separate question with a separate answer: `widgets::poster_mark` reads `PmsMovie::watched`, so
 /// a stale past-end `viewOffset` on an item the server has not marked watched drew no mark at all.
 fn cw_caption(m: &TileFacts<'_>) -> Option<std::ffi::CString> {
-    let show = m.show_title;
+    let is_episode = m.kind == TileKind::Episode;
+    let address = (is_episode && m.ep_index > 0)
+        .then(|| crate::ui::fmt::episode_address(i64::from(m.season_index), i64::from(m.ep_index)));
     let s = if let Some(resume) = m.resume {
         let left = crate::ui::fmt::time_left(resume.left_ms);
-        if m.kind == TileKind::Episode && !show.is_empty() {
-            format!("{show} \u{00b7} {left}")
-        } else {
-            left // a resumed movie: time-remaining alone
+        match address {
+            Some(a) => format!("{a} · {left}"),
+            None if is_episode && !m.show_title.is_empty() => format!("{} · {left}", m.show_title),
+            None => left,
         }
-    } else if m.kind == TileKind::Episode {
-        // next-up episode: no resume point, so no bar and no time — just the "New episode" cue
-        if show.is_empty() {
-            nj_platform::i18n::msg::widgets_card_new_episode().to_string()
-        } else {
-            nj_platform::i18n::msg::widgets_card_show_new_episode(show)
+    } else if is_episode {
+        let new = nj_platform::i18n::msg::widgets_card_new_episode();
+        match address {
+            Some(a) => format!("{a} · {new}"),
+            None if m.show_title.is_empty() => new.to_string(),
+            None => nj_platform::i18n::msg::widgets_card_show_new_episode(m.show_title),
         }
     } else {
         return None;
@@ -1079,10 +1082,10 @@ pub(crate) fn settled_top(r: usize, focus: Option<usize>, pitch_fixed: f32) -> f
 
 /// How long the run rests before it starts gliding — long enough to read the opening words of an
 /// ordinary title before it moves.
-const MARQUEE_HOLD_MS: f32 = 1000.0;
+const MARQUEE_HOLD_MS: f32 = crate::ui::marquee::HOLD_MS;
 /// Glide speed, in px/s. Chosen to be readable from a couch rather than merely legible paused — a
 /// scrolling news-ticker speed blurs on a TV's own motion smoothing.
-const MARQUEE_SPEED: f32 = 40.0;
+const MARQUEE_SPEED: f32 = crate::ui::marquee::SPEED;
 /// Air between the outgoing run's tail and its follower's head — enough that the two never read as
 /// one run with a repeated word running into itself.
 const MARQUEE_GAP: f32 = 60.0;
@@ -1441,6 +1444,32 @@ pub(crate) fn resume_bar(p: Painter, r: Rect, frac: f32, rad: f32) {
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn continue_watching_episode_captions_keep_the_address_and_time_visible_in_every_language() {
+        use nj_machine::machine::Measure;
+        let _serial = nj_base::testlock::serial();
+        let measure = &nj_base::fontcov::advances::ShippedMeasure;
+        for lang in nj_platform::i18n::SHIPPED {
+            let _lang = nj_platform::i18n::language_on_this_thread_for_test(lang);
+            for resume in [None, Some(crate::ui::tile::Resume { frac: 0.5, left_ms: 25 * 60_000 })] {
+                let facts = TileFacts { kind: TileKind::Episode, title: "Pilot", show_title: "A long show name",
+                    season_index: 2, ep_index: 5, resume, ..Default::default() };
+                let label = TileLabel { caption: focused_caption(&facts, true), ..TileLabel::played("Pilot") };
+                let caption = label.caption.as_ref().unwrap().to_str().unwrap();
+                assert!(caption.starts_with(&crate::ui::fmt::episode_address(2, 5)));
+                // Walk both edge columns and a middle card with the production placement/elision path.
+                for x in [MARGIN_X, 700.0, SCR_W - MARGIN_X - CARD_W] {
+                    let drawn = crate::ui::draw_census::capture_runs(|| draw_label_block(Painter::recording(),
+                        Rect::new(x, 400.0, CARD_W, CARD_H), &RowStyle::HOME, &label, 820.0, measure));
+                    let run = drawn.last().unwrap();
+                    assert_eq!(run.text, caption, "{}: full episode state must fit at x={x}", lang.tag());
+                    assert!(run.at.x >= EDGE_PAD - 0.01);
+                    assert!(run.at.x + measure.width_str(&run.text, run.size, run.bold) <= SCR_W - EDGE_PAD + 0.01);
+                }
+            }
+        }
+    }
+
     /// A collection's caption is its size — "1 item", "3 items" — never a year it does not have.
     #[test]
     fn a_collection_caption_counts_its_items() {

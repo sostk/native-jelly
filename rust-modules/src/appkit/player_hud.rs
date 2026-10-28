@@ -499,6 +499,7 @@ pub(crate) type RowPop = crate::ui::widgets::CtlPop<{ BTN_N as usize }>;
 /// exactly where [`step`](Self::step)'s doc says they must be.
 pub(crate) struct TransportRow {
     pop: RowPop,
+    title_clock: crate::ui::marquee::Clock,
     /// **The measured width of every control-row stand-in label seen so far** — a RENDER memo, the
     /// one half of this struct that is not logical state.
     ///
@@ -527,6 +528,7 @@ impl TransportRow {
     pub(crate) fn new() -> Self {
         Self {
             pop: RowPop::new(),
+            title_clock: crate::ui::marquee::Clock::default(),
             widths: Vec::new(),
             play_at: None,
             pause_seen: None,
@@ -569,13 +571,21 @@ impl TransportRow {
         self.play_at = Some(at);
     }
 
+    pub(crate) fn reset_title(&self) {
+        self.title_clock.release();
+    }
+
     pub(crate) fn note_transport(&mut self, now: u32) {
         if !crate::player::is_started() {
+            self.reset_title();
             self.play_at = None;
             self.pause_seen = None;
             return;
         }
         let paused = crate::player::TX.paused.load(Relaxed);
+        if !paused {
+            self.reset_title();
+        }
         if self.pause_seen == Some(true) && !paused {
             self.play_at = Some(now);
         }
@@ -1493,8 +1503,7 @@ pub(crate) enum Kicker {
     Context(*const std::os::raw::c_char),
 }
 
-/// The title block above the playbar: the [`Kicker`] line over the [`HUD_TITLE_SZ`] display
-/// title. (Apple-TV layout.)
+/// The trailer title block: it has no player control row to reserve space for.
 pub(crate) fn draw_title(p: Painter, kicker: Kicker, title: *const std::os::raw::c_char) {
     let (text, ink, bold) = match kicker {
         Kicker::Episode(text) => (text, theme::TEXT_PRIMARY, 1),
@@ -1518,6 +1527,65 @@ pub(crate) fn draw_title(p: Painter, kicker: Kicker, title: *const std::os::raw:
         0,
         1,
     );
+}
+
+/// Fit both title lines before the controls; pause reveals the display title's ending once.
+fn draw_player_title(
+    p: Painter,
+    kicker: Kicker,
+    title: *const std::os::raw::c_char,
+    right: f32,
+    measure: &dyn nj_machine::machine::Measure,
+    paused: bool,
+    clock: &crate::ui::marquee::Clock,
+) {
+    let width = (right - SB_X).max(0.0);
+    let _clip = crate::ui::screen::ClipScope::open_in(p, Rect::new(SB_X, 0.0, width, SCR_H));
+    let (text, ink, bold) = match kicker {
+        Kicker::Episode(text) => (text, theme::TEXT_PRIMARY, true),
+        Kicker::Context(text) => (text, theme::TEXT_SECONDARY, false),
+    };
+    let context = if text.is_null() { std::borrow::Cow::Borrowed("") }
+        else { unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy() };
+    if !text.is_null() {
+        let fitted = measure.fit_line(&context, width, theme::size::CAPTION, bold);
+        p.text(fitted.as_ptr(), SB_X, SCR_H - 312.0, theme::size::CAPTION, ink, 0, i32::from(bold));
+    }
+    if title.is_null() || width <= 0.0 {
+        clock.release();
+        return;
+    }
+    let full = unsafe { std::ffi::CStr::from_ptr(title) };
+    let label = full.to_string_lossy();
+    let full_width = measure.width(full, HUD_TITLE_SZ, true);
+    if paused && full_width > width {
+        let elapsed = clock.read(&label, &context);
+        let offset = crate::ui::marquee::reveal_once(elapsed, full_width, width);
+        if offset > 0.0 {
+            p.text(title, SB_X - offset, SCR_H - 278.0, HUD_TITLE_SZ, theme::TEXT_PRIMARY, 0, 1);
+            return;
+        }
+    } else {
+        clock.release();
+    }
+    let fitted = measure.fit_line(&label, width, HUD_TITLE_SZ, true);
+    p.text(fitted.as_ptr(), SB_X, SCR_H - 278.0, HUD_TITLE_SZ, theme::TEXT_PRIMARY, 0, 1);
+}
+
+/// The control/focus geometry is also the title's boundary. Reserve at least the settled
+/// focus scale, so walking the ring does not make the available reading width breathe.
+fn title_right(slot: ControlSlot, row: &TransportRow, measure: &dyn nj_machine::machine::Measure) -> f32 {
+    let mut left = CTRL_RIGHT;
+    for i in 0..slot.items() {
+        if let Some(rect) = slot.item_rect(row, i, measure) {
+            left = left.min(rect.scaled(row.scale(i).max(crate::ui::widgets::CTRL_FOCUS_SCALE)).x);
+        }
+    }
+    if matches!(slot, ControlSlot::UpNext(_)) {
+        let layout = crate::appkit::up_next::layout_peek(row, measure);
+        left = left.min(layout.still.x).min(layout.caption.x);
+    }
+    (left - theme::space::MD).max(SB_X)
 }
 
 /// How the playhead is drawn — see [`draw_playbar`].
@@ -1797,7 +1865,11 @@ pub(crate) fn draw_hud(
     // doc exists to forbid. Deliberately NOT gated on `transport` — the Info card / Chapters strip
     // pass false and would otherwise put the bottom scrim + tabs back under a failure.
     if readout_owns_frame(busy) {
+        row.reset_title();
         return;
+    }
+    if !transport {
+        row.reset_title();
     }
     let p = Painter::root();
     let e = hud_env();
@@ -1805,6 +1877,8 @@ pub(crate) fn draw_hud(
     draw_scrim(p);
 
     if transport {
+        let right = title_right(slot, row, measure);
+        let paused = crate::player::TX.paused.load(Relaxed);
         // title block under the playbar: for an episode, "S1, E1 · Episode Name" (white) sits above the
         // SHOW title; for a movie (or any extra, trailers included), the route ctxline over the movie
         // title. (Apple-TV layout.) Gated on `is_real_episode`, not `is_episode` — a show's trailer
@@ -1826,13 +1900,15 @@ pub(crate) fn draw_hud(
             // refactor was supposed to be visual-no-op, and an `unwrap_or_default()` here draws an
             // EMPTY title line instead of skipping it, which is a real (if rare) behavior change.
             if let Ok(title) = CString::new(n.title.clone()) {
-                draw_title(p, Kicker::Episode(kicker.as_ptr()), title.as_ptr());
+                draw_player_title(p, Kicker::Episode(kicker.as_ptr()), title.as_ptr(),
+                    right, measure, paused, &row.title_clock);
             }
         } else {
-            draw_title(
+            draw_player_title(
                 p,
                 Kicker::Context(crate::route::ctxline_cptr(ps)),
                 crate::route::title_cptr(ps),
+                right, measure, paused, &row.title_clock,
             );
         }
 
@@ -2832,3 +2908,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "player_hud/title_tests.rs"]
+mod title_tests;

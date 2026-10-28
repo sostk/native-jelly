@@ -67,6 +67,7 @@ pub(crate) mod master_detail; // RESTRUCTURE (spec §10): reusable two-region fo
 // no module-level deletion counter remains for a newly mounted screen to poll.
 pub(crate) mod page_stack; // the drill-in page stack Tracks and More share
 pub(crate) mod panel_motion; // the resize/page-slide spring of the in-player table popovers (Tracks, More)
+pub(crate) mod marquee; // shared title reveal clock and one-shot reading motion
 pub mod nav; // the page transition's PRESENTATION, published once a frame from the container
 pub mod pill; // THE CAPSULE OUTLINE — three blended arcs per corner, solved; not a stadium
 pub(crate) mod poster_grid; // uniform six-column portrait geometry for collection-like pages
@@ -295,6 +296,33 @@ pub(crate) mod draw_census {
         LOG.with(|l| *l.borrow_mut() = Some(Vec::new()));
         f();
         LOG.with(|l| l.borrow_mut().take()).unwrap_or_default()
+    }
+
+    #[derive(Debug, PartialEq)]
+    pub(crate) struct TextRun {
+        pub text: String,
+        pub at: Rect,
+        pub size: i32,
+        pub bold: bool,
+        pub ink: [f32; 4],
+    }
+    thread_local! {
+        static RUNS: RefCell<Option<Vec<TextRun>>> = const { RefCell::new(None) };
+    }
+    pub(crate) fn note_run(s: *const std::os::raw::c_char, at: Rect, size: i32, bold: bool, ink: [f32; 4]) {
+        RUNS.with(|l| {
+            if let Some(v) = l.borrow_mut().as_mut() {
+                if !s.is_null() {
+                    v.push(TextRun { text: unsafe { std::ffi::CStr::from_ptr(s) }.to_string_lossy().into_owned(), at, size, bold, ink });
+                }
+            }
+        });
+    }
+    /// The real strings and typography sent to a recording painter, without opening a font or GL.
+    pub(crate) fn capture_runs(f: impl FnOnce()) -> Vec<TextRun> {
+        RUNS.with(|l| *l.borrow_mut() = Some(Vec::new()));
+        f();
+        RUNS.with(|l| l.borrow_mut().take()).unwrap_or_default()
     }
 
     thread_local! {
@@ -1405,6 +1433,8 @@ impl Painter {
             let w = recorded_text_width(s, sz, bold);
             #[cfg(test)]
             draw_census::note(100, self.place(Rect::new(x, y, w, 0.0)));
+            #[cfg(test)]
+            draw_census::note_run(s, self.place(Rect::new(x, y, w, 0.0)), sz, bold != 0, self.c(col));
             return w;
         }
         let c = self.c(col);

@@ -313,3 +313,11 @@ and replayed on the LINUX simulator (`--features hostsim`, Xvfb); the macOS Simu
 first macOS replay of them. The alphabet's six `PlxNative` interface literals were renamed to the
 catalogue's current `Native Jelly` wording, and `Audio & Subtitles` and `Version`
 (`browse.detail.tracks`, `browse.detail.version`) were added, all source-backed in `locales/en`.
+
+**Continue Watching caption port (28 October 2026):** Home's anchor gains one Width entry
+for the new `S2 · E2 · 32 min left` caption. Its bits came from the production TtfMeasure
+in a fresh seed-1 controlled-Home recording; all nine shared measurements agreed bit for bit.
+The entry sits beside the old caption's measurement at frame 492. All 10,364 original records
+remain byte-for-byte unchanged when that one new line is removed: no manifest, state hash,
+input, effect, result, landing, present, focus or hit expectation was rebaselined. The alphabet
+adds this exact formatter output with its source, rather than a general metadata pattern.

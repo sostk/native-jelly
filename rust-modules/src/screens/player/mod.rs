@@ -214,6 +214,7 @@ impl PlayerScreen {
     /// is retired; a real stop ends the session, so the HUD's timer, its dismissal and the Up Next
     /// countdown go with it.
     pub(crate) fn transport_reset(&mut self, for_reload: bool) {
+        self.row.reset_title();
         self.scrub.ns = -1;
         self.scrub.disengage();
         self.scrub.commit_at = 0;
@@ -1357,6 +1358,8 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
         let hud_drawn = self.hud_drawn(ps, now);
         if hud_drawn {
             self.draw_hud(ps, now, f.measure, H::metadata(f.cx));
+        } else {
+            self.row.reset_title();
         }
         // The read-out is NOT transport chrome — it is drawn whether or not the HUD is up, so a
         // terminal `Error` (which is not `is_busy()`, so it does not pin the HUD) keeps its message
