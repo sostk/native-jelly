@@ -1152,6 +1152,8 @@ mod tests {
     /// and the queue it must reflect is THIS one — the pixels `accept` parked for the upload step.
     #[test]
     fn has_queued_work_reflects_the_texture_queue() {
+        // accept() publishes process-wide pending bytes despite CACHE being thread-local.
+        let _guard = nj_base::testlock::serial();
         let mut b = Budget::new();
         b.begin_frame(0);
         note_queued(&mut b);
@@ -1167,7 +1169,7 @@ mod tests {
         note_queued(&mut b);
         assert!(b.has_queued_work(), "a pending texture forces the frame that uploads it");
         // leave the thread-local cache as this test found it
-        CACHE.with(|c| c.borrow_mut().pending.clear());
+        mutate_cache(|c| c.pending.clear());
         note_queued(&mut b);
         assert!(!b.has_queued_work());
     }
