@@ -1169,6 +1169,13 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     // `TX.seek_to_ns` stays exactly where it is and the retranscode/native-audio tail re-checks it
     // once the claim lands (`commit_or_carry_seek`).
     const SEEK_STUCK_MS: u32 = 1200;
+    // A Pause accepted after arming the seek can hold the first post-seek keyframe in the
+    // queue. Feeding is deliberately closed, so absence of re-anchoring is not a failed reopen.
+    // Keep a fresh watchdog budget for Resume. A paused-seek preview has its own feed override
+    // and must still recover if it genuinely stalls while decoding that landed frame.
+    if eng.flushed && eng.rebase_pending && !TX.feed_allowed() {
+        eng.seek_armed_at = now;
+    }
     if eng.flushed && eng.rebase_pending
         && now.wrapping_sub(eng.seek_armed_at) > SEEK_STUCK_MS
         && !crate::route::claim_in_flight()
@@ -2049,6 +2056,41 @@ mod native_seek_pump_tests {
         assert_eq!(crate::player::state(&rig.ps), crate::player::PlaybackState::Error);
         crate::player::stop_bufferfeed(&mut rig.ps, &mut rig.pa);
         crate::route::cancel_play(&mut rig.ps);
+    }
+
+    #[test]
+    fn pause_after_seek_arming_does_not_spend_the_recovery_budget() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        rig.arm(TARGET_NS);
+        assert!(crate::player::pause(&mut rig.pa));
+        rig.land_keyframe(TARGET_NS);
+        for _ in 0..300 {
+            rig.frame();
+        }
+        assert!(TX.paused.load(Relaxed), "the viewer's Pause remains authoritative");
+        assert!(ffi_host::seek_log_for_test().is_empty(), "no feed while user-held");
+        assert_eq!(rig.eng().seek_retries, 0, "a held feed is not a stuck demuxer");
+        assert!(reloads().is_empty(), "Pause cannot trigger a fresh Load");
+        assert!(crate::player::resume(&mut rig.pa));
+        for _ in 0..5 { rig.frame(); }
+        assert_eq!(ffi_host::seek_log_for_test(), vec![TARGET_NS / 1_000_000]);
+        assert!(!rig.eng().rebase_pending);
+        assert!(reloads().is_empty());
+    }
+
+    #[test]
+    fn paused_seek_preview_keeps_the_stuck_watchdog_active() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        rig.arm(TARGET_NS);
+        assert!(crate::player::pause(&mut rig.pa));
+        assert!(TX.begin_paused_seek());
+        rig.now += 1300;
+        rig.frame();
+        assert_eq!(rig.eng().seek_retries, 1, "preview decoding still needs recovery when no keyframe arrives");
+        assert!(TX.paused.load(Relaxed), "recovery does not change viewer intent");
+        assert!(reloads().is_empty());
     }
 
     #[test]
