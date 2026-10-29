@@ -5,9 +5,9 @@ The implementation is on `feat/dovi-profile7`, stacked on the completed local U5
 `b9b1c1d3`. The later verification commit changes documentation only. Neither U5 nor C1
 has been merged into main or pushed in this work.
 
-**TV acceptance is pending.** The user stopped the first device run before its checks
-completed, then requested host-only completion and deferred TV work until the next morning.
-No partial device result is counted as a pass. No automatic TV run is scheduled.
+**Scoped TV acceptance completed later on 30 October 2026**, after the user made the TV
+available again. The results below retain the earlier host checkpoint; the final section
+records real Jellyfin playback on webOS 6.5.3. The first stopped run counted no pass.
 
 ## Conversion and negotiation
 
@@ -104,7 +104,7 @@ restored their edits and reported a clean tree. Compilation-unit totals are sepa
 the deterministic 84-package ARM graph count above.
 
 
-## Deferred device work
+## Original deferred device work (before the later acceptance run)
 
 A read-only scan using the provided dedicated Jellyfin test account found 20 Profile 7
 candidates among 247 Movie/Episode items. This establishes fixture availability only, not
@@ -113,9 +113,9 @@ credentials, identifiers, media names and captures are not included in this reco
 
 The stopped debug run closed the app, cleared injected triggers, stopped its tunnel and
 released the TV lock. The screen was already active when restoration was requested. Sound
-settings were untouched. No more TV commands were issued after the host-only instruction.
+settings were untouched. No more TV commands were issued until the user later made the TV available again.
 
-The prepared next device run must verify actual HEVC copy rather than server video encoding,
+The originally prepared device run was to verify actual HEVC copy rather than server video encoding,
 P7 RPU conversion, video-plane output, forward/backward seeks and continuing playback. It
 must read the panel's dynamic-range state for Dolby Vision and repeat with a diagnostic
 unsupported-DV capability override to check HDR10 fallback on the same HDR10-capable set.
@@ -128,3 +128,35 @@ stability, FEL detail, other firmware and a broader codec/HDR matrix remain outs
 - `f46a0631` — Jellyfin range offers and the conversion contract.
 - `b9b1c1d3` — isolated search test-fixture correction found by the full gate.
 - The documentation-only successor records these host results and deferred TV acceptance.
+
+
+## Later TV acceptance — 30 October 2026
+
+The tested debug artifact was built from `c876814f`; checkpoint `7145d5ec` has identical
+application/test/build inputs and only adds documentation. Its unstripped SHA-256 is
+`af4723050bd8d011c78e1d3241eaf8d9e6e29c84ba78d64978895f6f71c9c46a`.
+The connected set reports webOS **6.5.3**, model `o20n`, board `O20_DVB`, and an AV1 decoder
+row. This is distinct from the older webOS 4.10.2 development-set measurements in the
+historical Dolby document.
+
+Two real Jellyfin cases used the dedicated authorized test account and a single-track HEVC
+Profile 7 item. The server kept HEVC video unchanged. Both runs logged P7-to-8.1 arming,
+RPU rewriting and enhancement-layer removal, native load completion and a bound video plane.
+The exact rewriting/removal log counts are sampled markers, not a count of every NAL.
+
+| Case | Panel dynamic range | Native seek calls | Load completions | Advancement after seeks |
+|---|---|---|---|---|
+| Confirmed DV capability | `dolbyHdr` | 60 s then 10 s, both accepted | 1 | 7 s |
+| Diagnostic `dvcaps0` override | `hdr` | 60 s then 10 s, both accepted | 1 | 7 s |
+
+Neither case logged a conversion refusal, watchdog reload or crash. DISPLAY service captures
+include the hardware plane and were opened after releasing the lease: both show a decoded
+picture without a gross pink/green cast. Panel state was read through the settings service;
+captures alone are not a measurement of panel mode or calibrated colour correctness.
+The unforced DV and HDR capability probes also returned supported from configd on this set.
+
+Each bounded run closed the app, cleared injected triggers, terminated the server tunnel,
+restored the panel request and released the TV lock. Sound settings were untouched. Logs,
+real media identifiers and captures remain private outside the repository. This establishes
+the scoped P7 conversion/DV/HDR10/seek checks on this firmware; it does not establish long-run
+throughput, full FEL reconstruction, every source shape or behavior on other hardware.
