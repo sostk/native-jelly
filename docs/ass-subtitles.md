@@ -6,6 +6,12 @@ server's extracted file, which the same renderer draws; the server burns it only
 delivery fits (`docs/jellyfin-playback.md` "Subtitles"). The simple caption size/wrapping rules apply to plain text;
 ASS/SSA retains its authored layout. The viewer's existing tone and timing controls still apply.
 
+Text sidecars and embedded plain-text packets are decoded before parsing. A BOM wins
+(including UTF-16), valid UTF-8 is borrowed unchanged, and other text uses a bounded
+per-track `chardetng` decision with the container language as a hint. Unqualified Chinese
+tags leave GBK versus Big5 to the bytes. A whole sidecar is detected in one pass; embedded
+tracks settle after 160 non-ASCII bytes. Very short untagged tracks remain ambiguous.
+
 `ci/build-libass.py` builds a pinned libass with private FreeType, FriBidi and HarfBuzz. The
 application loads its own `libass-plx` by absolute path. Only the versioned `plx_ass_*` facade is
 exported; dependency symbols cannot collide with the firmware's font stack. `src/ass.c` reads

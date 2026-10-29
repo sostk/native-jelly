@@ -677,26 +677,17 @@ unsafe fn container_hdr(cp: *const AVCodecParameters) -> crate::player::vp9_hdr:
 /// The returned `String` is a COPY. The entry points into the stream's dictionary, which
 /// `avformat_close_input` frees.
 unsafe fn stream_name(s: *mut AVStream) -> String {
+    [c"title", c"name"].into_iter().find_map(|key| stream_tag(s, key)).unwrap_or_default()
+}
+
+/// Copy one container metadata tag; dictionary storage belongs to FFmpeg.
+unsafe fn stream_tag(s: *mut AVStream, key: &std::ffi::CStr) -> Option<String> {
     let dict = *((s as *const u8).add(OFF_STREAM_METADATA) as *const *const AVDictionary);
-    if dict.is_null() {
-        return String::new();
-    }
-    for key in [c"title", c"name"] {
-        let e = av_dict_get(dict, key.as_ptr(), std::ptr::null(), 0);
-        if e.is_null() || (*e).value.is_null() {
-            continue;
-        }
-        // `to_string_lossy` rather than a strict decode: these are user-authored tags off a
-        // stranger's file, and a mis-encoded byte must cost that character, not the whole name.
-        let v = std::ffi::CStr::from_ptr((*e).value)
-            .to_string_lossy()
-            .trim()
-            .to_string();
-        if !v.is_empty() {
-            return v;
-        }
-    }
-    String::new()
+    if dict.is_null() { return None; }
+    let e = av_dict_get(dict, key.as_ptr(), std::ptr::null(), 0);
+    if e.is_null() || (*e).value.is_null() { return None; }
+    let value = std::ffi::CStr::from_ptr((*e).value).to_string_lossy().trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 /// Every track's container name, by TYPE, in file order — the two lists
@@ -9183,6 +9174,7 @@ pub(crate) fn demux(
                 // only for Bitmap tracks (PGS/VobSub/DVB), which we software-decode to pixels;
                 // text tracks carry a null ctx and take the payload path below.
                 let mut sub_streams: Vec<(c_int, SubKind, *mut AVCodecContext)> = Vec::new();
+                let mut sub_charsets = Vec::new();
                 for i in 0..(*fmt).nb_streams {
                     let cp = stream_codecpar(*streams.add(i as usize));
                     if (*cp).codec_type == AVMEDIA_TYPE_SUBTITLE {
@@ -9193,6 +9185,9 @@ pub(crate) fn demux(
                             std::ptr::null_mut()
                         };
                         sub_streams.push((i as c_int, k, dec));
+                        sub_charsets.push(crate::player::sub_charset::TrackCharset::new(
+                            stream_tag(*streams.add(i as usize), c"language").as_deref(),
+                        ));
                     }
                 }
                 let ass_generation = begin_ass_sources(&url, fmt, streams, &sub_streams);
@@ -9598,9 +9593,10 @@ pub(crate) fn demux(
                                     crate::player::ass_source::push(
                                         ass_generation, sub_pos as i32, start, end, payload,
                                     );
-                                } else {
+                                } else if payload.len() <= 256 * 1024 {
+                                    let text = crate::player::sub_charset::subtitle_text(payload, &sub_charsets[sub_pos]);
                                     crate::player::push_subtitle_cue(
-                                        sub_pos as i32, start, end, payload,
+                                        sub_pos as i32, start, end, text.as_bytes(),
                                     );
                                 }
                             }

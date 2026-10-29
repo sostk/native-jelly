@@ -293,14 +293,14 @@ fn is_ass_script(text: &str) -> bool {
 
 fn decode(bytes: Vec<u8>, codec: &str) -> Result<Content, Failure> {
     if bytes.len() > crate::catalog::SIDECAR_MAX_BYTES { return Err(Failure::Empty); }
-    let text = String::from_utf8_lossy(&bytes);
+    let text = super::sub_charset::subtitle_text_whole(&bytes, &super::sub_charset::TrackCharset::unknown());
     if is_ass_script(&text) {
         // Validate only the presence of events. libass owns the script grammar, including
         // style/format declarations, overlapping dialogue and vector drawing events.
         return Ok(Content::Ass {
             source: Arc::new(super::ass::Source {
                 id: super::ass::next_source_id(), revision: 1,
-                content: super::ass::Content::Script { bytes: bytes.into(), fonts: Arc::from([]) },
+                content: super::ass::Content::Script { bytes: text.as_bytes().into(), fonts: Arc::from([]) },
             }),
             font_generation: None,
         });
@@ -331,7 +331,7 @@ fn cue_at(cues: &[Cue], now_ns: i64) -> Option<&Cue> {
 /// hours optional). ASS/SSA belongs to the native renderer and is never flattened here.
 pub(crate) fn parse(bytes: &[u8]) -> Vec<Cue> {
     if bytes.len() > crate::catalog::SIDECAR_MAX_BYTES { return Vec::new(); }
-    let text = String::from_utf8_lossy(bytes);
+    let text = super::sub_charset::subtitle_text_whole(bytes, &super::sub_charset::TrackCharset::unknown());
     let text = text.trim_start_matches('\u{feff}');
     if is_ass_script(text) { return Vec::new(); }
     let mut cues = parse_srt(text);
@@ -579,6 +579,16 @@ mod tests {
     }
 
     const S: i64 = 1_000_000_000;
+
+#[test] fn utf16_sidecar_keeps_its_cue() {
+ let s="1\n00:00:01,000 --> 00:00:03,000\nCafé\n";
+ let mut bytes=vec![0xff,0xfe]; bytes.extend(s.encode_utf16().flat_map(u16::to_le_bytes));
+ let cues=parse(&bytes); assert_eq!(cues.len(),1); assert_eq!(cues[0].text,"Café");
+}
+#[test] fn windows1252_sidecar_keeps_its_letters() {
+ let cues=parse(b"1\n00:00:01,000 --> 00:00:03,000\nO\xf9 est-ce qu'on d\xeene ce soir ? J'ai tr\xe8s faim.\n");
+ assert_eq!(cues[0].text,"Où est-ce qu'on dîne ce soir ? J'ai très faim.");
+}
 
     /// The ordinary file: counters, CRLF, a BOM, italics, a two-line cue — and the counter line
     /// must never leak into the text of the cue before it.

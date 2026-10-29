@@ -197,6 +197,9 @@ serde_json = { version = "1", default-features = false, features = ["alloc", "st
 # derive(Deserialize) for the typed plex API response models (src/plex/models.rs)
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 qrcodegen = "=1.8.0"
+# Pure-Rust legacy subtitle detection and decoding (no firmware charset dependency).
+encoding_rs = { version = "=0.8.35", default-features = false, features = ["alloc"] }
+chardetng = { version = "=1.0.0", default-features = false }
 
 [profile.release]
 opt-level = 2

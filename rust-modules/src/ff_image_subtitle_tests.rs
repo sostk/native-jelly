@@ -197,3 +197,37 @@ fn mkvmerge_zlib_subtitle_tracks_decode_like_uncompressed_ones() {
         "the zlib-compressed SRT packet must arrive inflated"
     );
 }
+
+/// A muxer can copy GBK bytes into a nominally UTF-8 SubRip track. Exercise the
+/// bundled demuxer's actual packets and language metadata, without a server.
+#[test]
+#[ignore = "requires the bundled host FFmpeg; run make check-ffmpeg"]
+fn legacy_subrip_packets_decode_using_the_container_language() {
+    let _guard = nj_base::testlock::serial();
+    bind_host_ffmpeg();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures/gbk-subrip.mkv").canonicalize().unwrap();
+    let url = CString::new(path.to_str().unwrap()).unwrap();
+    unsafe {
+        let mut fmt = std::ptr::null_mut();
+        assert!(avformat_open_input(&mut fmt, url.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) >= 0);
+        let streams = (*fmt).streams;
+        assert_eq!((*fmt).nb_streams, 1);
+        assert!(sub_kind((*stream_codecpar(*streams)).codec_id) == SubKind::Plain);
+        let language = stream_tag(*streams, c"language");
+        assert_eq!(language.as_deref(), Some("chi"));
+        let charset = crate::player::sub_charset::TrackCharset::new(language.as_deref());
+        let pkt = av_packet_alloc();
+        assert!(!pkt.is_null());
+        let mut cues = Vec::new();
+        while av_read_frame(fmt, pkt) >= 0 {
+            let raw = std::slice::from_raw_parts((*pkt).data, (*pkt).size as usize);
+            cues.push(crate::player::sub_charset::subtitle_text(raw, &charset).into_owned());
+            av_packet_unref(pkt);
+        }
+        let mut pkt = pkt;
+        av_packet_free(&mut pkt);
+        avformat_close_input(&mut fmt);
+        assert_eq!(cues, ["你好，世界！这是中文字幕。", "简体中文测试"]);
+    }
+}

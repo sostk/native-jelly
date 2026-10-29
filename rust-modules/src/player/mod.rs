@@ -34,6 +34,7 @@ mod pump;
 pub(crate) mod report;
 mod shared;
 pub(crate) mod sidecar;
+pub(crate) mod sub_charset;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
 #[cfg(feature = "hostsim")]
