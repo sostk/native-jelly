@@ -138,17 +138,10 @@ fn wrap(s: &str, max: usize) -> Vec<String> {
 /// every frame independent of the transport HUD; hidden when subtitles are off or no
 /// cue is active at the current position.
 ///
-/// TWO producers, one renderer: an external (sidecar) selection is asked first — it is no
-/// demuxer track, so `desired_sub_idx` is -1 while one is up and the embedded store answers
-/// nothing — then the embedded cue store. `suppressed` silences the sidecar while the playing
-/// conversion BURNS the selection into the picture (`route::client_renders_subtitle`), because
-/// drawing it too would double the line.
+/// Subtitle download notices use the HUD's ordinary text layout. Media captions
+/// themselves are rendered by the shared libass worker (or the image decoder).
 pub(crate) fn draw_subtitles(hud_up: bool, suppressed: bool) {
-    let now_ns = crate::player::playpos_ns();
-    // the sidecar is looked up on the SUBTITLE clock (the playhead less the viewer's timing
-    // offset); the embedded store applies the same subtraction inside `active_subtitle`
-    let cue = crate::player::sidecar::active(crate::player::subtitle_clock_ns(now_ns), suppressed)
-        .or_else(|| crate::player::active_subtitle(now_ns));
+    let cue = crate::player::sidecar::active(0, suppressed);
     let text = match cue {
         Some(t) if !t.trim().is_empty() => t,
         _ => return,
@@ -156,7 +149,7 @@ pub(crate) fn draw_subtitles(hud_up: bool, suppressed: bool) {
     draw_subtitle_message(&text, hud_up);
 }
 
-/// Shared caption placement for plain text and a styled-renderer failure message. Text size and
+/// Caption placement for a download or native-renderer failure message. Text size and
 /// vertical placement follow the viewer's Settings > Playback picks (`route::subtitle_size`,
 /// `route::subtitle_position`) — native ASS/SSA keeps its authored style instead
 /// (`docs/ass-subtitles.md`).
@@ -221,33 +214,22 @@ fn subtitle_ink_for(tone: crate::catalog::session::SubtitleTone) -> [f32; 4] {
 /// caption's 36 px base face ([`draw_subtitle_message`]) and its line pitch/wrap width together,
 /// so a larger caption still wraps before it runs off either edge.
 fn subtitle_size_scale(size: crate::catalog::session::SubtitleSize) -> f32 {
-    use crate::catalog::session::SubtitleSize;
-    match size {
-        SubtitleSize::Small => 0.78,
-        SubtitleSize::Medium => 1.0,
-        SubtitleSize::Large => 1.25,
-        SubtitleSize::ExtraLarge => 1.5,
-    }
+    crate::player::text_style::size_scale(size)
 }
 
 /// How far ABOVE [`SUB_BASE_Y`]/[`SUB_CEIL_Y`] the viewer's Position pick lifts the plain-text
 /// caption ([`draw_subtitle_message`]) — Low is the baseline every build before this preference
 /// drew, so it lifts nothing.
 fn subtitle_position_lift(position: crate::catalog::session::SubtitlePosition) -> f32 {
-    use crate::catalog::session::SubtitlePosition;
-    match position {
-        SubtitlePosition::Low => 0.0,
-        SubtitlePosition::Middle => 160.0,
-        SubtitlePosition::High => 320.0,
-    }
+    crate::player::text_style::position_lift(position)
 }
 
 /// Subtitle baseline: where the caption block sits with the transport DOWN, and the ceiling it
 /// lifts to with the transport UP (clear of the scrubber, buttons and tabs). Both paths share
 /// them: text lifts by moving its baseline, images lift by however much they overhang the
 /// ceiling — otherwise a bottom-positioned PGS cue sits behind the scrim while the user seeks.
-const SUB_BASE_Y: f32 = SCR_H - 100.0;
-const SUB_CEIL_Y: f32 = SCR_H - 300.0;
+const SUB_BASE_Y: f32 = crate::player::text_style::SUB_BASE_Y;
+const SUB_CEIL_Y: f32 = crate::player::text_style::SUB_CEIL_Y;
 
 /// The most caption lines [`draw_subtitle_message`] ever stacks (the rest of a longer cue is
 /// dropped), and the reason the Timing capsule's y is fixed rather than following the caption
@@ -256,7 +238,7 @@ const SUB_CEIL_Y: f32 = SCR_H - 300.0;
 const MAX_CAPTION_LINES: usize = 3;
 /// The vertical pitch of one caption line in [`draw_subtitle_message`] — its 36 px face plus
 /// leading.
-const CAPTION_LINE_PITCH: f32 = 48.0;
+const CAPTION_LINE_PITCH: f32 = crate::player::text_style::CAPTION_LINE_PITCH;
 /// The Timing capsule's bottom y — [`SUB_BASE_Y`] cleared by the tallest caption block this app
 /// ever draws ([`MAX_CAPTION_LINES`] at [`CAPTION_LINE_PITCH`]), so the capsule never overlaps
 /// even a three-line cue.

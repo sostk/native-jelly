@@ -1276,9 +1276,16 @@ unsafe fn begin_ass_sources(
     use crate::player::{ass::Font, ass_source};
     let mut headers = Vec::new();
     let mut header_bytes = 0;
+    let mut text_tracks = Vec::new();
     for (track, (si, kind, _)) in subs.iter().enumerate() {
-        if *kind != SubKind::Ass { continue; }
         let cp = stream_codecpar(*streams.add(*si as usize));
+        if *kind != SubKind::Ass {
+            let name = std::ffi::CStr::from_ptr(avcodec_get_name((*cp).codec_id)).to_string_lossy();
+            if let Some(dialect) = crate::player::text_ass::TextDialect::from_codec_name(&name) {
+                text_tracks.push((track as i32, dialect));
+            }
+            continue;
+        }
         let len = (*cp).extradata_size.max(0) as usize;
         if len > 0 && len <= ass_source::MAX_HEADER_BYTES
             && headers.len() < ass_source::MAX_TRACKS
@@ -1316,7 +1323,7 @@ unsafe fn begin_ass_sources(
             crate::player::log(&format!("ass: embedded tracks={} fonts={} font_bytes={font_bytes}", headers.len(), fonts.len()));
         }
     }
-    ass_source::begin(media_key, headers, fonts)
+    ass_source::begin_with_text(media_key, headers, text_tracks, fonts)
 }
 
 /// Open a software decoder for an image-subtitle stream (PGS/VobSub/DVB). Returns a
@@ -9595,8 +9602,8 @@ pub(crate) fn demux(
                                     );
                                 } else if payload.len() <= 256 * 1024 {
                                     let text = crate::player::sub_charset::subtitle_text(payload, &sub_charsets[sub_pos]);
-                                    crate::player::push_subtitle_cue(
-                                        sub_pos as i32, start, end, text.as_bytes(),
+                                    crate::player::ass_source::push_text(
+                                        ass_generation, sub_pos as i32, start, end, payload, &text,
                                     );
                                 }
                             }

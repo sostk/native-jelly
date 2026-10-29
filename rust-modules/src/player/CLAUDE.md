@@ -174,21 +174,17 @@ something.
   transcode decision. For ADTS/HE-AAC, use the **CORE** sample rate from the AudioSpecificConfig (SBR
   doubles it). See `[[audio-payload-codecs]]`.
 - **Subtitles are client-rendered here — the TV's HW subtitle engine is URI-mode only** and
-  unreachable in buffer-feed. Plain text and image (PGS/VobSub) subs are decoded and drawn by
-  us; styled ASS/SSA uses the bundled libass worker (`ass.rs`, `ass_source.rs`) with original
-  headers, events and attached fonts. Sidecar ASS keeps the complete script rather than requesting
-  a SubRip conversion. Don't expect the pipeline to burn or overlay them. See `[[tv-subtitle-engine]]` and the `plex/`
-  soft-subs note. An image sub's rect coords are in **the subtitle stream's own authoring canvas** —
-  1920×1080 for Blu-ray PGS but 720×480/576 for a DVD VobSub rip — so `ff::sub_canvas` reads that
-  canvas off the decoder (via `avcodec_parameters_from_context`, no raw struct offset; the ABI proof
-  is in its doc comment) and `appkit::player_hud::sub_screen_rect` scales the whole display set into the
-  video rect. Assuming 1080p unconditionally is what made VobSub render as a corner postage stamp.
-  **An EXTERNAL text subtitle (the `.srt` beside the film) is a third producer, `sidecar.rs`:** the
-  demuxer never sees it, so it is fetched whole from PMS, parsed, and looked up by time from its OWN
-  store — not `SHARED.sub_cues`, which is a window the demuxer refills and a backward seek would
-  empty. On a conversion it draws the server's extracted file when the negotiation delivers the
-  subtitle `External`, and is silent when the conversion burns it (`route::client_renders_subtitle`;
-  `docs/jellyfin-playback.md` "Subtitles").
+  unreachable in buffer-feed. Every text track uses the pinned libass worker: authored ASS/SSA
+  retains headers, events and fonts; SRT/WebVTT and other plain-text codecs use `text_ass` and
+  synthesized styles. `sub_charset` detects legacy encodings before conversion. The embedded
+  `ass_source` window preserves raw packet identities across seeks/reopens; external `sidecar`
+  retains the whole bounded script for backward seeks and Off/On. A burned server selection
+  suppresses client rendering. Size/position changes replace text-origin headers; authored ASS
+  keeps its layout. The HUD lifts bottom text regions conservatively; merged top/bottom regions
+  stay still. See `docs/text-subtitles.md` and `docs/ass-subtitles.md`.
+  Image subtitles (PGS/VobSub) retain their decoder and their own authoring canvas. `ff::sub_canvas`
+  reads that canvas via `avcodec_parameters_from_context` (no guessed struct offset), and
+  `appkit::player_hud::sub_screen_rect` scales it into the video rectangle.
 - **A seek NEVER interrupts the demuxer.** The pump publishes the target in `seek_to_ns` and the
   demux thread — the only thread that touches the `AVFormatContext` — `av_seek_frame`s on it
   between two reads. Do not reintroduce an interrupt: the pump used to `shutdown(2)` the socket to

@@ -3,8 +3,8 @@
 Direct playback preserves the authored script: styles, positioned signs, overlapping dialogue,
 drawings, font attachments, movement and karaoke. A conversion delivers an ASS/SSA track as the
 server's extracted file, which the same renderer draws; the server burns it only when no soft
-delivery fits (`docs/jellyfin-playback.md` "Subtitles"). The simple caption size/wrapping rules apply to plain text;
-ASS/SSA retains its authored layout. The viewer's existing tone and timing controls still apply.
+delivery fits (`docs/jellyfin-playback.md` "Subtitles"). Plain text now uses the same renderer with synthesized styles and the viewer’s size/position
+picks; ASS/SSA retains its authored layout (see [text subtitles](text-subtitles.md)). The viewer's existing tone and timing controls still apply.
 
 Text sidecars and embedded plain-text packets are decoded before parsing. A BOM wins
 (including UTF-16), valid UTF-8 is borrowed unchanged, and other text uses a bounded

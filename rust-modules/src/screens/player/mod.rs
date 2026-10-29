@@ -366,7 +366,7 @@ impl PlayerScreen {
     ///   the playhead knob, both clocks and the accelerating hold-to-scrub ramp: the MEDIA CLOCK
     ///   class. Conditional because none of it is drawn with the HUD hidden, which is ~99% of a
     ///   playback; reporting it there would present every frame for a picture nobody draws.
-    /// * `subtitle_cue_id` and `active_bitmap_key` — text and image subtitles, a whole-screen
+    /// * The native subtitle frame serial and `active_bitmap_key` — text and image subtitles, a whole-screen
     ///   content change with no spring behind it, drawn on every frame of the route.
     /// * `hud_up` — the auto-hide DEADLINE. At `now == until` the entire transport disappears.
     /// * `since_play_ms < PLAY_MARK_MS` — the two-second `Play` mark, plus `paused`: the transport
@@ -399,7 +399,6 @@ impl PlayerScreen {
         // …subtitles are NOT conditional: they are drawn on every frame of the route, HUD or no
         // HUD, which is exactly why a cue appearing had to become a report.
         mix(self.render.ass.fingerprint());
-        mix(crate::player::subtitle_cue_id(pos) as u64);
         mix(crate::player::active_bitmap_key(pos).unwrap_or(0) as u64);
         mix(u64::from(hud_up));
         mix(u64::from(
@@ -1376,7 +1375,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Screen<H> for Playe
         // capsule is the exception: it HIDES the transport rather than sharing its read time, so
         // captions stay at their normal `SUB_BASE_Y` even while it is up (`Self::subs_lift`).
         let subs_lift = self.subs_lift(ps, now);
-        self.render.ass.draw();
+        self.render.ass.draw(subs_lift);
         if let Some(message) = self.render.ass.error() {
             crate::appkit::player_hud::draw_subtitle_message(message, subs_lift);
         }

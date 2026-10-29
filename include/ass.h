@@ -23,6 +23,7 @@ unsigned plx_ass_abi_version(void);
 PlxAss *plx_ass_create(const char *default_font);
 void plx_ass_destroy(PlxAss *ctx);
 int plx_ass_add_font(PlxAss *ctx, const char *name, const uint8_t *data, size_t len);
+int plx_ass_set_line_spacing(PlxAss *ctx, double spacing);
 int plx_ass_load(PlxAss *ctx, const uint8_t *data, size_t len, int script);
 int plx_ass_chunk(PlxAss *ctx, const uint8_t *data, size_t len,
                   int64_t start_ms, int64_t duration_ms);

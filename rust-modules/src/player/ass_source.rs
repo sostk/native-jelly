@@ -3,6 +3,8 @@
 //! Selection does not discard read-ahead. A seek replaces each source identity so a completed
 //! render from the old position cannot land in the new playback epoch.
 use super::ass::{self, Content, Event, Font, Source};
+mod text;
+pub(crate) use text::{begin_with_text, push_text};
 use std::collections::BTreeMap;
 use std::sync::{Arc, MutexGuard};
 
@@ -24,6 +26,7 @@ pub(crate) struct Store {
     awaiting_reopen: bool,
     tracks: BTreeMap<i32, Arc<Source>>,
     fonts: Option<Arc<[Font]>>,
+    texts: BTreeMap<i32, text::TextTrack>,
 }
 fn store() -> MutexGuard<'static, Store> {
     super::SHARED
@@ -40,6 +43,7 @@ impl Store {
             awaiting_reopen: false,
             tracks: BTreeMap::new(),
             fonts: None,
+            texts: BTreeMap::new(),
         }
     }
 
@@ -49,6 +53,7 @@ impl Store {
         self.awaiting_reopen = false;
         self.tracks.clear();
         self.fonts = None;
+        self.texts.clear();
     }
 
     /// Retire producer/raster identities while retaining immutable facts about the
@@ -112,6 +117,7 @@ impl Store {
                 Arc::new(Source {
                     id: ass::next_source_id(),
                     revision: 0,
+                    origin: ass::Origin::Authored,
                     content: Content::Embedded {
                         header: header.into(),
                         events,
@@ -171,6 +177,7 @@ impl Store {
         let source = Source {
             id: old.id,
             revision: old.revision.wrapping_add(1),
+            origin: old.origin,
             content: Content::Embedded {
                 header: header.clone(),
                 events: events.into(),
@@ -196,6 +203,7 @@ impl Store {
             *source = Arc::new(Source {
                 id: ass::next_source_id(),
                 revision: 0,
+                origin: source.origin,
                 content: Content::Embedded {
                     header: header.clone(),
                     fonts: fonts.clone(),
@@ -208,6 +216,7 @@ impl Store {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn begin(media_key: &str, headers: Vec<(i32, Vec<u8>)>, fonts: Vec<Font>) -> u64 {
     store().begin(media_key, headers, fonts)
 }
@@ -239,7 +248,9 @@ pub(crate) fn font_snapshot() -> (u64, Arc<[Font]>) {
     (store.generation, fonts)
 }
 pub(crate) fn selected(track: i32) -> Option<Arc<Source>> {
-    store().selected(track)
+    let mut store = store();
+    store.restyle_text(track);
+    store.selected(track)
 }
 
 /// Interpolate the sparse native clock only while it is advancing. Limit extrapolation to

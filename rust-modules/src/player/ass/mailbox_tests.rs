@@ -59,6 +59,7 @@ impl Sim {
             source: Arc::new(Source {
                 id: 1,
                 revision: 1,
+                origin: super::Origin::Authored,
                 content: Content::Embedded {
                     header: Arc::from(&b"[Script Info]\n"[..]),
                     events: Arc::from([]),
@@ -107,7 +108,8 @@ impl Sim {
                     width: job.key.width,
                     height: job.key.height,
                     rects,
-                    error: None,
+                    error: None, origin: super::Origin::Authored,
+                    aligns: crate::player::text_ass::AlignSet::default(),
                 })
             }
         };

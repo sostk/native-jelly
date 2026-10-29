@@ -17,7 +17,7 @@ HEADER = r'''
 #include <stdint.h>
 #include <stdarg.h>
 typedef struct { int unused; } ASS_Library;
-typedef struct { int unused; } ASS_Renderer;
+typedef struct { double line_spacing; } ASS_Renderer;
 typedef struct { int track_type, n_styles, n_events; } ASS_Track;
 typedef struct ass_image {
     int w, h, stride;
@@ -38,6 +38,7 @@ static void ass_renderer_done(ASS_Renderer *r) {}
 static void ass_library_done(ASS_Library *l) {}
 static void ass_set_message_cb(ASS_Library *l, void (*cb)(int,const char *,va_list,void *), void *d) {}
 static void ass_set_extract_fonts(ASS_Library *l, int v) {}
+static void ass_set_line_spacing(ASS_Renderer *r, double spacing) { r->line_spacing = spacing; }
 static void ass_set_cache_limits(ASS_Renderer *r, int g, int b) {}
 static void ass_add_font(ASS_Library *l, const char *n, const char *d, int z) {}
 static void ass_process_codec_private(ASS_Track *t, char *d, int z) {}
@@ -115,6 +116,12 @@ int main(void) {
     ASS_Image sign = {12, 8, 16, masks[0], 0xff000020, 5, 6, &outline};
     input = &sign;
     PlxAss *ctx = context();
+    assert(plx_ass_abi_version() == 3);
+    assert(plx_ass_set_line_spacing(NULL, -3.5) == -1);
+    assert(plx_ass_set_line_spacing(ctx, -3.5) == 0);
+    assert(ctx->renderer->line_spacing == -3.5);
+    assert(plx_ass_set_line_spacing(ctx, 300.0) == -1);
+    assert(ctx->renderer->line_spacing == -3.5);
     unsigned all = check(ctx, WIDTH);
     motion.dst_x += 2;
     motion.color ^= 0x10000000;

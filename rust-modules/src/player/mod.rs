@@ -35,6 +35,8 @@ pub(crate) mod report;
 mod shared;
 pub(crate) mod sidecar;
 pub(crate) mod sub_charset;
+pub(crate) mod text_ass;
+pub(crate) mod text_style;
 #[cfg(feature = "hostsim")]
 pub(crate) mod sim_video; // the simulator's decoded picture, for screenshots (see its doc)
 #[cfg(feature = "hostsim")]
@@ -44,6 +46,8 @@ pub(crate) mod video_geometry;
 pub(crate) mod vp9_hdr; // HDR10 for a VP9 stream: the container's PQ tag, written into the sourceInfo envelope ACB is sent
 
 use nj_base::task::MainThread;
+#[cfg(test)]
+use shared::SubCue;
 pub(crate) use shared::HlsAutomaticTransition;
 pub(crate) use shared::HlsClockFenceError;
 /// one rect of an image-subtitle display set — the demuxer builds them, the HUD draws them
@@ -51,7 +55,7 @@ pub(crate) use shared::SubRect;
 pub(crate) use crate::metadata::track_names::TrackNames;
 pub(crate) use shared::UserPauseCursor;
 use shared::{
-    HlsPauseCompletion, HlsPlayCompletion, HlsUserPause, HlsUserResume, Shared, SubBitmap, SubCue,
+    HlsPauseCompletion, HlsPlayCompletion, HlsUserPause, HlsUserResume, Shared, SubBitmap,
     Transport,
 };
 
@@ -1556,6 +1560,7 @@ pub(crate) fn intended_pos_ns(ps: &crate::route::PlaybackSession) -> i64 {
 /// transcode with that source audio at the current position next tick.
 pub(crate) fn request_audio_switch(ps: &crate::route::PlaybackSession, _sid: i64) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
+    #[cfg(test)]
     SHARED.sub_cues.lock().unwrap().clear(); // the fresh transcode carries no embedded subs
 }
 /// request a NATIVE audio-track switch (direct-play, NO transcode): feed the 0-based `audio_idx`
@@ -1573,6 +1578,7 @@ pub(crate) fn request_audio_track(ps: &mut crate::route::PlaybackSession, audio_
 pub(crate) fn stage_native_audio(ps: &mut crate::route::PlaybackSession, audio_idx: i32, codec: &str) {
     crate::route::set_stream_acodec(ps, codec); // the reload's Load payload uses this audio codec
     SHARED.desired_audio_idx.store(audio_idx, Relaxed);
+    #[cfg(test)]
     SHARED.sub_cues.lock().unwrap().clear();
 }
 /// reset to the default (best) audio stream — called on a new item so a prior track choice
@@ -1600,6 +1606,7 @@ pub(crate) fn set_audio_track(idx: i32) {
 /// new pick (or drops the old one). No-op-ish if not transcoding (the caller gates on that).
 pub(crate) fn request_transcode_refresh(ps: &crate::route::PlaybackSession) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
+    #[cfg(test)]
     SHARED.sub_cues.lock().unwrap().clear(); // the old stream's cues; the fresh one brings its own
 }
 
@@ -1644,6 +1651,7 @@ pub(crate) fn request_original_recovery(ps: &crate::route::PlaybackSession) {
         ps,
         crate::route::UserRouteIntent::RecoverOriginal(crate::route::RecoveryCause::ManualOriginal),
     );
+    #[cfg(test)]
     SHARED.sub_cues.lock().unwrap().clear();
 }
 
@@ -1873,6 +1881,7 @@ pub(crate) fn reclamp_subtitle_offset() {
 /// dense dialogue track runs about one cue per second at its peak: 3 text tracks x 74 s x 1
 /// cue/s = 222 cues, under half the cap. Eviction is oldest first, i.e. history no delay is
 /// reading at an ordinary offset.
+#[cfg(test)]
 const SUB_TEXT_CAP: usize = 512;
 
 /// push a ready (already-clean) subtitle cue into the shared store, tagged with its 0-based
@@ -1880,6 +1889,7 @@ const SUB_TEXT_CAP: usize = 512;
 /// Bounded by TIME rather than a fixed count: since every track is pushed regardless of
 /// selection, drop cues more than the latest delay behind the playhead (`subtitle_floor_ns`)
 /// and keep the demuxer's forward window. [`SUB_TEXT_CAP`] guards against a runaway.
+#[cfg(test)]
 pub(crate) fn push_subtitle_text(track: i32, start_ns: i64, end_ns: i64, text: String) {
     if text.is_empty() {
         return;
@@ -1897,34 +1907,8 @@ pub(crate) fn push_subtitle_text(track: i32, start_ns: i64, end_ns: i64, text: S
         text,
     });
 }
-/// demux (D-thread) pushes a subtitle cue (content-time ns) for track `track`. Called for
-/// EVERY plain-text track so a mid-play switch is instant; only the selected track's cues are logged.
-pub(crate) fn push_subtitle_cue(
-    track: i32,
-    start_ns: i64,
-    end_ns: i64,
-    payload: &[u8],
-) {
-    let text = sub_text(payload);
-    if text.is_empty() {
-        return;
-    }
-    if track == SHARED.desired_sub_idx.load(Relaxed) {
-        // LENGTH, never the dialogue. This line used to carry 34 characters of what the viewer
-        // was watching — the most sensitive thing the event log has ever held, in a file that gets
-        // photographed into public issue threads. `len=` answers every question the text answered
-        // for triage (did a cue arrive, at what time, was it empty, is the track the right one)
-        // without being viewing content.
-        log(&format!(
-            "sub cue [{}..{}ms] len={}",
-            start_ns / 1_000_000,
-            end_ns / 1_000_000,
-            text.chars().count()
-        ));
-    }
-    push_subtitle_text(track, start_ns, end_ns, text);
-}
 /// the selected track's subtitle text active at `now_ns`, or None (also None when off).
+#[cfg(test)]
 pub(crate) fn active_subtitle(now_ns: i64) -> Option<String> {
     let sel = SHARED.desired_sub_idx.load(Relaxed);
     if sel < 0 {
@@ -1936,26 +1920,6 @@ pub(crate) fn active_subtitle(now_ns: i64) -> Option<String> {
         .rev()
         .find(|c| c.track == sel && lookup_ns >= c.start_ns && lookup_ns < c.end_ns)
         .map(|c| c.text.clone())
-}
-
-/// **The IDENTITY of the text cue active at `now_ns`** — its start, or 0 for none.
-///
-/// [`active_subtitle`] clones the cue's `String`, which is right for the draw and wrong for the
-/// per-frame motion report that has to run whether or not the frame draws (spec §8.3): a subtitle
-/// appearing or vanishing is a whole-screen content change with no spring behind it, and before
-/// phase 9 nothing reported it because the player route presented unconditionally. `start_ns` is a
-/// sufficient identity — two cues of one track cannot share a start.
-pub(crate) fn subtitle_cue_id(now_ns: i64) -> i64 {
-    let sel = SHARED.desired_sub_idx.load(Relaxed);
-    if sel < 0 {
-        return 0;
-    }
-    let cues = SHARED.sub_cues.lock().unwrap();
-    let lookup_ns = subtitle_clock_ns(now_ns);
-    cues.iter()
-        .rev()
-        .find(|c| c.track == sel && lookup_ns >= c.start_ns && lookup_ns < c.end_ns)
-        .map_or(0, |c| c.start_ns)
 }
 
 /// **The image-subtitle store's byte ceiling**, which must hold the window a delayed caption
@@ -2086,6 +2050,7 @@ pub(crate) fn bitmap_by_key(key: i64) -> Option<(i32, i32, Vec<SubRect>)> {
 }
 /// Extract plain caption text, stripping markup and normalizing line breaks.
 /// ASS/SSA never enters this path: the native renderer receives its complete script/events.
+#[cfg(test)]
 fn sub_text(payload: &[u8]) -> String {
     let s = String::from_utf8_lossy(payload);
     let mut out = String::with_capacity(s.len());

@@ -12,6 +12,7 @@ fn source(events: Vec<Event>) -> Source {
     Source {
         id: 1,
         revision: 1,
+        origin: super::Origin::Authored,
         content: Content::Embedded {
             header: Arc::from(&b"[Script Info]\n"[..]),
             events: events.into(),
@@ -335,6 +336,7 @@ fn script(lines: &str) -> Arc<Source> {
     Arc::new(Source {
         id: next_source_id(),
         revision: 1,
+        origin: super::Origin::Authored,
         content: Content::Script {
             bytes: format!("{HEADER}{lines}").into_bytes().into(),
             fonts: Arc::from([]),
@@ -427,6 +429,7 @@ fn native_pixels_preserve_position_layers_alpha_motion_karaoke_and_readorder() {
     let embedded = Arc::new(Source {
         id: next_source_id(),
         revision: 1,
+        origin: super::Origin::Authored,
         content: Content::Embedded {
             header: HEADER.as_bytes().into(),
             fonts: Arc::from([]),
@@ -553,6 +556,7 @@ fn native_script_font_revision_and_cjk_fallback_use_real_glyphs() {
     let attached = Arc::new(Source {
         id: plain.id,
         revision: 2,
+        origin: Origin::Authored,
         content: Content::Script {
             bytes: bytes.clone(),
             fonts: vec![Font {
@@ -665,4 +669,37 @@ fn native_fragmented_script_stays_bounded_without_dropping_signs() {
             "sign {i} must survive region compaction"
         );
     }
+}
+
+#[test]
+#[ignore = "requires the pinned native host libass and packaged fonts"]
+fn native_text_sidecar_and_embedded_cues_share_pixels_and_overlap_timing() {
+    use crate::player::{ass_source,text_ass::{self,TextDialect},text_style::TextStyle};
+    let _g=nj_base::testlock::serial();
+    let old_size=crate::route::subtitle_size(); let old_position=crate::route::subtitle_position();
+    crate::route::restore_subtitle_size(crate::catalog::session::SubtitleSize::Medium);
+    crate::route::restore_subtitle_position(crate::catalog::session::SubtitlePosition::Low);
+    let style=TextStyle::current();
+    let srt="00:00:01,000 --> 00:00:09,000\n{\\an8}Top sign\n\n00:00:02,000 --> 00:00:04,000\n<i>Dialogue</i>\n\n00:00:03,000 --> 00:00:03,500\n<b>Newest</b>\n";
+    let script=Arc::new(Source {id:next_source_id(),revision:1,origin:Origin::Text(style),
+        content:Content::Script {bytes:text_ass::script_from_srt(srt).assemble(&style).into_bytes().into(),fonts:Arc::from([])}});
+    crate::player::SHARED.playpos_ns.store(0, std::sync::atomic::Ordering::Relaxed);
+    let generation=ass_source::begin_with_text("native-text-fixture",vec![],vec![(0,TextDialect::Srt)],vec![]);
+    for (start,end,text) in [(1,9,"{\\an8}Top sign"),(2,4,"<i>Dialogue</i>")] {
+        ass_source::push_text(generation,0,start*1_000_000_000,end*1_000_000_000,text.as_bytes(),text);
+    }
+    let latest="<b>Newest</b>";
+    ass_source::push_text(generation,0,3_000_000_000,3_500_000_000,latest.as_bytes(),latest);
+    let embedded=ass_source::selected(0).unwrap();
+    let (mut a,mut b)=(Engine::default(),Engine::default());
+    for now in [0,1500,2500,3250,3750,5000,9500,1500] {
+        let sidecar=render(&mut a,&script,now); let muxed=render(&mut b,&embedded,now);
+        assert_eq!(sidecar.rects,muxed.rects,"same text pixels at {now} ms, including backward seek");
+        assert_eq!(sidecar.aligns,muxed.aligns);
+        assert_eq!(sidecar.aligns.top,(1000..9000).contains(&now));
+        assert_eq!(sidecar.aligns.bottom,(2000..4000).contains(&now));
+        assert_eq!(sidecar.rects.is_empty(),now==0 || now==9500);
+    }
+    crate::route::restore_subtitle_size(old_size); crate::route::restore_subtitle_position(old_position);
+    ass_source::reset();
 }

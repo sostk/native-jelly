@@ -45,7 +45,7 @@ static void quiet_message(int level, const char *format, va_list args, void *dat
     (void)level; (void)format; (void)args; (void)data;
 }
 
-unsigned plx_ass_abi_version(void) { return 2; }
+unsigned plx_ass_abi_version(void) { return 3; }
 
 void plx_ass_destroy(PlxAss *ctx)
 {
@@ -79,6 +79,14 @@ PlxAss *plx_ass_create(const char *default_font)
 failed:
     plx_ass_destroy(ctx);
     return NULL;
+}
+
+/* Renderer-local; no firmware symbol or third-party struct crosses the facade. */
+int plx_ass_set_line_spacing(PlxAss *ctx, double spacing)
+{
+    if (!ctx || spacing < -256.0 || spacing > 256.0) return -1;
+    ass_set_line_spacing(ctx->renderer, spacing);
+    return 0;
 }
 
 int plx_ass_add_font(PlxAss *ctx, const char *name, const uint8_t *data, size_t len)

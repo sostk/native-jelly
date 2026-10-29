@@ -45,6 +45,13 @@ pub(crate) enum Content {
     },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Origin {
+    #[default]
+    Authored,
+    Text(super::text_style::TextStyle),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Source {
     /// Identity of one timeline, independent of packet revision. Embedded seeks
@@ -53,6 +60,7 @@ pub(crate) struct Source {
     pub id: u64,
     /// Packet append changes this revision without hiding the current frame.
     pub revision: u64,
+    pub origin: Origin,
     pub content: Content,
 }
 
@@ -128,6 +136,8 @@ pub(crate) struct Frame {
     /// Disjoint regions; an empty list clears output between dialogue events.
     pub rects: Vec<Rect>,
     pub error: Option<Fault>,
+    pub origin: Origin,
+    pub aligns: super::text_ass::AlignSet,
 }
 
 pub(crate) fn next_source_id() -> u64 {
@@ -286,7 +296,8 @@ fn error_frame(key: Key, message: Fault) -> Arc<Frame> {
         width: key.width,
         height: key.height,
         rects: Vec::new(),
-        error: Some(message),
+        error: Some(message), origin: Origin::Authored,
+        aligns: super::text_ass::AlignSet::default(),
     })
 }
 
@@ -409,6 +420,7 @@ fn validate(source: &Source) -> Result<(), Fault> {
 /// Pruning expired events and appending preserves libass's parsed events, font
 /// caches and ReadOrder set, including a long event spanning many short ones.
 fn append_from(old: &Source, new: &Source) -> Option<usize> {
+    if old.origin != new.origin { return None; }
     if old.id != new.id {
         return None;
     }
@@ -450,6 +462,7 @@ fn prune_deadline(events: &[Event]) -> i64 {
 }
 
 fn same_embedded_resources(old: &Source, new: &Source) -> bool {
+    if old.origin != new.origin { return false; }
     matches!((&old.content, &new.content), (
         Content::Embedded { header: oh, fonts: of, .. },
         Content::Embedded { header: nh, fonts: nf, .. }
@@ -461,6 +474,7 @@ struct Engine {
     source: Option<Arc<Source>>,
     native: Option<Native>,
     script: Option<ass_timing::ScriptTimings>,
+    align_spans: Vec<(i64, i64, super::text_ass::AlignClass)>,
     frame: Option<Arc<Frame>>,
     error: Option<Fault>,
 }
@@ -496,6 +510,7 @@ impl Engine {
             old.id != request.source.id || old.revision != request.source.revision
         });
         if source_changed {
+            self.align_spans = super::text_ass::alignment_spans(&request.source);
             self.error = validate(&request.source).err();
             if self.error.is_none() {
                 let append = self
@@ -552,6 +567,8 @@ impl Engine {
             self.frame = Some(frame.clone());
             return frame;
         }
+        let aligns = super::text_ass::AlignSet::at(&self.align_spans, request.now_ms);
+        let origin = request.source.origin;
         let previous = self
             .frame
             .as_ref()
@@ -569,13 +586,13 @@ impl Engine {
         let frame = match result {
             Ok(None) => match &self.frame {
                 Some(frame) if frame.error.is_none() => {
-                    if frame.source_id == key.source_id && frame.width == key.width && frame.height == key.height {
+                    if frame.source_id == key.source_id && frame.width == key.width && frame.height == key.height && frame.origin == origin && frame.aligns == aligns {
                         return frame.clone();
                     }
                     // A reused renderer may keep identical pixels across a seek or track switch.
                     // The publication must still name the new timeline that it answers for.
                     Arc::new(Frame { source_id: key.source_id, serial: next_serial(),
-                        width: key.width, height: key.height, rects: frame.rects.clone(), error: None })
+                        width: key.width, height: key.height, rects: frame.rects.clone(), error: None, origin, aligns })
                 }
                 Some(frame) => return frame.clone(),
                 None => error_frame(key, Fault::RenderFailed),
@@ -586,6 +603,7 @@ impl Engine {
                         && old.width == key.width
                         && old.height == key.height
                         && old.error.is_none()
+                        && old.origin == origin && old.aligns == aligns
                         && old.rects == rects
                     {
                         return old.clone();
@@ -597,7 +615,7 @@ impl Engine {
                     width: key.width,
                     height: key.height,
                     rects,
-                    error: None,
+                    error: None, origin, aligns,
                 })
             }
             Err(error) => {
@@ -641,6 +659,7 @@ nj_base::dynlib! {
         fn plx_ass_chunk(ctx: *mut c_void, data: *const u8, len: usize, start_ms: i64, duration_ms: i64) -> i32;
         fn plx_ass_prune_before(ctx: *mut c_void, deadline_ms: i64);
         fn plx_ass_flush_events(ctx: *mut c_void);
+        fn plx_ass_set_line_spacing(ctx: *mut c_void, spacing: f64) -> i32;
         fn plx_ass_render(ctx: *mut c_void, now_ms: i64, width: i32, height: i32, storage_width: i32, storage_height: i32, frame: *mut NativeFrame) -> i32;
     }
 }
@@ -675,7 +694,7 @@ impl Native {
     fn open(source: &Source) -> Result<Self, Fault> {
         static LOADED: OnceLock<bool> = OnceLock::new();
         let loaded = *LOADED.get_or_init(|| {
-            native_ass::load(Some(asset_dir())).ok() && unsafe { plx_ass_abi_version() } == 2
+            native_ass::load(Some(asset_dir())).ok() && unsafe { plx_ass_abi_version() } == 3
         });
         if !loaded {
             return Err(Fault::Unavailable);
@@ -688,6 +707,11 @@ impl Native {
             return Err(Fault::InitFailed);
         }
         let mut native = Self(ptr);
+        if let Origin::Text(style) = source.origin {
+            if unsafe { plx_ass_set_line_spacing(ptr, super::text_style::line_spacing(style.scale())) } < 0 {
+                return Err(Fault::InitFailed);
+            }
+        }
         #[cfg(test)]
         NATIVE_OPENS.with(|n| n.set(n.get() + 1));
         for name in ["appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf"] {

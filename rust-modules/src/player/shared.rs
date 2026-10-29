@@ -350,6 +350,7 @@ struct AbrSeed {
 /// index it belongs to; the demuxer pushes cues for ALL text tracks and the render filters by
 /// the selected `desired_sub_idx`, so switching tracks is instant (no re-demux of the buffered
 /// region). Content-time ns matches the fed video PTS timeline (see active_subtitle).
+#[cfg(test)]
 pub(crate) struct SubCue {
     pub track: i32,
     pub start_ns: i64,
@@ -616,6 +617,7 @@ pub(crate) struct Shared {
     /// picker's rows are the only place this reaches, and only on DIRECT PLAY: a transcode is a
     /// remux the server built, and its tags are whatever the server put there.
     pub track_names: Mutex<TrackNames>,
+    #[cfg(test)]
     pub sub_cues: Mutex<Vec<SubCue>>,
     pub ass_sources: Mutex<super::ass_source::Store>,
     pub ass_renderer: super::ass::Runtime,
@@ -939,6 +941,7 @@ impl Shared {
             playback_trace: Mutex::new(super::report::PlaybackTrace::new()),
             desired_sub_idx: AtomicI32::new(-1),
             track_names: Mutex::new(TrackNames::new()),
+            #[cfg(test)]
             sub_cues: Mutex::new(Vec::new()),
             ass_sources: Mutex::new(super::ass_source::Store::new()),
             ass_renderer: super::ass::Runtime::new(),
@@ -1545,6 +1548,7 @@ impl Shared {
             if for_reload { sources.retain_for_reload(); } else { sources.reset(); }
         }
         // These decoded cue/bitmap stores are transient render state and refill on read.
+        #[cfg(test)]
         self.sub_cues.lock().unwrap().clear();
         self.sub_bitmaps.lock().unwrap().clear();
         // Cleared with them, and for the same reason: they describe the FILE the last demuxer had
