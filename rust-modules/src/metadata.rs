@@ -507,8 +507,8 @@ impl Dovi {
     /// `signal` retains `nodv`'s diagnostic asymmetry: it withholds a Profile-5-style declaration,
     /// but does not suppress a compatible Profile 8 on a supported set. `capability` must be a
     /// definite [`Supported`](nj_platform::devcaps::dv::DvCapability::Supported), and
-    /// `video_is_hevc` closes the old Profile 9 disagreement where the gate declared AVC and the
-    /// payload's H265 guard silently discarded the node.
+    /// Production callers use `presentation_for_codec` to enforce profile/codec pairing; the boolean
+    /// policy seam also supports table-driven tests.
     ///
     /// The four arms, and why each is where it is:
     ///
@@ -522,7 +522,7 @@ impl Dovi {
     ///   It is deliberately checked BEFORE the declaration arm — which is what keeps the emitted
     ///   node's `trackType` at `"single"` and, with `encryptionType` fixed at `"clear"`, makes the
     ///   pipeline's `dv-dual-svp` secure-video-path flag unreachable. We cannot satisfy that flag.
-    /// - **no node will be sent** (capability absent/unknown, non-HEVC output, a profile the
+    /// - **no node will be sent** (capability absent/unknown, an ineligible codec/profile pair, a profile the
     ///   server never named, or Profile 5 with the trigger armed) → fall back to
     ///   exactly the pre-declaration rule: refuse iff [`base_layer_unusable`](Self::base_layer_unusable).
     ///   That is what makes "keep the refusal for any case where we would not send the node" a
@@ -541,12 +541,12 @@ impl Dovi {
         &self,
         signal: bool,
         capability: nj_platform::devcaps::dv::DvCapability,
-        video_is_hevc: bool,
+        video_carries_dv: bool,
     ) -> DvPresentation {
         if !self.present {
             return DvPresentation::NotDv;
         }
-        let converted = self.converts_to_p81() && video_is_hevc;
+        let converted = self.converts_to_p81() && video_carries_dv;
         if self.el_present && !converted {
             return DvPresentation::Refuse("dual-layer");
         }
@@ -554,7 +554,7 @@ impl Dovi {
         // it. libplayerAPIs' own platform metadata does not protect that seam, so only this app's
         // affirmative configd result may make the declaration eligible.
         let declare = capability == nj_platform::devcaps::dv::DvCapability::Supported
-            && video_is_hevc
+            && video_carries_dv
             && (signal || !self.base_layer_unusable());
         if !declare || self.profile <= 0 {
             return if self.base_layer_unusable() {
@@ -573,22 +573,41 @@ impl Dovi {
         })
     }
 
+    /// Match both the profile and elementary stream before enabling a declaration or P7 conversion.
+    pub(crate) fn presentation_for_codec(
+        &self,
+        signal: bool,
+        capability: nj_platform::devcaps::dv::DvCapability,
+        codec: &str,
+    ) -> DvPresentation {
+        self.presentation(signal, capability, dv_video_codec(self.profile, codec))
+    }
+
     /// Resolve a fresh decision from the cached platform answer and the boot-latched diagnostic
     /// signal. Call once at a route boundary; installed playback must retain the returned value.
-    pub(crate) fn presentation_now(&self, video_is_hevc: bool) -> DvPresentation {
-        self.presentation(
+    pub(crate) fn presentation_now(&self, codec: &str) -> DvPresentation {
+        self.presentation_for_codec(
             !dv_withheld(),
             nj_platform::devcaps::dv::capability(),
-            video_is_hevc,
+            codec,
         )
     }
 
-    pub(crate) fn decision_now(&self, video_is_hevc: bool) -> DvDecision {
+    pub(crate) fn decision_now(&self, codec: &str) -> DvDecision {
         let capability = nj_platform::devcaps::dv::capability();
         DvDecision {
             capability,
-            presentation: self.presentation(!dv_withheld(), capability, video_is_hevc),
+            presentation: self.presentation_for_codec(!dv_withheld(), capability, codec),
         }
+    }
+}
+
+/// Only these profile/codec pairs have a supported single-stream Dolby Vision feed.
+pub(crate) fn dv_video_codec(profile: i64, codec: &str) -> bool {
+    match profile {
+        5 | 7 | 8 => codec.eq_ignore_ascii_case("hevc") || codec.eq_ignore_ascii_case("h265"),
+        10 => codec.eq_ignore_ascii_case("av1"),
+        _ => false,
     }
 }
 

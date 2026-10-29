@@ -6,6 +6,48 @@ use super::test_support::*;
 use super::*;
 
 #[test]
+fn copied_av1_video_keeps_profile10_but_an_encode_clears_it() {
+    use nj_platform::devcaps::dv::DvCapability::Supported;
+    let dovi = Dovi { present: true, profile: 10, bl_compat: 1, ..Dovi::NONE };
+    let decision = crate::metadata::DvDecision { capability: Supported,
+        presentation: dovi.presentation_for_codec(true, Supported, "av1") };
+    let mut lane = crate::catalog::Lane { source: "av1".into(), output: "av1".into(), copied: true };
+    assert_eq!(copied_video_dv(&lane, dovi, decision), (dovi, decision));
+    lane.output = "h264".into();
+    lane.copied = false;
+    assert_eq!(copied_video_dv(&lane, dovi, decision), (Dovi::NONE, crate::metadata::DvDecision::NONE));
+    lane.copied = true;
+    assert_eq!(copied_video_dv(&lane, dovi, decision), (Dovi::NONE, crate::metadata::DvDecision::NONE));
+}
+
+#[test]
+fn av1_profile10_requires_the_matching_codec_and_decoder() {
+    use nj_platform::devcaps::dv::DvCapability::{Supported, Unsupported, Unknown};
+    let p10 = Dovi { present: true, profile: 10, bl_compat: 1, ..Dovi::NONE };
+    let dv = p10.presentation_for_codec(true, Supported, "av1");
+    assert_eq!(dv.declared().unwrap().profile_id, 10);
+    let mut caps = nj_platform::devcaps::Caps::assumed();
+    assert!(!video_direct_plays("av1", 1920, 1080, dv, &caps));
+    caps.av1 = true;
+    caps.av1_row = (3840, 2160, 60);
+    assert!(video_direct_plays("av1", 1920, 1080, dv, &caps));
+    for capability in [Unsupported, Unknown] {
+        assert_eq!(p10.presentation_for_codec(true, capability, "av1"), DvPresentation::NotDv);
+        assert!(Dovi { bl_compat: 0, ..p10 }.presentation_for_codec(true, capability, "av1").refusal().is_some());
+    }
+    for codec in ["hevc", "h264", "vp9", ""] {
+        assert!(p10.presentation_for_codec(true, Supported, codec).declared().is_none());
+    }
+    for profile in [5, 7, 8, 9, 20] {
+        let wrong = Dovi { profile, ..p10 };
+        assert!(wrong.presentation_for_codec(true, Supported, "av1").declared().is_none());
+    }
+    let p7 = Dovi { profile: 7, bl_compat: 6, el_present: true, ..p10 };
+    assert_eq!(p7.presentation_for_codec(true, Supported, "av1"), DvPresentation::Refuse("dual-layer"));
+    assert_eq!(Dovi { el_present: true, ..p10 }.presentation_for_codec(true, Supported, "av1"), DvPresentation::Refuse("dual-layer"));
+}
+
+#[test]
 fn p8_without_confirmed_dv_support_uses_base_layer() {
     let caps = nj_platform::devcaps::Caps {
         hevc: true,

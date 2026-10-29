@@ -1127,16 +1127,16 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     let dv_decision = match env.dv_capability {
         Some(capability) => crate::metadata::DvDecision {
             capability,
-            presentation: dovi.presentation(
+            presentation: dovi.presentation_for_codec(
                 !crate::metadata::dv_withheld(),
                 capability,
-                vcodec == "hevc",
+                vcodec,
             ),
         },
-        None => dovi.decision_now(vcodec == "hevc"),
+        None => dovi.decision_now(vcodec),
     };
     #[cfg(not(test))]
-    let dv_decision = dovi.decision_now(vcodec == "hevc");
+    let dv_decision = dovi.decision_now(vcodec);
     let dv = dv_decision.presentation;
     let video_dp = if forced { video_feed_supported(vcodec, dv, nj_platform::devcaps::caps()) } else {
         video_direct_plays(vcodec, src_w, src_h, dv, nj_platform::devcaps::caps())
@@ -1389,7 +1389,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
 }
 
 /// The Dolby Vision a conversion's stream carries. A video lane the server COPIES hands on the
-/// file's own HEVC elementary stream, DOVI configuration record and RPUs included, so the Load
+/// file's own HEVC or AV1 elementary stream, DOVI configuration record and RPUs included, so the Load
 /// declares it as the direct play would have (upstream #839; an LG C1 has no DTS decoder, so every
 /// DV file with DTS audio arrives this way). A re-encoded lane carries the server's picture and
 /// nothing is declared. A source whose base layer is unusable is never offered a copy
@@ -1399,7 +1399,7 @@ pub(super) fn copied_video_dv(
     dovi: crate::metadata::Dovi,
     decision: crate::metadata::DvDecision,
 ) -> (crate::metadata::Dovi, crate::metadata::DvDecision) {
-    if video.copied && video.output.eq_ignore_ascii_case("hevc") && !dovi.base_layer_unusable() {
+    if video.copied && crate::metadata::dv_video_codec(dovi.profile, &video.output) && !dovi.base_layer_unusable() {
         (dovi, decision)
     } else {
         (crate::metadata::Dovi::NONE, crate::metadata::DvDecision::NONE)

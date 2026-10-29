@@ -888,13 +888,10 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
         ));
         return p.to_string();
     }
-    if video != "H265" {
-        // Unreachable by construction — `route` records the DV layering on the direct-play branch
-        // only, and that branch's payload codec is the file's own hevc — so this is the guard that
-        // says so out loud rather than declaring Dolby Vision over an H264 elementary stream. A
-        // malformed sourceInfo does not fail loudly; it wedges the sink.
+    if !crate::metadata::dv_video_codec(n.profile_id, video) {
+        // Independently reject stale or malformed route declarations at the payload boundary.
         log(&format!(
-            "dv: DolbyHdrInfo P{} NOT sent — payload video codec is {video}, not H265",
+            "dv: DolbyHdrInfo P{} NOT sent — incompatible payload video codec {video}",
             n.profile_id
         ));
         return p.to_string();
@@ -3423,7 +3420,7 @@ mod payload_tests {
     #[test]
     fn a_declared_profile_5_splices_the_node_into_contents() {
         // what `build_av_payload` hands it: the AV template with the codec already set to H265,
-        // which is what a native HEVC direct play — the only kind that can be Dolby Vision — sends
+        // which is what a native HEVC direct play sends
         let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
         let out = with_dolby_hdr_info(&base, "H265", p5().presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true));
         assert!(
@@ -3478,6 +3475,30 @@ mod payload_tests {
         const NODE: &str = r#","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":8}"#;
         assert!(out.contains(NODE), "{out}");
         assert_eq!(out.replace(NODE, ""), PAYLOAD_AV);
+    }
+
+    #[test]
+    fn av1_profile10_keeps_its_codec_and_declares_dolby_vision() {
+        let p10 = Dovi { present: true, profile: 10, bl_compat: 1,
+            el_present: false, ..Dovi::NONE };
+        let mut ps = crate::route::PlaybackSession::IDLE;
+        assert!(crate::route::set_stream_declaration_for_test(
+            &mut ps, "av1", "eac3", 23.976, p10, false,
+            nj_platform::devcaps::dv::DvCapability::Supported));
+        let payload = build_av_payload(&ps, "AV1", "AC3 PLUS",
+            SinkEnvelope { w: 3840, h: 2160, fps: 60 });
+        assert!(payload.contains(r#""video":"AV1""#), "{payload}");
+        assert!(payload.contains(r#""DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":10}"#), "{payload}");
+    }
+
+    #[test]
+    fn payload_independently_rejects_mismatched_dolby_profiles() {
+        for (profile_id, codec) in [(10, "H265"), (8, "AV1"), (7, "AV1"), (5, "VP9"), (10, "H264")] {
+            let dv = crate::metadata::DvPresentation::Declare(crate::metadata::DolbyHdrInfo {
+                profile_id, track_type: "single", encryption_type: "clear",
+            });
+            assert_eq!(with_dolby_hdr_info(PAYLOAD_AV, codec, dv), PAYLOAD_AV);
+        }
     }
 
     /// **What we actually send for a Dolby Atmos track**, at the key path `libpf` reads

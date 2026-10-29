@@ -4526,18 +4526,19 @@ pub(crate) fn stream_fps(ps: &PlaybackSession) -> f64 {
 /// DV file we refused to declare — there the payload must say nothing.
 pub(crate) fn stream_dovi(ps: &PlaybackSession) -> crate::metadata::Dovi {
     let s = &*ps;
-    if s.stream_vcodec.eq_ignore_ascii_case("hevc") {
+    if crate::metadata::dv_video_codec(s.stream_dovi.profile, &s.stream_vcodec) {
         s.stream_dovi
     } else {
-        // Last-line consistency guard for dev declarations and future route mutations: the LG
-        // payload cannot truthfully describe Dolby Vision on a non-HEVC elementary stream.
+        // Last-line consistency guard for dev declarations and future route mutations: the
+        // payload must match the profile to the elementary stream.
         crate::metadata::Dovi::NONE
     }
 }
 /// The capability and presentation frozen into this installed route. Unlike the raw DOVI metadata,
 /// this is the value the Load payload must consume without consulting the live capability cache.
 pub(crate) fn stream_dv_presentation(ps: &PlaybackSession) -> crate::metadata::DvPresentation {
-    if ps.stream_vcodec.eq_ignore_ascii_case("hevc") {
+    if ps.stream_dv_decision.presentation.declared().is_some_and(|n|
+        crate::metadata::dv_video_codec(n.profile_id, &ps.stream_vcodec)) {
         ps.stream_dv_decision.presentation
     } else {
         crate::metadata::DvPresentation::NotDv
@@ -4675,10 +4676,10 @@ fn set_stream_declaration_with_capability(
 ) -> bool {
     let decision = crate::metadata::DvDecision {
         capability,
-        presentation: dovi.presentation(
+        presentation: dovi.presentation_for_codec(
             !crate::metadata::dv_withheld(),
             capability,
-            vc.eq_ignore_ascii_case("hevc"),
+            vc,
         ),
     };
     if decision.presentation.refusal().is_some() {
@@ -6002,12 +6003,12 @@ fn playback_preview_with_capability(
         None => (d.part.as_str(), d.vcodec.as_str()),
     };
     let presentation = match capability {
-        Some(capability) => d.dovi.presentation(
+        Some(capability) => d.dovi.presentation_for_codec(
             !crate::metadata::dv_withheld(),
             capability,
-            vcodec.eq_ignore_ascii_case("hevc"),
+            vcodec,
         ),
-        None => d.dovi.presentation_now(vcodec.eq_ignore_ascii_case("hevc")),
+        None => d.dovi.presentation_now(vcodec),
     };
     let mode = direct_play_mode();
     // An audio track the viewer chose on this page is the only one Play may carry
