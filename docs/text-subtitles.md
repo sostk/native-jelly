@@ -17,7 +17,9 @@ when its shorter replacement expires; top signs and bottom dialogue can coexist.
 timestamps are quantized down to libass centiseconds, at most 9.999 ms early.
 
 Size and position update synthesized headers; tone and timing offset retain their existing
-controls. Embedded restyles share event/font allocations. Large external scripts are
+controls. Embedded restyles share event/font allocations. Conversion and expanded-view payload copies
+run without holding the source-store lock; publication rechecks the media generation and
+keeps the latest header if a style pick changes during the build. Large external scripts are
 rejoined on a worker; the old look remains until the new revision publishes. Text captions
 use the UI canvas while authored ASS uses the video viewport. With the transport open,
 bottom text moves up; top/middle cues stay. A compositor region merging top and bottom
