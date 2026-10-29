@@ -1036,6 +1036,10 @@ player, transport and tracks auditors, and is counted once in the themes above.
   *Verified:* UPDATED 2026-08-24. Quality persistence is now explicit in `plex/session.rs`; `route::set_quality` writes through the session's locked read-modify-write seam and the boot/credential handoff restores it. Literal legacy files with no field remain Original. The separate full Settings surface and its other preferences remain absent; quality intentionally stays in the existing in-player overflow popover.
 
 - **No subtitle appearance controls (size / position / style)** — `major` / `medium`
+  **Native Jelly update, 2026-10-29:** synthesized text captions now apply size and position
+  through shared libass styles (`player::text_style`), while the HUD text helper is used
+  for notices. Authored ASS keeps its own layout; existing tone and timing controls remain.
+  The literal HUD references below describe the earlier implementation.
   The official client lets the user set subtitle size, position and style. Size and vertical
   position have landed as Settings > Playback pickers (`route::subtitle_size`/
   `route::subtitle_position`, `ui/player_hud.rs`'s `draw_subtitle_message`); tone (a grey ladder,
@@ -1604,6 +1608,11 @@ player, transport and tracks auditors, and is counted once in the themes above.
   *Verified:* CONFIRMED verbatim in the working tree. rust-modules/src/app.rs:1405 `if vis && hud_nav.focus == 1 && !ctrl.is_discs()`, :1409 `} else if vis && hud_nav.focus == 1 {` with an EMPTY body, :1410 the identical condition carrying `track_menu::open_tab(...)`. Because arm 1 excludes `ctrl.is_discs()`, the discs case (ControlSlot::Discs, the normal state — player_hud.rs:221 `is_discs`) falls into the empty arm at 1409 and is swallowed; line 1410-1412 is dead. `git diff rust-modules/src/app.rs` confirms this is uncommitted skip-pill/up-next work: the pre-diff code was one `if vis && hud_nav.focus == 1
 
 - **Sidecar (external) subtitle streams are unreachable on the direct-play path — i.e. on almost every item** — `major` / `medium`
+  **Native Jelly update, 2026-10-29:** the historical whole-file sidecar path remains available,
+  but SRT/WebVTT now becomes a bounded synthesized ASS script drawn by the shared libass
+  worker. Embedded text uses the same converter and bounded source store. The HUD renders
+  download/failure notices, not media captions; the old `SHARED.sub_cues` description below
+  is historical. See [shared text subtitles](text-subtitles.md).
   Plex HTPC lists embedded AND sidecar subtitles together; a downloaded .srt beside the file just works. Here the menu filters external streams out unless the item is already transcoding, because the client renderer only sees streams inside the container the demuxer opened. Since this client is direct-play-first (MKV + H264/HEVC + AAC/AC3/EAC3 direct-play), the common case is a direct-played file whose only subtitles are sidecars — the user opens the picker and sees just "Off", or a list missing the language they have. There is no path to enable them at all: they can't be picked, so they can't even force the transcode that would burn them.
   *Landed 2026-09-18 for TEXT sidecars:* `player::sidecar` fetches the file once (`/library/streams/{id}?encoding=utf-8&format=srt`, falling back to encoding-only and then the bare key), parses SubRip/WebVTT into its own whole-file store (ASS/SSA now retains the complete script for native libass rendering, without the SubRip conversion) — `SHARED.sub_cues` is a 2 s / 512-cue window a backward seek would empty — and `ui::player_hud::draw_subtitles` asks it before the embedded store. The menu lists a renderable sidecar on direct play with an EXTERNAL badge, a server-selected one is restored on a direct-play start, and a failed fetch says so on screen. Device-confirmed with Hungarian `.srt` files on one set (on the v0.6.6 line). IMAGE sidecars (`.idx`/`.sub`, `.sup`) are still transcode-only, and there is still no subtitle delay control.
   *Where:* rust-modules/src/ui/track_menu.rs:65-79 (stop filtering), a new sidecar fetch+parse feeding rust-modules/src/player/mod.rs:209 `push_subtitle_text`, and rust-modules/src/plex/library.rs (new `GET /library/streams/{id}` client method). PMS endpoint: /library/streams/{id} (the spec's /library/streams/{id}.{ext}).
@@ -1651,6 +1660,11 @@ player, transport and tracks auditors, and is counted once in the themes above.
   thread never parses a script or rasterizes a font. See `docs/ass-subtitles.md`.
 
 - **Long subtitle cues are silently truncated: a 42-CHARACTER wrap and a hard 3-line cap that DROPS the rest** — `minor` / `small`
+  **Resolved for media captions in Native Jelly, 2026-10-29:** shared libass text rendering
+  replaces the HUD's character-count wrap and three-line cap. The old HUD helper remains
+  for notices. Explicit packet/script/event bounds still apply; this is not unlimited
+  subtitle storage. See [the contract](text-subtitles.md) and
+  [verification](verification/2026-10-29-text-subtitles.md). The following is historical evidence.
   The plain-text subtitle renderer word-wraps by character count (42) rather than by pixels, then keeps only the first three lines and discards the remainder without an ellipsis. 42 characters at 36px is roughly 750px — under 40% of the panel width — so ordinary long sentences (SDH captions, Cyrillic dubs) wrap to four or more lines and the tail of the sentence is simply never shown. The codebase already owns a pixel word-wrapping primitive that the HUD does not use here.
   *Where:* rust-modules/src/ui/player_hud.rs:38-102 — either widen/measure with crate::text::text_width or move the caption onto ui/text_view.rs's TextView (noting the renderer is a documented immediate-mode carve-out, ui/CLAUDE.md).
   *Device:* none known — main-thread GLES text drawing that already runs every frame; TTF_SizeUTF8 measurement is memoised elsewhere in the same file (player_hud.rs:171-191) if per-frame measuring is a concern on the Mali budget.
