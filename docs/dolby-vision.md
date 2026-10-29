@@ -24,7 +24,7 @@ still pending is `Unknown` and follows the unsupported column.
 | **P8 single-layer, CCID 1/2/4** | declare + direct play | no node; direct-play the HDR10/SDR/HLG base |
 | **P5** | declare + direct play | refuse direct play and video copy; request a video re-encode |
 | **Eligible HEVC P7, EL present, CCID 6** | convert to 8.1; declare profile 8 single | convert; use HDR10 base only on an HDR10-capable panel |
-| **AV1 P10 single-layer** | declare profile 10 when an AV1 decoder is present; device acceptance pending | no node; compatible base only |
+| **AV1 P10 single-layer** | declare profile 10 when an AV1 decoder is present; scoped P10.0 device check passed | no node; compatible base only |
 | **Other enhancement layer** | refuse → transcode | refuse → transcode |
 | **Non-DV / insufficient metadata** | existing behavior | existing behavior |
 
@@ -66,14 +66,17 @@ Build timing and ARM size must be assessed independently of this deterministic g
 
 **AV1 Profile 10 port — 2026-10-30:** the route and Load payload now allow Profile 10 on AV1,
 with a confirmed Dolby Vision capability and an AV1 decoder row. The codec remains `AV1`;
-existing AV1 framing preserves metadata OBUs. This follows upstream #838, not a Native Jelly
-TV measurement. Profile/codec pairing is enforced at planning, route installation and Load;
+existing AV1 framing preserves metadata OBUs. This follows upstream #838; a later scoped
+Native Jelly check on webOS 6.5.3 displayed a public P10.0 sample in Dolby Vision. Profile/codec pairing is enforced at planning, route installation and Load;
 HEVC P7 conversion cannot apply to AV1. Jellyfin range-only AV1 metadata implies Profile 10,
 and video-copy conversions preserve the frozen declaration. Re-encoded output clears it.
 Jellyfin offers compatible HDR10/SDR/HLG bases only according to panel capabilities, with the
 non-compatible `DOVI` range requiring confirmed DV support. No AV1 enhancement-layer range is
-offered. Host and ARM evidence cannot prove picture, panel mode, seek stability or performance;
-those checks remain pending at the user's request.
+offered. Later device checks confirmed decoded pictures, Dolby Vision panel state and ordinary
+native seeks on the AV1-capable webOS 6.5.3 set. A pause/seek overlap recovered through reload,
+so that condition is not claimed as a clean native-seek pass. Real-server P10, P10.1 HDR10
+fallback, audio-only-copy and broader performance acceptance remain pending; see
+[the C2 record](verification/2026-10-30-av1-dolby-vision.md).
 
 Profiles not supported here: **4** is dual-layer and deprecated (P&L §1.1 p. 6); **9** is
 single-layer **AVC**, which falls back without a node because profile/codec eligibility is
@@ -461,11 +464,12 @@ human at the panel, check whether the platform already publishes it.
 ## 7. Open
 
 - **Profile 7.** The feed now converts eligible single-track dual-layer HEVC to 8.1;
-  panel-mode and throughput acceptance for this implementation remains a device check.
+  scoped real-Jellyfin DV/HDR10 panel-mode and native-seek checks passed on webOS 6.5.3
+  ([C1 record](verification/2026-10-30-dovi-profile7.md)); broader throughput acceptance remains open.
   Full enhancement-layer reconstruction and feeding a true dual-layer pipeline remain unexamined.
-- **Anonymous configd access.** The key, parser and fail-closed policy are host-tested, but an
-  unforced query from this app's anonymous LS2 registration has not yet been measured on device.
-  The dev firmware ACL permits public `getConfigs`; that is not proof the registration receives it.
+- **Cross-firmware configd access.** An unforced query from this app returned supported for DV
+  and HDR on the connected webOS 6.5.3 set on 2026-10-30. That observation does not establish
+  anonymous-registration access on every firmware or hardware model.
 - **Cross-firmware reply behavior.** The libplayerAPIs mechanism exists in the symbol/decompile
   census from 3.9.2 through 11.2.0, but the key, ACL and reply semantics have not been exercised
   across that range. Older or refusing firmware remains Unknown rather than being inferred from a

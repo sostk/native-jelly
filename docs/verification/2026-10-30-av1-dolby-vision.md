@@ -4,9 +4,10 @@ Implemented on `feat/av1-dolby-vision`, stacked on C1 `b976caee` and U5.
 The clean committed source checked below is `c876814fb8e9fc958318d662d24ee4f3b53a6e99`. The later evidence commit changes
 documentation only. No main merge, push, version bump or release occurred.
 
-**TV acceptance remains pending at the user's request.** No TV commands ran for C2.
-Neither picture quality, Dolby Vision panel mode, playback stability nor performance is
-claimed as device-verified. C1 Profile 7 acceptance also remains pending independently.
+**Scoped TV playback completed later on 30 October 2026.** Profile 10 with compatibility id 0
+played in Dolby Vision on the connected AV1-capable webOS 6.5.3 set. Real-Jellyfin Profile 10,
+audio-only-copy coverage and Profile 10.1 HDR10 fallback remain pending; see the later section.
+The initial host-only checkpoint below is retained as evidence of the earlier state.
 
 ## Behavior and regression coverage
 
@@ -78,7 +79,7 @@ retained; codec/profile consistency is independently checked before splicing it.
 contradiction audit updated the Dolby contract, AV1 capability comment and HEVC-only test
 comment. Historical HEVC release notes remain historical claims.
 
-## Device acceptance still required
+## Initial device prerequisite (before obtaining a public sample)
 
 A read-only local Jellyfin request using the authorized test account found 247 video
 items, five with AV1 streams and **zero AV1 Dolby Vision/Profile 10 candidates**. No viewing
@@ -94,3 +95,45 @@ No automatic device run is scheduled.
 - `65a8c0e1` — existing range assertion and test-prose correction.
 - `c876814f` — isolated diagnostics seeking-state fixture correction.
 - The documentation-only successor records these checks and deferred device acceptance.
+
+
+## Later TV acceptance — 30 October 2026
+
+The same `7145d5ec` checkpoint/debug bytes described in [C1 acceptance](2026-10-30-dovi-profile7.md)
+were tested on the connected webOS **6.5.3** set. Its device codec table lists AV1 at
+4096×2304@60, and configd confirmed DV support without a capability override. Older development
+notes describing a different set without AV1 do not describe this connected television.
+
+The public sample was linked by quietvoid in [GPAC issue #2549](https://github.com/gpac/gpac/issues/2549).
+Its original SHA-256 is `9c7211b0d6db9bc25761e2db122fa23ae8d1ff0ec57d4e3054b3368f6fc7dc8b`.
+ffprobe identifies 3840×2160 AV1 at 30 fps, DV Profile 10, compatibility id **0**, BL/RPU present,
+EL absent, DV configuration version 2.1. It is an older public test artifact, not a validated
+Profile 10.1 fallback fixture. The four-second video was looped by stream copy to 118 seconds
+and muxed with silent stereo AC3; ffprobe confirmed the DV record survived. It was served through
+a private local synthetic Jellyfin fixture. No sample bytes are committed or added to the user's
+real library. This tests the local Jellyfin adapter/route/feed path but is not real-server proof.
+
+Both runs emitted an AV1 Profile 10 single-layer node, completed native load, bound the video
+plane, showed a decoded picture in DISPLAY captures, and reported **`dolbyHdr`** from the TV's
+settings service. P7 conversion was not armed, and neither run logged a crash.
+
+- The first run accepted pause/resume and both scripted seeks, then advanced. Its forward seek
+  overlapped a pause: the watchdog attempted two reopens and reloaded before playback resumed.
+  Three native load-completion messages were logged. Recovery is observed; a clean native-seek
+  pass is not claimed for this overlap case. Precise pause/seek-overlap behavior needs further
+  investigation before claiming that condition is reliable.
+- A separate seek-only run accepted both native seeks (45 s then 5 s), with **one** native load,
+  **zero** reopen retries and **zero** watchdog reloads. Playback continued afterward (11 s of
+  reported advancement across capture/wait/collection). This distinguishes ordinary seeking
+  from the overlap condition. Captures from both runs were opened after release.
+
+Both sessions closed the app, cleared injected automation, stopped their tunnels and released
+the lease. A final read-only status confirmed the TV lock was free. Panel restoration was
+requested; sound settings were untouched. The test fixture's audio is silent, so it supplies
+no evidence about audible audio quality. No performance or long-session stability claim is made.
+
+**Still pending:** real-Jellyfin Profile 10 loading and audio-only video-copy conversion,
+Profile 10.1 HDR10 fallback on this set, pause/seek-overlap investigation, wider source/firmware
+coverage and long-session acceptance. A no-compatible-base Profile 10 sample cannot establish
+HDR10 fallback. C1's separate real-Jellyfin HEVC HDR10 fallback passed; it is not substituted
+for the missing AV1 fallback test.
