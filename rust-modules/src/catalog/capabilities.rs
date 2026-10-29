@@ -226,8 +226,9 @@ impl<'a> Capabilities<'a> {
     /// The Dolby Vision entries mirror the route's own decision (`metadata::Dovi::presentation`):
     /// a panel that takes Dolby Vision is sent Profile 5 and the cross-compatible Profile 8 layers;
     /// one that does not plays a Profile 8 file's base layer, so only the fallbacks it can show are
-    /// offered. A dual-layer (`DOVIWithEL*`) or malformed (`DOVIInvalid`) stream is never offered,
-    /// as the route refuses to feed one.
+    /// offered. Profile 7's HDR10 base can be offered on HDR10 panels: the feed converts
+    /// eligible dual-layer streams to 8.1. Malformed DV remains excluded, and the item's
+    /// precise profile/compatibility fields still gate negotiation before this profile is sent.
     pub(crate) fn hevc_video_ranges(&self) -> Option<Vec<&'static str>> {
         let hdr10 = match self.hdr10() {
             Support::Yes => true,
@@ -237,7 +238,7 @@ impl<'a> Capabilities<'a> {
         let hlg = self.hlg() == Support::Yes;
         let mut ranges = vec!["SDR"];
         if hdr10 {
-            ranges.extend(["HDR10", "HDR10Plus"]);
+            ranges.extend(["HDR10", "HDR10Plus", "DOVIWithEL", "DOVIWithELHDR10Plus"]);
         }
         if hlg {
             ranges.push("HLG");
@@ -451,7 +452,9 @@ mod tests {
         assert!(dv.hevc_video_ranges().unwrap().contains(&"DOVI"));
         for caps in [sdr, hdr, dv] {
             let ranges = caps.hevc_video_ranges().unwrap();
-            assert!(ranges.iter().all(|r| !r.starts_with("DOVIWithEL") && *r != "DOVIInvalid"), "{ranges:?}");
+            assert!(!ranges.contains(&"DOVIInvalid"), "{ranges:?}");
+            assert_eq!(ranges.contains(&"DOVIWithEL"), caps.hdr10() == Support::Yes);
+            assert_eq!(ranges.contains(&"DOVIWithELHDR10Plus"), caps.hdr10() == Support::Yes);
         }
     }
 

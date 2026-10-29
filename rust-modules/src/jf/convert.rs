@@ -164,7 +164,8 @@ fn dovi_layering(s: &MediaStream, range: &str) -> (i64, i64, bool) {
     (
         s.dv_profile.filter(|&p| p > 0).unwrap_or(implied.0),
         s.dv_bl_signal_compatibility_id.unwrap_or(implied.1),
-        // Either saying so refuses the stream: a dual layer fed as a single one is the failure.
+        // Either source identifies an enhancement layer; route eligibility and the feed's
+        // independent container check decide whether it can be converted safely.
         implied.2 || s.el_present_flag.is_some_and(|f| f != 0),
     )
 }

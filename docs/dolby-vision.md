@@ -22,7 +22,8 @@ still pending is `Unknown` and follows the unsupported column.
 |---|---|---|
 | **P8 single-layer, CCID 1/2/4** | declare + direct play | no node; direct-play the HDR10/SDR/HLG base |
 | **P5** | declare + direct play | refuse direct play and video copy; request a video re-encode |
-| **Enhancement layer present** | refuse → transcode | refuse → transcode |
+| **Eligible HEVC P7, EL present, CCID 6** | convert to 8.1; declare profile 8 single | convert; use HDR10 base only on an HDR10-capable panel |
+| **Other enhancement layer** | refuse → transcode | refuse → transcode |
 | **Non-DV / insufficient metadata** | existing behavior | existing behavior |
 
 Historical census taken 2026-08-21 on the dev server by fetching all 540 leaves and reading every
@@ -33,13 +34,33 @@ affirmative platform result above. The base-layer predicate accepts more compati
 than the measured 1/2/4 set, but reserved/unknown identifiers are not claimed here as validated
 fallback formats.
 
-**Profile 7 is the one real gap and it is structural, not policy.** Its picture is split across a
-base and an enhancement layer — two elementary streams — and BUFFERSTREAM buffer-feed hands the
-pipeline **one**. There is no payload key for the second; `Dovi::presentation` refuses on
-`el_present` before it reaches the declaration arm, which is also what keeps the emitted node's
-`trackType` at `"single"` and makes the pipeline's `dv-dual-svp` secure-video-path flag — which
-this app cannot satisfy — unreachable. Whether `gst_dvbin_pipeline_dovi_dual` (which sits beside
-the `_single` we do use) can be fed from a single appsrc is unexamined.
+**Profile 7 is converted to single-layer Profile 8.1 on the feed path.**
+The client uses quietvoid's `dolby_vision` 3.4.0 Rust API, the implementation behind
+libdovi and dovi_tool, with optional features disabled. For HEVC P7 with an enhancement
+layer and compatibility id 6, `packet_to_annexb` removes UNSPEC63 and nonzero-layer NALs
+and converts UNSPEC62 RPUs with `ConversionMode::To81`, as `dovi_tool -m 2` does.
+Failed RPU conversions are dropped. Profile 5 and existing single-layer Profile 8 pass
+through unchanged. FEL residual enhancement detail is discarded; the base picture and
+converted dynamic metadata remain. This is not full FEL reconstruction.
+
+Jellyfin's precise item facts gate the route before negotiation. HEVC range offers include
+`DOVIWithEL` and `DOVIWithELHDR10Plus` only on confirmed HDR10-capable panels. A confirmed
+Dolby Vision panel receives a single-layer profile-8 declaration; other panels use the
+HDR10 base. Unknown/reserved P7 compatibility ids remain refused. HLS retains its existing
+no-video-copy rule. A demux-side configuration check independently requires base/RPU/EL
+flags and compatibility id 6; missing or contradictory container facts abort before feed,
+even if server metadata advertised a convertible source. No new firmware API is used.
+
+Host fixtures validate the MEL bytes against dovi_tool's mode-2 oracle and FEL output as
+profile 8. Device playback, mode engagement, seek behavior and throughput require separate
+TV acceptance before this port is called hardware-verified.
+
+The minimal-feature converter adds 13 registry packages (84 total in both ARM feature
+graphs, up from 71 including subtitle charset support). The package budgets are 87,
+retaining three packages of headroom. These dependencies supply the upstream RPU parser,
+bitstream writer, mapping conversion and CRC machinery; importing that implementation
+avoids duplicating the Dolby bitstream format or adding a C ABI. Notices cover all 13.
+Build timing and ARM size must be assessed independently of this deterministic graph count.
 
 Profiles not present here: **4** is dual-layer and deprecated (P&L §1.1 p. 6); **9** is single-layer
 **AVC**, and now falls back without a node because codec eligibility is part of
@@ -399,7 +420,8 @@ ssh root@$(cat .tv-host) 'script -qc "luna-send -n 1 -f \
 Note the errorKey/`returnValue:false` on a set with no Dolby picture modes is not a failure of the read —
 `dimension` is still populated.
 
-Measured on the dev set (49SM9000PLA, webOS 4.10.2), one launch per row, `nativejelly-play=<rk>`:
+Historical measurements before Profile 7 conversion, on the dev set
+(49SM9000PLA, webOS 4.10.2), one launch per row, `nativejelly-play=<rk>`:
 
 | content | what the app declared | pipeline `hdrType` | `dynamicRange` | `pictureMode` |
 | --- | --- | --- | --- | --- |
@@ -415,7 +437,7 @@ to this table until those current paths are measured on hardware.
 
 Three distinct panel states, each the one the app asked for. That makes this a test of the whole
 chain rather than of Dolby Vision alone: **the Profile 7 refusal is confirmed by the same reading**,
-landing on HDR10 exactly as §1 says it should, which no amount of reading our own log could have
+landing on HDR10 under the policy that applied then, which no amount of reading our own log could have
 shown. A log line proves what we sent; `dimension.dynamicRange` proves what the panel did with it.
 
 **Why this belongs beside §5's silent instruments.** §5 is about instruments that cannot see the
@@ -426,11 +448,9 @@ human at the panel, check whether the platform already publishes it.
 
 ## 7. Open
 
-- **Profile 7.** One film on the dev server. Would need to know whether `gst_dvbin_pipeline_dovi_dual`
-  can be fed from a single appsrc, or whether a second one can be created — unexamined. The REFUSAL
-  path is no longer open: §6a confirms it lands on HDR10 at the panel, which is the intended
-  outcome, so what remains is only whether Profile 7 could ever be played as DV rather than whether
-  declining it works.
+- **Profile 7.** The feed now converts eligible single-track dual-layer HEVC to 8.1;
+  panel-mode and throughput acceptance for this implementation remains a device check.
+  Full enhancement-layer reconstruction and feeding a true dual-layer pipeline remain unexamined.
 - **Anonymous configd access.** The key, parser and fail-closed policy are host-tested, but an
   unforced query from this app's anonymous LS2 registration has not yet been measured on device.
   The dev firmware ACL permits public `getConfigs`; that is not proof the registration receives it.
