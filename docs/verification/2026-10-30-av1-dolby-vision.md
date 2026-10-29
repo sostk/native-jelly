@@ -120,8 +120,8 @@ settings service. P7 conversion was not armed, and neither run logged a crash.
 - The first run accepted pause/resume and both scripted seeks, then advanced. Its forward seek
   overlapped a pause: the watchdog attempted two reopens and reloaded before playback resumed.
   Three native load-completion messages were logged. Recovery is observed; a clean native-seek
-  pass is not claimed for this overlap case. Precise pause/seek-overlap behavior needs further
-  investigation before claiming that condition is reliable.
+  pass is not claimed for this overlap case. That observation motivated the later paused-seek
+  follow-up below.
 - A separate seek-only run accepted both native seeks (45 s then 5 s), with **one** native load,
   **zero** reopen retries and **zero** watchdog reloads. Playback continued afterward (11 s of
   reported advancement across capture/wait/collection). This distinguishes ordinary seeking
@@ -133,7 +133,18 @@ requested; sound settings were untouched. The test fixture's audio is silent, so
 no evidence about audible audio quality. No performance or long-session stability claim is made.
 
 **Still pending:** real-Jellyfin Profile 10 loading and audio-only video-copy conversion,
-Profile 10.1 HDR10 fallback on this set, pause/seek-overlap investigation, wider source/firmware
+Profile 10.1 HDR10 fallback on this set, wider source/firmware
 coverage and long-session acceptance. A no-compatible-base Profile 10 sample cannot establish
 HDR10 fallback. C1's separate real-Jellyfin HEVC HDR10 fallback passed; it is not substituted
 for the missing AV1 fallback test.
+
+
+## Paused-seek follow-up — 30 October 2026
+
+A later local fix corrects watchdog accounting while feeding is user-held and preserves
+Resume ownership for a seek armed after Pause. The original 3-second overlap and a 6.5-second
+hold both passed on the same webOS 6.5.3 set: one Load, two native seeks, no reopen retries or
+watchdog reloads, and continuing playback. Both input orderings and preview recovery also
+have host regressions. See [the final source and evidence](2026-10-30-paused-seek.md).
+This supersedes the overlap investigation item above; the independent real-server/P10.1
+fallback coverage gaps remain. The follow-up is local and has not been pushed.

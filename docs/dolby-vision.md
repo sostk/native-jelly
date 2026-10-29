@@ -73,8 +73,9 @@ and video-copy conversions preserve the frozen declaration. Re-encoded output cl
 Jellyfin offers compatible HDR10/SDR/HLG bases only according to panel capabilities, with the
 non-compatible `DOVI` range requiring confirmed DV support. No AV1 enhancement-layer range is
 offered. Later device checks confirmed decoded pictures, Dolby Vision panel state and ordinary
-native seeks on the AV1-capable webOS 6.5.3 set. A pause/seek overlap recovered through reload,
-so that condition is not claimed as a clean native-seek pass. Real-server P10, P10.1 HDR10
+native seeks on the AV1-capable webOS 6.5.3 set. The initial pause/seek overlap needed a reload;
+a later [watchdog and user-hold fix](verification/2026-10-30-paused-seek.md) passed 3-second
+and 6.5-second overlap holds with one Load and no reopen/reload. Real-server P10, P10.1 HDR10
 fallback, audio-only-copy and broader performance acceptance remain pending; see
 [the C2 record](verification/2026-10-30-av1-dolby-vision.md).
 
