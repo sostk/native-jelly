@@ -1222,6 +1222,30 @@ mod tests {
     }
 
     #[test]
+    fn av1_dolby_negotiation_requires_an_av1_decoder() {
+        use nj_platform::devcaps::{dv::DvCapability, hdr::HdrCapability};
+        let ask = ProfileAsk { direct: true, forced: false, ceiling: None, burn: false, hls: None, embed_bitmap: true };
+        let mut d = device();
+        for av1 in [false, true] {
+            d.av1 = av1;
+            d.av1_row = if av1 { (3840, 2160, 60) } else { (0, 0, 0) };
+            let caps = crate::catalog::capabilities::Capabilities::of(&d, DvCapability::Supported)
+                .with_hdr(HdrCapability::Supported);
+            let p = device_profile(&caps, &ask);
+            let offered = p["DirectPlayProfiles"][0]["VideoCodec"].as_str().unwrap().split(',').any(|c| c == "av1");
+            assert_eq!(offered, av1);
+            if av1 {
+                let ranges = range_condition(&p, "av1").unwrap();
+                assert!(ranges.split('|').any(|r| r == "DOVI"));
+                assert!(ranges.split('|').any(|r| r == "DOVIWithHDR10"));
+                assert!(!ranges.contains("EL") && !ranges.contains("DOVIInvalid"));
+            } else {
+                assert_eq!(range_condition(&p, "av1"), None);
+            }
+        }
+    }
+
+    #[test]
     fn a_ceiling_bounds_the_original_file_as_well_as_the_encode() {
         let c = Ceiling { max_kbps: 4000, max_w: 1280, max_h: 720 };
         let p = profile(&ProfileAsk { direct: false, forced: false, ceiling: Some(c), burn: true, hls: None, embed_bitmap: true });

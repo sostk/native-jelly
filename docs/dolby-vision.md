@@ -2,7 +2,8 @@
 
 The record of how this app came to declare Dolby Vision and Dolby Atmos to LG's pipeline, what the
 television's own binaries say about it, and what the Dolby specifications do and do not require.
-Written 2026-08-21, the day both landed; every number in it was measured on the dev set (LG
+Written 2026-08-21, the day both landed; later port checkpoints are dated explicitly.
+Unless a later checkpoint says otherwise, every number was measured on the dev set (LG
 49SM9000PLA, webOS 4.10.2) or read out of that set's libraries unless it carries a page citation.
 
 **Read this before touching `Dovi::presentation`, `with_dolby_hdr_info`, `with_immersive`,
@@ -23,6 +24,7 @@ still pending is `Unknown` and follows the unsupported column.
 | **P8 single-layer, CCID 1/2/4** | declare + direct play | no node; direct-play the HDR10/SDR/HLG base |
 | **P5** | declare + direct play | refuse direct play and video copy; request a video re-encode |
 | **Eligible HEVC P7, EL present, CCID 6** | convert to 8.1; declare profile 8 single | convert; use HDR10 base only on an HDR10-capable panel |
+| **AV1 P10 single-layer** | declare profile 10 when an AV1 decoder is present; device acceptance pending | no node; compatible base only |
 | **Other enhancement layer** | refuse → transcode | refuse → transcode |
 | **Non-DV / insufficient metadata** | existing behavior | existing behavior |
 
@@ -62,11 +64,21 @@ bitstream writer, mapping conversion and CRC machinery; importing that implement
 avoids duplicating the Dolby bitstream format or adding a C ABI. Notices cover all 13.
 Build timing and ARM size must be assessed independently of this deterministic graph count.
 
-Profiles not present here: **4** is dual-layer and deprecated (P&L §1.1 p. 6); **9** is single-layer
-**AVC**, and now falls back without a node because codec eligibility is part of
-`Dovi::presentation` itself (the old gate/payload disagreement has a host regression); **10** and
-**20** are AV1 and MV-HEVC, and this panel has no Dolby Vision decoder for either. (A set whose
-codec table lists an AV1 decoder can direct-play plain AV1, but that is not a Dolby Vision path.)
+**AV1 Profile 10 port — 2026-10-30:** the route and Load payload now allow Profile 10 on AV1,
+with a confirmed Dolby Vision capability and an AV1 decoder row. The codec remains `AV1`;
+existing AV1 framing preserves metadata OBUs. This follows upstream #838, not a Native Jelly
+TV measurement. Profile/codec pairing is enforced at planning, route installation and Load;
+HEVC P7 conversion cannot apply to AV1. Jellyfin range-only AV1 metadata implies Profile 10,
+and video-copy conversions preserve the frozen declaration. Re-encoded output clears it.
+Jellyfin offers compatible HDR10/SDR/HLG bases only according to panel capabilities, with the
+non-compatible `DOVI` range requiring confirmed DV support. No AV1 enhancement-layer range is
+offered. Host and ARM evidence cannot prove picture, panel mode, seek stability or performance;
+those checks remain pending at the user's request.
+
+Profiles not supported here: **4** is dual-layer and deprecated (P&L §1.1 p. 6); **9** is
+single-layer **AVC**, which falls back without a node because profile/codec eligibility is
+part of the route policy; **20** is MV-HEVC and has no declaration path. The original dev panel
+has no AV1 decoder; plain AV1 and Profile 10 both require another set with an AV1 row.
 
 ---
 
@@ -91,7 +103,7 @@ gets plain `video/x-h265` and nothing downstream can engage Dolby Vision at all.
 
 Three things that look like they should change and do not:
 
-- **the codec string stays `"H265"`.** `getVideoCaps` maps H265 to `video/x-h265` and that branch
+- **for HEVC, the codec string stays `"H265"`.** `getVideoCaps` maps H265 to `video/x-h265` and that branch
   falls THROUGH into the Dolby Vision tail. There is no DVHE/DVH1 row in its codec table — those
   literals belong to AdaptivePipeline's RFC-6381 parser, a different pipeline. LG's own Chromium
   client also reports `codec.video = "H265"` for a Dolby Vision stream.
@@ -284,7 +296,7 @@ Capability experiments use two presence-only, boot-latched triggers:
 exist, `dvcaps0` wins and the conflict is logged. Restart the app between cases; changing a file
 cannot alter either the completed capability result or an installed playback decision. These
 overrides change capability only — they do not bypass `nodv`, the enhancement-layer refusal or the
-HEVC codec guard. `dvnonode` remains the deliberate diagnostic exception: it suppresses a node
+profile/codec guard (HEVC P5/7/8 or AV1 P10). `dvnonode` remains the deliberate diagnostic exception: it suppresses a node
 after a route has already frozen `Declare`, and logs that disagreement explicitly.
 
 ---

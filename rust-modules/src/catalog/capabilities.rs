@@ -276,8 +276,9 @@ impl<'a> Capabilities<'a> {
 
     /// The AV1 `VideoRangeType`s direct play and a video copy may carry, `None` while HDR10 is not
     /// measured. AV1 states its colour in the sequence header the decoder reads, as HEVC does in its
-    /// VUI, so the panel's own HDR10 and HLG support decide it. Dolby Vision AV1 is never offered:
-    /// the Load declares no Dolby Vision node for AV1. Unverified on an AV1 set.
+    /// VUI, so the panel's own HDR10 and HLG support decide it. Profile 10 may be declared
+    /// on confirmed DV panels; other panels are offered only compatible base layers.
+    /// Actual AV1 Dolby Vision output remains pending device acceptance.
     pub(crate) fn av1_video_ranges(&self) -> Option<Vec<&'static str>> {
         let hdr10 = match self.hdr10() {
             Support::Yes => true,
@@ -290,6 +291,16 @@ impl<'a> Capabilities<'a> {
         }
         if self.hlg() == Support::Yes {
             ranges.push("HLG");
+        }
+        if self.dolby_vision == DvCapability::Supported {
+            ranges.push("DOVI");
+        }
+        ranges.push("DOVIWithSDR");
+        if hdr10 {
+            ranges.extend(["DOVIWithHDR10", "DOVIWithHDR10Plus"]);
+        }
+        if self.hlg() == Support::Yes {
+            ranges.push("DOVIWithHLG");
         }
         Some(ranges)
     }
@@ -387,7 +398,7 @@ mod tests {
     }
 
     /// VP9 reaches HDR only through the ACB sourceInfo rewrite, so HDR10 is offered only with the
-    /// measured 10-bit claim; AV1 follows the panel like HEVC, without Dolby Vision.
+    /// measured 10-bit claim; AV1 follows the panel and the Profile 10 declaration capability.
     #[test]
     fn vp9_and_av1_ranges_follow_what_can_reach_the_panel() {
         let eight = Caps { vp9: true, av1: true, ..Caps::assumed() };
@@ -400,11 +411,19 @@ mod tests {
         let hdr10 = Capabilities::of(&ten, DvCapability::Supported).with_hdr(HdrCapability::Supported);
         assert_eq!(hdr10.vp9_video_ranges().unwrap(), ["SDR", "HDR10"]);
         let av1 = hdr10.av1_video_ranges().unwrap();
-        assert_eq!(av1, ["SDR", "HDR10", "HDR10Plus", "HLG"]);
-        assert!(av1.iter().all(|r| !r.starts_with("DOVI")));
+        assert_eq!(av1, ["SDR", "HDR10", "HDR10Plus", "HLG", "DOVI", "DOVIWithSDR", "DOVIWithHDR10", "DOVIWithHDR10Plus", "DOVIWithHLG"]);
         let sdr = Capabilities::of(&ten, DvCapability::Supported).with_hdr(HdrCapability::Unsupported);
         assert_eq!(sdr.vp9_video_ranges().unwrap(), ["SDR"]);
-        assert_eq!(sdr.av1_video_ranges().unwrap(), ["SDR"]);
+        assert_eq!(sdr.av1_video_ranges().unwrap(), ["SDR", "DOVI", "DOVIWithSDR"]);
+        for capability in [DvCapability::Unsupported, DvCapability::Unknown] {
+            let caps = Capabilities::of(&ten, capability).with_hdr(HdrCapability::Supported);
+            let ranges = caps.av1_video_ranges().unwrap();
+            assert!(!ranges.contains(&"DOVI"));
+            assert!(ranges.contains(&"DOVIWithHDR10"));
+            assert!(!ranges.iter().any(|r| r.contains("EL") || *r == "DOVIInvalid"));
+            let sdr = Capabilities::of(&ten, capability).with_hdr(HdrCapability::Unsupported);
+            assert_eq!(sdr.av1_video_ranges().unwrap(), ["SDR", "DOVIWithSDR"]);
+        }
     }
 
     #[test]

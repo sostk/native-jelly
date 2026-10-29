@@ -153,7 +153,7 @@ fn stream_type(kind: &str) -> i64 {
 /// undeclared whatever the fields say (issue #22 was a `DOVIWithHDR10Plus` file that a narrower
 /// table left at profile 0, so it played as HDR10).
 fn dovi_layering(s: &MediaStream, range: &str) -> (i64, i64, bool) {
-    let implied = match range {
+    let mut implied = match range {
         "DOVI" => (5, 0, false),
         "DOVIWithHDR10" | "DOVIWithHDR10Plus" => (8, 1, false),
         "DOVIWithSDR" => (8, 2, false),
@@ -161,6 +161,11 @@ fn dovi_layering(s: &MediaStream, range: &str) -> (i64, i64, bool) {
         "DOVIWithEL" | "DOVIWithELHDR10Plus" => (7, 6, true),
         _ => return (0, 0, false),
     };
+    // Range-only metadata describes the base layer; AV1 carries it as Profile 10, not HEVC P8.
+    // Keep explicit profiles and EL claims intact so the route can reject mismatches.
+    if !implied.2 && s.codec.as_deref().is_some_and(|c| c.eq_ignore_ascii_case("av1")) {
+        implied.0 = 10;
+    }
     (
         s.dv_profile.filter(|&p| p > 0).unwrap_or(implied.0),
         s.dv_bl_signal_compatibility_id.unwrap_or(implied.1),
@@ -537,6 +542,21 @@ pub fn hub(identifier: &str, title: &str, kind: &str, key: &str, items: Vec<Meta
 mod tests {
     use super::*;
     use crate::jf::images::{jf_image_path, split_art_tag};
+
+    #[test]
+    fn av1_dolby_ranges_infer_profile10_without_overwriting_explicit_facts() {
+        for (range, compat) in [("DOVI", 0), ("DOVIWithHDR10", 1),
+            ("DOVIWithHDR10Plus", 1), ("DOVIWithSDR", 2), ("DOVIWithHLG", 4)] {
+            let av1 = MediaStream { codec: Some("AV1".into()), ..Default::default() };
+            assert_eq!(dovi_layering(&av1, range), (10, compat, false));
+            let explicit = MediaStream { dv_profile: Some(8), ..av1.clone() };
+            assert_eq!(dovi_layering(&explicit, range), (8, compat, false));
+            let el = MediaStream { el_present_flag: Some(1), ..av1.clone() };
+            assert_eq!(dovi_layering(&el, range), (10, compat, true));
+            assert_eq!(dovi_layering(&av1, "DOVIWithEL"), (7, 6, true));
+            assert_eq!(dovi_layering(&av1, "DOVIInvalid"), (0, 0, false));
+        }
+    }
 
     fn movie() -> BaseItemDto {
         serde_json::from_str(r#"{
