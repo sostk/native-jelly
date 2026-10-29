@@ -3570,13 +3570,11 @@ mod payload_tests {
         assert_eq!(out.matches("DolbyHdrInfo").count(), 1);
     }
 
-    /// The consistency guard: a Dolby Vision declaration only ever rides an HEVC elementary
-    /// stream, so a payload built for H264 must not carry one. Unreachable by construction — the
-    /// route records the DV record on the direct-play branch, whose codec is the file's own hevc —
-    /// which is exactly why it is asserted rather than trusted: the `sourceInfo` envelope is
-    /// parsed before anything decodes, and a malformed one wedges the sink instead of failing.
+    /// The consistency guard: an HEVC Profile 5 declaration cannot ride an H264 stream.
+    /// The payload boundary checks the profile/codec pair independently of route planning;
+    /// a malformed sourceInfo envelope may wedge the sink before anything decodes.
     #[test]
-    fn a_declaration_never_rides_a_non_hevc_payload() {
+    fn a_profile5_declaration_never_rides_an_h264_payload() {
         assert_eq!(
             with_dolby_hdr_info(PAYLOAD_AV, "H264", p5().presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true)),
             PAYLOAD_AV

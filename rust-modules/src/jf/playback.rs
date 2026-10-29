@@ -1290,7 +1290,7 @@ mod tests {
         let av1 = codec("av1");
         assert_eq!(value(&av1, "Width"), Some("1920".into()));
         assert_eq!(value(&av1, "Height"), Some("1080".into()));
-        assert_eq!(value(&av1, "VideoRangeType"), Some("SDR|HDR10|HDR10Plus|HLG".into()));
+        assert_eq!(value(&av1, "VideoRangeType"), Some("SDR|HDR10|HDR10Plus|HLG|DOVIWithSDR|DOVIWithHDR10|DOVIWithHDR10Plus|DOVIWithHLG".into()));
 
         let hls = device_profile(
             &caps,
