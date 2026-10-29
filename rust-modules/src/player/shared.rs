@@ -1782,9 +1782,9 @@ impl Shared {
     }
 
     /// Reserve the native Pause that makes an in-place seek safe. A seek requested from an
-    /// existing user hold reuses that physical Pause, but temporarily transfers ownership to the
-    /// seek prime so exactly one landed frame may be decoded before the user hold is restored.
-    pub(crate) fn prepare_seek_pause(&self) -> Option<HlsSeekPause> {
+    /// existing user hold reuses that physical Pause. Only an explicit paused-frame preroll
+    /// transfers ownership to the seek prime; an ordinary hold remains resumable by the viewer.
+    pub(crate) fn prepare_seek_pause(&self, paused_preroll: bool) -> Option<HlsSeekPause> {
         let mut clock = self.hls_clock.lock().unwrap_or_else(|e| e.into_inner());
         match clock.phase {
             HlsClockPhase::Running => {
@@ -1799,7 +1799,7 @@ impl Shared {
                 hold:
                     ClockHold::User | ClockHold::Initial | ClockHold::Seek | ClockHold::ResumePrime,
             } => {
-                if clock.user_held {
+                if clock.user_held && paused_preroll {
                     clock.user_held = false;
                     clock.resume_acb_pending = true;
                 }
@@ -2903,7 +2903,7 @@ mod tests {
             HlsPauseCompletion::Accepted
         );
         assert_eq!(s.prepare_hls_user_resume(true), Some(HlsUserResume::Prime));
-        assert_eq!(s.prepare_seek_pause(), Some(HlsSeekPause::AlreadyHeld));
+        assert_eq!(s.prepare_seek_pause(true), Some(HlsSeekPause::AlreadyHeld));
         assert_eq!(s.hls_prime_kind(), Some(HlsPrimeKind::Fresh));
 
         let generation = s.hls_candidate_generation.load(Ordering::Acquire);
@@ -3010,7 +3010,7 @@ mod tests {
             s.complete_hls_user_pause(pause, true),
             HlsPauseCompletion::Accepted
         );
-        assert_eq!(s.prepare_seek_pause(), Some(HlsSeekPause::AlreadyHeld));
+        assert_eq!(s.prepare_seek_pause(true), Some(HlsSeekPause::AlreadyHeld));
 
         let generation = s.hls_candidate_generation.load(Ordering::Acquire);
         let (play, _) = s

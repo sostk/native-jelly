@@ -1283,7 +1283,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         // Pause, user-held seek reuse and eventual prime all share one actuator state. In
         // particular a seek from Paused must not issue a redundant native Pause, and a result from
         // an older transition must not authorize flushing this session's queues.
-        match SHARED.prepare_seek_pause() {
+        match SHARED.prepare_seek_pause(TX.seek_preroll_active()) {
             Some(HlsSeekPause::AlreadyHeld) => {}
             Some(HlsSeekPause::Issue(token)) => {
                 let accepted = unsafe { super::sink().pause(mt) } != 0;
@@ -2073,6 +2073,23 @@ mod native_seek_pump_tests {
         assert_eq!(rig.eng().seek_retries, 0, "a held feed is not a stuck demuxer");
         assert!(reloads().is_empty(), "Pause cannot trigger a fresh Load");
         assert!(crate::player::resume(&mut rig.pa));
+        for _ in 0..5 { rig.frame(); }
+        assert_eq!(ffi_host::seek_log_for_test(), vec![TARGET_NS / 1_000_000]);
+        assert!(!rig.eng().rebase_pending);
+        assert!(reloads().is_empty());
+    }
+
+    #[test]
+    fn seek_armed_after_pause_keeps_resume_authorized() {
+        let _serial = nj_base::testlock::serial();
+        let mut rig = Rig::new(None);
+        assert!(crate::player::pause(&mut rig.pa));
+        rig.arm(TARGET_NS);
+        rig.land_keyframe(TARGET_NS);
+        for _ in 0..300 { rig.frame(); }
+        assert!(TX.paused.load(Relaxed));
+        assert_eq!(rig.eng().seek_retries, 0);
+        assert!(crate::player::resume(&mut rig.pa), "a seek must not discard the accepted user hold");
         for _ in 0..5 { rig.frame(); }
         assert_eq!(ffi_host::seek_log_for_test(), vec![TARGET_NS / 1_000_000]);
         assert!(!rig.eng().rebase_pending);
