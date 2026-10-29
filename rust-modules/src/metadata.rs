@@ -355,8 +355,8 @@ impl Cast {
 /// IS an HDR10 stream — ignoring the RPU costs the dynamic metadata and nothing else. It is not
 /// fine for **Profile 5**, which is single-layer IPT-PQ with no HDR10 fallback: decoded as
 /// ordinary HEVC it is not a dimmer picture but a WRONG one, with the washed, pink-green cast of
-/// IPT read as YCbCr. And it cannot work at all for **Profile 7**, whose picture is split across
-/// two layers we cannot interleave.
+/// IPT read as YCbCr. Eligible **Profile 7** is converted to single-layer 8.1 on the feed path;
+/// an unsupported dual layer still cannot work because we cannot interleave its layers.
 ///
 /// All zero is "the server said nothing", which is also what a non-DV stream produces — see
 /// [`Dovi::base_layer_unusable`] for why silence must never convict.
@@ -462,7 +462,8 @@ impl Dovi {
     /// - **an enhancement layer** (`el_present`, Profile 7) — one elementary stream is all the
     ///   pipeline feeds, so the other layer simply never arrives. This is the only test that
     ///   catches P7: measured live 2026-08-21, the dev server's P7 item reports `bl_compat = 6`,
-    ///   which sails through any `== 0` check.
+    ///   which sails through any `== 0` check. Eligible Profile 7 is the exception:
+    ///   `converts_to_p81` retains the HDR10 base and rewrites its dynamic metadata.
     /// - **no cross-compatible base layer** (Profile 5 / `bl_compat == 0`) — IPT-PQ, which an
     ///   HEVC decoder will happily decode and a panel will happily show, incorrectly.
     ///
@@ -488,7 +489,15 @@ impl Dovi {
         if !self.present {
             return false;
         }
+        if self.converts_to_p81() { return false; }
         self.el_present || self.profile == 5 || (self.profile > 0 && self.bl_compat == 0)
+    }
+
+    /// Eligible UHD Blu-ray Profile 7: the feed drops the enhancement layer and
+    /// converts its RPU to single-layer 8.1. Compatibility id 6 is Profile 7's
+    /// HDR10 base; reserved or contradictory compatibility ids remain refused.
+    pub(crate) fn converts_to_p81(&self) -> bool {
+        self.present && self.el_present && self.profile == 7 && self.bl_compat == 6
     }
 
     /// PURE: **how this stream will be presented** — the ONE predicate behind both halves of the
@@ -505,7 +514,8 @@ impl Dovi {
     ///
     /// - **not `present`** → [`DvPresentation::NotDv`]. No Dolby Vision, nothing to say, and
     ///   nothing to refuse. This is every ordinary file in the library.
-    /// - **`el_present`** → refuse, always, `signal` or not. Profile 7 splits its picture across a
+    /// - **`el_present`** → refuse unless eligible HEVC Profile 7 is converted to 8.1.
+    ///   Other dual layers split their picture across a
     ///   base and an enhancement layer; the pipeline feeds ONE elementary stream and cannot
     ///   interleave the other, so no payload key makes it displayable. (This is also the only
     ///   thing that identifies a dual-layer file: the dev server's P7 reports `bl_compat = 6`.)
@@ -536,7 +546,8 @@ impl Dovi {
         if !self.present {
             return DvPresentation::NotDv;
         }
-        if self.el_present {
+        let converted = self.converts_to_p81() && video_is_hevc;
+        if self.el_present && !converted {
             return DvPresentation::Refuse("dual-layer");
         }
         // Presence of our node enables libpf's DV path even on a television which cannot display
@@ -553,11 +564,9 @@ impl Dovi {
             };
         }
         DvPresentation::Declare(DolbyHdrInfo {
-            profile_id: self.profile,
-            // Honest derivation, and unreachable as `"dual"` while the `el_present` arm above
-            // returns first — written this way so that the day an interleaver exists, the payload
-            // follows the refusal being relaxed instead of quietly lying about the track.
-            track_type: if self.el_present { "dual" } else { "single" },
+            profile_id: if converted { 8 } else { self.profile },
+            // The feed converts eligible P7 to one layer; other dual layers return above.
+            track_type: "single",
             // Never `"all"`: paired with `trackType: "dual"` that is what sets `dv-dual-svp`, the
             // secure-video-path flag, which this app cannot satisfy.
             encryption_type: "clear",

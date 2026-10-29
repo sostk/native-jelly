@@ -1404,13 +1404,14 @@ fn start_bufferfeed_inner(
             // `teardown(true) + start_bufferfeed()` (reload_at / reload_transcode /
             // switch_audio_native), which respawns this thread with the new value.
             let acodec = crate::route::stream_acodec(ps);
+            let expected_p7 = crate::route::stream_dovi(ps).converts_to_p81();
             // The item's whole length from the negotiation, by value for the same reason: the
             // total the open publishes when the stream itself cannot say (`ff::open_duration_ns`).
             let runtime_ns = crate::route::runtime_ns(ps);
             let abr = crate::route::hls_abr_control(ps);
             let auto_original = crate::route::auto_original_watch(ps);
             stream_th = nj_base::task::spawn("demux", move || {
-                crate::ff::demux(origin, path, acodec, runtime_ns, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(origin, path, acodec, expected_p7, runtime_ns, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 // Nothing will ever fill the AU queues, so there is no session to start. `hs` is
@@ -3448,7 +3449,7 @@ mod payload_tests {
     }
 
     /// The three ways the node is NOT sent, each of which must leave the payload byte-identical:
-    /// a file with no Dolby Vision, a Dolby Vision file we refuse (the dual-layer P7 — declaring a
+    /// a file with no Dolby Vision, a Dolby Vision file we refuse (an ineligible dual layer — declaring a
     /// layer we cannot feed is worse than refusing it), and the disarmed trigger, which is what a
     /// `RELEASE=1` build compiles in and what every boot without `/tmp/nativejelly-dv` does today.
     #[test]
@@ -3456,7 +3457,7 @@ mod payload_tests {
         let p7 = Dovi {
             present: true,
             profile: 7,
-            bl_compat: 6,
+            bl_compat: 0,
             el_present: true,
             ..Dovi::NONE
         };
@@ -3467,6 +3468,16 @@ mod payload_tests {
         ] {
             assert_eq!(with_dolby_hdr_info(PAYLOAD_AV, "H265", dv), PAYLOAD_AV);
         }
+    }
+
+    #[test]
+    fn converted_profile7_payload_declares_profile8_single() {
+        let p7 = Dovi { present: true, profile: 7, bl_compat: 6, el_present: true, ..Dovi::NONE };
+        let out = with_dolby_hdr_info(PAYLOAD_AV, "H265",
+            p7.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true));
+        const NODE: &str = r#","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":8}"#;
+        assert!(out.contains(NODE), "{out}");
+        assert_eq!(out.replace(NODE, ""), PAYLOAD_AV);
     }
 
     /// **What we actually send for a Dolby Atmos track**, at the key path `libpf` reads

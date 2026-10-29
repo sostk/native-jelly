@@ -170,6 +170,8 @@ warnings = "deny"
 workspace = true
 
 [dependencies]
+# quietvoid's libdovi implementation, used directly through its pure Rust RPU API.
+dolby_vision = { version = "=3.4.0", default-features = false }
 # The base layer (ci/module-layers.ini `[base]`): event log, paths, spawn discipline, dlopen seam,
 # frame instruments. Features it has a `cfg` on are forwarded by the features above.
 nj_base = { path = "base" }

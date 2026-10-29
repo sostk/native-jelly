@@ -5,6 +5,30 @@
 use super::test_support::*;
 use super::*;
 
+#[test]
+fn convertible_profile7_is_declared_as_single_layer_profile8() {
+    let p7 = Dovi { present: true, profile: 7, bl_compat: 6, el_present: true, ..Dovi::NONE };
+    let output = p7.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true);
+    let DvPresentation::Declare(info) = output else { panic!("convertible P7 was refused: {output:?}"); };
+    assert_eq!(info.profile_id, 8);
+    assert_eq!(info.track_type, "single");
+}
+
+#[test]
+fn profile7_conversion_refuses_reserved_compatibility_and_non_hevc() {
+    use nj_platform::devcaps::dv::DvCapability::{Supported, Unknown, Unsupported};
+    let p7 = Dovi { present: true, profile: 7, bl_compat: 6, el_present: true, ..Dovi::NONE };
+    for capability in [Supported, Unsupported, Unknown] {
+        assert_eq!(p7.presentation(true, capability, false), DvPresentation::Refuse("dual-layer"));
+    }
+    for compat in [0, 1, 2, 4, 5, 7, 255] {
+        let d = Dovi { bl_compat: compat, ..p7 };
+        assert!(!d.converts_to_p81());
+        assert!(d.base_layer_unusable());
+        assert_eq!(d.presentation(true, Supported, true), DvPresentation::Refuse("dual-layer"));
+    }
+}
+
 /// **A Dolby Vision record must survive a second video stream that has none.** `fps` and `hdr`
 /// take the LAST `streamType: 1` stream in the part and that is harmless for both; the DV
 /// record is read by `route::video_direct_plays`, so blanking it back to the all-zero default
@@ -130,10 +154,9 @@ fn a_range_type_alone_still_names_the_layering() {
     assert_eq!(layering(dovi("HDR10Plus")), (false, 0, 0, false));
 }
 
-/// A dual-layer file whose range type names it is refused whatever the fields say, as the Plex
-/// path's `DOVIELPresent` was.
+/// Jellyfin's dual-layer range supplies the same eligible conversion facts as the container.
 #[test]
-fn an_enhancement_layer_is_refused_from_the_jellyfin_fields() {
+fn an_eligible_enhancement_layer_is_converted_from_the_jellyfin_fields() {
     let dovi = jellyfin_dovi(
         r#"{"Type":"Video","Index":0,"Codec":"hevc","VideoRangeType":"DOVIWithEL",
             "DvProfile":7,"ElPresentFlag":1,"BlPresentFlag":1,"DvBlSignalCompatibilityId":6}"#,
@@ -141,6 +164,6 @@ fn an_enhancement_layer_is_refused_from_the_jellyfin_fields() {
     assert_eq!((dovi.profile, dovi.bl_compat, dovi.el_present), (7, 6, true));
     assert_eq!(
         dovi.presentation(true, nj_platform::devcaps::dv::DvCapability::Supported, true),
-        DvPresentation::Refuse("dual-layer")
+        DvPresentation::Declare(DolbyHdrInfo { profile_id: 8, track_type: "single", encryption_type: "clear" })
     );
 }

@@ -302,7 +302,7 @@ impl DemuxRun {
         let origin = crate::catalog::Origin::http("127.0.0.1", port as i32);
         let thread = std::thread::spawn(move || {
             // `acodec` is the Load payload's audio codec: the demuxer feeds the track that matches.
-            demux(origin, "/library/parts/1/file.mkv".into(), "eac3".into(), 0, None, None, vp, ap, hp)
+            demux(origin, "/library/parts/1/file.mkv".into(), "eac3".into(), false, 0, None, None, vp, ap, hp)
         });
         DemuxRun { video, audio, thread: Some(thread), hs }
     }

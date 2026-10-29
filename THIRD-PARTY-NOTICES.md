@@ -362,6 +362,33 @@ here (the standard library takes `hashbrown` with default features disabled, whi
 enable it) — verified absent from the binary. `rustc-literal-escaper`, `proc_macro`,
 `panic_abort` are build-std source components; final object inclusion is recorded in the linker evidence. `std_detect` supplies CPU capability detection in the Rust runtime and is covered by the Rust notices above.
 
+### 2.4.1 Dolby Vision RPU conversion dependencies
+
+These additional crates are statically linked for the Profile 7 to 8.1 conversion.
+MIT is elected wherever offered, under the existing `licenses/MIT.txt` grant.
+The exact libdovi implementation notice is also preserved in `licenses/dolby_vision-MIT.txt`.
+No optional `dolby_vision` C API, XML or serde feature is enabled.
+
+| Package | Version | Declared licence | Copyright |
+|---|---|---|---|
+| anyhow | 1.0.104 | MIT OR Apache-2.0 | David Tolnay |
+| bitstream-io | 4.10.0 | MIT/Apache-2.0 | 2017 Brian Langenberger |
+| bitvec | 1.1.1 | MIT | Copyright (c) 2018 myrrlyn (Alexander Payne) |
+| bitvec_helpers | 4.0.2 | MIT | Copyright (c) 2026 quietvoid |
+| crc | 3.4.0 | MIT OR Apache-2.0 | 2017 crc-rs Developers |
+| crc-catalog | 2.5.0 | MIT OR Apache-2.0 | Akhil Velagapudi |
+| dolby_vision | 3.4.0 | MIT | Copyright (c) 2026 quietvoid. Parses and rewrites Dolby Vision RPUs for the Profile 7 to 8.1 conversion (`ff.rs`); used unmodified, with no optional features |
+| funty | 2.0.0 | MIT | Copyright (c) 2020 myrrlyn (Alexander Payne) |
+| no_std_io2 | 0.9.4 | Apache-2.0 OR MIT | 2020-2021 Brendan Molloy |
+| radium | 0.7.0 | MIT | Copyright (c) 2019 kneecaw (Nika Layzell) |
+| tap | 1.0.1 | MIT | Copyright (c) 2017 Elliot Linder |
+| tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT | 2019 Daniel "Lokathor" Gee |
+| wyz | 0.5.1 | MIT | Copyright (c) 2018 myrrlyn (Alexander Payne) |
+
+The three `tests/fixtures/dovi-p7-*-rpu.bin` files are unmodified dovi_tool test assets,
+Copyright quietvoid, MIT, from commit `614c816b6446dcd1dbaf433403d499a6026fbb5a`.
+Their source paths and conversion oracle are recorded in `tests/fixtures/README.md`.
+
 ### 2.5 Compiler runtime fragments statically linked into `nativejelly`
 
 - **GCC runtime startup objects** (`crtbegin.o`, `crtend.o`) from the webOS NDK's GCC 12.2.0.
