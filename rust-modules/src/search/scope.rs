@@ -408,6 +408,11 @@ mod tests {
     fn equal_generation_browse_owners_publish_their_own_search_scope() {
         let _serial = nj_base::testlock::serial();
         let _reset = Reset;
+        // This regression needs an identical complete cache key for both owners.
+        // A cold session peek queues a refresh that can publish between the two
+        // reads; settle a private fixture instead of racing that unrelated writer.
+        let _session = crate::catalog::session::TempSession::new("scope-equal-owner-generation");
+        let _ = crate::catalog::session::peek_at(std::time::Instant::now());
         crate::catalog::reset_servers_for_test();
         let sid = crate::catalog::register_for_test(
             "equal-generation-scope", "127.0.0.1", 9, "synthetic", "scope");
