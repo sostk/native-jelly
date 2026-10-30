@@ -32,7 +32,9 @@ Push, into the single `AuQueue`:
 
 - **Video AUs** (`es=1`): H264/HEVC **Annex-B** — every NAL prefixed with a `00 00 00 01` start
   code; **SPS/PPS (H264) or VPS/SPS/PPS (HEVC) prepended at every keyframe**; `key=1` iff the AU
-  is an IDR (H264 NAL type 5) / IRAP (HEVC NAL types 16–23). One `aq_push` = one coded picture.
+  is an IDR (H264 NAL type 5), an H264 non-IDR I-slice the container flags as a keyframe or that
+  follows an in-band SPS in the same AU (a Blu-ray remux's recovery-point I-frames), or an IRAP
+  (HEVC NAL types 16–23). One `aq_push` = one coded picture.
 - **Audio AUs** (`es=2`, `key=1` always): **raw** elementary-stream frames — AC3/EAC3 syncframes,
   **raw AAC (no ADTS)** — bytes verbatim from `av_read_frame`, no container framing, no BSF.
 - **PTS in nanoseconds of content time**: `pts_ns = av_rescale_q(pkt.pts, stream.time_base,

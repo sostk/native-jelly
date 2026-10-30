@@ -158,6 +158,42 @@ fn h264_non_idr_is_not_a_keyframe_and_gets_no_parameter_set() {
     );
 }
 
+/// **An H.264 I-frame that is not an IDR is a keyframe when the container says so** (Matroska
+/// flags a Blu-ray remux's recovery-point I-frames and its Cues index them).
+#[test]
+fn h264_a_flagged_non_idr_i_frame_is_a_keyframe_and_gets_the_parameter_set() {
+    // slice header: first_mb_in_slice ue(0) = '1', slice_type ue(7) (I, all slices) = '0001000'
+    let buf = avcc(&[&[0x21, 0x88, 0xAA, 0xBB]]);
+    let param = [0, 0, 0, 1, 0x67, 0x42];
+    let (key, out) = to_annexb_flagged(&buf, &param);
+    assert!(key, "a container keyframe whose slice is I is a random access point");
+    assert_eq!(&out[..param.len()], &param, "and carries the parameter sets like an IDR");
+    // slice_type ue(2) (I) = '011'
+    assert!(to_annexb_flagged(&avcc(&[&[0x21, 0xB0, 0x00]]), &[]).0, "slice_type 2 is I too");
+}
+
+/// The container's flag alone does not make a P- or B-slice a keyframe, an unflagged I-slice
+/// without an in-band SPS is not one, and a header too short to read is not intra.
+#[test]
+fn h264_a_flagged_p_or_b_slice_and_a_bare_i_slice_are_not_keyframes() {
+    assert!(!to_annexb_flagged(&avcc(&[&[0x21, 0xC0, 0x00]]), &[]).0, "a flagged P-slice");
+    assert!(!to_annexb_flagged(&avcc(&[&[0x01, 0x9C, 0x00]]), &[]).0, "a flagged B-slice");
+    assert!(!to_annexb(&avcc(&[&[0x21, 0x88, 0xAA]]), false, &[]).0, "an unflagged I-slice");
+    assert!(!to_annexb_flagged(&avcc(&[&[0x21]]), &[]).0, "a header with no slice fields");
+    assert!(!to_annexb_flagged(&avcc(&[&[0x21, 0x00, 0x00, 0x00, 0x00]]), &[]).0, "an unterminated Exp-Golomb run");
+}
+
+/// An unflagged I-slice IS a keyframe when its AU repeats the SPS ahead of it: that is how a
+/// Blu-ray stream marks a random access point after its first frame (upstream #1085). With only
+/// IDR counted, every seek landed on one and the post-seek rebase waited for a keyframe that never
+/// came: the player sat on Buffering at the target.
+#[test]
+fn h264_an_i_slice_behind_an_in_band_sps_is_a_keyframe() {
+    let (sps, pps): (&[u8], &[u8]) = (&[0x67, 0x4D, 0x40, 0x29], &[0x68, 0xEE, 0x3C]);
+    assert!(to_annexb(&avcc(&[sps, pps, &[0x21, 0x88, 0xAA]]), false, &[]).0, "SPS + PPS + I-slice");
+    assert!(!to_annexb(&avcc(&[sps, pps, &[0x21, 0xC0, 0x00]]), false, &[]).0, "SPS + PPS + P-slice");
+}
+
 #[test]
 fn hevc_irap_range_is_detected_as_a_keyframe() {
     // HEVC nal type is bits 1..6 of byte 0; IRAP is 16..=23.
