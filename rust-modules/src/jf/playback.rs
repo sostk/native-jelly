@@ -479,10 +479,12 @@ fn transcode_reasons(url: &str) -> Vec<String> {
         .collect()
 }
 
+/// A reason that means the server re-encodes the video. `DirectPlayError` is not one: Jellyfin
+/// sets it as a fallback when no direct profile matched (`StreamBuilder.GetVideoDirectPlayProfile`)
+/// and its video copy decision never reads the reasons.
 fn video_reason(r: &str) -> bool {
     r.starts_with("Video")
-        || matches!(r, "RefFramesNotSupported" | "AnamorphicVideoNotSupported" | "InterlacedVideoNotSupported"
-            | "DirectPlayError")
+        || matches!(r, "RefFramesNotSupported" | "AnamorphicVideoNotSupported" | "InterlacedVideoNotSupported")
 }
 
 fn audio_reason(r: &str) -> bool {
@@ -1463,6 +1465,19 @@ mod tests {
         assert_eq!(r, ["ContainerNotSupported", "AudioCodecNotSupported"]);
         assert!(!r.iter().any(|r| video_reason(r)));
         assert!(r.iter().any(|r| audio_reason(r)));
+    }
+
+    /// Jellyfin sets `DirectPlayError` only as a fallback when no direct-play or direct-stream
+    /// profile matched with no compatibility reason (`StreamBuilder.GetVideoDirectPlayProfile`);
+    /// it is in none of the video reason groups, and the video copy decision
+    /// (`GetVideoTranscodeProfile`) never reads the reasons. Jellyfin 12.0 answers a TrueHD
+    /// switch of an HEVC film `AudioCodecNotSupported,DirectPlayError` and COPIES the HEVC; read
+    /// as a video reason, the Load declared H.264 and the demuxer refused the copied HEVC.
+    #[test]
+    fn a_direct_play_error_says_nothing_about_the_video_lane() {
+        assert!(!video_reason("DirectPlayError"));
+        assert!(!audio_reason("DirectPlayError"));
+        assert!(video_reason("VideoCodecNotSupported") && video_reason("RefFramesNotSupported"));
     }
 
     #[test]

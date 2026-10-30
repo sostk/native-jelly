@@ -142,3 +142,23 @@ fn a_forced_route_is_never_rebuilt_by_the_recovery() {
     assert!(!seen.iter().any(|r| r.line.contains("/PlaybackInfo")), "the server is not asked: {seen:?}");
     reset_session(&mut ps);
 }
+
+/// The answer Jellyfin 12.0 gave on the TV (2026-10-30) for an audio-only conversion of an HEVC
+/// file: `AudioCodecNotSupported,DirectPlayError` with the HEVC copied. The rebuilt route must
+/// declare the copied HEVC, and the rescue changed only the audio, so it is a proof.
+#[test]
+fn a_direct_play_error_in_the_answer_still_copies_the_video() {
+    let mut ps = PlaybackSession::IDLE;
+    let _g = fresh_registry(&mut ps);
+    let hevc_opus = H264_TWO_OPUS.replace(r#""Codec":"h264""#, r#""Codec":"hevc""#);
+    let url = format!("/videos/{JF_GUID}/stream.mkv?VideoCodec=h264,hevc&AudioCodec=ac3,eac3,aac&TranscodeReasons=AudioCodecNotSupported,DirectPlayError&PlaySessionId=ps-loopback");
+    let lb = JfLoopback::start(playback_info(false, "mkv", &hevc_opus, Some(&url)), user_config(None, true, None, "Default"));
+    let audio = refused_direct_play(&mut ps, &lb, Default::default(), OpenFailure::Refused { num: Some(601) });
+    assert!(convert_refused_audio(&mut ps, &audio, 0).is_some());
+    let _ = lb.finish();
+    assert_eq!(stream_vcodec(&ps), "hevc", "the server copied the HEVC; the Load must say so");
+    note_audio_recovery_load(&mut ps);
+    assert_eq!(audio_recovery_first_picture(&mut ps), Some(Record::Proof(audio)));
+    reset_session(&mut ps);
+    install_active_encoder("");
+}
