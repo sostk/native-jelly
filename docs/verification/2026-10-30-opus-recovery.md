@@ -75,6 +75,45 @@ The conversion was a pre-made AAC file standing in for the server; real Jellyfin
 negotiation, a pipeline refusal (`num=200`/`601`) on the set, listening and output
 separation remain unverified.
 
+## Real Jellyfin 12.0 checks and the `DirectPlayError` fix — 30 October 2026
+
+Server: Jellyfin 12.0.0 on the host, reached through a reverse tunnel; the authorized test
+account only (its watch state is the only server write). Same set and handback rules as above;
+sound output, volume and mute untouched.
+
+1. **4K HEVC SDR episode, E-AC-3 5.1, on `main`:** `method=DirectPlay`; one `H265`/`AC3 PLUS`
+   Load; position to 124 s; pause and resume; native seeks to 120 s and 60 s; no error.
+2. **4K HEVC HDR10 film, switch to its TrueHD 7.1 track at ~4 s, on `main`: failed.** The
+   server answered `TranscodeReasons=AudioCodecNotSupported,DirectPlayError` and copied the
+   HEVC. The client counted `DirectPlayError` as a video reason, read the lane as an encode,
+   declared `H264` and the demuxer refused the copied HEVC (`the Load declared H264 but the file
+   is hevc`); playback stopped at 3 s. Present since `41fbe62c` (2026-10-04), not introduced by
+   C3, but every C3 recovery conversion withholds direct play and would hit it.
+3. **Same film with `b24ab6fe`:** `delivery=audio-transcode video=hevc->hevc
+   audio=#1:truehd->ac3`, external subtitle kept; `H265`/`AC3` Load; a seek to 300 s restarted
+   the real conversion at 300 s; position to 351 s; capture shows the picture at 5:52 with
+   TrueHD selected and subtitles drawn; no pipeline error or crash.
+
+Jellyfin source (`StreamBuilder.GetVideoDirectPlayProfile`) sets `DirectPlayError` only as a
+fallback when no direct profile matched without a compatibility reason; it is in none of the
+server's video reason groups, and `GetVideoTranscodeProfile`'s copy decision does not read the
+reasons. `b24ab6fe` adds a classifier regression and a recovery-level loopback regression with
+the measured answer; both failed before the fix.
+
+Gates on `b24ab6fe` (`umask 022`): shipping check and debug ARM build passed. The first full
+`make check` failed one unrelated test,
+`person::tests::a_roles_landing_captions_by_key_and_a_media_landing_resets_it`
+("a caption survived the list it was addressed to"), which passed 5/5 isolated and in its
+module; the second full run on the same commit passed in 387.27 s:
+
+```text
+test result: ok. 5233 passed; 0 failed; 27 ignored; 0 measured; 0 filtered out; finished in 85.04s
+test result: ok. 5329 passed; 0 failed; 27 ignored; 0 measured; 0 filtered out; finished in 81.15s
+```
+
+The person test is an order-dependent flake to fix separately. The account's library holds no
+Opus item, so the Opus recovery itself was not run against the real server.
+
 ## Limits
 
 - Host tests do not drive the pump's failure-branch reload; on the TV only the
