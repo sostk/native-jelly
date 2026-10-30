@@ -17,13 +17,13 @@ pub use crate::jf::playback::{
 // [`is_dp_audio_track`] for membership and channel bounds, shared with the device profile.
 pub use nj_platform::devcaps::DP_AUDIO_CODECS;
 pub fn is_dp_audio(codec: &str) -> bool {
-    nj_platform::devcaps::caps().audio_has(codec)
+    super::capabilities::start_caps().audio_has(codec)
 }
 
 /// Codec and channel check for an actual selected track. Codec-only membership is insufficient
 /// on devices whose DTS decoder stops at 5.1 or whose AAC decoder stops at stereo.
 pub fn is_dp_audio_track(codec: &str, channels: i64) -> bool {
-    nj_platform::devcaps::caps().audio_supports(codec, channels)
+    super::capabilities::start_caps().audio_supports(codec, channels)
 }
 
 /// Subtitle codecs the client renders itself (`ff.rs` / the track menu): an embedded track whose

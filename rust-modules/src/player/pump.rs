@@ -581,6 +581,65 @@ fn recover_failed_source_route(ps: &mut crate::route::PlaybackSession) -> Option
     }
 }
 
+/// **C3: offer a pre-picture failure to this request's audio recovery** (`route::audio_recovery`),
+/// the rung between a pending HLS->Original rollback and [`recover_failed_source_route`]'s Auto
+/// HLS contingency (the machine passes while a rollback is pending, under Force and after a
+/// picture). Records what the failure taught, then — when the machine asks — rebuilds the route
+/// with the refused audio converted and reloads it at the position the viewer intends, a seek
+/// pressed during the failed open included. The viewer's pause is the transport's and survives
+/// the reload (`TX::reset_for_reload`). Returns the reload position in nanoseconds once the
+/// conversion's route is installed ([`reload_refused_audio`] starts it); `None` leaves the failure
+/// to the ladder.
+fn recover_refused_audio(
+    ps: &mut crate::route::PlaybackSession,
+    failure: crate::route::audio_recovery::OpenFailure,
+) -> Option<i64> {
+    use crate::route::audio_recovery::{Action, OpenFacts};
+    let facts = OpenFacts {
+        failure,
+        audio: crate::route::fed_audio(ps),
+        seen_picture: SHARED.seen_frame.load(Relaxed),
+        forced: crate::route::forced_direct_play(ps),
+        pending_original: crate::route::original_recovery_pending(),
+    };
+    let step = crate::route::audio_recovery_failure(ps, &facts);
+    if let Some(record) = &step.record {
+        record_audio_refusal(record);
+    }
+    let Action::Convert(audio) = step.action else {
+        return None;
+    };
+    super::log(&format!("audio recovery: {failure:?} with native {} before any picture", audio.codec));
+    let offset_secs = (super::intended_pos_ns(ps) / 1_000_000_000).max(0);
+    crate::route::convert_refused_audio(ps, &audio, offset_secs)?;
+    Some(offset_secs * 1_000_000_000)
+}
+
+/// Reload onto the conversion [`recover_refused_audio`] installed. A reload that cannot start
+/// spends the rung and raises the read-out (`settle_reload`).
+fn reload_refused_audio(
+    ps: &mut crate::route::PlaybackSession,
+    pa: &mut super::adapter::PlayerAdapter,
+    offset_ns: i64,
+) {
+    let started = settle_reload(
+        super::engine::reload_transcode(ps, pa, offset_ns),
+        "audio conversion after a native audio refusal",
+    );
+    if !started {
+        crate::route::audio_recovery_reload_failed(ps);
+    }
+}
+
+/// The learner's write for a recovery record: fire-and-forget on the storage worker.
+fn record_audio_refusal(record: &crate::route::audio_recovery::Record) {
+    use crate::route::audio_recovery::Record;
+    let _ = match record {
+        Record::Named(a) => crate::catalog::session::record_named_refusal(&a.codec, a.channels),
+        Record::Proof(a) => crate::catalog::session::record_refusal_proof(&a.codec, a.channels),
+    };
+}
+
 /// How close to the container's duration the playhead must be, after the EOS, to count as the end.
 const EOS_TAIL_NS: i64 = 1_000_000_000;
 
@@ -837,6 +896,15 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             finish_preview_open_failure(ps, pa);
             return;
         }
+        let failure = if SHARED.load_timed_out.load(Acquire) {
+            crate::route::audio_recovery::OpenFailure::TimedOut
+        } else {
+            crate::route::audio_recovery::OpenFailure::Refused { num: SHARED.load_refusal() }
+        };
+        if let Some(offset_ns) = recover_refused_audio(ps, failure) {
+            reload_refused_audio(ps, pa, offset_ns);
+            return;
+        }
         if let Some(rollback) = recover_failed_source_route(ps) {
             let started = settle_reload(
                 super::engine::reload_transcode(ps, pa, rollback.offset_ns),
@@ -878,6 +946,11 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     if SHARED.frames.load(Relaxed) > 0 {
         crate::route::confirm_resume_presented(ps);
     }
+    if SHARED.seen_frame.load(Relaxed) {
+        if let Some(proof) = crate::route::audio_recovery_first_picture(ps) {
+            record_audio_refusal(&proof);
+        }
+    }
 
     // The producer died before publishing a duration: the EOS path is gated on `duration_ns > 0`
     // so it can NEVER fire, and the player used to sit on a black screen forever with no error
@@ -912,6 +985,13 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     if SHARED.demux_failed.load(Acquire) && SHARED.frames.load(Relaxed) == 0 {
         if crate::route::preview_request(ps) {
             finish_preview_open_failure(ps, pa);
+            return;
+        }
+        if let Some(offset_ns) = SHARED.native_audio_header_refused.load(Acquire)
+            .then(|| recover_refused_audio(ps, crate::route::audio_recovery::OpenFailure::HeaderUnsupported))
+            .flatten()
+        {
+            reload_refused_audio(ps, pa, offset_ns);
             return;
         }
         if let Some(rollback) = recover_failed_source_route(ps) {

@@ -688,6 +688,15 @@ pub struct Session {
     /// credentials.
     #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::catalog::AudioEnhancements::is_none")]
     pub(crate) audio_enhancements: crate::catalog::AudioEnhancements,
+    /// **Native audio combinations the pipeline was watched refusing on this television**
+    /// (Opus direct play, C3). A fact about the SET's firmware, not about the account, so it is a
+    /// public, install-wide preference that sign-out leaves alone. Each row is scoped to the exact
+    /// firmware build it was watched on: [`Session::with_native_audio_refusal`] drops rows from any
+    /// other build, and `devcaps` applies none of them, so an LG update gets a fresh native try.
+    /// Bounded by [`MAX_NATIVE_AUDIO_REFUSALS`]. Skipped on write while empty, so a session that
+    /// never learned one round-trips byte-identical; soft-parsed, an unreadable row costs itself.
+    #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
+    pub(crate) native_audio_refused: Vec<NativeAudioRefusal>,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub(crate) extensions: OpaqueExtensions,
 
@@ -750,6 +759,8 @@ struct CanonicalSessionPreferences {
     server_key_pins: Vec<ServerKeyPin>,
     #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::catalog::AudioEnhancements::is_none")]
     audio_enhancements: crate::catalog::AudioEnhancements,
+    #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
+    native_audio_refused: Vec<NativeAudioRefusal>,
     /// Parsed only so a future preference does not make the known fields disappear. The shipping
     /// adapter merges these opaque keys from the current DB8 public payload before every rewrite;
     /// they are not promoted into the Session domain object.
@@ -786,6 +797,7 @@ impl Default for CanonicalSessionPreferences {
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
             audio_enhancements: crate::catalog::AudioEnhancements::NONE,
+            native_audio_refused: Vec::new(),
             extensions: BTreeMap::new(),
         }
     }
@@ -849,6 +861,7 @@ fn split_public(session: &Session) -> Result<nj_platform::storage::state::Public
         plaintext_consent: session.plaintext_consent.clone(),
         server_key_pins: session.server_key_pins.clone(),
         audio_enhancements: session.audio_enhancements,
+        native_audio_refused: session.native_audio_refused.clone(),
         extensions: BTreeMap::new(),
     })
     .map_err(|_| ())?;
@@ -924,6 +937,7 @@ pub(crate) fn join_canonical(
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
+        native_audio_refused: preferences.native_audio_refused,
         profiles,
         extensions: auth.extensions,
     })
@@ -958,6 +972,7 @@ fn public_session(public: &nj_platform::storage::state::PublicPayload) -> Sessio
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
         audio_enhancements: preferences.audio_enhancements,
+        native_audio_refused: preferences.native_audio_refused,
         home_pins, recent_searches,
         ..Default::default()
     }
@@ -1875,6 +1890,61 @@ pub(crate) struct ServerKeyPin {
     pub(crate) extensions: OpaqueExtensions,
 }
 
+/// How many facet-clean conversion proofs make an AMBIGUOUS refusal (`type=18 num=601`) apply on
+/// its build. One rescued play is counted, the second applies: a transient resource refusal that
+/// happened to coincide with one Load cannot teach alone. A refusal that NAMES the audio
+/// (`num=200`) applies at once. Current upstream (`b3d2b66c0`) uses the same split.
+pub(crate) const LEARNED_REFUSAL_PROOFS: u32 = 2;
+
+/// At most this many refusal rows are stored; the oldest go first. One build's distinct
+/// codec/width combinations are few, so the bound only ever trims a hand-edited record.
+pub(crate) const MAX_NATIVE_AUDIO_REFUSALS: usize = 16;
+
+/// One native audio combination the pipeline refused on this install. See
+/// [`Session::native_audio_refused`]. Identity is `(build, codec, channels)`; `firmware` records
+/// which codename taught it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeAudioRefusal {
+    pub firmware: String,
+    pub build: String,
+    pub codec: String,
+    pub channels: u32,
+    /// Facet-clean proofs counted on `build`. ABSENT means the pipeline named the audio and the
+    /// row applies at once; otherwise it applies from [`LEARNED_REFUSAL_PROOFS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proofs: Option<u32>,
+    #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
+    pub(crate) extensions: OpaqueExtensions,
+}
+
+impl NativeAudioRefusal {
+    /// A row for `codec` at `channels` on `(firmware, build)`, or `None` when it cannot be stored:
+    /// an unnamed firmware or codec, or a PROOF of unknown width, whose ceiling would remove the
+    /// whole codec on counted evidence alone.
+    pub(crate) fn new(firmware: &str, build: &str, codec: &str, channels: u32, proofs: Option<u32>) -> Option<Self> {
+        let codec = nj_platform::devcaps::audio_codec_id(codec).into_owned();
+        if firmware.is_empty() || build.is_empty() || codec.is_empty() || (channels == 0 && proofs.is_some()) {
+            return None;
+        }
+        Some(Self {
+            firmware: firmware.to_owned(),
+            build: build.to_owned(),
+            codec,
+            channels,
+            proofs: proofs.map(|n| n.min(LEARNED_REFUSAL_PROOFS)),
+            extensions: Default::default(),
+        })
+    }
+
+    pub(crate) fn applies(&self) -> bool {
+        self.proofs.is_none_or(|n| n >= LEARNED_REFUSAL_PROOFS)
+    }
+
+    fn same_as(&self, other: &Self) -> bool {
+        self.build == other.build && self.codec == other.codec && self.channels == other.channels
+    }
+}
+
 /// Is `pin` shaped like `nj_base::spki::pin_from_pem`'s answer: `sha256//` and the 44 base64
 /// characters of a 32-byte digest. The file is hand-editable and the value goes to libcurl, so a
 /// string that is not one is treated as absent rather than handed on.
@@ -2483,6 +2553,46 @@ impl Session {
         Some(next)
     }
 
+    /// The stored refusals in force, in the shape a play start applies
+    /// (`devcaps::effective_caps`). Counted rows short of their proofs are not in force.
+    pub(crate) fn applied_refusals(&self) -> Vec<nj_platform::devcaps::Refusal> {
+        self.native_audio_refused
+            .iter()
+            .filter(|row| row.applies() && !row.build.is_empty() && !row.codec.is_empty())
+            .map(|row| nj_platform::devcaps::Refusal {
+                codec: nj_platform::devcaps::audio_codec_id(&row.codec).into_owned(),
+                channels: row.channels,
+                build: row.build.clone(),
+            })
+            .collect()
+    }
+
+    /// This session with `row` remembered, or `None` when nothing would change. **The one way the
+    /// list changes**: rows another build learned are dropped (a firmware update replaces the
+    /// decoder they were watched on); the same identity merges, a named row always wins and
+    /// proofs add up to [`LEARNED_REFUSAL_PROOFS`]; the list is trimmed to
+    /// [`MAX_NATIVE_AUDIO_REFUSALS`], oldest first.
+    pub(crate) fn with_native_audio_refusal(&self, row: &NativeAudioRefusal) -> Option<Self> {
+        if row.build.is_empty() || row.codec.is_empty() || row.firmware.is_empty() {
+            return None;
+        }
+        let mut next = self.clone();
+        let list = &mut next.native_audio_refused;
+        list.retain(|old| old.build == row.build);
+        match list.iter_mut().find(|old| old.same_as(row)) {
+            Some(old) => {
+                old.proofs = match (old.proofs, row.proofs) {
+                    (None, _) | (_, None) => None,
+                    (Some(a), Some(b)) => Some(a.saturating_add(b).min(LEARNED_REFUSAL_PROOFS)),
+                };
+            }
+            None => list.push(row.clone()),
+        }
+        let excess = list.len().saturating_sub(MAX_NATIVE_AUDIO_REFUSALS);
+        list.drain(..excess);
+        (next.native_audio_refused != self.native_audio_refused).then_some(next)
+    }
+
     pub(crate) fn subtitle_tone(&self) -> SubtitleTone {
         self.subtitle_tone
     }
@@ -3085,6 +3195,40 @@ pub(crate) fn learn_server_key(machine_id: &str, pin: &str) -> bool {
     // sign-out repopulate the table that sign-out just emptied.
     let (machine_id, pin) = (machine_id.to_owned(), pin.to_owned());
     queue_update(move |cur| cur.with_server_key_pin(&machine_id, &pin))
+}
+
+/// **The pipeline named a refused native audio track** (`type=18 num=200`): remember
+/// `(this build, codec, channels)`, applied from the next play start. Returns whether a write was
+/// queued, never whether it landed. The request in flight has already narrowed its own attempt.
+pub(crate) fn record_named_refusal(codec: &str, channels: u32) -> bool {
+    record_refusal(codec, channels, None)
+}
+
+/// **A conversion rescued an ambiguous refusal and changed only the audio**: count one proof.
+pub(crate) fn record_refusal_proof(codec: &str, channels: u32) -> bool {
+    record_refusal(codec, channels, Some(1))
+}
+
+fn record_refusal(codec: &str, channels: u32, proofs: Option<u32>) -> bool {
+    let Some((firmware, build)) = nj_platform::devcaps::learning_firmware() else {
+        return false;
+    };
+    let Some(row) = NativeAudioRefusal::new(&firmware, &build, codec, channels, proofs) else {
+        return false;
+    };
+    queue_update(move |cur| {
+        let next = cur.with_native_audio_refusal(&row)?;
+        let applies = next.native_audio_refused.iter().any(|r| r.same_as(&row) && r.applies());
+        nj_base::eventlog::log(&format!(
+            "native audio: remembered {} with {} channels on build {:?} ({}){}",
+            row.codec,
+            row.channels,
+            row.build,
+            if proofs.is_some() { "proved by its conversion" } else { "named by the pipeline" },
+            if applies { "; later plays convert it" } else { "; not yet applied" },
+        ));
+        Some(next)
+    })
 }
 
 /// The UI may retain the receipt while showing its pending preference locally.

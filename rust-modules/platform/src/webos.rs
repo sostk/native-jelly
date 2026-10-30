@@ -64,8 +64,13 @@ fn parse(s: &str) -> Info {
         .next()
         .and_then(|m| m.parse::<u32>().ok())
         .unwrap_or(0);
+    let build = match get("core_os_release") {
+        build if build.is_empty() => release.clone(),
+        build => build,
+    };
     Info {
         release,
+        build,
         codename: get("webos_release_codename"),
         api: get("webos_api_version"),
         name: get("webos_name"),
@@ -963,6 +968,9 @@ mod tests {
 
     #[test]
     fn reads_the_dev_sets_real_os_info() {
+        assert_eq!(parse(REAL).build, "4.10.2-31");
+        assert_eq!(parse(r#"{"webos_release":"4.10.2"}"#).build, "4.10.2");
+        assert_eq!(parse("").build, "");
         assert_eq!(field(REAL, "webos_release"), Some("4.10.2"));
         assert_eq!(
             field(REAL, "webos_release_codename"),

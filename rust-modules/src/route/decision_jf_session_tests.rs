@@ -44,6 +44,7 @@ fn encode(lb: &JfLoopback, session: &str, continues: &str, offset_secs: i64, con
         2,
         0,
         contract,
+        nj_platform::devcaps::caps(),
     );
     assert!(
         matches!(client.transcode(&spec), crate::catalog::Negotiation::Playable(_)),
@@ -203,7 +204,7 @@ fn an_hls_contract_asks_for_hls_and_keeps_the_masters_own_url() {
         ceiling: Some(crate::catalog::Ceiling { max_kbps: 4000, max_w: 1280, max_h: 720 }),
         ..Default::default()
     };
-    let spec = transcode_spec(&rk, "jf-hls", "jf-hls", "", crate::catalog::TranscodeOffset::from_seconds(600), 2, 0, contract);
+    let spec = transcode_spec(&rk, "jf-hls", "jf-hls", "", crate::catalog::TranscodeOffset::from_seconds(600), 2, 0, contract, nj_platform::devcaps::caps());
     let n = match client.transcode(&spec) {
         crate::catalog::Negotiation::Playable(n) => n,
         _ => panic!("the loopback negotiates"),
@@ -264,6 +265,7 @@ fn transcode_at(info: String, offset_secs: i64) -> crate::catalog::Negotiated {
         2,
         0,
         contract,
+        nj_platform::devcaps::caps(),
     );
     let n = client.transcode(&spec).playable().expect("the loopback negotiates");
     let _ = lb.finish();
@@ -295,6 +297,7 @@ fn negotiate_direct(lb: &JfLoopback) -> crate::catalog::Negotiated {
         forced: false,
         burn: false,
         hls_segment_secs: None,
+        caps: nj_platform::devcaps::caps(),
     }) {
         crate::catalog::Negotiation::Playable(n) => n,
         _ => panic!("the loopback negotiates"),
@@ -415,7 +418,7 @@ fn an_external_subtitle_outside_the_server_is_asked_again_as_a_burn() {
     let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
     let rk = jf_rk();
     let contract = crate::catalog::EncodeContract { remux: true, ..Default::default() };
-    let spec = transcode_spec(&rk, "jf-remote-sub", "jf-remote-sub", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract);
+    let spec = transcode_spec(&rk, "jf-remote-sub", "jf-remote-sub", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract, nj_platform::devcaps::caps());
     let n = client.transcode(&spec).playable().expect("playable");
     let seen = lb.finish();
 
@@ -458,7 +461,7 @@ fn a_text_subtitle_the_server_would_encode_as_pgs_is_asked_again_as_a_sidecar() 
     let client = crate::catalog::client_for(lb.sid).expect("loopback registered");
     let rk = jf_rk();
     let contract = crate::catalog::EncodeContract { no_video_copy: true, ..Default::default() };
-    let spec = transcode_spec(&rk, "jf-text-as-pgs", "jf-text-as-pgs", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract);
+    let spec = transcode_spec(&rk, "jf-text-as-pgs", "jf-text-as-pgs", "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 3, contract, nj_platform::devcaps::caps());
     let n = client.transcode(&spec).playable().expect("playable");
     let seen = lb.finish();
 

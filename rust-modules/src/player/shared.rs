@@ -14,6 +14,9 @@ use std::sync::atomic::{
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+/// [`Shared::load_refusal_num`] when the session has seen no pre-picture `type=18`.
+pub(crate) const NO_LOAD_REFUSAL: i32 = i32::MIN;
+
 /// Exact conservation certificate accumulated while the native media clock is held.
 ///
 /// For completed acquisitions `(A_i, D_i)`, `debt` is `Σ(A_i-D_i)` and `runway` is
@@ -584,6 +587,15 @@ pub(crate) struct Shared {
     /// `error_shape` tell a k5lp-style hang apart from an ordinary firmware refusal on the wire,
     /// as `FailureKind::LoadTimeout` rather than the generic `FailureKind::TvPipeline`.
     pub load_timed_out: AtomicBool,
+    /// The number of this session's FIRST `type=18` refusal before any picture
+    /// ([`Shared::load_refusal`]); [`NO_LOAD_REFUSAL`] when there was none. The C3 audio recovery
+    /// reads it to tell a refusal that names the audio (`num=200`) from one that names nothing
+    /// (`num=601`). Session-scoped like `load_failed`, which the same callback arm publishes.
+    pub load_refusal_num: AtomicI32,
+    /// The demuxer refused to feed an Opus track whose container header disagrees with the Load's
+    /// declaration (`ff::opus_stream_matches_load`). An UNSUPPORTED SOURCE, published beside
+    /// `demux_failed`: the television's decoder was never asked, so it is never decoder evidence.
+    pub native_audio_header_refused: AtomicBool,
     /// issue #74 D.1: the epoch this session last logged "native: loadCompleted while Load in
     /// flight — deferring" for — 0 = never. `epoch` is monotonic and never 0 for a real session
     /// ([`NativeSessionState::next`] skips 0 on wraparound), so comparing against this is enough
@@ -785,7 +797,7 @@ pub(crate) struct Shared {
     pub dg_fed_v_pts: AtomicI64,
     pub dg_fed_a_pts: AtomicI64,
     /// The codec strings this session actually put in the Starfish Load payload, as small codes
-    /// (0 = none/not built; video 1 = H264, 2 = H265, 3 = AV1, 4 = VP9; audio 1 = AC3, 2 = AC3 PLUS, 3 = AAC).
+    /// (0 = none/not built; video 1 = H264, 2 = H265, 3 = AV1, 4 = VP9; audio 1 = AC3, 2 = AC3 PLUS, 3 = AAC, 4 = DTS, 6 = OPUS).
     ///
     /// Codes rather than strings so they need no lock on the render path — and the PAYLOAD's view
     /// rather than a re-derivation, because the whole class of bug here is the payload disagreeing
@@ -936,6 +948,8 @@ impl Shared {
             demux_no_video: AtomicBool::new(false),
             load_failed: AtomicBool::new(false),
             load_timed_out: AtomicBool::new(false),
+            load_refusal_num: AtomicI32::new(NO_LOAD_REFUSAL),
+            native_audio_header_refused: AtomicBool::new(false),
             native_load_deferred_logged_epoch: AtomicU32::new(0),
             native_load_elapsed_ms: AtomicU64::new(0),
             playback_trace: Mutex::new(super::report::PlaybackTrace::new()),
@@ -1019,6 +1033,16 @@ impl Shared {
             }
             _ => None,
         }
+    }
+
+    /// Latch `num` as this session's pre-picture refusal unless one is already latched.
+    pub(crate) fn note_load_refusal(&self, num: i32) {
+        let _ = self.load_refusal_num.compare_exchange(NO_LOAD_REFUSAL, num, Ordering::AcqRel, Ordering::Relaxed);
+    }
+
+    /// The number of this session's first pre-picture `type=18` refusal, if there was one.
+    pub(crate) fn load_refusal(&self) -> Option<i32> {
+        Some(self.load_refusal_num.load(Ordering::Acquire)).filter(|&num| num != NO_LOAD_REFUSAL)
     }
 
     /// Publish a synchronous refusal only while this exact epoch owns the active session.
@@ -1538,6 +1562,8 @@ impl Shared {
         self.demux_no_video.store(false, Ordering::Relaxed);
         self.load_failed.store(false, Ordering::Relaxed);
         self.load_timed_out.store(false, Ordering::Relaxed);
+        self.load_refusal_num.store(NO_LOAD_REFUSAL, Ordering::Relaxed);
+        self.native_audio_header_refused.store(false, Ordering::Relaxed);
         // NB: desired_sub_idx is NOT reset here — like desired_audio_idx it persists across
         // seeks/reloads so a reload-based seek keeps the chosen subtitle. It is reset on a new
         // item (player::reset_subtitle). ASS packets are immutable file facts, not

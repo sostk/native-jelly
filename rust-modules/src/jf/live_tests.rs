@@ -167,6 +167,7 @@ fn live_playback_decisions_reports_and_watched_state() {
         rk: &rk, session, media_source_id: super::convert::media_source_id(&part), audio_index: None,
         subtitle_index: None, start_ticks: 0, ceiling: None,
         direct_play: true, video_copy: true, forced: false, burn: false, hls_segment_secs: None,
+        caps: nj_platform::devcaps::caps(),
     }).playable().expect("negotiated");
     eprintln!("negotiated: {} video {}->{} audio {}->{}", n.method.as_str(),
         n.video.source, n.video.output, n.audio.source, n.audio.output);
@@ -188,6 +189,7 @@ fn live_playback_decisions_reports_and_watched_state() {
         contract: crate::catalog::EncodeContract { remux: false, no_video_copy: true,
             ceiling: Some(crate::catalog::Ceiling { max_kbps: 3000, max_w: 1280, max_h: 720 }), ..Default::default() },
         audio_stream_id: 0, subtitle_stream_id: 0, offset: TranscodeOffset::from_seconds(30),
+        caps: nj_platform::devcaps::caps(),
     };
     let enc = c.transcode(&spec).playable().expect("transcode");
     eprintln!("encode: {} video {}->{} audio {}->{}", enc.method.as_str(),

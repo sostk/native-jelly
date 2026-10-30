@@ -104,6 +104,9 @@ pub struct Ask<'a> {
     /// A conversion delivered as HLS with segments of this many seconds; `None` asks for the
     /// progressive Matroska stream.
     pub hls_segment_secs: Option<u8>,
+    /// The attempt's own capability snapshot (`route::ResolveEnv::caps`), the same value the
+    /// local route gates read. The DeviceProfile is built from this, never from the boot answer.
+    pub caps: &'a nj_platform::devcaps::Caps,
 }
 
 /// One elementary stream of a negotiated playback, in the app's codec spelling.
@@ -358,6 +361,14 @@ pub(crate) fn device_profile(caps: &crate::catalog::capabilities::Capabilities, 
         })],
     };
     let mut codec = Vec::new();
+    if ask.forced {
+        for (c, ch) in caps.forced_audio_channel_limits() {
+            codec.push(json!({
+                "Type": "VideoAudio", "Codec": c,
+                "Conditions": [cond("LessThanEqual", "AudioChannels", &ch.to_string())],
+            }));
+        }
+    }
     if !ask.forced {
         codec.push(json!({
             "Type": "Video",
@@ -759,7 +770,7 @@ impl Jf<'_> {
     /// ([`ProfileAsk::embed_bitmap`]).
     fn negotiate_offering(&self, ask: &Ask, embed_bitmap: bool) -> Negotiation {
         let Some(guid) = self.guid(ask.rk) else { return Negotiation::Unreachable };
-        let caps = crate::catalog::capabilities::Capabilities::current();
+        let caps = crate::catalog::capabilities::Capabilities::for_attempt(ask.caps);
         static LOGGED: std::sync::Once = std::sync::Once::new();
         LOGGED.call_once(|| nj_base::eventlog::log(&format!("jf: capabilities {}", caps.summary())));
         let profile = device_profile(&caps, &ProfileAsk {
@@ -934,6 +945,7 @@ impl Jf<'_> {
             forced: false,
             burn: false,
             hls_segment_secs,
+            caps: spec.caps,
         });
         if let (Negotiation::Playable(_), Some(p)) = (&negotiation, prior) {
             update_session(spec.session, |s| {
@@ -1155,6 +1167,29 @@ mod tests {
             &crate::catalog::capabilities::Capabilities::of(&d, nj_platform::devcaps::dv::DvCapability::Unknown),
             ask,
         )
+    }
+
+    #[test]
+    fn forced_profiles_keep_hard_firmware_audio_limits() {
+        let mut device = device();
+        device.native_audio_limits.insert("aac".into(), 2);
+        let caps = crate::catalog::capabilities::Capabilities::of(&device, nj_platform::devcaps::dv::DvCapability::Unknown);
+        let profile = device_profile(&caps, &ProfileAsk { direct: true, forced: true, ceiling: None, burn: false, hls: None, embed_bitmap: true });
+        let rows = profile["CodecProfiles"].as_array().unwrap();
+        assert!(rows.iter().any(|row| row["Type"] == "VideoAudio" && row["Codec"] == "aac"
+            && row["Conditions"][0]["Property"] == "AudioChannels"
+            && row["Conditions"][0]["Value"] == "2"));
+    }
+
+    #[test]
+    fn opus_payload_support_alone_does_not_enable_server_profiles() {
+        for forced in [false, true] {
+            let p = profile(&ProfileAsk { direct: true, forced, ceiling: None, burn: false, hls: None, embed_bitmap: true });
+            assert!(!p["DirectPlayProfiles"][0]["AudioCodec"].as_str().unwrap().split(',').any(|c| c == "opus"));
+            for target in p["TranscodingProfiles"].as_array().unwrap() {
+                assert!(!target["AudioCodec"].as_str().unwrap().split(',').any(|c| c == "opus"));
+            }
+        }
     }
 
     #[test]

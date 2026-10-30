@@ -290,6 +290,11 @@ struct DemuxRun {
 
 impl DemuxRun {
     fn start(port: u16) -> DemuxRun {
+        Self::start_audio(port, "eac3", 0)
+    }
+
+    fn start_audio(port: u16, codec: &str, channels: i64) -> DemuxRun {
+        let codec = codec.to_owned();
         let (video_cap, audio_cap) = crate::player::engine::aq_caps();
         let mut video = crate::aq::aq_new(video_cap as c_long);
         let mut audio = crate::aq::aq_new(audio_cap as c_long);
@@ -302,7 +307,7 @@ impl DemuxRun {
         let origin = crate::catalog::Origin::http("127.0.0.1", port as i32);
         let thread = std::thread::spawn(move || {
             // `acodec` is the Load payload's audio codec: the demuxer feeds the track that matches.
-            demux(origin, "/library/parts/1/file.mkv".into(), "eac3".into(), false, 0, None, None, vp, ap, hp)
+            demux(origin, "/library/parts/1/file.mkv".into(), codec, channels, false, 0, None, None, vp, ap, hp)
         });
         DemuxRun { video, audio, thread: Some(thread), hs }
     }
@@ -1093,4 +1098,79 @@ fn a_constant_audio_skew_neither_hangs_the_start_nor_starves_video_mid_film() {
         audio > crate::player::engine::aq_caps().1,
         "the audio lane carries the skew over its base cap: {audio} bytes"
     );
+}
+
+/// Actual bundled demux + loopback transport + real AU queues: Opus is raw,
+/// with no ADTS, OpusHead or container prefix inserted into any packet. This
+/// does not exercise the TV decoder or prove audible output.
+#[test]
+#[ignore = "needs host bundled FFmpeg and ffmpeg CLI"]
+fn opus_raw_packets_and_mismatched_layout_refusal() {
+    let _guard = nj_base::testlock::serial();
+    if !tool_present("ffmpeg") {
+        assert!(std::env::var_os("CI").is_none(), "ffmpeg missing under CI");
+        eprintln!("SKIP Opus demux: ffmpeg CLI unavailable");
+        return;
+    }
+    bind_host_ffmpeg();
+    super::ABI_OK.store(true, Ordering::Relaxed);
+    let scratch = Scratch::new("opus-feed");
+    for (codec, channels, declared, accepted) in [
+        ("libopus", 1, 1, true),
+        ("libopus", 2, 2, true),
+        ("libopus", 1, 2, false),
+        ("libopus", 2, 1, false),
+        ("libopus", 6, 2, false),
+        ("libopus", 6, 6, true),
+        ("libopus", 8, 8, true),
+        ("libopus", 8, 2, false),
+        ("aac", 2, 2, false),
+    ] {
+        let file = scratch.0.join(format!("{codec}-{channels}-{declared}.mkv"));
+        let status = Command::new("ffmpeg")
+            .args(["-nostdin", "-v", "error", "-y"])
+            .args(["-f", "lavfi", "-i", "color=s=64x64:r=5:d=1"])
+            .args(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=1"])
+            .args(["-c:v", "libx264", "-threads", "1", "-c:a", codec, "-ac", &channels.to_string()])
+            .arg(&file).status().expect("generate Opus fixture");
+        assert!(status.success(), "fixture encoding failed");
+        let expected = Command::new("ffmpeg")
+            .args(["-nostdin", "-v", "error", "-i"]).arg(&file)
+            .args(["-map", "0:a:0", "-c:a", "copy", "-f", "data", "-"])
+            .output().expect("extract raw packets");
+        assert!(expected.status.success() && !expected.stdout.is_empty());
+        SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
+        SHARED.desired_audio_idx.store(-1, Ordering::Relaxed);
+        SHARED.demux_failed.store(false, Ordering::Relaxed);
+        SHARED.demux_io_failed.store(false, Ordering::Relaxed);
+        SHARED.dg_load_v.store(0, Ordering::Relaxed);
+        FEED_AUDIO.store(true, Ordering::Relaxed);
+        let server = FileServer::start(&file);
+        let mut run = DemuxRun::start_audio(server.port, "opus", declared);
+        let deadline = Instant::now() + FIRST_AUDIO_DEADLINE;
+        let mut received = Vec::new();
+        loop {
+            assert!(Instant::now() < deadline, "Opus demux did not finish");
+            let node = crate::aq::aq_pop(&mut *run.audio, std::ptr::null_mut());
+            if !node.is_null() {
+                let (es, _, _, len, data) = unsafe { crate::aq::au_fields(node) };
+                assert_eq!(es, 2);
+                received.extend_from_slice(unsafe { std::slice::from_raw_parts(data, len as usize) });
+                unsafe { libc::free(node as *mut c_void) };
+            } else if run.finished() {
+                break;
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+        if accepted {
+            assert!(!SHARED.demux_failed.load(Ordering::Acquire));
+            assert!(received == expected.stdout, "Opus packets were changed or lost: {channels} channels");
+        } else {
+            assert!(SHARED.demux_failed.load(Ordering::Acquire));
+            assert!(received.is_empty(), "a mismatched track reached the audio lane");
+            assert_eq!(crate::aq::aq_bytes(&mut *run.video), 0, "refuse before feeding video too");
+        }
+        eprintln!("Opus demux: source={codec}/{channels} declared={declared} accepted={accepted} bytes={}", received.len());
+    }
 }

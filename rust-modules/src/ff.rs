@@ -724,6 +724,43 @@ fn audio_name_matches(ffmpeg_name: &str, want: &str) -> bool {
     nj_platform::devcaps::audio_codec_id(ffmpeg_name) == nj_platform::devcaps::audio_codec_id(want)
 }
 
+/// RFC 7845 identification header used by upstream #992: family 0 for
+/// mono/stereo, family 1 with Vorbis mapping for 3–8 channels. The wider forms
+/// are for explicitly requested pipeline experiments; routing keeps its limits.
+pub(crate) fn opus_head(channels: i64) -> Option<Vec<u8>> {
+    const FAMILY1: [(u8, u8, &[u8]); 6] = [
+        (2, 1, &[0, 2, 1]),
+        (2, 2, &[0, 1, 2, 3]),
+        (3, 2, &[0, 4, 1, 2, 3]),
+        (4, 2, &[0, 4, 1, 2, 3, 5]),
+        (4, 3, &[0, 4, 1, 2, 3, 5, 6]),
+        (5, 3, &[0, 6, 1, 2, 3, 4, 5, 7]),
+    ];
+    let ch = u8::try_from(channels).ok().filter(|c| (1..=8).contains(c))?;
+    let mut head = b"OpusHead".to_vec();
+    head.extend_from_slice(&[1, ch]);
+    head.extend_from_slice(&312u16.to_le_bytes());
+    head.extend_from_slice(&48_000u32.to_le_bytes());
+    head.extend_from_slice(&0u16.to_le_bytes());
+    if ch <= 2 { head.push(0); }
+    else {
+        let (streams, coupled, mapping) = FAMILY1[usize::from(ch) - 3];
+        head.extend_from_slice(&[1, streams, coupled]);
+        head.extend_from_slice(mapping);
+    }
+    Some(head)
+}
+
+/// Check the exact selected source before either lane receives an AU. Timing,
+/// gain and layout must agree with the Load; input sample rate is informational.
+fn opus_stream_matches_load(codec: &str, channels: i32, header: &[u8], declared: i64) -> bool {
+    let Some(expected) = opus_head(declared) else { return false; };
+    codec == "opus" && i64::from(channels) == declared
+        && header.len() >= expected.len()
+        && header[..12] == expected[..12]
+        && header[16..expected.len()] == expected[16..]
+}
+
 /// The ffmpeg stream index of the first audio stream whose codec matches `want` (the Load
 /// payload's audio codec, e.g. "ac3"), or None. `av_find_best_stream` picks the "highest
 /// quality" audio (on an 8-track file it chose DTS over the AC3 default) — but the Load payload
@@ -8825,6 +8862,7 @@ pub(crate) fn demux(
     origin: crate::catalog::Origin,
     path: String,
     acodec: String,
+    achannels: i64,
     expected_p7: bool,
     runtime_ns: i64,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
@@ -9169,6 +9207,30 @@ pub(crate) fn demux(
                     break;
                 }
                 let streams = (*fmt).streams;
+                if nj_platform::devcaps::audio_codec_id(&acodec) == "opus" {
+                    let valid = if ai >= 0 {
+                        let cp = stream_codecpar(*streams.add(ai as usize));
+                        let name = std::ffi::CStr::from_ptr(avcodec_get_name((*cp).codec_id)).to_string_lossy();
+                        let header = if !(*cp).extradata.is_null() && (19..=4096).contains(&(*cp).extradata_size) {
+                            std::slice::from_raw_parts((*cp).extradata, (*cp).extradata_size as usize)
+                        } else {
+                            &[]
+                        };
+                        opus_stream_matches_load(&name, (*cp).ch_layout.nb_channels, header, achannels)
+                    } else {
+                        false
+                    };
+                    if !valid {
+                        crate::player::log("ff: Opus stream disagrees with the Load layout; refusing audio feed");
+                        // Before `demux_failed`: the pump reads the pair, and an unsupported source
+                        // header must never be read as the decoder's refusal.
+                        SHARED.native_audio_header_refused.store(true, Ordering::Release);
+                        SHARED.demux_failed.store(true, Ordering::Release);
+                        avformat_close_input(&mut fmt);
+                        free_avio(avio);
+                        break;
+                    }
+                }
                 let vst = *streams.add(vi as usize);
                 let vcp = stream_codecpar(vst);
                 // AAC needs ADTS framing for LG's decoder (mp4/mkv carry raw AAC). Precompute the
@@ -9966,6 +10028,50 @@ mod open_duration_tests;
 #[cfg(test)]
 mod audio_codec_name_tests {
     use super::*;
+
+    #[test]
+    fn opus_surround_headers_and_source_mapping_are_exact() {
+        assert_eq!(opus_head(6).unwrap(), vec![79,112,117,115,72,101,97,100,1,6,56,1,128,187,0,0,0,0,1,4,2,0,4,1,2,3,5]);
+        assert_eq!(opus_head(8).unwrap(), vec![79,112,117,115,72,101,97,100,1,8,56,1,128,187,0,0,0,0,1,5,3,0,6,1,2,3,4,5,7]);
+        for channels in 3..=8 {
+            let header = opus_head(channels).unwrap();
+            assert!(opus_stream_matches_load("opus", channels as i32, &header, channels));
+            assert!(!opus_stream_matches_load("opus", channels as i32, &header[..header.len()-1], channels));
+            for byte in 18..header.len() {
+                let mut bad = header.clone(); bad[byte] = bad[byte].wrapping_add(1);
+                assert!(!opus_stream_matches_load("opus", channels as i32, &bad, channels), "mapping field {byte}");
+            }
+        }
+    }
+
+    #[test]
+    fn opus_validates_the_source_layout_timing_and_gain_before_feed() {
+        // Standard libopus stereo CodecPrivate, also emitted by the Load builder.
+        let mut header = *b"OpusHead\x01\x02\x38\x01\x80\xbb\x00\x00\x00\x00\x00";
+        assert!(opus_stream_matches_load("opus", 2, &header, 2));
+        header[9] = 1;
+        assert!(opus_stream_matches_load("opus", 1, &header, 1));
+        assert!(!opus_stream_matches_load("opus", 2, &header, 2));
+        header[9] = 2;
+        for channels in [-1, 0, 1, 3, 6] {
+            assert!(!opus_stream_matches_load("opus", channels, &header, 2));
+            assert!(!opus_stream_matches_load("opus", 2, &header, i64::from(channels)));
+        }
+        for codec in ["aac", "ac3", "", "vorbis"] {
+            assert!(!opus_stream_matches_load(codec, 2, &header, 2));
+        }
+        for length in 0..19 {
+            assert!(!opus_stream_matches_load("opus", 2, &header[..length], 2));
+        }
+        for byte in [0, 8, 9, 10, 11, 16, 17, 18] {
+            let mut bad = header;
+            bad[byte] = bad[byte].wrapping_add(1);
+            assert!(!opus_stream_matches_load("opus", 2, &bad, 2), "field {byte}");
+        }
+        // The input-rate field is informational, not Opus's decoded sample clock.
+        header[12..16].copy_from_slice(&44_100u32.to_le_bytes());
+        assert!(opus_stream_matches_load("opus", 2, &header, 2));
+    }
 
     /// FFmpeg names DTS `dts`; the catalog (and so the payload codec reaching the matcher) says `dca`.
     #[test]

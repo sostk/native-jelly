@@ -1425,6 +1425,7 @@ impl Diag {
             2 => "AC3 PLUS",
             3 => "AAC",
             4 => "DTS",
+            6 => "OPUS",
             _ => "NONE (needAudio:false)",
         }
     }
@@ -2272,6 +2273,7 @@ fn sf_on_event_inner(ty: c_int, num: i64, s: *const c_char) {
             log(&format!(
                 "smp: Load refused by the pipeline before any picture (type=18 num={num}) — failing the source"
             ));
+            SHARED.note_load_refusal(i32::try_from(num).unwrap_or(i32::MAX));
             SHARED.load_failed.store(true, std::sync::atomic::Ordering::Release);
         }
     }
@@ -2661,6 +2663,51 @@ mod tests {
         );
         SHARED.retire_native_session(epoch);
         SHARED.reset_session();
+    }
+
+    /// C3: the audio recovery tells a refusal that NAMES the audio (`num=200`) from one that names
+    /// nothing (`num=601`) by the number of the session's first pre-picture refusal. The first one
+    /// is the verdict; a later number, or one after a picture, does not replace it.
+    #[test]
+    fn the_first_pre_picture_refusal_number_is_latched_per_session() {
+        let _guard = nj_base::testlock::serial();
+        SHARED.reset_session();
+        assert_eq!(SHARED.load_refusal(), None);
+        let epoch = SHARED.begin_native_session().expect("session");
+        sf_on_event(epoch, 18, 200, c"Audio Codec Not Supported".as_ptr());
+        sf_on_event(epoch, 18, 601, c"Resource Allocation Error".as_ptr());
+        assert_eq!(SHARED.load_refusal(), Some(200), "the first refusal is the verdict");
+        SHARED.retire_native_session(epoch);
+        SHARED.reset_session();
+        assert_eq!(SHARED.load_refusal(), None, "a new session starts with no verdict");
+
+        let epoch = SHARED.begin_native_session().expect("session");
+        sf_on_event(epoch, 0, 7_000_000_000, std::ptr::null());
+        sf_on_event(epoch, 18, 200, c"Audio Codec Not Supported".as_ptr());
+        assert_eq!(SHARED.load_refusal(), None, "a refusal after a picture is diagnostic only");
+        SHARED.retire_native_session(epoch);
+        SHARED.reset_session();
+
+        SHARED.native_audio_header_refused.store(true, Relaxed);
+        SHARED.reset_session();
+        assert!(!SHARED.native_audio_header_refused.load(Relaxed), "the header verdict is per session");
+    }
+
+    /// C3: the audio recovery reloads a failed open at [`intended_pos_ns`] — the resume a direct
+    /// play armed for its first open, or a seek the viewer pressed while it was still connecting.
+    #[test]
+    fn a_failed_opens_intended_position_is_its_resume_or_the_pending_seek() {
+        let _guard = nj_base::testlock::serial();
+        SHARED.reset_session();
+        TX.reset();
+        let ps = crate::route::PlaybackSession::IDLE;
+        SHARED.pb_state.store(shared::PlaybackState::Connecting as u8, Relaxed);
+        super::engine::arm_seek(600_000_000_000);
+        assert_eq!(intended_pos_ns(&ps), 600_000_000_000, "the resume armed for the first open");
+        request_seek(900_000_000_000);
+        assert_eq!(intended_pos_ns(&ps), 900_000_000_000, "a seek pressed during the open wins");
+        SHARED.reset_session();
+        TX.reset();
     }
 
     /// **The pipeline's end-of-stream is reported once there is a picture.** C1 event log,

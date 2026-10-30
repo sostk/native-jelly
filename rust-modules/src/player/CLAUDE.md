@@ -28,6 +28,16 @@ so the AVIO is not merely how bytes reach it today, it is the only way they *can
 emits Annex-B video AUs (param sets prepended at each keyframe) and, for AV1, Section-5 temporal units (TD OBU first, the av1C sequence header and metadata OBUs in-band on keyframes; `/tmp/nativejelly-av1obu` = notd,noseq,raw tokens varies it on a debug build), for VP9 the demuxed packet unchanged (a frame carries its own headers and libpf's `video/x-vp9` caps have no `codec_data`), and AC3/EAC3, ADTS-framed AAC, or DTS core audio frames,
 and seeks by time via `av_seek_frame` (libavformat's own Cues index).
 
+The C3 native Opus feed (`OPUS` plus `opusInfo`, validated source headers and raw
+packets) and firmware/rank restrictions are staged. Ordinary policy is mono/stereo; wider
+family-1 layouts require an exact typed debug-fixture override. Auto/Force routing and
+Jellyfin profiles still withhold Opus. The groundwork is in: one capability snapshot per play
+attempt (`route::attempt_caps`, shared with the DeviceProfile), build-scoped refusal records, and
+one bounded audio-conversion recovery per request (`route::audio_recovery`, driven by
+`pump::recover_refused_audio`). Enabling waits on real-server and TV acceptance. See
+`docs/opus.md` for its exact subset and verification limits; this is not yet a shipping
+direct-play capability.
+
 ## Threading model (this is the whole ballgame)
 
 - `engine.rs` — the **main-thread-confined** session object. All ACB/Starfish *control* calls happen

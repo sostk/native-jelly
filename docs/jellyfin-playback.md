@@ -36,7 +36,7 @@ Client::negotiate(PlaybackAsk{ media_source_id = the part's MediaSourceId, Audio
    SubtitleStreamIndex, ceiling, direct_play, video_copy, … })
    ▼
 jf::playback::negotiate
-   Capabilities::current() ─► device_profile() ─► POST /Items/{id}/PlaybackInfo
+   Capabilities::for_attempt(ask.caps) ─► device_profile() ─► POST /Items/{id}/PlaybackInfo
    ErrorCode?                       → Negotiation::Refused(Refusal)
    source = the one whose Id == MediaSourceId (else the first, logged)
    SupportsDirectPlay && asked      → DirectPlay, /Videos/{id}/stream.{ext}?static=true

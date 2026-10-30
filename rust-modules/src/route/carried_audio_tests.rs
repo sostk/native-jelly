@@ -161,3 +161,21 @@ fn candidate_audio_none_matches_legacy_payload() {
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
+
+#[test]
+fn opus_load_channels_follow_the_exact_carried_track() {
+    let mut ps = PlaybackSession::IDLE;
+    ps.stream_acodec = "opus".into();
+    assert_eq!(stream_achannels(&ps), 0, "unknown track");
+    for channels in [1, 2] {
+        ps.cur_audio = Some(CarriedAudio::from_stream(&crate::metadata::Stream {
+            codec: "OPUS".into(), channels, ..Default::default()
+        }, 0));
+        assert_eq!(stream_achannels(&ps), channels);
+    }
+    ps.stream_acodec = "aac".into();
+    assert_eq!(stream_achannels(&ps), 0, "converted audio cannot inherit Opus width");
+    ps.stream_acodec = "opus".into();
+    ps.cur_audio = Some(CarriedAudio::named(7, -1));
+    assert_eq!(stream_achannels(&ps), 0, "a named track has no layout evidence");
+}

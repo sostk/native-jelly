@@ -377,6 +377,15 @@ pub(crate) struct PlaybackSession {
     /// machine still owns the engine, this says what the session may write. See
     /// [`preview_request`].
     resolved_as_preview: bool,
+    /// The capability snapshot this playback attempt was planned under (`ResolveEnv::caps`),
+    /// installed by [`apply_plan`]. Every later gate of the SAME attempt — a track switch, a
+    /// conversion rebuild, the Load's guards, the ABR worker's negotiation — reads it through
+    /// [`attempt_caps`], so a refusal stored mid-play changes the next request and never this one.
+    attempt_caps: Option<std::sync::Arc<nj_platform::devcaps::Caps>>,
+    /// **This request's one audio-conversion recovery** (`super::audio_recovery`, C3). A fresh
+    /// value comes with every plan ([`apply_plan`]), so its rung, its counted Loads and a pending
+    /// proof are the request's own and never reach the next one.
+    audio_recovery: super::audio_recovery::AudioRecovery,
 }
 
 /// What the server actually did with a requested Plex Pass audio enhancement (issue #266) — as
@@ -458,6 +467,8 @@ impl PlaybackSession {
         now_ms: 0,
         preview: false,
         resolved_as_preview: false,
+        attempt_caps: None,
+        audio_recovery: super::audio_recovery::AudioRecovery::NEW,
     };
 }
 
@@ -533,6 +544,8 @@ impl PlaybackSession {
             queue: _,
             preview: _,
             resolved_as_preview,
+            attempt_caps,
+            audio_recovery,
         } = self;
         PlaybackSession {
             direct_play_mode: *direct_play_mode,
@@ -590,6 +603,8 @@ impl PlaybackSession {
             // A screen copy is not the live preview. The loop reads the real session.
             preview: false,
             resolved_as_preview: *resolved_as_preview,
+            attempt_caps: attempt_caps.clone(),
+            audio_recovery: audio_recovery.clone(),
         }
     }
 }
@@ -2598,6 +2613,9 @@ fn is_worker_ticket_current(expected: &WorkerTicket) -> bool {
 #[derive(Clone)]
 pub(crate) struct HlsAbrControl {
     trace_generation: u32,
+    /// The attempt's capability snapshot; the worker's rung negotiations build their profile
+    /// from it rather than re-reading the boot answer.
+    caps: std::sync::Arc<nj_platform::devcaps::Caps>,
     sid: ServerId,
     rating_key: String,
     logical_session: String,
@@ -2907,6 +2925,7 @@ impl HlsAbrControl {
                 },
                 audio: crate::catalog::AudioEnhancements::NONE,
             },
+            &self.caps,
         );
         // The active encoder is checked on the far side so a concurrent route change has priority
         // over the answer.
@@ -3004,7 +3023,7 @@ impl HlsAbrControl {
 /// what raster the source actually has. Neither is a preference and neither belongs in a utility
 /// weight — a candidate outside these bounds is removed before anything is scored.
 fn auto_catalog(ps: &PlaybackSession) -> crate::abr::HlsActuatorCatalog {
-    let caps = nj_platform::devcaps::caps();
+    let caps = attempt_caps(ps);
     let device = (
         u16::try_from(caps.hevc_max.0).unwrap_or(u16::MAX),
         u16::try_from(caps.hevc_max.1).unwrap_or(u16::MAX),
@@ -3112,6 +3131,7 @@ pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, Wo
     Some((
         HlsAbrControl {
             trace_generation: playback_trace_generation(),
+            caps: attempt_caps(ps),
             sid: cur_sid(ps),
             rating_key: cur_rk(ps),
             logical_session: sess(ps),
@@ -4512,6 +4532,34 @@ pub(crate) fn stream_vcodec(ps: &PlaybackSession) -> String {
 pub(crate) fn stream_acodec(ps: &PlaybackSession) -> String {
     ps.stream_acodec.clone()
 }
+/// Channel count of the exact track the route carries, only when its codec
+/// agrees with the Load declaration. A named/default track or converted audio
+/// cannot borrow the source track's width. Native audio switches replace this
+/// snapshot before rebuilding the engine, so mono/stereo changes rebuild OpusHead.
+pub(crate) fn stream_achannels(ps: &PlaybackSession) -> i64 {
+    ps.cur_audio.as_ref().filter(|track| {
+        nj_platform::devcaps::audio_codec_id(&track.codec)
+            == nj_platform::devcaps::audio_codec_id(&ps.stream_acodec)
+    }).map_or(0, |track| track.channels)
+}
+/// An explicit pipeline fixture has no server-selected track. Its declaration
+/// is validated against the probed staged decoder policy and again against the
+/// actual container before feed. It never changes shipping route capabilities.
+pub(crate) fn set_synthetic_audio_channels(ps: &mut PlaybackSession, channels: i64, allow_wide: bool) -> bool {
+    ps.cur_audio = None;
+    if nj_platform::devcaps::audio_codec_id(&ps.stream_acodec) != "opus" {
+        return true;
+    }
+    if !attempt_caps(ps).opus_fixture_supports(channels, allow_wide) {
+        crate::player::log("playurl: Opus decoder/layout not admitted by measured firmware policy");
+        return false;
+    }
+    ps.cur_audio = Some(CarriedAudio::from_stream(&crate::metadata::Stream {
+        codec: "opus".into(), channels, ..Default::default()
+    }, 0));
+    true
+}
+
 /// The playing item's whole length, nanoseconds, from the negotiation; `0` when unknown. See the
 /// `runtime_ns` field.
 pub(crate) fn runtime_ns(ps: &PlaybackSession) -> i64 {
@@ -5190,6 +5238,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         logical_session.as_str()
     };
     let replacement = next_encoder_session(namespace);
+    let caps = attempt_caps(ps);
     let sp = transcode_spec(
         &rk,
         &replacement,
@@ -5199,6 +5248,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         cur_audio_sid(ps),
         cur_sub_sid(ps),
         ps.cur_contract,
+        &caps,
     );
     let Some(negotiated) = c.transcode(&sp).playable() else {
         // A lost answer may still have started a job. The old route remains published; clean up
@@ -5547,7 +5597,13 @@ pub(crate) fn forced_direct_play(ps: &PlaybackSession) -> bool {
 }
 
 pub(crate) fn audio_track_direct_plays(ps: &PlaybackSession, codec: &str, channels: i64) -> bool {
-    audio_direct_plays(ps.direct_play_mode, codec, channels)
+    audio_direct_plays_with(&attempt_caps(ps), ps.direct_play_mode, codec, channels)
+}
+
+/// The capability snapshot the current attempt was planned under; before any plan has landed
+/// (a fixture, a URL-trigger playback), what a play start would derive now.
+pub(crate) fn attempt_caps(ps: &PlaybackSession) -> std::sync::Arc<nj_platform::devcaps::Caps> {
+    ps.attempt_caps.clone().unwrap_or_else(crate::catalog::capabilities::start_caps)
 }
 
 /// The user's current pick. An atomic rather than a field on [`Session`] because it OUTLIVES a
@@ -5981,6 +6037,7 @@ impl ResolveEnv {
             preview: false,
             start_ns: 0,
             audio_enhancements: crate::player::audio_enhancements(),
+            caps: crate::catalog::capabilities::start_caps(),
             #[cfg(test)]
             dv_capability: None,
         }
@@ -6022,7 +6079,7 @@ fn playback_preview_with_capability(
     let audio = if chosen.is_empty() { &d.audio[..] } else { &chosen[..] };
     if mode == DirectPlayMode::Forced {
         return (!part.is_empty() && part_is_streamable(part)
-            && video_feed_supported(vcodec, presentation, nj_platform::devcaps::caps())
+            && video_feed_supported(vcodec, presentation, &crate::catalog::capabilities::start_caps())
             && audio.iter().any(|a| audio_direct_plays(mode, &a.codec, a.channels)))
             .then_some(Preview::DirectPlay);
     }
@@ -6404,7 +6461,7 @@ fn request_play_inner(
         // catch_unwind OUTSIDE the mailbox write, like load_season: a panicking resolve must still
         // land (as !ok) or PLAY_BUSY latches and the screen wedges on a spinner forever.
         let plan = std::panic::catch_unwind(|| build_stream(&rk, &part, &vc, &ac, &env))
-            .unwrap_or_else(|_| Plan { direct_play_mode: env.direct_play_mode, ..Default::default() });
+            .unwrap_or_else(|_| Plan { direct_play_mode: env.direct_play_mode, caps: Some(env.caps.clone()), ..Default::default() });
         let landing = PlayLanding {
             gen,
             trace_generation,
@@ -6942,6 +6999,8 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             now_ms,
             preview,
             resolved_as_preview: preview,
+            attempt_caps: plan.caps,
+            audio_recovery: super::audio_recovery::AudioRecovery::NEW,
         };
     } };
     if let (crate::catalog::TranscodeDelivery::FixedHls { .. }, Some(rung)) = (
@@ -7052,6 +7111,7 @@ fn prepare_original_remux(
     let _ = force_burn;
     let audio = crate::catalog::AudioEnhancements::NONE;
     let contract = enhanced_remux_contract(audio, false);
+    let caps = attempt_caps(ps);
     let spec = transcode_spec(
         &rk,
         &replacement,
@@ -7061,6 +7121,7 @@ fn prepare_original_remux(
         candidate_audio_sid,
         subtitle,
         contract.clone(),
+        &caps,
     );
     let negotiated = match c.transcode(&spec) {
         crate::catalog::Negotiation::Playable(n) => n,
@@ -7217,6 +7278,8 @@ struct RetranscodeClaimInputs {
     namespace: String,
     offset_secs: i64,
     expected: WorkerTicket,
+    /// The attempt's capability snapshot, carried to the worker by value.
+    caps: std::sync::Arc<nj_platform::devcaps::Caps>,
 }
 
 /// What one accepted `/decision` attempt produced: the session the worker started and committed
@@ -7251,6 +7314,9 @@ struct AppliedRetranscode {
     /// screen until the landing reloads, so the caller retires it only after that reload
     /// (see [`retire_superseded_encoder`]).
     superseded: String,
+    /// Whether the server stated each lane copied (`/decision`'s own verdicts): the C3 audio
+    /// recovery's proof that a conversion changed the audio alone.
+    lanes: super::audio_recovery::Lanes,
 }
 
 /// What one `/decision` attempt produced.
@@ -7290,6 +7356,7 @@ fn try_retranscode(
         inputs.audio_sid,
         inputs.subtitle_sid,
         contract,
+        &inputs.caps,
     );
     let negotiated = match inputs.client.transcode(&sp) {
         crate::catalog::Negotiation::Playable(n) => n,
@@ -7303,6 +7370,10 @@ fn try_retranscode(
     };
     let (dovi, dv_decision) = super::plan::copied_video_dv(&negotiated.video, inputs.src_dovi, inputs.src_dv_decision);
     let fps = super::plan::copied_video_fps(&negotiated.video, inputs.src_fps);
+    let lanes = super::audio_recovery::Lanes {
+        video_copied: negotiated.video.copied,
+        audio_copied: negotiated.audio.copied,
+    };
     let output_codecs = (negotiated.video.output, negotiated.audio.output);
     let subtitle = negotiated.subtitle;
     let url = negotiated.url;
@@ -7349,6 +7420,7 @@ fn try_retranscode(
         subtitle,
         ticket: replacement_ticket,
         client: inputs.client,
+        lanes,
         superseded,
     })
 }
@@ -7385,6 +7457,7 @@ fn prepare_retranscode_inputs(
         src_dovi: ps.src_dovi,
         src_dv_decision: ps.src_dv_decision,
         src_fps: ps.src_fps,
+        caps: attempt_caps(ps),
     })
 }
 
@@ -7461,6 +7534,93 @@ fn retranscode_as(
             Some(applied.url)
         }
         RetranscodeWorkerOutcome::Refused => None,
+    }
+}
+
+// ---- C3: the request's audio-conversion recovery (`super::audio_recovery`) -------------------
+
+/// The audio the live route feeds the pipeline: the Load's declared codec and the carried
+/// track's width. A conversion's output codec (AAC) is never under suspicion
+/// (`audio_recovery::suspect`), so a transcode route answers harmlessly too.
+pub(crate) fn fed_audio(ps: &PlaybackSession) -> Option<super::audio_recovery::FedAudio> {
+    (!ps.stream_acodec.is_empty())
+        .then(|| super::audio_recovery::FedAudio::new(&ps.stream_acodec, stream_achannels(ps)))
+}
+
+/// Hand a pre-picture failure to this request's recovery.
+pub(crate) fn audio_recovery_failure(
+    ps: &mut PlaybackSession,
+    facts: &super::audio_recovery::OpenFacts,
+) -> super::audio_recovery::Step {
+    ps.audio_recovery.on_failure(facts)
+}
+
+/// A Load started on this request's route (`player::engine::start_bufferfeed_inner`).
+pub(crate) fn note_audio_recovery_load(ps: &mut PlaybackSession) {
+    ps.audio_recovery.on_load_started();
+}
+
+/// The current Engine presented its first picture; a proof the conversion earned, if any.
+pub(crate) fn audio_recovery_first_picture(ps: &mut PlaybackSession) -> Option<super::audio_recovery::Record> {
+    ps.audio_recovery.on_first_picture()
+}
+
+/// The conversion could not start its reload: the rung is spent.
+pub(crate) fn audio_recovery_reload_failed(ps: &mut PlaybackSession) {
+    ps.audio_recovery.on_conversion_failed();
+}
+
+/// **The recovery's rung: rebuild this request's route with `audio` converted.** The attempt's
+/// capability snapshot is narrowed first (`Caps::without_audio`: the boot snapshot and the stored
+/// rows are untouched), so the DeviceProfile the server answers no longer offers that audio
+/// natively, and the conversion is planned from the same value every later gate of the request
+/// reads. The carried track and subtitle are the session's own (`prepare_retranscode_inputs`);
+/// the video stays copyable unless the route's contract forbids a copy (`is_no_video_copy`, the
+/// Dolby Vision rule), and the ceiling is the route's. Returns the replacement URL, or `None`
+/// with the rung spent when the server refused or the route moved under it — the failure then
+/// falls through to the rest of the ladder. Synchronous on the frame thread, like the Auto HLS
+/// contingency beside it: the viewer is looking at the spinner of a play that never started.
+pub(crate) fn convert_refused_audio(
+    ps: &mut PlaybackSession,
+    audio: &super::audio_recovery::FedAudio,
+    offset_secs: i64,
+) -> Option<String> {
+    let narrowed = attempt_caps(ps).without_audio(&audio.codec, audio.channels);
+    ps.attempt_caps = Some(std::sync::Arc::new(narrowed));
+    let contract = crate::catalog::EncodeContract {
+        remux: false,
+        delivery: crate::catalog::TranscodeDelivery::ProgressiveMkv,
+        no_video_copy: is_no_video_copy(ps),
+        ceiling: cur_ceiling(ps),
+        audio: crate::catalog::AudioEnhancements::NONE,
+    };
+    let expected = worker_ticket();
+    let outcome = match prepare_retranscode_inputs(ps, &expected, offset_secs) {
+        Some(inputs) => {
+            let _block = pending_split_block();
+            try_retranscode(&inputs, contract)
+        }
+        None => RetranscodeWorkerOutcome::Refused,
+    };
+    match outcome {
+        RetranscodeWorkerOutcome::Applied(applied) => {
+            crate::player::log(&format!(
+                "audio recovery: converting {} ({} ch) at {offset_secs}s; video {}, audio {}",
+                audio.codec,
+                audio.channels,
+                if applied.lanes.video_copied { "copied" } else { "encoded" },
+                if applied.lanes.audio_copied { "copied" } else { "converted" },
+            ));
+            install_retranscode_outcome(ps, &applied);
+            stop_encoder_session(applied.client, applied.superseded);
+            ps.audio_recovery.on_landed(applied.lanes);
+            Some(applied.url)
+        }
+        RetranscodeWorkerOutcome::Refused => {
+            crate::player::log(&format!("audio recovery: the conversion of {} was refused", audio.codec));
+            ps.audio_recovery.on_conversion_failed();
+            None
+        }
     }
 }
 
@@ -8754,6 +8914,14 @@ mod subtitle_style_tests;
 #[cfg(test)]
 #[path = "carried_audio_tests.rs"]
 mod carried_audio_tests;
+
+#[cfg(test)]
+#[path = "decision_attempt_caps_tests.rs"]
+mod attempt_caps_tests;
+
+#[cfg(test)]
+#[path = "decision_audio_recovery_tests.rs"]
+mod audio_recovery_tests;
 
 
 /// Cached after durable storage; no session IO occurs on the input/frame path.

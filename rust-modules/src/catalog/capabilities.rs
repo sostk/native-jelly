@@ -68,10 +68,19 @@ pub(crate) struct Capabilities<'a> {
     hdr: HdrCapability,
 }
 
-impl Capabilities<'static> {
-    /// This television, as the platform probes measured it.
-    pub(crate) fn current() -> Self {
-        Self::of(devcaps::caps(), devcaps::dv::capability()).with_hdr(devcaps::hdr::capability())
+/// The capability value the NEXT play start would derive: the write-once boot snapshot less the
+/// install's stored native audio refusals in force on this build (`devcaps::effective_caps`). A
+/// play captures it once (`route::ResolveEnv::caps`) and every gate and profile of that attempt
+/// reads the captured value; this reader is for what a page shows before Play is pressed.
+pub(crate) fn start_caps() -> std::sync::Arc<Caps> {
+    devcaps::effective_caps(&crate::catalog::session::peek().applied_refusals())
+}
+
+impl<'a> Capabilities<'a> {
+    /// One attempt's measured capabilities: `device` is the attempt's own snapshot, the Dolby
+    /// Vision and HDR10 answers are the platform's.
+    pub(crate) fn for_attempt(device: &'a Caps) -> Self {
+        Self::of(device, devcaps::dv::capability()).with_hdr(devcaps::hdr::capability())
     }
 }
 
@@ -146,13 +155,28 @@ impl<'a> Capabilities<'a> {
         devcaps::DP_AUDIO_CODECS.split(',').filter(|c| self.device.forced_feeds_audio(c)).map(jf_codec).collect()
     }
 
-    /// Measured channel ceilings, per decodable audio codec, in Jellyfin's spelling.
-    pub(crate) fn audio_channel_limits(&self) -> impl Iterator<Item = (&'a str, u32)> + '_ {
-        self.device
-            .audio_channels
-            .iter()
-            .filter(|(c, _)| self.device.audio_has(c))
-            .map(|(c, ch)| (jf_codec(c), *ch))
+    /// Channel ceilings per decodable audio codec, in Jellyfin's spelling: the measured table row
+    /// and any firmware or learned hard limit (`Caps::native_audio_limits`), the lower winning —
+    /// the same two bounds the local gate (`Caps::audio_supports`) applies, so a limit with no
+    /// table row still reaches the server.
+    pub(crate) fn audio_channel_limits(&self) -> Vec<(&'a str, u32)> {
+        let device: &'a Caps = self.device;
+        let mut limits: std::collections::BTreeMap<&'a str, u32> = std::collections::BTreeMap::new();
+        for (codec, max) in device.audio_channels.iter().chain(device.native_audio_limits.iter()) {
+            if *max > 0 && device.audio_has(codec) {
+                let slot = limits.entry(codec.as_str()).or_insert(*max);
+                *slot = (*slot).min(*max);
+            }
+        }
+        limits.into_iter().map(|(c, ch)| (jf_codec(c), ch)).collect()
+    }
+
+    /// Firmware exclusions retained by Strict Original, independently of the
+    /// ordinary device ceilings that Forced mode intentionally omits.
+    pub(crate) fn forced_audio_channel_limits(&self) -> impl Iterator<Item = (&str, u32)> {
+        self.device.native_audio_limits.iter()
+            .filter(|(codec, max)| **max > 0 && self.device.forced_feeds_audio(codec))
+            .map(|(codec, max)| (jf_codec(codec), *max))
     }
 
     /// The highest measured channel count of any audio codec, `None` when none was measured.
@@ -320,7 +344,7 @@ impl<'a> Capabilities<'a> {
     /// One line for the event log: what the profile is built from.
     pub(crate) fn summary(&self) -> String {
         let (w, h) = self.max_resolution();
-        let channels: Vec<String> = self.audio_channel_limits().map(|(c, ch)| format!("{c}:{ch}")).collect();
+        let channels: Vec<String> = self.audio_channel_limits().into_iter().map(|(c, ch)| format!("{c}:{ch}")).collect();
         format!(
             "video={} audio={} channels={} containers={} max={w}x{h} bitrate={} dv={} hdr10={} hlg={} hw_decode={} passthrough={} table={}",
             self.video_codecs().join(","),
@@ -433,7 +457,7 @@ mod tests {
         c.audio_channels.insert("truehd".into(), 8);
         let caps = Capabilities::of(&c, DvCapability::Unknown);
         assert_eq!(caps.audio_codecs(), ["aac", "ac3", "dts"]);
-        assert_eq!(caps.audio_channel_limits().collect::<Vec<_>>(), [("dts", 6)], "a codec the TV cannot decode has no limit to state");
+        assert_eq!(caps.audio_channel_limits(), [("dts", 6)], "a codec the TV cannot decode has no limit to state");
         assert!(caps.pipeline_audio_codecs().contains(&"dts"));
         let no_row = soc(true, "aac,ac3");
         assert!(!Capabilities::of(&no_row, DvCapability::Unknown).pipeline_audio_codecs().contains(&"dts"), "no DTS row, no DTS");

@@ -722,7 +722,7 @@ fn sink_envelope_now(ps: &crate::route::PlaybackSession, video: LoadVideo) -> Si
         video,
         crate::route::sink_max_raster(ps),
         crate::route::stream_fps(ps),
-        nj_platform::devcaps::caps(),
+        &crate::route::attempt_caps(ps),
         nj_platform::devcaps::measured() && !crate::route::forced_direct_play(ps),
     )
 }
@@ -749,8 +749,28 @@ fn audio_payload_codec(codec: &str) -> Option<(&'static str, u8)> {
         "eac3" => Some(("AC3 PLUS", 2)),
         "aac" => Some(("AAC", 3)),
         "dts" => Some(("DTS", 4)),
+        "opus" => Some(("OPUS", 6)),
         _ => None,
     }
+}
+
+/// One shared identification-header definition for the Load and demux guard.
+fn opus_head(channels: i64) -> Option<Vec<u8>> {
+    crate::ff::opus_head(channels)
+}
+
+/// Declare the same layout the demuxer validates. Refuse absent/ambiguous anchors
+/// and an existing node instead of silently producing duplicate JSON keys.
+fn with_opus_info(p: &str, channels: i64) -> Option<String> {
+    let head = opus_head(channels)?;
+    let anchor = r#""provider":"nativejelly""#;
+    if p.matches(anchor).count() != 1 || p.contains(r#""opusInfo""#) {
+        return None;
+    }
+    Some(p.replace(anchor, &format!(
+        r#"{anchor},"opusInfo":{{"channels":{channels},"sampleRate":48,"streamHeader":"{}"}}"#,
+        nj_base::b64::encode(&head),
+    )))
 }
 
 /// The pipeline reads the true dimensions from the SPS (Phase 0 HEVC probe), so mw/mh are only
@@ -1244,7 +1264,7 @@ fn start_bufferfeed_inner(
             SHARED.demux_failed.store(true, Ordering::Release);
             return Err(crate::route::RouteStartResult::StartFailed);
         };
-        if load_video_refused(lv, nj_platform::devcaps::caps()) {
+        if load_video_refused(lv, &crate::route::attempt_caps(ps)) {
             log(&format!(
                 "start_bufferfeed: {} stream but the device table lists no such decoder; refusing the Load",
                 lv.payload_name()
@@ -1291,7 +1311,27 @@ fn start_bufferfeed_inner(
             // path and is false here for every streamed HEVC playback (device-measured 2026-09-03:
             // three HEVC cells declared FHD before this read the right flag).
             sink_env = sink_envelope_now(ps, lv);
-            stream_payload = build_av_payload(ps, lv.payload_name(), ac, sink_env);
+            let av = build_av_payload(ps, lv.payload_name(), ac, sink_env);
+            stream_payload = if ac == "OPUS" {
+                let channels = crate::route::stream_achannels(ps);
+                let wide = channels > 2 && crate::player::playurl::playurl()
+                    .is_some_and(|fixture| fixture.is_ok_and(|fixture|
+                        fixture.permits_wide_opus(&url, channels)));
+                if !crate::route::attempt_caps(ps).opus_fixture_supports(channels, wide) {
+                    log("start_bufferfeed: Opus layout exceeds firmware policy without an explicit fixture override");
+                    SHARED.demux_failed.store(true, Ordering::Release);
+                    return Err(crate::route::RouteStartResult::StartFailed);
+                }
+                if wide { log(&format!("Opus: explicit pipeline-only wide experiment channels={channels}")); }
+                let Some(payload) = with_opus_info(&av, channels) else {
+                    log("start_bufferfeed: unknown or unsupported Opus layout; refusing Load");
+                    SHARED.demux_failed.store(true, Ordering::Release);
+                    return Err(crate::route::RouteStartResult::StartFailed);
+                };
+                payload
+            } else {
+                av
+            };
             &stream_payload
         }
     } else if is_h265 {
@@ -1401,6 +1441,7 @@ fn start_bufferfeed_inner(
             // `teardown(true) + start_bufferfeed()` (reload_at / reload_transcode /
             // switch_audio_native), which respawns this thread with the new value.
             let acodec = crate::route::stream_acodec(ps);
+            let achannels = crate::route::stream_achannels(ps);
             let expected_p7 = crate::route::stream_dovi(ps).converts_to_p81();
             // The item's whole length from the negotiation, by value for the same reason: the
             // total the open publishes when the stream itself cannot say (`ff::open_duration_ns`).
@@ -1408,7 +1449,7 @@ fn start_bufferfeed_inner(
             let abr = crate::route::hls_abr_control(ps);
             let auto_original = crate::route::auto_original_watch(ps);
             stream_th = nj_base::task::spawn("demux", move || {
-                crate::ff::demux(origin, path, acodec, expected_p7, runtime_ns, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(origin, path, acodec, achannels, expected_p7, runtime_ns, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 // Nothing will ever fill the AU queues, so there is no session to start. `hs` is
@@ -1425,6 +1466,9 @@ fn start_bufferfeed_inner(
         source = Source::Sample(sample.unwrap());
     }
 
+    // Every Load of this request counts for the C3 audio recovery: the conversion's proof is its
+    // own reload's first picture, with no other Load in between.
+    crate::route::note_audio_recovery_load(ps);
     // the media thread constructs + loads + runs the loop (owns the GMainContext)
     let payload_ptr = threads::SendPtr(payload_c.as_ptr() as *mut c_char);
     let native_epoch = native_start.epoch();
@@ -1546,6 +1590,9 @@ fn install_synthetic_playurl(
         play.dovi.to_dovi(),
         play.atmos,
     ) {
+        return Err(crate::route::RouteStartResult::StartFailed);
+    }
+    if !crate::route::set_synthetic_audio_channels(ps, play.achannels, play.allow_wide_opus) {
         return Err(crate::route::RouteStartResult::StartFailed);
     }
     let url = play.url.clone();
@@ -3308,12 +3355,41 @@ mod payload_tests {
     }
 
     #[test]
+    fn synthetic_opus_requires_a_probed_candidate_and_keeps_the_declared_track() {
+        let mut caps = nj_platform::devcaps::Caps::assumed();
+        caps.opus_max_channels = 2;
+        let mut ps = crate::route::PlaybackSession::IDLE;
+        let play: crate::player::playurl::PlayUrl = serde_json::from_value(serde_json::json!({
+            "url":"http://127.0.0.1/opus.mkv", "vcodec":"h264", "acodec":"opus", "achannels":2,
+        })).unwrap();
+        {
+            let _caps = nj_platform::devcaps::caps_on_this_thread_for_test(nj_platform::devcaps::Caps::assumed());
+            assert!(super::install_synthetic_playurl(&mut ps, &play).is_err());
+            assert!(crate::route::url(&ps).is_empty());
+        }
+        {
+            let _caps = nj_platform::devcaps::caps_on_this_thread_for_test(caps.clone());
+            assert!(super::install_synthetic_playurl(&mut ps, &play).is_ok());
+            assert_eq!(crate::route::stream_achannels(&ps), 2);
+        }
+        crate::route::set_url(&mut ps, "");
+        caps.native_audio_limits.insert("opus".into(), 0);
+        let _caps = nj_platform::devcaps::caps_on_this_thread_for_test(caps);
+        for _ in 0..2 {
+            assert!(super::install_synthetic_playurl(&mut ps, &play).is_err());
+            assert!(crate::route::url(&ps).is_empty(), "a retry cannot bypass the refusal");
+        }
+    }
+
+    #[test]
     fn refused_synthetic_p5_start_cannot_be_retried_past_validation() {
         let mut ps = crate::route::PlaybackSession::IDLE;
         let play = crate::player::playurl::PlayUrl {
             url: "http://192.0.2.1/refused-p5.mkv".into(),
             vcodec: "hevc".into(),
             acodec: "eac3".into(),
+            achannels: 0,
+            allow_wide_opus: false,
             fps: 23.976,
             dovi: crate::player::playurl::PlayDovi {
                 profile: 5,
@@ -5322,6 +5398,50 @@ mod sink_envelope_tests {
         let ps = crate::route::PlaybackSession::IDLE;
         let payload = build_av_payload(&ps, "H264", "DTS", ENVELOPE_FHD60);
         assert!(payload.contains(r#""audio":"DTS""#));
+    }
+
+    #[test]
+    fn opus_has_its_own_raw_feed_declaration() {
+        assert_eq!(audio_payload_codec("opus"), Some(("OPUS", 6)));
+        assert_eq!(audio_payload_codec("OPUS"), Some(("OPUS", 6)));
+    }
+
+    #[test]
+    fn opus_headers_keep_family_zero_and_refuse_unknown_widths() {
+        for channels in [1, 2] {
+            let header = opus_head(channels).unwrap();
+            assert_eq!(&header[..8], b"OpusHead");
+            assert_eq!(&header[8..], &[1, channels as u8, 56, 1, 128, 187, 0, 0, 0, 0, 0]);
+            assert_eq!(header.len(), 19);
+        }
+        for channels in [-1, 0, 9, 255, 256, i64::MAX] {
+            assert_eq!(opus_head(channels), None, "{channels}");
+        }
+    }
+
+    #[test]
+    fn opus_payload_has_one_node_and_preserves_video_declaration() {
+        let ps = crate::route::PlaybackSession::IDLE;
+        for video in ["H264", "H265", "AV1", "VP9"] {
+            for channels in [1, 2, 6, 8] {
+                let av = build_av_payload(&ps, video, "OPUS", ENVELOPE_FHD60);
+                let payload = with_opus_info(&av, channels).unwrap();
+                let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+                let contents = &v["args"][0]["option"]["externalStreamingInfo"]["contents"];
+                assert_eq!(contents["codec"]["video"], video);
+                assert_eq!(contents["codec"]["audio"], "OPUS");
+                assert_eq!(contents["opusInfo"]["channels"], channels);
+                assert_eq!(contents["opusInfo"]["sampleRate"], 48);
+                let header = nj_base::b64::decode(contents["opusInfo"]["streamHeader"].as_str().unwrap()).unwrap();
+                assert_eq!(header, opus_head(channels).unwrap());
+                assert_eq!(payload.matches(r#""opusInfo""#).count(), 1);
+                assert!(with_opus_info(&payload, channels).is_none());
+            }
+        }
+        assert!(with_opus_info("{}", 2).is_none());
+        assert!(with_opus_info(&format!("{PAYLOAD_AV}{PAYLOAD_AV}"), 2).is_none());
+        assert!(with_opus_info(PAYLOAD_AV, 0).is_none());
+        assert!(with_opus_info(PAYLOAD_AV, 9).is_none());
     }
 
     const DEV_SET: ((u32, u32, u32), (u32, u32, u32)) = ((4096, 2304, 60), (4096, 2176, 60));

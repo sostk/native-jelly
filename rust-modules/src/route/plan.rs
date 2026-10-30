@@ -342,6 +342,7 @@ pub(super) fn transcode_spec<'a>(
     aud: i64,
     sub: i64,
     contract: crate::catalog::EncodeContract,
+    caps: &'a nj_platform::devcaps::Caps,
 ) -> crate::catalog::TranscodeSpec<'a> {
     crate::catalog::TranscodeSpec {
         rating_key: rk,
@@ -352,6 +353,7 @@ pub(super) fn transcode_spec<'a>(
         audio_stream_id: aud,
         subtitle_stream_id: sub,
         offset,
+        caps,
     }
 }
 
@@ -845,6 +847,11 @@ pub(crate) struct ResolveEnv {
     /// ever reaches the wire through [`desired_audio`]. A preview and a start-failure retry
     /// capture `NONE` (`request_play_inner`).
     pub audio_enhancements: crate::catalog::AudioEnhancements,
+    /// **This attempt's capability snapshot**, derived ONCE at the play-start edge on the main
+    /// thread (`catalog::capabilities::start_caps`: the boot snapshot less the stored refusals in
+    /// force) and narrowed only by a recovery of this request. Every local gate below and the
+    /// Jellyfin DeviceProfile read this value, so the two cannot disagree about one attempt.
+    pub caps: std::sync::Arc<nj_platform::devcaps::Caps>,
     /// Test-only replacement for the process cache. Capability is an explicit policy input in
     /// regressions; no test mutates the production `OnceLock` or makes the whole host a DV set.
     #[cfg(test)]
@@ -933,6 +940,10 @@ pub(super) fn resolve_src_kbps(
 #[derive(Default)]
 pub(crate) struct Plan {
     pub direct_play_mode: DirectPlayMode,
+    /// The capability snapshot this plan was resolved under ([`ResolveEnv::caps`]); `apply_plan`
+    /// installs it as the attempt's (`PlaybackSession::attempt_caps`). `None` only on the default
+    /// `Plan` a panicking resolve lands.
+    pub caps: Option<std::sync::Arc<nj_platform::devcaps::Caps>>,
     /// The server this plan was resolved against — copied straight from [`ResolveEnv::sid`], so
     /// what `apply_plan` installs as `cur_sid` is the id the request captured and not a re-read of
     /// whatever became current while the worker ran. `UNSET` only on the default `Plan` a panicking
@@ -1068,6 +1079,7 @@ pub(crate) struct Plan {
 /// client here is `client_for` of it: an item from a shared source is not the current server's.
 pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env: &ResolveEnv) -> Plan {
     let mut plan = Plan {
+        caps: Some(env.caps.clone()),
         // carried through every exit below, the failing ones included: a plan without a server is
         // a plan `apply_plan` cannot install an honest `cur_sid` from.
         sid: env.sid,
@@ -1138,8 +1150,9 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     #[cfg(not(test))]
     let dv_decision = dovi.decision_now(vcodec);
     let dv = dv_decision.presentation;
-    let video_dp = if forced { video_feed_supported(vcodec, dv, nj_platform::devcaps::caps()) } else {
-        video_direct_plays(vcodec, src_w, src_h, dv, nj_platform::devcaps::caps())
+    let caps: &nj_platform::devcaps::Caps = &env.caps;
+    let video_dp = if forced { video_feed_supported(vcodec, dv, caps) } else {
+        video_direct_plays(vcodec, src_w, src_h, dv, caps)
     };
     plan.source_decodable = video_dp;
     // **Refusing direct play is only half of it.** A remux COPIES the video, and no
@@ -1182,13 +1195,13 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     };
     let audio_sel = if env.audio_sid > 0 {
         tracks.iter().enumerate().find(|(_, t)| t.id == env.audio_sid
-            && audio_direct_plays(env.direct_play_mode, &t.codec, t.channels))
+            && audio_direct_plays_with(caps, env.direct_play_mode, &t.codec, t.channels))
             .map(|(i, t)| (i as i32, t.codec.to_lowercase(), t.id))
-            .or_else(|| (!forced && !env.audio_explicit).then(|| pick_dp_audio_pref(tracks, acodec, audio_prefs)).flatten())
+            .or_else(|| (!forced && !env.audio_explicit).then(|| pick_dp_audio_mode(caps, tracks, acodec, audio_prefs, DirectPlayMode::Auto)).flatten())
     } else if rk.is_empty() {
         None
     } else {
-        pick_dp_audio_mode(tracks, acodec, audio_prefs, env.direct_play_mode)
+        pick_dp_audio_mode(caps, tracks, acodec, audio_prefs, env.direct_play_mode)
     };
     if let Some(lang) = audio_prefs.language {
         let hit = audio_sel
@@ -1239,7 +1252,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         let failure = if part.is_empty() { Some(ForcedFailure::NoOriginal) }
             else if !streamable { Some(ForcedFailure::Container) }
             else if !video_dp { Some(ForcedFailure::Video) }
-            else if audio_sel.is_none() && (!tracks.is_empty() || !audio_direct_plays(env.direct_play_mode, acodec, 0)) {
+            else if audio_sel.is_none() && (!tracks.is_empty() || !audio_direct_plays_with(caps, env.direct_play_mode, acodec, 0)) {
                 Some(ForcedFailure::Audio)
             } else { None };
         if let Some(failure) = failure {
@@ -1258,7 +1271,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     // **Auto, the Jellyfin way**: time `/Playback/BitrateTest` and advertise 70% of it as
     // `MaxStreamingBitrate` (bounding direct play too — see `jf::playback::device_profile`). A
     // verified LAN needs no proof; a fixed rung is its own ceiling; Original asks for no bound.
-    let (max_w, max_h) = nj_platform::devcaps::caps().hevc_max;
+    let (max_w, max_h) = caps.hevc_max;
     let ceiling = match playback_quality {
         Quality::Auto if location != Some(crate::catalog::probe::Location::Local) && !env.preview => {
             auto_bitrate_kbps(client).map(|kbps| crate::catalog::Ceiling {
@@ -1316,6 +1329,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         forced,
         burn: false,
         hls_segment_secs: None,
+        caps,
     });
     let n = match negotiation {
         crate::catalog::Negotiation::Playable(n) => n,
@@ -1556,16 +1570,19 @@ pub(super) fn pick_dp_audio(
 }
 
 /// [`pick_dp_audio`] with the user's Jellyfin language preferences.
+#[cfg(test)]
 pub(super) fn pick_dp_audio_pref(
     tracks: &[crate::metadata::Stream],
     default_acodec: &str,
     prefs: AudioLangPrefs<'_>,
 ) -> Option<(i32, String, i64)> {
-    pick_dp_audio_mode(tracks, default_acodec, prefs, DirectPlayMode::Auto)
+    pick_dp_audio_mode(&crate::catalog::capabilities::start_caps(), tracks, default_acodec, prefs, DirectPlayMode::Auto)
 }
 
+/// [`audio_direct_plays_with`] against what the next play start would offer; for pages, not for
+/// an attempt in flight (which reads its own snapshot).
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
-    audio_direct_plays_with(nj_platform::devcaps::caps(), mode, codec, channels)
+    audio_direct_plays_with(&crate::catalog::capabilities::start_caps(), mode, codec, channels)
 }
 
 /// [`audio_direct_plays`] over an explicit capability snapshot. Auto and Forced both go through
@@ -1574,18 +1591,19 @@ pub(super) fn audio_direct_plays_with(
     caps: &nj_platform::devcaps::Caps, mode: DirectPlayMode, codec: &str, channels: i64,
 ) -> bool {
     if mode == DirectPlayMode::Forced {
-        caps.forced_feeds_audio(codec)
+        caps.forced_supports_audio(codec, channels)
     } else {
         caps.audio_supports(codec, channels)
     }
 }
 
 fn pick_dp_audio_mode(
+    caps: &nj_platform::devcaps::Caps,
     tracks: &[crate::metadata::Stream], default_acodec: &str,
     prefs: AudioLangPrefs<'_>, mode: DirectPlayMode,
 ) -> Option<(i32, String, i64)> {
     pick_dp_audio_eligible(tracks, default_acodec, prefs,
-        |codec, channels| audio_direct_plays(mode, codec, channels))
+        |codec, channels| audio_direct_plays_with(caps, mode, codec, channels))
 }
 
 fn pick_dp_audio_eligible(
@@ -1903,7 +1921,7 @@ pub(crate) fn playback_preview_of(
     if part.is_empty() {
         return None; // nothing playable loaded (a show still resolving its episode)
     }
-    let video = video_direct_plays(vcodec, width, height, dv, nj_platform::devcaps::caps());
+    let video = video_direct_plays(vcodec, width, height, dv, &crate::catalog::capabilities::start_caps());
     let audio = audio_streams
         .iter()
         .any(|a| crate::catalog::is_dp_audio_track(&a.codec, a.channels));

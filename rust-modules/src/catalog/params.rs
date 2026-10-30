@@ -213,6 +213,8 @@ pub struct TranscodeSpec<'a> {
     pub subtitle_stream_id: i64,
     /// Restart at this exact content boundary, or omit `offset` for a fresh start.
     pub offset: TranscodeOffset,
+    /// The playback attempt's capability snapshot; the profile is built from it alone.
+    pub caps: &'a nj_platform::devcaps::Caps,
 }
 
 /// A bound a playback must come in under, in the units PMS's own params use: `maxVideoBitrate` is

@@ -61,6 +61,7 @@ fn p8_without_confirmed_dv_support_uses_base_layer() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     for bl_compat in [1, 2, 4] {
         let dovi = Dovi {
@@ -101,6 +102,7 @@ fn p5_without_confirmed_dv_support_requires_video_encode() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     for capability in [
         nj_platform::devcaps::dv::DvCapability::Unknown,
@@ -200,6 +202,7 @@ fn a_profile_5_source_does_not_direct_play_undeclared() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     // the live P5 item's own shape: 3840x1602 hevc, well inside the bound
     assert!(
@@ -243,6 +246,7 @@ fn declaring_dolby_vision_inverts_the_profile_5_refusal() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     let dv = p5().presentation(DECLARED, nj_platform::devcaps::dv::DvCapability::Supported, true);
     assert!(
@@ -293,6 +297,7 @@ fn a_cross_compatible_profile_7_source_direct_plays_as_profile_8() {
         av1_row: (0, 0, 0),
         audio: "eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     for signal in [SILENT, DECLARED] {
         let dv = p7().presentation(signal, Supported, true);
@@ -363,6 +368,7 @@ fn profile_8_and_plain_files_are_unaffected() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     for signal in [SILENT, DECLARED] {
         assert!(
@@ -514,6 +520,7 @@ fn the_direct_play_gate_and_the_payload_node_can_never_disagree() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     for capability in [
         nj_platform::devcaps::dv::DvCapability::Unknown,
@@ -664,6 +671,7 @@ fn a_source_beyond_the_device_bound_does_not_direct_play() {
         av1_row: (0, 0, 0),
         audio: "aac,ac3,eac3".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     // the codec agrees; the frame size must still refuse — on either codec
     assert!(!video_direct_plays(
@@ -714,6 +722,7 @@ fn unknown_dimensions_fail_open_and_the_codec_half_still_gates() {
         av1_row: (0, 0, 0),
         audio: "aac".into(),
         audio_channels: Default::default(),
+        ..nj_platform::devcaps::Caps::assumed()
     };
     assert!(video_direct_plays(
         "h264",

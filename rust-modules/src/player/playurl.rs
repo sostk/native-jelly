@@ -55,6 +55,14 @@ pub(crate) struct PlayUrl {
     /// engine does the LG-side renaming, which is the trap this tier exists to keep testing.
     #[serde(default)]
     pub(crate) acodec: String,
+    /// Explicit source width for Opus pipeline tests. Zero means unknown for the
+    /// legacy codecs; Opus requires mono/stereo rather than guessing a header.
+    #[serde(default)]
+    pub(crate) achannels: i64,
+    /// Explicit permission for a bounded 3–8 channel pipeline experiment. This
+    /// does not affect Auto/Force capabilities and is unavailable without dev triggers.
+    #[serde(default)]
+    pub(crate) allow_wide_opus: bool,
     /// Source frame rate for the Load `esInfo`; 0 omits it, exactly as a transcode does.
     #[serde(default)]
     pub(crate) fps: f64,
@@ -135,6 +143,15 @@ impl PlayDovi {
     }
 }
 
+impl PlayUrl {
+    /// Permission belongs to this exact fixture declaration, never a subsequent
+    /// library route or another track width that happens to share the boot.
+    pub(super) fn permits_wide_opus(&self, url: &str, channels: i64) -> bool {
+        self.allow_wide_opus && self.acodec.eq_ignore_ascii_case("opus")
+            && self.url == url && self.achannels == channels
+    }
+}
+
 /// Parse the `playurl` trigger's content. Pure, so the host suite can pin it.
 ///
 /// An `Err` rather than a defaulted object on malformed input, for `crate::dev`'s `parse_servers`' reason: a
@@ -146,6 +163,10 @@ fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
     let p: PlayUrl = serde_json::from_str(s).map_err(|e| e.to_string())?;
     if p.url.is_empty() {
         return Err("no `url`".to_string());
+    }
+    if p.acodec.eq_ignore_ascii_case("opus")
+        && !(matches!(p.achannels, 1 | 2) || (p.allow_wide_opus && (3..=8).contains(&p.achannels))) {
+        return Err("Opus needs explicit mono/stereo `achannels`".into());
     }
     Ok(p)
 }
@@ -169,6 +190,15 @@ pub(crate) fn playurl() -> Option<Result<PlayUrl, String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opus_pipeline_fixture_requires_a_stated_supported_width() {
+        for channels in [None, Some(0), Some(-1), Some(6)] {
+            let mut value = serde_json::json!({"url":"http://127.0.0.1/opus.mkv", "acodec":"opus"});
+            if let Some(channels) = channels { value["achannels"] = channels.into(); }
+            assert!(super::parse_playurl(&value.to_string()).is_err(), "Opus width {channels:?}");
+        }
+    }
+
     /// The payload `tests/run.py` writes, verbatim. Pinned as a literal for `dev::parse_servers`'
     /// reason: nothing links the two languages at build time, so if this has to change, the
     /// harness's writer changes with it.
@@ -274,4 +304,32 @@ mod tests {
         );
         assert!(super::parse_playurl(payload).is_ok());
     }
+    #[test]
+    fn opus_pipeline_fixture_keeps_its_explicit_width() {
+        for channels in [1, 2] {
+            let value = serde_json::json!({"url":"http://127.0.0.1/opus.mkv", "acodec":"OPUS", "achannels":channels});
+            assert_eq!(super::parse_playurl(&value.to_string()).unwrap().achannels, channels);
+        }
+    }
+
+    #[test]
+    fn opus_surround_fixture_requires_an_explicit_override() {
+        for channels in [6, 8, 9] {
+            for allow in [false, true] {
+                let value = serde_json::json!({"url":"http://127.0.0.1/opus.mkv", "acodec":"opus", "achannels":channels, "allow_wide_opus":allow});
+                assert_eq!(super::parse_playurl(&value.to_string()).is_ok(), allow && channels <= 8);
+            }
+        }
+    }
+
+    #[test]
+    fn opus_wide_permission_cannot_escape_its_fixture_identity() {
+        let mut fixture = super::parse_playurl(r#"{"url":"http://127.0.0.1/opus.mkv","acodec":"opus","achannels":6,"allow_wide_opus":true}"#).unwrap();
+        assert!(fixture.permits_wide_opus("http://127.0.0.1/opus.mkv", 6));
+        assert!(!fixture.permits_wide_opus("http://127.0.0.1/other.mkv", 6));
+        assert!(!fixture.permits_wide_opus("http://127.0.0.1/opus.mkv", 8));
+        fixture.acodec = "aac".into();
+        assert!(!fixture.permits_wide_opus("http://127.0.0.1/opus.mkv", 6));
+    }
+
 }

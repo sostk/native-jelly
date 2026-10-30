@@ -118,6 +118,18 @@ pub struct Caps {
     /// Nonzero, per-codec channel ceilings from the device table, duplicate rows MIN-merged.
     /// Missing legacy limits remain unknown; DTS is admitted only with a measured limit.
     pub audio_channels: std::collections::BTreeMap<String, u32>,
+    /// Measured-table candidate for the staged Opus feed, capped at stereo. This
+    /// is not shipping eligibility: Opus stays outside `audio` until recovery lands.
+    pub opus_max_channels: u32,
+    /// Hard exclusions from firmware evidence; apply to Forced mode as well.
+    pub native_audio_limits: std::collections::BTreeMap<String, u32>,
+}
+
+/// The value [`caps`] answers before [`probe`] has run: [`Caps::assumed`].
+impl Default for Caps {
+    fn default() -> Self {
+        Caps::assumed()
+    }
 }
 
 impl Caps {
@@ -137,6 +149,8 @@ impl Caps {
             av1_row: (0, 0, 0),
             audio: "aac,ac3,eac3".to_string(),
             audio_channels: Default::default(),
+            opus_max_channels: 0,
+            native_audio_limits: Default::default(),
         }
     }
 
@@ -150,7 +164,8 @@ impl Caps {
     /// Local counterpart of the profile's codec-scoped audio.channels limitations.
     pub fn audio_supports(&self, codec: &str, channels: i64) -> bool {
         let id = audio_codec_id(codec);
-        if !self.audio_has(&id) {
+        if !self.audio_has(&id) || self.native_audio_limits.get(id.as_ref())
+            .is_some_and(|&max| channels <= 0 || channels > i64::from(max)) {
             return false;
         }
         match self.audio_channels.get(id.as_ref()) {
@@ -164,10 +179,38 @@ impl Caps {
     /// ([`Caps::forced_admits_dts`]). The planner and the forced profile both read this.
     pub fn forced_feeds_audio(&self, codec: &str) -> bool {
         let id = audio_codec_id(codec);
+        if self.native_audio_limits.get(id.as_ref()) == Some(&0) {
+            return false;
+        }
         if id == "dts" {
             return self.forced_admits_dts();
         }
         DP_AUDIO_CODECS.split(',').any(|c| c == id)
+    }
+
+    /// Hard channel exclusions are never bypassed by Force. A constrained
+    /// codec needs a stated count, even if its ordinary firmware bound is unknown.
+    pub fn forced_supports_audio(&self, codec: &str, channels: i64) -> bool {
+        let id = audio_codec_id(codec);
+        self.forced_feeds_audio(&id) && self.native_audio_limits.get(id.as_ref())
+            .is_none_or(|&max| channels > 0 && channels <= i64::from(max))
+    }
+
+    /// Staged decoder eligibility, used by the explicit pipeline fixture only.
+    /// Normal and Forced routes continue to withhold Opus until recovery is ready.
+    pub fn native_opus_supports(&self, channels: i64) -> bool {
+        channels > 0 && channels <= i64::from(self.opus_max_channels)
+            && self.native_audio_limits.get("opus")
+                .is_none_or(|&max| channels <= i64::from(max))
+    }
+
+    /// A per-fixture, debug entry can explicitly test wider native Opus. It
+    /// cannot invent an unread decoder or bypass a decoder ranked off. Ordinary
+    /// routes never supply this override and keep the measured stereo ceiling.
+    pub fn opus_fixture_supports(&self, channels: i64, allow_wide: bool) -> bool {
+        self.native_opus_supports(channels)
+            || (allow_wide && (3..=8).contains(&channels) && self.opus_max_channels > 0
+                && self.native_audio_limits.get("opus") != Some(&0))
     }
 
     /// The Forced-mode DTS rule, one predicate so the owner can flip it: the table has a DTS
@@ -395,6 +438,9 @@ fn parse(s: &str) -> Option<Caps> {
         .filter(|c| table_audio.iter().any(|t| t == c))
         .filter(|c| *c != "dts" || audio_channels.contains_key("dts"))
         .collect();
+    let opus_max_channels = if audio.is_empty() { 0 } else {
+        audio_channels.get("opus").copied().unwrap_or(2).min(2)
+    };
     let audio = if audio.is_empty() {
         // Every webOS SoC decodes AAC; a table naming none of the three is evidence about our
         // reading of it, not about the television. Same reasoning as the empty-video guard.
@@ -418,7 +464,180 @@ fn parse(s: &str) -> Option<Caps> {
         av1_row: (av1_wh.0, av1_wh.1, av1_fps),
         audio,
         audio_channels,
+        opus_max_channels,
+        native_audio_limits: Default::default(),
     })
+}
+
+/// Decoder ranks in the sections the media stack consumes. An absent or
+/// malformed measurement remains unknown; it must not invent decoder support.
+pub fn parse_gst_ranks(text: &str) -> std::collections::BTreeMap<String, i64> {
+    let mut ranks = std::collections::BTreeMap::new();
+    let mut wanted = false;
+    for line in text.lines().map(str::trim) {
+        if let Some(section) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            wanted = matches!(section.trim(), "rank" | "sw_decoder");
+        } else if wanted && !line.starts_with('#') && !line.starts_with(';') {
+            if let Some((name, value)) = line.split_once('=') {
+                if let Ok(rank) = value.trim().parse::<i64>() {
+                    let name = name.trim();
+                    if !name.is_empty() { ranks.insert(name.to_owned(), rank); }
+                }
+            }
+        }
+    }
+    ranks
+}
+
+/// Remove capabilities only. Missing ranks leave table evidence unchanged;
+/// positive ranks cannot add codecs. Force observes the same explicit exclusions.
+pub fn apply_audio_restrictions(caps: &mut Caps, codename: &str, conf: &str) {
+    // Upstream #1034: C1 webOS 6.5.3, surround Opus stalls above ~1500-byte
+    // packets; Vorbis is refused with type=18 num=200. No broader family claim.
+    if codename.eq_ignore_ascii_case("kisscurl-koli") {
+        caps.native_audio_limits.insert("opus".into(), 2);
+        caps.native_audio_limits.insert("vorbis".into(), 0);
+        caps.opus_max_channels = caps.opus_max_channels.min(2);
+    }
+    let ranks = parse_gst_ranks(conf);
+    for (codec, elements) in [
+        ("aac", &["aac_audiodec", "avdec_aac", "faad"][..]),
+        ("ac3", &["ac3_audiodec", "avdec_ac3"][..]),
+        ("eac3", &["ac3_audiodec", "avdec_eac3"][..]),
+        ("dts", &["dts_audiodec", "avdec_dca"][..]),
+        ("opus", &["opus_audiodec", "opusdec", "avdec_opus"][..]),
+        ("vorbis", &["vorbis_audiodec", "vorbisdec", "ivorbisdec"][..]),
+    ] {
+        let mut listed = elements.iter().filter_map(|e| ranks.get(*e)).peekable();
+        if listed.peek().is_some() && listed.all(|&rank| rank <= 0) {
+            caps.native_audio_limits.insert(codec.into(), 0);
+        }
+    }
+    project_audio_limits(caps);
+}
+
+/// Fold `native_audio_limits` into the announced set, channel ceilings and the
+/// Opus candidate. Idempotent and only ever narrows.
+fn project_audio_limits(caps: &mut Caps) {
+    let limits = &caps.native_audio_limits;
+    caps.audio = caps.audio.split(',').filter(|codec| limits.get(*codec) != Some(&0))
+        .collect::<Vec<_>>().join(",");
+    for (codec, max) in limits {
+        if *max == 0 { caps.audio_channels.remove(codec); }
+        else if let Some(channels) = caps.audio_channels.get_mut(codec) {
+            *channels = (*channels).min(*max);
+        }
+    }
+    if let Some(max) = limits.get("opus") {
+        caps.opus_max_channels = caps.opus_max_channels.min(*max);
+    }
+}
+
+/// Lower `codec`'s hard limit to `max` (never raise it) and project it.
+fn limit_codec(caps: &mut Caps, codec: &str, max: u32) {
+    let id = audio_codec_id(codec).into_owned();
+    if id.is_empty() {
+        return;
+    }
+    let slot = caps.native_audio_limits.entry(id).or_insert(max);
+    *slot = (*slot).min(max);
+    project_audio_limits(caps);
+}
+
+/// A native audio combination this install watched the pipeline refuse, on one
+/// exact firmware build. The install preference owns the stored list; this is
+/// the shape a play start applies ([`Caps::minus`], [`effective_caps`]).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Refusal {
+    pub codec: String,
+    /// The refused track's channel count; 0 when the width was unknown.
+    pub channels: u32,
+    /// `tv::device::Info::build`. A row says nothing about another build, and a
+    /// row with no build (or a set that cannot name its own) applies nowhere.
+    pub build: String,
+}
+
+impl Refusal {
+    pub fn watched_on(&self, build: &str) -> bool {
+        !self.build.is_empty() && self.build == build
+    }
+}
+
+/// What a refusal of a `channels`-wide track leaves of its codec: mono, stereo
+/// or an unknown width takes the codec away; a surround refusal keeps stereo.
+/// One rule for a stored row ([`Caps::minus`]) and an attempt's own
+/// narrowing ([`Caps::without_audio`]).
+pub fn refusal_ceiling(channels: u32) -> u32 {
+    if channels <= 2 { 0 } else { 2 }
+}
+
+impl Caps {
+    /// A copy that no longer offers `codec` at `channels` natively. Pure: it
+    /// records nothing, so a recovery can narrow an attempt before any proof.
+    pub fn without_audio(&self, codec: &str, channels: u32) -> Caps {
+        let mut next = self.clone();
+        limit_codec(&mut next, codec, refusal_ceiling(channels));
+        next
+    }
+
+    /// This value less the stored `rows` watched on `build`. Pure, monotone and
+    /// idempotent: it only ever removes.
+    pub fn minus(&self, rows: &[Refusal], build: &str) -> Caps {
+        let mut next = self.clone();
+        for row in rows.iter().filter(|row| row.watched_on(build)) {
+            limit_codec(&mut next, &row.codec, refusal_ceiling(row.channels));
+        }
+        next
+    }
+}
+
+/// The running firmware identity a refusal is stored and applied under:
+/// `(codename, build)`, or `None` when the set does not name both.
+pub fn learning_firmware() -> Option<(String, String)> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(identity) = THREAD_FIRMWARE.with(|slot| slot.borrow().clone()) {
+        return identity;
+    }
+    let info = crate::tv::device::info();
+    (!info.codename.is_empty() && !info.build.is_empty())
+        .then(|| (info.codename.clone(), info.build.clone()))
+}
+
+/// One play attempt's capability value: the write-once boot snapshot less the
+/// stored refusals watched on this build. A set that cannot name its firmware
+/// applies none. Every route gate and the Jellyfin profile of the attempt read
+/// this one value; [`caps`] itself never changes.
+pub fn effective_caps(rows: &[Refusal]) -> std::sync::Arc<Caps> {
+    let boot = caps();
+    match learning_firmware() {
+        Some((_, build)) if !rows.is_empty() => std::sync::Arc::new(boot.minus(rows, &build)),
+        _ => std::sync::Arc::new(boot.clone()),
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static THREAD_FIRMWARE: std::cell::RefCell<Option<Option<(String, String)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Make [`learning_firmware`] answer `(codename, build)` on this test thread
+/// (empty strings model a set that names neither) until the guard drops.
+#[cfg(any(test, feature = "test-support"))]
+pub fn firmware_on_this_thread_for_test(codename: &str, build: &str) -> FirmwareGuard {
+    let identity = (!codename.is_empty() && !build.is_empty())
+        .then(|| (codename.to_owned(), build.to_owned()));
+    FirmwareGuard(THREAD_FIRMWARE.with(|slot| slot.replace(Some(identity))))
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub struct FirmwareGuard(Option<Option<(String, String)>>);
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for FirmwareGuard {
+    fn drop(&mut self) {
+        THREAD_FIRMWARE.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
 }
 
 /// The VP9 bit depth to claim on a set running webOS `major` (0 = unknown). 10 on webOS 1 to 4, the
@@ -487,6 +706,13 @@ pub fn probe() {
             Caps::assumed()
         }
     };
+    let mut caps = caps;
+    let ranks = std::fs::read_to_string("/etc/gst/gstcool.conf").unwrap_or_default();
+    apply_audio_restrictions(&mut caps, &crate::tv::device::info().codename, &ranks);
+    nj_base::eventlog::log(&format!(
+        "devcaps: audio policy audio={} staged_opus_max={} limits={:?}",
+        caps.audio, caps.opus_max_channels, caps.native_audio_limits,
+    ));
     let _ = MEASURED.set(measured);
     let _ = CAPS.set(caps);
 }
@@ -890,4 +1116,137 @@ mod tests {
         assert_eq!(Caps::assumed().vp9_bit_depth, 8);
         assert_eq!(parse(REAL).unwrap().vp9_bit_depth, 8, "parse() alone never claims it; probe() sets it");
     }
+    /// C3 is staged: the payload path alone must not opt normal/forced routing in
+    /// before the firmware and successful-retry refusal policy is integrated.
+    #[test]
+    fn opus_is_withheld_until_recovery_is_integrated() {
+        let mut table: serde_json::Value = serde_json::from_str(REAL).unwrap();
+        table["audioCodecs"].as_array_mut().unwrap().push(serde_json::json!({
+            "name": "OPUS", "channels": 8,
+        }));
+        for caps in [Caps::assumed(), parse(&table.to_string()).unwrap()] {
+            assert!(!caps.audio_has("opus"));
+            assert!(!caps.forced_feeds_audio("opus"));
+            for channels in [0, 1, 2, 6, 8] {
+                assert!(!caps.audio_supports("opus", channels));
+            }
+        }
+    }
+
+    #[test]
+    fn opus_candidate_requires_a_valid_audio_table_and_never_exceeds_stereo() {
+        assert!(!Caps::assumed().native_opus_supports(2));
+        let caps = parse(REAL).unwrap();
+        assert!(caps.native_opus_supports(1) && caps.native_opus_supports(2));
+        for channels in [-1, 0, 3, 6, 8] { assert!(!caps.native_opus_supports(channels)); }
+        let mut table: serde_json::Value = serde_json::from_str(REAL).unwrap();
+        table["audioCodecs"] = serde_json::json!([]);
+        assert!(!parse(&table.to_string()).unwrap().native_opus_supports(1));
+        table["audioCodecs"] = serde_json::json!([{"name":"AAC", "channels":6}, {"name":"Opus", "channels":1}]);
+        let mono = parse(&table.to_string()).unwrap();
+        assert!(mono.native_opus_supports(1) && !mono.native_opus_supports(2));
+    }
+
+    #[test]
+    fn audio_ranks_only_remove_and_require_positive_exclusion_evidence() {
+        let table = parse(REAL).unwrap();
+        for conf in ["", "[other]\navdec_dca=0", "[rank]\navdec_dca=unknown", "[rank]\n#avdec_dca=0"] {
+            let mut caps = table.clone();
+            apply_audio_restrictions(&mut caps, "unmeasured", conf);
+            assert_eq!(caps, table, "unknown ranks cannot alter capabilities");
+        }
+        let mut caps = table.clone();
+        apply_audio_restrictions(&mut caps, "unmeasured", "[rank]\navdec_dca=0\nopusdec=0\n[sw_decoder]\navdec_opus=-1");
+        assert!(!caps.audio_has("dts") && !caps.forced_feeds_audio("dca"));
+        assert!(!caps.native_opus_supports(1));
+        let mut on = table.clone();
+        apply_audio_restrictions(&mut on, "unmeasured", "[rank]\nopusdec=0\n[sw_decoder]\navdec_opus=256");
+        assert_eq!(on, table, "one enabled decoder suffices; positive ranks add nothing");
+        assert_eq!(parse_gst_ranks("[rank]\n opusdec = 0\n[sw_decoder]\nopusdec=64").get("opusdec"), Some(&64));
+    }
+
+    #[test]
+    fn c1_exclusions_apply_to_force_and_never_create_a_candidate() {
+        let mut caps = parse(REAL).unwrap();
+        // Model the future shipping set: a hard exclusion must still constrain Force.
+        caps.audio.push_str(",opus,vorbis");
+        apply_audio_restrictions(&mut caps, "KISSCURL-KOLI", "");
+        assert!(caps.native_opus_supports(2));
+        assert!(!caps.native_opus_supports(6));
+        assert!(!caps.forced_supports_audio("opus", 6));
+        assert!(!caps.forced_feeds_audio("vorbis"));
+        let once = caps.clone();
+        apply_audio_restrictions(&mut caps, "kisscurl-koli", "");
+        assert_eq!(caps, once, "policy is idempotent");
+        caps.native_audio_limits.insert("aac".into(), 2);
+        assert!(caps.forced_supports_audio("aac", 2));
+        assert!(!caps.forced_supports_audio("aac", 6));
+        assert!(!caps.forced_supports_audio("aac", 0));
+        let mut missing = Caps::assumed();
+        apply_audio_restrictions(&mut missing, "kisscurl-koli", "[rank]\nopusdec=256");
+        assert!(!missing.native_opus_supports(1), "ranks and exclusions cannot invent a table");
+    }
+
+
+    fn opus_caps() -> Caps {
+        let mut caps = parse(REAL).unwrap();
+        caps.audio.push_str(",opus");
+        caps
+    }
+
+    #[test]
+    fn a_learned_refusal_narrows_like_the_static_rows_and_only_removes() {
+        let caps = opus_caps();
+        assert!(caps.audio_supports("opus", 2));
+        let stereo = caps.without_audio("OPUS", 2);
+        assert!(!stereo.audio_has("opus") && !stereo.forced_feeds_audio("opus"));
+        assert!(!stereo.native_opus_supports(1));
+        let surround = caps.without_audio("ac3", 6);
+        assert!(surround.audio_supports("ac3", 2) && !surround.audio_supports("ac3", 6));
+        assert!(!surround.forced_supports_audio("ac3", 6), "Force observes the narrowing");
+        assert!(!caps.without_audio("ac3", 0).audio_has("ac3"), "unknown width removes the codec");
+        assert_eq!(stereo.without_audio("opus", 2), stereo, "idempotent");
+        assert_eq!(caps.without_audio("vorbis", 2).audio, caps.audio, "an absent codec is already without");
+        let narrowed = caps.without_audio("eac3", 6);
+        assert_eq!(narrowed.without_audio("eac3", 8), narrowed, "a wider refusal never raises a lower limit");
+    }
+
+    #[test]
+    fn stored_rows_apply_only_on_the_build_that_watched_them() {
+        let caps = opus_caps();
+        let row = |build: &str| Refusal { codec: "opus".into(), channels: 2, build: build.into() };
+        assert!(!caps.minus(&[row("6.5.3-47")], "6.5.3-47").audio_has("opus"));
+        assert_eq!(caps.minus(&[row("6.5.3-46")], "6.5.3-47"), caps, "another build is not evidence");
+        assert_eq!(caps.minus(&[row("")], "6.5.3-47"), caps, "an untagged row is not evidence");
+        assert_eq!(caps.minus(&[row("")], ""), caps, "an unnamed set applies nothing");
+        let _boot = caps_on_this_thread_for_test(caps.clone());
+        {
+            let _fw = firmware_on_this_thread_for_test("kisscurl-koli", "6.5.3-47");
+            assert!(!effective_caps(&[row("6.5.3-47")]).audio_has("opus"));
+            assert_eq!(*effective_caps(&[]), caps);
+            assert_eq!(learning_firmware(), Some(("kisscurl-koli".into(), "6.5.3-47".into())));
+        }
+        let _fw = firmware_on_this_thread_for_test("", "");
+        assert_eq!(learning_firmware(), None);
+        assert_eq!(*effective_caps(&[row("6.5.3-47")]), caps);
+        assert_eq!(*super::caps(), caps, "the boot snapshot never moves");
+    }
+
+    #[test]
+    fn opus_wide_fixture_override_is_explicit_and_never_changes_normal_caps() {
+        let mut caps = parse(REAL).unwrap();
+        apply_audio_restrictions(&mut caps, "kisscurl-koli", "");
+        for channels in [6, 8] {
+            assert!(!caps.native_opus_supports(channels));
+            assert!(!caps.opus_fixture_supports(channels, false));
+            assert!(caps.opus_fixture_supports(channels, true));
+            assert!(!caps.audio_supports("opus", channels));
+            assert!(!caps.forced_supports_audio("opus", channels));
+            assert!(!Caps::assumed().opus_fixture_supports(channels, true));
+        }
+        assert!(!caps.opus_fixture_supports(9, true));
+        apply_audio_restrictions(&mut caps, "kisscurl-koli", "[rank]\nopusdec=0");
+        assert!(!caps.opus_fixture_supports(6, true));
+    }
+
 }

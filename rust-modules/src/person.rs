@@ -2718,6 +2718,10 @@ mod tests {
     fn an_unknown_person_settles_the_profile_while_a_failure_backs_off() {
         let mut owner = Owner::default();
         let _serial = nj_base::testlock::serial();
+        // This is a mailbox-driven fixture: slot 0 must be unregistered as the
+        // module contract says, regardless of the preceding test's server roster.
+        // Otherwise open can spawn a worker that races these manual landings.
+        crate::catalog::reset_servers_for_test();
         owner.open(S0, "6059", "0000000000000000000000ff", "Nobody", "");
         let gen = owner.gen();
         owner.hold_off();

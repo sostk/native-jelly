@@ -552,3 +552,87 @@ fn preferences_soft_parse_without_losing_the_session() {
     assert_eq!(s.language, Preference::Be);
     assert_eq!(serde_json::to_value(&s).unwrap()["language"], "be");
 }
+
+fn refusal(build: &str, codec: &str, channels: u32, proofs: Option<u32>) -> NativeAudioRefusal {
+    NativeAudioRefusal::new("kisscurl-koli", build, codec, channels, proofs).expect("a storable row")
+}
+
+/// C3: the learned native audio refusals live in the PUBLIC preferences half, survive the
+/// canonical split and the locked-bundle snapshot, and a session that never learned one keeps the
+/// exact shape it had (no key at all).
+#[test]
+fn native_audio_refusals_survive_the_canonical_split_and_old_files_keep_their_shape() {
+    let session = Session::default();
+    assert!(split_public(&session).unwrap().preferences.get("native_audio_refused").is_none());
+    let old: Session = serde_json::from_str(r#"{"language":"be","direct_play_mode":"forced"}"#).unwrap();
+    assert!(old.native_audio_refused.is_empty() && old.applied_refusals().is_empty());
+    assert_eq!(old.direct_play_mode, DirectPlayMode::Forced, "existing preferences keep their values");
+    assert!(serde_json::to_value(&old).unwrap().get("native_audio_refused").is_none());
+
+    let learned = session.with_native_audio_refusal(&refusal("6.5.3-47", "OPUS", 2, None)).unwrap();
+    let public = split_public(&learned).unwrap();
+    assert_eq!(public.preferences["native_audio_refused"][0]["codec"], "opus");
+    assert!(public.preferences["native_audio_refused"][0].get("proofs").is_none());
+    let joined = join_canonical(&public, MINIMAL_PROTECTED_AUTH).unwrap();
+    for restored in [&joined, &public_session(&public)] {
+        assert_eq!(restored.native_audio_refused, learned.native_audio_refused);
+        assert_eq!(restored.applied_refusals(), [nj_platform::devcaps::Refusal {
+            codec: "opus".into(), channels: 2, build: "6.5.3-47".into(),
+        }]);
+    }
+    // a malformed row costs itself, never the preferences beside it
+    let mut public = public;
+    public.preferences["native_audio_refused"].as_array_mut().unwrap()
+        .extend([serde_json::json!("bad"), serde_json::json!({"codec": 7})]);
+    public.preferences["subtitle_tone"] = serde_json::json!("grey_40");
+    let joined = join_canonical(&public, MINIMAL_PROTECTED_AUTH).unwrap();
+    assert_eq!(joined.native_audio_refused.len(), 1);
+    assert_eq!(joined.subtitle_tone(), SubtitleTone::DarkGrey);
+}
+
+/// Named refusals apply at once; ambiguous ones need [`LEARNED_REFUSAL_PROOFS`] proofs, which a
+/// named row outranks and which never exceed the cap. A proof of unknown width is not storable.
+#[test]
+fn named_refusals_apply_at_once_and_counted_ones_after_two_proofs() {
+    let one = Session::default().with_native_audio_refusal(&refusal("B", "opus", 2, Some(1))).unwrap();
+    assert!(one.applied_refusals().is_empty(), "one proof is counted, not applied");
+    let two = one.with_native_audio_refusal(&refusal("B", "opus", 2, Some(1))).unwrap();
+    assert_eq!(two.native_audio_refused[0].proofs, Some(LEARNED_REFUSAL_PROOFS));
+    assert_eq!(two.applied_refusals().len(), 1);
+    assert!(two.with_native_audio_refusal(&refusal("B", "opus", 2, Some(1))).is_none(), "capped: no write");
+    let named = one.with_native_audio_refusal(&refusal("B", "opus", 2, None)).unwrap();
+    assert_eq!(named.native_audio_refused[0].proofs, None);
+    assert!(named.with_native_audio_refusal(&refusal("B", "opus", 2, Some(1))).is_none(), "a proof never downgrades a named row");
+    assert!(NativeAudioRefusal::new("fw", "B", "opus", 0, Some(1)).is_none());
+    assert!(NativeAudioRefusal::new("fw", "B", "opus", 0, None).is_some());
+    for (fw, build, codec) in [("", "B", "opus"), ("fw", "", "opus"), ("fw", "B", "")] {
+        assert!(NativeAudioRefusal::new(fw, build, codec, 2, None).is_none());
+    }
+}
+
+/// A firmware update reconsiders every stored row: the first write on a new build drops the old
+/// build's rows, and rows from another build never apply before that write either. The record is
+/// bounded, oldest first.
+#[test]
+fn a_new_build_reconsiders_stored_refusals_and_the_record_is_bounded() {
+    let old = Session::default().with_native_audio_refusal(&refusal("6.5.3-46", "opus", 2, None)).unwrap();
+    let caps = {
+        let mut caps = nj_platform::devcaps::Caps::assumed();
+        caps.audio.push_str(",opus");
+        caps.opus_max_channels = 2;
+        caps
+    };
+    let _boot = nj_platform::devcaps::caps_on_this_thread_for_test(caps.clone());
+    let _fw = nj_platform::devcaps::firmware_on_this_thread_for_test("kisscurl-koli", "6.5.3-47");
+    assert!(nj_platform::devcaps::effective_caps(&old.applied_refusals()).audio_has("opus"),
+        "a row from the previous build is not evidence about this one");
+    let new = old.with_native_audio_refusal(&refusal("6.5.3-47", "ac3", 6, None)).unwrap();
+    assert_eq!(new.native_audio_refused.len(), 1);
+    assert_eq!(new.native_audio_refused[0].build, "6.5.3-47");
+    let mut many = Session::default();
+    for channels in 1..=(MAX_NATIVE_AUDIO_REFUSALS as u32 + 3) {
+        many = many.with_native_audio_refusal(&refusal("B", "aac", channels, None)).unwrap();
+    }
+    assert_eq!(many.native_audio_refused.len(), MAX_NATIVE_AUDIO_REFUSALS);
+    assert_eq!(many.native_audio_refused[0].channels, 4, "the oldest rows were trimmed");
+}

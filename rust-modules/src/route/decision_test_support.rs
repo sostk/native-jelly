@@ -341,7 +341,7 @@ impl JfLoopback {
 /// PlaySessionId a later stop reports.
 pub(super) fn negotiate_jf_session(sid: ServerId, rk: &str, session: &str, contract: crate::catalog::EncodeContract) {
     let client = crate::catalog::client_for(sid).expect("loopback registered");
-    let spec = transcode_spec(rk, session, session, "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 0, contract);
+    let spec = transcode_spec(rk, session, session, "", crate::catalog::TranscodeOffset::from_seconds(0), 0, 0, contract, nj_platform::devcaps::caps());
     assert!(
         matches!(client.transcode(&spec), crate::catalog::Negotiation::Playable(_)),
         "the loopback negotiates {session}"

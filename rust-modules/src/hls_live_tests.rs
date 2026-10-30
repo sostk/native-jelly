@@ -28,6 +28,7 @@ fn live_hls_rung_from_an_offset() {
             ..Default::default()
         },
         audio_stream_id: 0, subtitle_stream_id: 0, offset: TranscodeOffset::from_seconds(offset_secs),
+        caps: nj_platform::devcaps::caps(),
     };
     let enc = c.transcode(&spec).playable().expect("hls transcode");
     let start = crate::catalog::StreamUrl::parse(&enc.url);
