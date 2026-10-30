@@ -49,9 +49,36 @@ before the opener runs. It fails identically at `a963da40`, is unrelated to C3, 
   new plan starts fresh; a forced route never asks the server.
 - `route::decision::attempt_caps_tests` (2), `player` refusal-latch and intended-position tests.
 
+## Television checks — 30 October 2026
+
+Set: webOS 6.5.3 build 6.5.3-47 (`kisscurl-koli`); synthetic 72 s H.264 720p30 + 48 kHz
+stereo Opus served by a local mock Jellyfin through a reverse tunnel; one TV lease per case,
+released after each; app closed, triggers cleared, panel restored. Sound output, volume and
+mute were not touched (current output only; speakers/soundbar not separated).
+
+1. **Pushed `main` (`0bb0bcda`, Opus withheld), H.264/AC-3 direct play:** profile
+   `audio=aac,ac3,eac3,dts` with no Opus; one Load; native picture; position to 51 s; pause and
+   resume; native seeks to 45 s and 5 s; no reopen, watchdog reload, recovery, pipeline error
+   or crash.
+2. **Local enable build** (an uncommitted `devcaps` patch admitting the measured stereo Opus
+   candidate; reverted afterwards) — valid stereo Opus (pre-skip 312, gain 0): profile
+   `audio=…,opus` with `opus:2`; one native `H264`/`OPUS` Load; position to 32 s; pause and
+   resume; two native seeks; recovery not taken.
+3. **Same build — the same file with a +1 dB OpusHead output gain** (legal, outside the fed
+   subset): the demuxer refused the header; `audio recovery: HeaderUnsupported`; the second
+   PlaybackInfo withheld direct play and kept `AudioStreamIndex` 1, `AllowVideoStreamCopy`
+   true and `StartTimeTicks` 0; landing `video copied, audio converted`; reload as
+   `H264`/`AAC`; position to 46 s with the converted picture on the video plane; pause and
+   resume; no refusal remembered; no pipeline error or crash.
+
+The conversion was a pre-made AAC file standing in for the server; real Jellyfin
+negotiation, a pipeline refusal (`num=200`/`601`) on the set, listening and output
+separation remain unverified.
+
 ## Limits
 
-- Host tests do not drive the pump's failure-branch reload; that path needs the TV.
+- Host tests do not drive the pump's failure-branch reload; on the TV only the
+  unsupported-header trigger was exercised.
 - No stall detector: surround stalls (debug fixtures only) are neither recovered nor learned.
 - Remaining: test-account negotiation/recovery, restart persistence, track changes, then
   enabling stereo Opus together in routing and profiles and TV acceptance on both outputs.
