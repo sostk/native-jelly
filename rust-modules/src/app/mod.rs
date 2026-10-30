@@ -551,9 +551,18 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
 }
 
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
-pub(crate) fn run_application(pms_host: *const c_char, pms_port: c_int) -> c_int {
-    let mut app = match enter_application(pms_host,pms_port) { Ok(app) => app, Err(code) => return code };
-    unsafe { run_and_shutdown(&mut app) }
+/// It never returns: every exit ends in [`nj_base::process::exit_now`], so the process never
+/// reaches libc `exit` and OpenSSL's atexit cleanup cannot run under a live curl worker. The `App`
+/// is dropped first, so everything its drop did before (the telemetry guard's flush included)
+/// still happens.
+pub(crate) fn run_application(pms_host: *const c_char, pms_port: c_int) -> ! {
+    let mut app = match enter_application(pms_host,pms_port) {
+        Ok(app) => app,
+        Err(code) => nj_base::process::exit_now(code),
+    };
+    let code = unsafe { run_and_shutdown(&mut app) };
+    drop(app);
+    nj_base::process::exit_now(code)
 }
 
 

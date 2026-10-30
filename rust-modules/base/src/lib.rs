@@ -21,6 +21,7 @@ pub mod spki; // a PEM certificate -> its CURLOPT_PINNEDPUBLICKEY string
 pub mod dynlib; // dlopen-by-SONAME-candidate: the libraries whose major moves between webOS releases
 pub mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocking media wait consults
 pub mod storage_worker; // a bounded FIFO for blocking persistence work
+pub mod process; // `exit_now`: the app process never returns into libc `exit` (OpenSSL atexit vs curl workers)
 pub mod fontcov; // which codepoints a font file can draw, read from its cmap
 pub mod surface; // what we are actually drawing into: drawable vs the 1920x1080 logical canvas
 pub mod tile; // `Tile`: the shelf-tile trait the data layer implements and `ui` draws through
