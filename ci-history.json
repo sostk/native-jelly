@@ -1,4 +1,4 @@
-{"updated":"2026-10-30T06:29:41Z",
+{"updated":"2026-10-30T06:41:17Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
 {"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}},
@@ -30,5 +30,6 @@
 {"id":40960903642,"at":"2026-10-29T21:48:52Z","sha":"e673debb5","title":"docs(player): record paused-seek regression and TV verification","pr":null,"jobs":{"macOS simulator build + launch":1063,"Linux simulator build + launch":273,"Windows launcher syntax":32}},
 {"id":40997381438,"at":"2026-10-30T03:26:23Z","sha":"0bb0bcdae","title":"feat(player): stage native Opus with build-scoped refusals and recovery","pr":null,"jobs":{"macOS simulator build + launch":1092,"Linux simulator build + launch":224,"Windows launcher syntax":15}},
 {"id":41002840940,"at":"2026-10-30T04:25:47Z","sha":"9ead96687","title":"docs(player): record real Jellyfin TV checks and the DirectPlayError fix","pr":null,"jobs":{"Windows launcher syntax":13,"macOS simulator build + launch":926,"Linux simulator build + launch":288}},
-{"id":41010642418,"at":"2026-10-30T05:50:23Z","sha":"ad6323f65","title":"fix(app): never return into libc exit, so OpenSSL cannot clean up under curl","pr":null,"jobs":{"macOS simulator build + launch":841,"Windows launcher syntax":15,"Linux simulator build + launch":276}}
+{"id":41010642418,"at":"2026-10-30T05:50:23Z","sha":"ad6323f65","title":"fix(app): never return into libc exit, so OpenSSL cannot clean up under curl","pr":null,"jobs":{"macOS simulator build + launch":841,"Windows launcher syntax":15,"Linux simulator build + launch":276}},
+{"id":41013794872,"at":"2026-10-30T06:23:27Z","sha":"c7bd13fed","title":"fix(ui): evict a left-behind backdrop before older posters","pr":null,"jobs":{"macOS simulator build + launch":1054,"Linux simulator build + launch":239,"Windows launcher syntax":16}}
 ]}
