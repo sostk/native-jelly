@@ -1995,6 +1995,25 @@ mod tests {
         adapter: Arc<PersonAdapter>,
     }
 
+    /// The guards a mailbox-driven fixture holds for its whole body: the serial lock, slot 0
+    /// unregistered (the module contract above), and a session of its own with no persistence job
+    /// of an earlier test still in flight. `pump` supersedes the page when the visible session
+    /// changes — production behaviour — so a late write from a previous test landing mid-fixture
+    /// bumped the generation and discarded the next hand landing as stale (seen as a caption
+    /// surviving its list). Fields drop in order: the session is torn down under the lock.
+    struct MailboxFixture {
+        _session: crate::catalog::session::TempSession,
+        _serial: nj_base::testlock::Serial,
+    }
+
+    fn mailbox_fixture() -> MailboxFixture {
+        let serial = nj_base::testlock::serial();
+        nj_base::storage_worker::drain_for_test();
+        crate::catalog::reset_servers_for_test();
+        let session = crate::catalog::session::TempSession::new("person-mailbox");
+        MailboxFixture { _session: session, _serial: serial }
+    }
+
     impl Default for Owner {
         fn default() -> Self {
             Self { state: Default::default(), adapter: Arc::new(Default::default()) }
@@ -2222,7 +2241,7 @@ mod tests {
     #[test]
     fn per_source_media_resolution_stays_pending_across_failure_until_an_answer() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.reset();
         owner.open(S0, "6059", "guid", "Somebody", "");
         assert!(media_resolving(owner.current().unwrap(), S0));
@@ -2575,7 +2594,7 @@ mod tests {
     #[test]
     fn a_landing_from_the_previous_person_is_discarded_but_still_releases_the_fetch() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         let stale = owner.gen();
         owner.open(S0, "465", "5d777", "Cynthia Erivo", ""); // supersedes: the fetch above is now obsolete
@@ -2608,7 +2627,7 @@ mod tests {
     #[test]
     fn a_failed_fetch_keeps_the_shelves_and_backs_off_instead_of_publishing_empty() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         let gen = owner.gen();
         // seed a populated, landed page the honest way (through the pump)
@@ -2644,7 +2663,7 @@ mod tests {
     #[test]
     fn close_clears_every_single_flight_flag_and_retry_backoff() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.open(S0, "161", "5d776", "Idina Menzel", "");
         for i in 0..NFETCH {
             owner.adapter.fetch[i].claim();
@@ -2669,7 +2688,7 @@ mod tests {
     #[test]
     fn a_profile_landing_fills_the_header_without_touching_the_shelves() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.open(S0, "6059", "5d7768268718ba001e311be6", "Peter Sallis", "");
         let gen = owner.gen();
         owner.land(
@@ -2815,7 +2834,7 @@ mod tests {
     #[test]
     fn a_roles_landing_captions_by_key_and_a_media_landing_resets_it() {
         let mut owner = Owner::default();
-        let _serial = nj_base::testlock::serial();
+        let _isolated = mailbox_fixture();
         owner.open(S0, "6059", "5d7768268718ba001e311be6", "Peter Sallis", "");
         let gen = owner.gen();
         let (fm, fr) = (at(S0, K_MEDIA), at(S0, K_ROLES));
