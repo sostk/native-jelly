@@ -714,12 +714,16 @@ impl Native {
         }
         #[cfg(test)]
         NATIVE_OPENS.with(|n| n.set(n.get() + 1));
-        for name in ["appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf"] {
-            let bytes = std::fs::read(asset_dir().join(name))
-                .map_err(|_| Fault::FontsUnavailable)?;
+        // Inter, Inter Bold, the CJK face, then the per-script Noto faces (`fonts.rs`: the order
+        // is load-bearing, and the files are read here, per renderer, never kept).
+        let mut faces = fonts::bundled(asset_dir())?;
+        faces.insert(2, asset_dir().join("appfont-cjk.ttf"));
+        for path in faces {
+            let bytes = std::fs::read(&path).map_err(|_| Fault::FontsUnavailable)?;
             if bytes.len() > MAX_FONT_BYTES {
                 return Err(Fault::FontTooLarge);
             }
+            let name = path.file_name().and_then(|n| n.to_str()).ok_or(Fault::FontsUnavailable)?;
             native.font(name, &bytes)?;
         }
         let (Content::Embedded { fonts, .. } | Content::Script { fonts, .. }) = &source.content;
@@ -851,6 +855,8 @@ impl Native {
         Ok(Some(rects))
     }
 }
+
+mod fonts;
 
 #[cfg(test)]
 mod tests;

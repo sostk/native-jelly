@@ -703,3 +703,50 @@ fn native_text_sidecar_and_embedded_cues_share_pixels_and_overlap_timing() {
     crate::route::restore_subtitle_size(old_size); crate::route::restore_subtitle_position(old_position);
     ass_source::reset();
 }
+
+// ---- the bundled subtitle faces (`ass/fonts.rs`): scripts reached by family name ----
+//
+// A character no face covers is drawn from the CJK default face without a coverage check, as that
+// face's `.notdef` box, so "this text rendered" is never ink alone: it is "this text does NOT draw
+// as the boxes of the same number of codepoints nobody has" (U+10FFFD).
+
+fn drawn(family: &str, body: &str) -> Vec<(i32, i32, i32, i32, Vec<u8>)> {
+    let source = Arc::new(Source {
+        id: next_source_id(),
+        revision: 1,
+        origin: super::Origin::Authored,
+        content: Content::Script {
+            bytes: format!(
+                "{}Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{{\\an7\\pos(10,10)}}{body}\n",
+                HEADER.replace("Style: Default,Inter,24", &format!("Style: Default,{family},40"))
+            )
+            .into_bytes()
+            .into(),
+            fonts: Arc::from([]),
+        },
+    });
+    let frame = render(&mut Engine::default(), &source, 100);
+    frame.rects.iter().map(|r| (r.x, r.y, r.width, r.height, r.rgba.to_vec())).collect()
+}
+
+#[test]
+fn every_renderer_starts_with_inter_then_the_manifest_faces() {
+    let faces = fonts::bundled(asset_dir()).expect("the bundled faces");
+    let names: Vec<_> = faces.iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_owned()).collect();
+    assert_eq!(&names[..2], ["appfont.ttf", "appfont-bold.ttf"]);
+    assert!(names.contains(&"NotoSansHebrew-Bold.ttf".to_owned()), "{names:?}");
+}
+
+/// Hebrew in the synthesized family ("Inter") and in an authored family nothing carries both fall
+/// to Inter, whose Noto Hebrew alias answers: Hebrew glyphs, not missing-glyph boxes.
+#[test]
+#[ignore = "requires the pinned native host libass artifact and packaged fonts"]
+fn native_hebrew_renders_hebrew_not_tofu() {
+    let hebrew = "שלום עולם";
+    let boxes = "\u{10FFFD}".repeat(hebrew.chars().count());
+    for family in ["Inter", "NoSuchFamily"] {
+        let text = drawn(family, hebrew);
+        assert!(!text.is_empty(), "{family}: Hebrew drew nothing");
+        assert_ne!(text, drawn(family, &boxes), "{family}: Hebrew drew as missing-glyph boxes");
+    }
+}
