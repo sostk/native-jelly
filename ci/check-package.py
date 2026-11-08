@@ -548,7 +548,7 @@ if len(sys.argv) > 2 and sys.argv[1] == "--print-nightly-date":
 SENTINELS = ("__IPK_SHA256__", "__COMMIT__", "__RUN_URL__", "__IPK_SIZE__", "__INSTALLED_SIZE__")
 # The one a note cannot do without: it is the only tamper check a user of an unsigned binary has.
 REQUIRED_SENTINEL = "__IPK_SHA256__"
-FFMPEG_TARBALL_SHA = "7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52"
+FFMPEG_TARBALL_SHA = "8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e"
 AUDIT_BEGIN = "<!-- BEGIN GENERATED"
 AUDIT_END = "<!-- END GENERATED -->"
 # Sections that were in the note and are now the audit's. Named so a regression to the old shape

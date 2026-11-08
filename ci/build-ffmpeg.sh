@@ -60,8 +60,8 @@
 # `lib*-plx.so.*` glob cannot pick it up.
 set -eu
 
-VERSION=9.0
-SHA256=7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52
+VERSION=9.0.2
+SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 NDK=${WEBOS_SDK:-$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot}
 SYSROOT="$NDK/arm-webos-linux-gnueabi/sysroot"

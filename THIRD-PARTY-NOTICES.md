@@ -34,13 +34,13 @@ they no longer do, because the TV's version moves with the firmware (libavformat
 
 | Shipped file | Upstream | Licence |
 |---|---|---|
-| `libavutil-plx.so.61`, `libavcodec-plx.so.63`, `libavformat-plx.so.63` | FFmpeg **9.0**, unmodified | LGPL-2.1-or-later |
+| `libavutil-plx.so.61`, `libavcodec-plx.so.63`, `libavformat-plx.so.63` | FFmpeg **9.0.2**, unmodified | LGPL-2.1-or-later |
 
 **These libraries are covered by the GNU Lesser General Public License, version 2.1 or later.** A
 complete copy of that licence is supplied with this package at `licenses/LGPL-2.1.txt`.
 
 **Complete corresponding source.** The exact upstream tarball these were built from —
-`ffmpeg-9.0.tar.xz`, sha256 `7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52`,
+`ffmpeg-9.0.2.tar.xz`, sha256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`,
 from <https://ffmpeg.org/releases/> — is attached to every PlxNative release alongside the `.ipk`.
 The sources are **unmodified**: no patches are applied. The complete configure invocation that
 produced them, including every enabled component, is `ci/build-ffmpeg.sh` in the PlxNative
