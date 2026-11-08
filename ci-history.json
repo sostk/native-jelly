@@ -1,4 +1,4 @@
-{"updated":"2026-11-08T06:08:21Z",
+{"updated":"2026-11-08T11:55:16Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
 {"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}},
@@ -41,5 +41,6 @@
 {"id":41229363365,"at":"2026-10-31T18:25:40Z","sha":"98b2d98ff","title":"refactor(route): name the pre-picture recovery for what it now covers","pr":null,"jobs":{"macOS simulator build + launch":827,"Windows launcher syntax":16,"Linux simulator build + launch":284}},
 {"id":41293064281,"at":"2026-11-01T09:36:09Z","sha":"315d62290","title":"test(replay): re-record the Settings anchor for the Back on Home row","pr":null,"jobs":{"Linux simulator build + launch":183,"Windows launcher syntax":18,"macOS simulator build + launch":584}},
 {"id":41344860184,"at":"2026-11-01T20:03:31Z","sha":"24f4d16f0","title":"Merge pull request #32 from Anarh2404/fix/videobitrate-copy","pr":null,"jobs":{"Linux simulator build + launch":262,"macOS simulator build + launch":995,"Windows launcher syntax":20}},
-{"id":42452754443,"at":"2026-11-08T05:57:18Z","sha":"acbb1b60d","title":"Merge pull request #34 from dorko87/subtitle-script-faces","pr":null,"jobs":{"macOS simulator build + launch":632,"Linux simulator build + launch":227,"Windows launcher syntax":15}}
+{"id":42452754443,"at":"2026-11-08T05:57:18Z","sha":"acbb1b60d","title":"Merge pull request #34 from dorko87/subtitle-script-faces","pr":null,"jobs":{"macOS simulator build + launch":632,"Linux simulator build + launch":227,"Windows launcher syntax":15}},
+{"id":42476642692,"at":"2026-11-08T11:38:32Z","sha":"3f9344bcd","title":"deps: libass stack to FreeType 2.15.0, FriBidi 1.0.18, HarfBuzz 15.0.0","pr":null,"jobs":{"Windows launcher syntax":16,"Linux simulator build + launch":486,"macOS simulator build + launch":991}}
 ]}
