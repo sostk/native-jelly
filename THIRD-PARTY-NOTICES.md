@@ -249,33 +249,34 @@ stated; election does not alter your rights under the other arms.
 | — its in-tree mpmc channels (`library/std/src/sync/mpmc`) | in-tree | MIT OR Apache-2.0 | 2019 The Crossbeam Project Developers |
 | addr2line | 0.25.1 | Apache-2.0 OR MIT | The `addr2line` authors |
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | Jonas Schievink, oyvindln |
-| bitflags | 2.13.0 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
-| bytemuck | 1.25.0 | Zlib OR Apache-2.0 OR MIT | 2019 Daniel "Lokathor" Gee |
+| bitflags | 2.13.2 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
+| bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT | 2019 Daniel "Lokathor" Gee |
 | byteorder-lite | 0.1.0 | Unlicense OR MIT | 2015 Andrew Gallant |
-| cfg-if | 1.0.4 | MIT OR Apache-2.0 | 2014 Alex Crichton |
+| cfg-if | 1.0.5 | MIT OR Apache-2.0 | 2014 Alex Crichton |
 | chardetng | 1.0.0 | Apache-2.0 OR MIT | Mozilla Foundation |
-| encoding_rs | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | Mozilla Foundation; WHATWG encoding tables (`licenses/WHATWG-BSD-3-Clause.txt`) |
-| crc32fast | 1.5.0 | MIT OR Apache-2.0 | 2018 Sam Rijs, Alex Crichton and contributors |
-| either | 1.18.0 | MIT OR Apache-2.0 | Copyright (c) 2015 (the upstream notice names no holder) |
+| encoding_rs | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause | Mozilla Foundation; WHATWG encoding tables (`licenses/WHATWG-BSD-3-Clause.txt`) |
+| crc32fast | 1.5.4 | MIT OR Apache-2.0 | 2018 Sam Rijs, Alex Crichton and contributors |
+| either | 1.19.0 | MIT OR Apache-2.0 | Copyright (c) 2015 (the upstream notice names no holder) |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | The image-rs Developers |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 | 2014-2026 Alex Crichton |
 | gimli | 0.32.3 | MIT OR Apache-2.0 | The `gimli` authors |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | Amanieu d'Antras |
 | image | 0.25.10 | MIT OR Apache-2.0 | The image-rs Developers |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | David Tolnay |
-| libc | 0.2.186 and 0.2.185 | MIT OR Apache-2.0 | The Rust Project Developers |
-| memchr | 2.8.2 and 2.7.6 | Unlicense OR MIT | 2015 Andrew Gallant |
+| libc | 0.2.191 and 0.2.185 | MIT OR Apache-2.0 | The Rust Project Developers |
+| memchr | 2.8.3 and 2.7.6 | Unlicense OR MIT | 2015 Andrew Gallant |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | 2013-2014 RAD Game Tools and Valve Software; 2010-2014 Rich Geldreich and Tenacious Software LLC; (c) 2017 Frommi; (c) 2017-2024 oyvindln |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | 2014 The Rust Project Developers |
 | object | 0.37.3 | Apache-2.0 OR MIT | The `object` authors |
 | png | 0.18.1 | MIT OR Apache-2.0 | 2015 nwin |
 | rustc-demangle | 0.1.27 | MIT/Apache-2.0 | Alex Crichton |
-| serde | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
-| serde_core | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
-| serde_json | 1.0.150 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
-| smallvec | 1.16.2 | MIT OR Apache-2.0 | Copyright (c) 2018 The Servo Project Developers |
+| scopeguard | 1.2.0 | MIT OR Apache-2.0 | 2016-2019 Ulrik Sverdrup "bluss" and scopeguard developers |
+| serde | 1.0.229 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
+| serde_core | 1.0.229 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
+| serde_json | 1.0.154 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
+| smallvec | 1.16.5 | MIT OR Apache-2.0 | Copyright (c) 2018 The Servo Project Developers |
 | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | Copyright (c) 2017 Robert Grosse |
-| zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
+| zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
 
 **MIT only — no alternative arm** (`licenses/MIT.txt`):
@@ -285,8 +286,8 @@ stated; election does not alter your rights under the other arms.
 | core_maths | 0.1.1 | Copyright (c) 2024 Robert Bastian |
 | libm | 0.2.16 | Copyright (c) 2018 Jorge Aparicio and the third-party copyright notices preserved verbatim in `licenses/libm.txt` |
 | qrcodegen | 1.8.0 | Copyright (c) Project Nayuki. The complete upstream MIT notice is preserved in `licenses/qrcodegen.txt` |
-| simd-adler32 | 0.3.9 | (c) 2021 Marvin Countryman |
-| zmij | 1.0.21 | David Tolnay (a Rust port of Victor Zverovich's C++ `zmij`) |
+| simd-adler32 | 0.3.10 | (c) 2021 Marvin Countryman |
+| zmij | 1.0.23 | David Tolnay (a Rust port of Victor Zverovich's C++ `zmij`) |
 | rust-lang/libm — compiled *inside* `compiler_builtins` and exposed as intrinsics on this target | as vendored in rustc 1.98.0-nightly | (c) 2018 Jorge Aparicio; musl libc (c) 2005-2020 Rich Felker, et al.; CORE-MATH; and the fdlibm-derived notice: (c) 1993, 2004 Sun Microsystems; (c) 2003-2011 David Schultz; (c) 2003-2009 Steven G. Kargl; (c) 2003-2009 Bruce D. Evans; (c) 2008 Stephen L. Moshier; (c) 2017-2018 Arm Limited |
 
 **Apache-2.0** (`licenses/Apache-2.0.txt`) — elected for `moxcms` and `pxfm`; the sole declared licence of `calendrical_calculations`:
@@ -295,7 +296,7 @@ stated; election does not alter your rights under the other arms.
 |---|---|---|---|
 | calendrical_calculations | 0.2.4 | Apache-2.0 | Copyright 2023 The Unicode Consortium |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
-| pxfm | 0.1.29 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
+| pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
 
 **ICU4X code and compiled locale data — Unicode-3.0** (`licenses/ICU4X.txt`).
 These packages provide locale parsing, plural selection, regional number/date formatting and
@@ -309,7 +310,7 @@ verbatim in `licenses/ICU4X.txt`, including both notices:
 
 | Package | Version |
 |---|---|
-| fixed_decimal | 0.7.2 |
+| fixed_decimal | 0.7.3 |
 | icu_calendar | 2.1.1 |
 | icu_calendar_data | 2.1.1 |
 | icu_collections | 2.1.1 |
@@ -318,23 +319,23 @@ verbatim in `licenses/ICU4X.txt`, including both notices:
 | icu_decimal | 2.1.1 |
 | icu_decimal_data | 2.1.1 |
 | icu_locale | 2.1.1 |
-| icu_locale_core | 2.3.0 |
+| icu_locale_core | 2.4.0 |
 | icu_locale_data | 2.1.2 |
 | icu_pattern | 0.4.2 |
 | icu_plurals | 2.1.1 |
 | icu_plurals_data | 2.1.1 |
-| icu_provider | 2.3.1 |
+| icu_provider | 2.4.0 |
 | icu_time | 2.1.1 |
 | icu_time_data | 2.1.1 |
-| ixdtf | 0.6.6 |
+| ixdtf | 0.6.7 |
 | litemap | 0.8.3 |
 | potential_utf | 0.1.6 |
-| tinystr | 0.8.4 |
+| tinystr | 0.8.5 |
 | writeable | 0.6.4 |
-| yoke | 0.8.3 |
+| yoke | 0.8.4 |
 | zerofrom | 0.1.8 |
 | zerotrie | 0.2.5 |
-| zerovec | 0.11.8 |
+| zerovec | 0.11.9 |
 
 `calendrical_calculations` implements algorithms from *Calendrical Calculations* by Reingold &
 Dershowitz, Cambridge University Press, 4th edition (2018), released as Lisp code under
