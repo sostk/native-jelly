@@ -1,4 +1,4 @@
-freetype-2.14.3/LICENSE.TXT
+freetype-2.15.0/LICENSE.TXT
 
 FREETYPE LICENSES
 -----------------
@@ -49,7 +49,7 @@ builds) is in the public domain.
 --- end of LICENSE.TXT ---
 
 
-freetype-2.14.3/docs/FTL.TXT
+freetype-2.15.0/docs/FTL.TXT
 
                     The FreeType Project LICENSE
                     ----------------------------
@@ -222,7 +222,7 @@ Legal Terms
 --- end of FTL.TXT ---
 
 
-freetype-2.14.3/src/bdf/README
+freetype-2.15.0/src/bdf/README
 
                   FreeType font driver for BDF fonts
 
@@ -378,7 +378,7 @@ find something good in this driver you should probably thank him, not
 me.
 
 
-freetype-2.14.3/src/pcf/README
+freetype-2.15.0/src/pcf/README
 
                   FreeType font driver for PCF fonts
 
@@ -478,7 +478,7 @@ the same time the specification and the sample implementation of the
 PCF format.  Undoubtedly, this driver is inspired from his work.
 
 
-freetype-2.14.3/src/base/fthash.c
+freetype-2.15.0/src/base/fthash.c
 
 /****************************************************************************
  *
