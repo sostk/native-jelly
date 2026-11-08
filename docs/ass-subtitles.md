@@ -19,6 +19,20 @@ libass structures through the same headers used to compile that library. No firm
 new Starfish API is required. Pins, checksums, license notices and corresponding source archives
 are part of the normal package/source-bundle workflow.
 
+Fonts. libass runs with no font provider, so it finds a face by family name among the faces the
+engine adds when a renderer is created (`ass/fonts.rs`): `appfont.ttf` and `appfont-bold.ttf`
+(Inter, the family the synthesized style names), `appfont-cjk.ttf`, then the
+22 `fonts/subs/NotoSans<Script>-Bold.ttf` faces listed in `fonts/subs/manifest.json`, in manifest
+order. Each Noto face answers to "PlxSubs" and "Inter" too, carries nothing Inter Bold covers, and
+has Inter Bold's win-metric proportions, so authored ASS naming an unknown family falls to a face
+that has the script instead of the CJK default's missing-glyph boxes. Add order is load-bearing
+(Inter first). The files are read at each create and not kept. `tools/cut-noto-subs.py` cuts them
+and accounts for EVERY language of the picker (a face, the CJK default,
+Inter, or uncovered with its reason), which a test checks against the shipped cmaps. Three scripts
+are uncovered because Noto Sans ships them in Regular only: Yi (`ii`), Avestan (`ae`) and
+traditional Mongolian (`mn`, whose Cyrillic form is Inter's). U+2060 is not carried by any face:
+libass skips the default-ignorables (U+200B-200F, U+2060-206F) before it looks a glyph up.
+
 The demuxer copies ASS headers, complete timed packets and font attachments out of FFmpeg.
 `Shared` owns the ASS source store and renderer mailbox alongside the other playback transport
 state. `player::ass_source` retains immutable snapshots and a bounded event window, including the

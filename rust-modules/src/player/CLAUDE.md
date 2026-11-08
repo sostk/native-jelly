@@ -218,7 +218,8 @@ something.
 - **Subtitles are client-rendered here — the TV's HW subtitle engine is URI-mode only** and
   unreachable in buffer-feed. Every text track uses the pinned libass worker: authored ASS/SSA
   retains headers, events and fonts; SRT/WebVTT and other plain-text codecs use `text_ass` and
-  synthesized styles. `sub_charset` detects legacy encodings before conversion. The embedded
+  synthesized styles. All of them render over the bundled Inter and per-script Noto faces
+  (`ass/fonts.rs`). `sub_charset` detects legacy encodings before conversion. The embedded
   `ass_source` window preserves raw packet identities across seeks/reopens; external `sidecar`
   retains the whole bounded script for backward seeks and Off/On. A burned server selection
   suppresses client rendering. Size/position changes replace text-origin headers; authored ASS
