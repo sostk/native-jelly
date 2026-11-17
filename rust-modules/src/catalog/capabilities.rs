@@ -178,7 +178,8 @@ impl<'a> Capabilities<'a> {
     /// Channel ceilings per decodable audio codec, in Jellyfin's spelling: the measured table row
     /// and any firmware or learned hard limit (`Caps::native_audio_limits`), the lower winning —
     /// the same two bounds the local gate (`Caps::audio_supports`) applies, so a limit with no
-    /// table row still reaches the server.
+    /// table row still reaches the server. A DTS ceiling that takes a full core is advertised as
+    /// any DTS source (`devcaps::source_channel_ceiling`): only the core is fed.
     pub(crate) fn audio_channel_limits(&self) -> Vec<(&'a str, u32)> {
         let device: &'a Caps = self.device;
         let mut limits: std::collections::BTreeMap<&'a str, u32> = std::collections::BTreeMap::new();
@@ -188,7 +189,8 @@ impl<'a> Capabilities<'a> {
                 *slot = (*slot).min(*max);
             }
         }
-        let mut limits: Vec<(&'a str, u32)> = limits.into_iter().map(|(c, ch)| (jf_codec(c), ch)).collect();
+        let mut limits: Vec<(&'a str, u32)> = limits.into_iter()
+            .map(|(c, ch)| (jf_codec(c), devcaps::source_channel_ceiling(c, ch))).collect();
         limits.extend(self.converted_channel_limits());
         limits
     }
@@ -198,7 +200,7 @@ impl<'a> Capabilities<'a> {
     pub(crate) fn forced_audio_channel_limits(&self) -> impl Iterator<Item = (&str, u32)> {
         self.device.native_audio_limits.iter()
             .filter(|(codec, max)| **max > 0 && self.device.forced_feeds_audio(codec) && !self.device.converts_audio(codec))
-            .map(|(codec, max)| (jf_codec(codec), *max))
+            .map(|(codec, max)| (jf_codec(codec), devcaps::source_channel_ceiling(codec, *max)))
             .chain(self.converted_channel_limits())
     }
 
@@ -480,7 +482,8 @@ mod tests {
         c.audio_channels.insert("truehd".into(), 8);
         let caps = Capabilities::of(&c, DvCapability::Unknown);
         assert_eq!(caps.audio_codecs(), ["aac", "ac3", "dts"]);
-        assert_eq!(caps.audio_channel_limits(), [("dts", 6)], "a codec the TV cannot decode has no limit to state");
+        // A 5.1 DTS decoder takes any DTS source: only its core is fed (devcaps::source_channel_ceiling).
+        assert_eq!(caps.audio_channel_limits(), [("dts", 8)], "a codec the TV cannot decode has no limit to state");
         assert!(caps.pipeline_audio_codecs().contains(&"dts"));
         let no_row = soc(true, "aac,ac3");
         assert!(!Capabilities::of(&no_row, DvCapability::Unknown).pipeline_audio_codecs().contains(&"dts"), "no DTS row, no DTS");

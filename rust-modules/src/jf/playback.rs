@@ -1197,6 +1197,27 @@ mod tests {
             && row["Conditions"][0]["Value"] == "2"));
     }
 
+    /// A DTS track is fed as its core (5.1 at most), so a 5.1 DTS decoder is advertised as taking
+    /// any DTS source — DTS-HD MA 7.1 included — while a narrower one keeps its own bound.
+    #[test]
+    fn a_full_core_dts_decoder_is_advertised_for_dts_hd_7_1() {
+        let dts_ceiling = |device: &nj_platform::devcaps::Caps, forced: bool| {
+            let caps = crate::catalog::capabilities::Capabilities::of(device, nj_platform::devcaps::dv::DvCapability::Unknown);
+            let p = device_profile(&caps, &ProfileAsk { direct: true, forced, ceiling: None, burn: false, hls: None, embed_bitmap: true });
+            p["CodecProfiles"].as_array().unwrap().iter()
+                .find(|row| row["Codec"] == "dts" && row["Conditions"][0]["Property"] == "AudioChannels")
+                .map(|row| row["Conditions"][0]["Value"].as_str().unwrap().to_owned())
+        };
+        assert_eq!(dts_ceiling(&device(), false).as_deref(), Some("8"));
+        let mut stereo = device();
+        stereo.audio_channels.insert("dts".into(), 2);
+        assert_eq!(dts_ceiling(&stereo, false).as_deref(), Some("2"));
+        let mut refused = device();
+        refused.native_audio_limits.insert("dts".into(), 2);
+        assert_eq!(dts_ceiling(&refused, false).as_deref(), Some("2"));
+        assert_eq!(dts_ceiling(&refused, true).as_deref(), Some("2"));
+    }
+
     /// With the converter loaded, the lossless formats direct-play (the TV converts them to AC-3)
     /// up to 7.1, in both asks, and are never a conversion TARGET.
     #[test]
@@ -1245,7 +1266,7 @@ mod tests {
         assert_eq!(video[0]["Value"], "3840");
         assert_eq!(video[1]["Value"], "2176");
         let dts = p["CodecProfiles"].as_array().unwrap().iter().find(|c| c["Codec"] == "dts").unwrap();
-        assert_eq!(dts["Conditions"][0]["Value"], "6");
+        assert_eq!(dts["Conditions"][0]["Value"], "8", "a 5.1 core decoder takes DTS-HD 7.1");
         assert!(p["SubtitleProfiles"].as_array().unwrap().iter().any(|s| s["Format"] == "pgssub" && s["Method"] == "Embed"));
     }
 

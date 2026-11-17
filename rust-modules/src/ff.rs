@@ -3912,9 +3912,43 @@ fn dts_core_packet(packet: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
     })
 }
 
+/// The channel count a normalized DTS core frame (as [`dts_core_packet`] returns it) declares:
+/// its AMODE's channels plus one for an LFE (ETSI TS 102 114 §5.3.1: AMODE is bits 60–65, LFF
+/// bits 85–86). `None` for a user-defined AMODE (above 15), which no decoder is known to take.
+/// This is what proves a DTS-HD source's core fits the decoder
+/// (`devcaps::DTS_CORE_MAX_CHANNELS`); the stream's declared width is the extension's.
+fn dts_core_channels(core: &[u8]) -> Option<u32> {
+    let header = core.get(..11)?;
+    let amode = ((header[7] & 0x0f) << 2) | (header[8] >> 6);
+    const AMODE_CHANNELS: [u32; 16] = [1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 6, 7, 8, 8];
+    let lfe = u32::from((header[10] >> 1) & 3 != 0);
+    AMODE_CHANNELS.get(usize::from(amode)).map(|ch| ch + lfe)
+}
+
 #[cfg(test)]
 mod dts_core_tests {
-    use super::dts_core_packet;
+    use super::{dts_core_channels, dts_core_packet};
+
+    /// A 5.1 core (FFmpeg's encoder: AMODE 9, LFF 2) reads six channels, stereo two; AMODE 13
+    /// (7 channels) and a user-defined AMODE do not fit.
+    #[test]
+    fn reads_the_core_channel_count_from_its_header() {
+        let frame = include_bytes!("../../tests/fixtures/dts-core-frame.dts");
+        assert_eq!(dts_core_channels(&dts_core_packet(frame).unwrap()), Some(6));
+        let with = |amode: u8, lff: u8| {
+            let mut h = core();
+            h[7] = (h[7] & 0xf0) | (amode >> 2);
+            h[8] = (h[8] & 0x3f) | ((amode & 3) << 6);
+            h[10] = (h[10] & !0x06) | (lff << 1);
+            dts_core_channels(&h)
+        };
+        assert_eq!(with(2, 0), Some(2));
+        assert_eq!(with(9, 1), Some(6));
+        assert_eq!(with(9, 0), Some(5));
+        assert_eq!(with(13, 1), Some(8));
+        assert_eq!(with(16, 0), None);
+        assert_eq!(dts_core_channels(&frame[..10]), None);
+    }
 
     fn core() -> Vec<u8> {
         let mut frame = vec![0x55; 128];
@@ -9786,6 +9820,24 @@ pub(crate) fn demux(
                                     av_packet_unref(pkt);
                                     break;
                                 };
+                                // The planner admitted this track by its CORE's width
+                                // (devcaps::fed_audio_channels); the core's own header proves it.
+                                let fits = dts_core_channels(&core)
+                                    .is_some_and(|ch| ch <= nj_platform::devcaps::DTS_CORE_MAX_CHANNELS);
+                                if !fits {
+                                    crate::player::log(&format!(
+                                        "ff: DTS core declares {:?} channels, wider than the decoder's 5.1; refusing audio feed",
+                                        dts_core_channels(&core)));
+                                    if headroom.first_audio_ns.is_none() {
+                                        // Nothing fed yet: the open recovery's to convert on the server.
+                                        SHARED.native_audio_header_refused.store(true, Ordering::Release);
+                                    } else {
+                                        SHARED.demux_io_failed.store(true, Ordering::Release);
+                                    }
+                                    SHARED.demux_failed.store(true, Ordering::Release);
+                                    av_packet_unref(pkt);
+                                    break;
+                                }
                                 Some(core)
                             } else {
                                 None

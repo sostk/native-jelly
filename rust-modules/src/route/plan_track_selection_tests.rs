@@ -295,8 +295,13 @@ fn a_dca_track_follows_the_dts_row_in_both_modes() {
         assert!(audio_direct_plays_with(&with_row, mode, "dca", 6), "{mode:?}");
         assert!(!audio_direct_plays_with(&without, mode, "dca", 6), "{mode:?}");
     }
-    assert!(!audio_direct_plays_with(&with_row, DirectPlayMode::Auto, "dca", 8), "Auto keeps the ceiling");
-    assert!(audio_direct_plays_with(&with_row, DirectPlayMode::Forced, "dca", 8), "Forced skips it");
+    // A DTS-HD MA 7.1 track is fed as its 5.1 core, which a 5.1 DTS decoder takes in both modes;
+    // a stereo DTS decoder still sends it to the server in Auto.
+    assert!(audio_direct_plays_with(&with_row, DirectPlayMode::Auto, "dca", 8), "Auto: the core fits");
+    assert!(audio_direct_plays_with(&with_row, DirectPlayMode::Forced, "dca", 8), "Forced");
+    let mut stereo_row = with_row.clone();
+    stereo_row.audio_channels.insert("dts".into(), 2);
+    assert!(!audio_direct_plays_with(&stereo_row, DirectPlayMode::Auto, "dca", 8), "Auto keeps the ceiling");
 }
 
 #[test]

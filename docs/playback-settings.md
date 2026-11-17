@@ -67,10 +67,14 @@ Host tests cannot establish DTS sound, synchronization, resource allocation or D
 acceptance. Those require the synthetic DTS fixture and server-backed playback on the television.
 A muted device run proves pipeline behavior, not audible output.
 
-Auto keeps the measured DTS channel ceiling: DTS-HD sources reporting more channels than that
-ceiling (including 7.1 on the six-channel dev set), or no usable channel count, still convert on
-the server. Stripping an HD extension alone does not prove the remaining core fits the decoder;
-this change does not advertise all DTS-HD streams as directly playable.
+A DTS track is judged by the core it is fed as, not by its declared width. Every DTS stream is
+fed as its core (`ff::dts_core_packet`), and a DTS core is at most 5.1, so a decoder whose table
+row takes six channels is offered any DTS source, DTS-HD MA 7.1 included
+(`devcaps::fed_audio_channels`, `devcaps::source_channel_ceiling`); a narrower DTS row or a learned
+refusal still bounds it, and a track with no usable channel count still converts. The demuxer proves
+the claim per packet: it reads the core's own AMODE and LFE bits (`ff::dts_core_channels`) and a
+core wider than 5.1 refuses the native feed, before any audio is fed, as an unsupported header
+that the open recovery converts on the server.
 
 ### Implementation verification — 2026-09-27
 

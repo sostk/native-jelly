@@ -70,6 +70,27 @@ pub const CONVERTED_AUDIO_CODECS: &str =
 /// The widest source the converter takes: 7.1, folded into AC-3's 5.1.
 pub const CONVERTED_AUDIO_MAX_CHANNELS: u32 = 8;
 
+/// The widest DTS core: 5.1. The demuxer feeds every DTS stream as its core
+/// (`ff::dts_core_packet`), dropping the DTS-HD extension substream, so a DTS-HD MA
+/// 7.1 track reaches the decoder at this width. A 6.1 DTS-ES core's extra channel
+/// rides inside the core frame, which a 5.1 decoder plays as 5.1 by the format's design.
+pub const DTS_CORE_MAX_CHANNELS: u32 = 6;
+
+/// The widest DTS source a stream can declare: DTS-HD MA 7.1.
+pub const DTS_SOURCE_MAX_CHANNELS: u32 = 8;
+
+/// The width the decoder is fed for a `codec` stream declaring `channels`: DTS as its core
+/// ([`DTS_CORE_MAX_CHANNELS`]), everything else as declared. An unknown width (0) stays unknown.
+pub fn fed_audio_channels(codec: &str, channels: i64) -> i64 {
+    if audio_codec_id(codec) == "dts" { channels.min(i64::from(DTS_CORE_MAX_CHANNELS)) } else { channels }
+}
+
+/// The channel ceiling to advertise to a server for `codec`, given the decoder's own ceiling
+/// `max`: a DTS decoder that takes a full core takes any DTS source, since only its core is fed.
+pub fn source_channel_ceiling(codec: &str, max: u32) -> u32 {
+    if audio_codec_id(codec) == "dts" && max >= DTS_CORE_MAX_CHANNELS { DTS_SOURCE_MAX_CHANNELS } else { max }
+}
+
 /// Whether the bundled converter is usable on this run: set once by `ff::boot` after the FFmpeg
 /// ABI check and an AC-3 encoder was found. Folded into every attempt's snapshot by
 /// [`effective_caps`]; the boot snapshot [`caps`] itself is written before FFmpeg loads.
@@ -211,6 +232,7 @@ impl Caps {
         if self.converts_audio(&id) {
             return self.converted_width_fits(&id, channels);
         }
+        let channels = fed_audio_channels(&id, channels);
         if !self.audio_has(&id) || self.native_audio_limits.get(id.as_ref())
             .is_some_and(|&max| channels <= 0 || channels > i64::from(max)) {
             return false;
@@ -245,6 +267,7 @@ impl Caps {
         if self.converts_audio(&id) {
             return self.converted_width_fits(&id, channels);
         }
+        let channels = fed_audio_channels(&id, channels);
         self.forced_feeds_audio(&id) && self.native_audio_limits.get(id.as_ref())
             .is_none_or(|&max| channels > 0 && channels <= i64::from(max))
     }
@@ -898,7 +921,7 @@ mod tests {
     fn pms_spelling_dca_is_dts_for_membership_and_channel_bounds() {
         let caps = parse(REAL).unwrap();
         assert!(caps.audio_supports("dca", 6));
-        assert!(!caps.audio_supports("dca", 8));
+        assert!(caps.audio_supports("dca", 8), "a DTS-HD 7.1 source is fed as its 5.1 core");
         assert!(!caps.audio_supports("dca", 0));
         assert!(caps.audio_supports("DCA", 6), "case folds too");
         assert!(caps.audio_supports("ec-3", 8), "ec-3 is eac3");
@@ -908,13 +931,13 @@ mod tests {
     }
 
     /// Forced mode admits DTS only on table evidence (a DTS row with channels), but skips the
-    /// channel ceiling: 7.1 DTS-HD MA is refused in Auto and admitted in Forced.
+    /// channel ceiling.
     #[test]
     fn forced_dts_needs_a_table_row_but_no_channel_ceiling() {
         let caps = parse(REAL).unwrap();
         assert!(caps.forced_feeds_audio("dca"));
         assert!(caps.forced_feeds_audio("dts"));
-        assert!(!caps.audio_supports("dca", 8));
+        assert!(caps.forced_supports_audio("dca", 8));
         assert!(!Caps::assumed().forced_feeds_audio("dca"));
         assert!(!Caps::assumed().forced_feeds_audio("dts"));
         let no_row = parse(&REAL.replace("DTS", "WMA")).unwrap();
@@ -923,6 +946,28 @@ mod tests {
             assert!(Caps::assumed().forced_feeds_audio(c), "{c}");
         }
         assert!(!Caps::assumed().forced_feeds_audio("truehd"));
+    }
+
+    /// A DTS stream is fed as its core, at most 5.1: a decoder that takes a full core takes any
+    /// DTS source, and is advertised so; a narrower decoder or a learned refusal still bounds it.
+    #[test]
+    fn dts_is_judged_by_its_core_width() {
+        assert_eq!(fed_audio_channels("dca", 8), 6);
+        assert_eq!(fed_audio_channels("dts", 2), 2);
+        assert_eq!(fed_audio_channels("dts", 0), 0);
+        assert_eq!(fed_audio_channels("eac3", 8), 8);
+        assert_eq!(source_channel_ceiling("dts", 6), 8);
+        assert_eq!(source_channel_ceiling("dts", 2), 2);
+        assert_eq!(source_channel_ceiling("ac3", 6), 6);
+        let stereo = parse(&REAL.replace("\"name\" : \"DTS\",\n      \"channels\" : 6",
+            "\"name\" : \"DTS\",\n      \"channels\" : 2")).unwrap();
+        assert!(stereo.audio_supports("dts", 2));
+        assert!(!stereo.audio_supports("dts", 6));
+        assert!(!stereo.audio_supports("dts", 8), "a 5.1 core does not fit a stereo decoder");
+        let refused = parse(REAL).unwrap().without_audio("dts", 8);
+        assert!(!refused.audio_supports("dts", 8));
+        assert!(!refused.forced_supports_audio("dts", 8));
+        assert!(refused.audio_supports("dts", 2));
     }
 
     #[test]
@@ -936,7 +981,7 @@ mod tests {
     fn audio_limits_retain_and_merge_the_devices_channel_bounds() {
         let caps = parse(REAL).unwrap();
         assert!(caps.audio_supports("dts", 6));
-        assert!(!caps.audio_supports("dts", 8));
+        assert!(caps.audio_supports("dts", 8), "fed as its 5.1 core");
         assert!(!caps.audio_supports("dts", 0));
         assert!(caps.audio_supports("aac", 2));
         assert!(caps.audio_supports("aac", 6));
