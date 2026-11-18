@@ -15,7 +15,8 @@
 //!
 //! # Where it comes from
 //!
-//! `/var/run/nyx/os_info.json`, read once, at boot. Kodi asks
+//! `/var/run/nyx/os_info.json`, read once, at boot (and `/usr/lib/os-release`, for the release only,
+//! when that file cannot be read: see [`probe`]). Kodi asks
 //! `luna://com.webos.service.config/getConfigs` for `tv.nyx.platformCode`; this is the same
 //! information from the file nyx writes, and it needs no LS2 client, no subscription and no
 //! thread. Verified present on the dev set (webOS 4.5), which reports:
@@ -78,16 +79,74 @@ fn parse(s: &str) -> Info {
     }
 }
 
-/// Read it once and log it. Called at boot; safe to call when the file does not exist.
+/// The firmware's own release file. The developer-mode jail mounts `/usr/lib` read-only, so it is
+/// readable where nyx's `/var/run/nyx/os_info.json` may not be (upstream PlxNative #1351: a 6.5.3
+/// set whose boot found the nyx file missing logged its version as unknown), and it names the
+/// release on every firmware image from 5.5 to 11.2 that upstream checked.
+const OS_RELEASE: &str = "/usr/lib/os-release";
+
+/// The lowest major whose firmware ships [`OS_RELEASE`]. Measured upstream on every unpacked image:
+/// none of 3.4.3 to 4.10.2 has the file, every one from 5.5.0 to 11.2.0 has it.
+const OS_RELEASE_FIRST_MAJOR: u32 = 5;
+
+/// The value of `key` in an os-release(5) text: `KEY=value`, the value bare or in one pair of
+/// single or double quotes. The last assignment of a key wins, as it does when a shell sources the
+/// file; a comment line or a longer key that merely ends in `key` never answers.
+fn os_release_value<'a>(s: &'a str, key: &str) -> Option<&'a str> {
+    s.lines()
+        .filter_map(|line| {
+            let (k, v) = line.trim().split_once('=')?;
+            let v = v.trim();
+            let unquoted = ['"', '\'']
+                .into_iter()
+                .find_map(|q| v.strip_prefix(q).and_then(|v| v.strip_suffix(q)));
+            (k == key).then_some(unquoted.unwrap_or(v))
+        })
+        .next_back()
+}
+
+/// PURE: the release an `/usr/lib/os-release` text names, from `VERSION_ID` (`6.5.3`) and its
+/// first component, or `None` when the text is not webOS TV's (`ID=starfish`), `VERSION_ID` is
+/// missing or not dotted decimal numbers, or its major is below [`OS_RELEASE_FIRST_MAJOR`]: no
+/// older firmware writes this file, and a major 1 to 4 would flip decisions keyed on it. The ID
+/// check is what keeps a Linux host that runs the simulator from reading its distribution's
+/// `VERSION_ID` as a firmware.
+///
+/// The file carries no codename, API version or build id, so those stay empty rather than
+/// invented; in particular [`Info::build`] stays empty, not the release, so that this boot and a
+/// nyx boot of the same set (`6.5.3-47`) never read as two builds.
+fn os_release_info(s: &str) -> Option<Info> {
+    if os_release_value(s, "ID") != Some("starfish") {
+        return None;
+    }
+    let release = os_release_value(s, "VERSION_ID")?;
+    if !release.split('.').all(|c| !c.is_empty() && c.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let major = release.split('.').next()?.parse::<u32>().ok().filter(|m| *m >= OS_RELEASE_FIRST_MAJOR)?;
+    Some(Info { release: release.to_string(), major, ..Info::default() })
+}
+
+/// Read it once and log it. Called at boot; safe to call when the file does not exist. When
+/// nyx's file cannot be read, `/usr/lib/os-release` is read for the release.
 pub fn probe() {
     let info = match std::fs::read_to_string(OS_INFO) {
         Ok(s) => parse(&s),
-        Err(e) => {
-            nj_base::eventlog::log(&format!(
-                "webos: {OS_INFO} unreadable ({e}) — version unknown"
-            ));
-            Info::default()
-        }
+        Err(e) => match std::fs::read_to_string(OS_RELEASE).ok().as_deref().and_then(os_release_info) {
+            Some(info) => {
+                nj_base::eventlog::log(&format!(
+                    "webos: release={} major={} (from {OS_RELEASE}; {OS_INFO} unreadable: {e})",
+                    info.release, info.major
+                ));
+                info
+            }
+            None => {
+                nj_base::eventlog::log(&format!(
+                    "webos: {OS_INFO} unreadable ({e}) — version unknown"
+                ));
+                Info::default()
+            }
+        },
     };
     if info.major > 0 {
         nj_base::eventlog::log(&format!(
@@ -1107,5 +1166,50 @@ mod tests {
         assert!(!is_realtek_k5lp_family(""));
         assert!(!is_realtek_k5lp_family("prefix-k5lp"));
         assert!(!is_realtek_k5lp_family("K5LP"));
+    }
+}
+
+#[cfg(test)]
+mod os_release_tests {
+    use super::*;
+
+    /// `/usr/lib/os-release` as 6.5.3 firmware ships it, verbatim (quoted values).
+    const OS_RELEASE_653: &str = "ID=\"starfish\"\nNAME=\"webOS TV\"\nVERSION=\"6.5.3\"\nVERSION_ID=\"6.5.3\"\nPRETTY_NAME=\"webOS TV 6.5.3\"\n";
+    /// 11.2.0 firmware: unquoted values, and a sixth line.
+    const OS_RELEASE_1120: &str = "ID=starfish\nNAME=\"webOS TV\"\nVERSION=\"11.2.0\"\nVERSION_ID=11.2.0\nPRETTY_NAME=\"webOS TV 11.2.0\"\nCPE_NAME=\"cpe:/o:openembedded:starfish:11.2.0\"\n";
+    /// What a Linux host (the simulator, a CI runner) has at the same path.
+    const OS_RELEASE_UBUNTU: &str = "PRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\nID_LIKE=debian\n";
+
+    #[test]
+    fn os_release_names_the_release_and_the_major_and_nothing_more() {
+        let i = os_release_info(OS_RELEASE_653).expect("6.5.3 firmware names its release");
+        assert_eq!((i.release.as_str(), i.major), ("6.5.3", 6));
+        assert!(i.codename.is_empty() && i.api.is_empty() && i.name.is_empty() && i.build.is_empty(), "{i:?}");
+    }
+
+    #[test]
+    fn os_release_values_may_be_quoted_or_bare() {
+        let i = os_release_info(OS_RELEASE_1120).expect("bare values");
+        assert_eq!((i.release.as_str(), i.major), ("11.2.0", 11), "a two-digit major, not its first digit");
+        assert_eq!(os_release_info("ID='starfish'\nVERSION_ID='7.6.0'\n").map(|i| i.major), Some(7));
+        let noisy = "# VERSION_ID=\"1.0.0\"\r\n  ID=starfish\r\nVERSION_ID=\"9.2.4\"\r\n\r\nVERSION_ID=\"9.2.5\"\r\n";
+        assert_eq!(os_release_info(noisy).expect("noisy file").release, "9.2.5", "the last assignment wins");
+    }
+
+    #[test]
+    fn os_release_that_is_not_a_webos_release_names_nothing() {
+        for text in [
+            "",
+            OS_RELEASE_UBUNTU,
+            "ID=starfish\n",
+            "ID=starfish\nVERSION_ID=\n",
+            "ID=starfish\nVERSION_ID=\"abc\"\n",
+            "ID=starfish\nVERSION_ID=\"6..3\"\n",
+            "ID=starfish\nVERSION_ID=\"6.5.3-47\"\n",
+            "ID=starfish\nVERSION_ID=\"4.10.2\"\n",
+            "ID=starfish\nMY_VERSION_ID=\"6.5.3\"\n",
+        ] {
+            assert!(os_release_info(text).is_none(), "{text:?}");
+        }
     }
 }
