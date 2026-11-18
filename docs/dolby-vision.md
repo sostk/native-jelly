@@ -79,6 +79,32 @@ and 6.5-second overlap holds with one Load and no reopen/reload. Real-server P10
 fallback, audio-only-copy and broader performance acceptance remain pending; see
 [the C2 record](verification/2026-10-30-av1-dolby-vision.md).
 
+**A landing the splitter would skip — ported from upstream PlxNative #1166, 2026-11-18.** Some LG
+Dolby Vision splitters (`libgstdvsplitter.so`, built only when the Load carries `DolbyHdrInfo`) let
+only an HEVC IDR (NAL 19 or 20) be the first picture after the pipeline starts or flushes; a CRA
+(21) or BLA (16-18) landing is skipped for good. Upstream read this from the firmware images of
+webOS 5.5.0-19 (`jhericurl-jervisbay`, an LG CX, where it was observed) and **6.5.3-47
+(`kisscurl-koli`, the LG C1 — the dev set's firmware)**; 4.10.2-31 and 5.6.2-21 accept 16-21. A
+film whose only IDR is frame 0 therefore sits on Buffering after every resume and seek. Here:
+
+- the demux thread records each HEVC keyframe as an IDR or as its non-IDR IRAP type
+  (`ff::Keyframe`, carried in `aq::AuNode::key`; the `ff: AU#0` and `rebase:` lines name it);
+- `devcaps::DV_IDR_ONLY_FAMILIES` sets `Caps::dv_first_picture = IdrOnly` for those two
+  codenames, carried on the attempt's caps; a debug build's `dvfirstpicture` trigger (`idr` or
+  `any`) overrides it;
+- `player/dv_start.rs` is a pure guard per Engine. Under the row a non-IDR landing keyframe is
+  held unfed, with no native Seek. On any firmware, a fed landing with no position update for 4 s
+  after 700 ms of video was accepted is withdrawn too. The pump runs it before the audio-stall and
+  seek stuck-watchdogs and calls `reload_at` once;
+- `route::withdraw_dv_presentation` rewrites the stored presentation (stream, source and the Auto
+  Original candidate) to what the no-node rule plans, keeping the probed capability. The rest of
+  that play is the HDR10 base layer; the next play declares Dolby Vision again;
+- a Profile 5 direct play, and a server conversion that copies a declared video, have no rung and
+  are only logged (`dv: landing keyframe … fed as before`).
+
+Host-verified only. Not measured on a set: the C1 hang itself, that its splitter shows a picture
+from a CRA once the declaration is gone, the 4 s threshold, and the panel's switch to HDR10.
+
 Profiles not supported here: **4** is dual-layer and deprecated (P&L §1.1 p. 6); **9** is
 single-layer **AVC**, which falls back without a node because profile/codec eligibility is
 part of the route policy; **20** is MV-HEVC and has no declaration path. The original dev panel

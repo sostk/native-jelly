@@ -3717,6 +3717,50 @@ fn h264_slice_is_intra(nal: &[u8]) -> bool {
     ue().and_then(|_| ue()).is_some_and(|t| t == 2 || t == 7)
 }
 
+/// What a video packet is as a random access point, as `packet_to_annexb` reads it. The one place the
+/// kind of an HEVC keyframe is known is the demux thread, so it is carried to the frame thread in the
+/// access unit's `key` ([`Keyframe::au_key`], the encoding documented on `aq::AuNode::key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Keyframe {
+    /// Not a keyframe.
+    No,
+    /// A keyframe the Dolby Vision splitter takes first: an HEVC IDR, or any keyframe that is not HEVC.
+    Clean,
+    /// An HEVC IRAP that is not an IDR, with its `nal_unit_type`: a BLA (16 to 18) or a CRA (21), or a
+    /// reserved IRAP type (22, 23).
+    HevcIrapNotIdr(u8),
+}
+
+impl Keyframe {
+    /// The class of a keyframe flag from a framing that does not tell the kinds apart.
+    fn of(key: bool) -> Keyframe {
+        if key { Keyframe::Clean } else { Keyframe::No }
+    }
+
+    pub(crate) fn is_key(self) -> bool {
+        self != Keyframe::No
+    }
+
+    /// What the `ff: AU#0` line prints for the first access unit: `true`/`false` as before, with the
+    /// HEVC NAL type of a non-IDR IRAP named (`irap=CRA(21)`).
+    fn label(self) -> String {
+        match self {
+            Keyframe::No => "false".to_string(),
+            Keyframe::Clean => "true".to_string(),
+            Keyframe::HevcIrapNotIdr(t) => format!("true irap={}", crate::aq::hevc_irap_label(t)),
+        }
+    }
+
+    /// The `key` the access unit is queued with ([`crate::aq::AU_KEY`] and [`crate::aq::hevc_irap_not_idr`]).
+    fn au_key(self) -> c_int {
+        match self {
+            Keyframe::No => 0,
+            Keyframe::Clean => crate::aq::AU_KEY,
+            Keyframe::HevcIrapNotIdr(t) => c_int::from(t),
+        }
+    }
+}
+
 /// Convert one length-prefixed video packet to Annex-B (4-byte start codes) into `out`,
 /// prepending `param` (VPS/SPS/PPS) when the AU is a keyframe (H264 IDR type 5, or a non-IDR
 /// I-slice at a random access point, see `container_key`; HEVC IRAP types 16-23). Returns true if
@@ -3742,14 +3786,14 @@ unsafe fn packet_to_annexb(
     container_key: bool,
     param: &[u8],
     out: &mut Vec<u8>,
-) -> bool {
+) -> Keyframe {
     out.clear();
     if data.is_null() || size < nls + 1 {
-        return false;
+        return Keyframe::No;
     }
     let d = std::slice::from_raw_parts(data, size);
-    // pass 1: is this AU a keyframe?
-    let mut is_key = false;
+    // pass 1: is this AU a keyframe, and which kind?
+    let mut is_key = Keyframe::No;
     let mut in_band_sps = false;
     let mut i = 0usize;
     while i + nls <= size {
@@ -3762,22 +3806,32 @@ unsafe fn packet_to_annexb(
             break;
         }
         let b0 = d[i];
-        let key = if is_hevc {
-            (16..=23).contains(&((b0 >> 1) & 0x3f))
+        let class = if is_hevc {
+            // An IRAP picture's VCL NALs all share one type (HEVC 7.4.2.2), so the first IRAP NAL
+            // names the picture. Only an IDR (19, 20) is `Clean`: a CRA or BLA (16 to 18, 21) and the
+            // reserved IRAP types (22, 23) are not, because a Dolby Vision splitter may take only an
+            // IDR as its first picture (`player::dv_start`).
+            match (b0 >> 1) & 0x3f {
+                19 | 20 => Keyframe::Clean,
+                t @ (16..=18 | 21..=23) => Keyframe::HevcIrapNotIdr(t),
+                _ => Keyframe::No,
+            }
         } else {
             in_band_sps |= (b0 & 0x1f) == 7;
-            (b0 & 0x1f) == 5
-                || ((container_key || in_band_sps)
-                    && (b0 & 0x1f) == 1
-                    && h264_slice_is_intra(&d[i..i + nl]))
+            Keyframe::of(
+                (b0 & 0x1f) == 5
+                    || ((container_key || in_band_sps)
+                        && (b0 & 0x1f) == 1
+                        && h264_slice_is_intra(&d[i..i + nl])),
+            )
         };
-        if key {
-            is_key = true;
+        if class.is_key() {
+            is_key = class;
             break;
         }
         i += nl;
     }
-    if is_key {
+    if is_key.is_key() {
         out.extend_from_slice(param);
     }
     // pass 2: emit each NAL as 00 00 00 01 + bytes, dropping per-frame HDR10+ SEI (HEVC) and, on a
@@ -9674,26 +9728,28 @@ pub(crate) fn demux(
                     }
                     let si = (*pkt).stream_index;
                     if si == vi {
-                        let is_key = if is_av1 {
+                        // What kind of keyframe this packet is, if one: only a length-prefixed HEVC
+                        // packet can be a non-IDR IRAP ([`Keyframe`]); every other framing answers a bool.
+                        let kf = if is_av1 {
                             let pkt_bytes: &[u8] = if (*pkt).data.is_null() {
                                 &[]
                             } else {
                                 std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize)
                             };
-                            av1_packet_to_tu(
+                            Keyframe::of(av1_packet_to_tu(
                                 pkt_bytes,
                                 (*pkt).flags & AV_PKT_FLAG_KEY != 0,
                                 &av1_cfg,
                                 av1_framing,
                                 &mut aubuf,
-                            )
+                            ))
                         } else if is_vp9 {
                             let pkt_bytes: &[u8] = if (*pkt).data.is_null() {
                                 &[]
                             } else {
                                 std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize)
                             };
-                            vp9_packet_to_frame(pkt_bytes, (*pkt).flags & AV_PKT_FLAG_KEY != 0, &mut aubuf)
+                            Keyframe::of(vp9_packet_to_frame(pkt_bytes, (*pkt).flags & AV_PKT_FLAG_KEY != 0, &mut aubuf))
                         } else {
                             packet_to_annexb(
                                 (*pkt).data,
@@ -9717,7 +9773,7 @@ pub(crate) fn demux(
                             crate::player::log(&format!(
                                 "ff: AU#0 size={} key={} head=[{}]",
                                 aubuf.len(),
-                                is_key,
+                                kf.label(),
                                 head
                             ));
                         }
@@ -9762,7 +9818,7 @@ pub(crate) fn demux(
                             aubuf.as_ptr(),
                             aubuf.len() as c_int,
                             pts,
-                            if is_key { 1 } else { 0 },
+                            kf.au_key(),
                             1,
                             || state.drain_wire(),
                         );

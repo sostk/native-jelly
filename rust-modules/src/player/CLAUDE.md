@@ -117,7 +117,11 @@ something.
   freezes that capability + presentation decision, and every Load/reload/recovery consumes the
   stored presentation rather than re-reading the later cache; `dvnonode` is the logged diagnostic
   exception. Atmos routing and ACB forwarding are independent and unchanged. The payload evidence,
-  Profile 5 one-tick fix and instrument traps live in that document.
+  Profile 5 one-tick fix and instrument traps live in that document. **A declared landing the
+  firmware's splitter would skip** (a CRA/BLA first picture on an IDR-only set, or no position
+  update 4 s after a fed landing) withdraws the declaration for the rest of the play and reloads
+  once (`dv_start.rs`, `route::withdraw_dv_presentation`); an AU's `key` therefore carries the HEVC
+  IRAP type, and every "is this a keyframe" reader tests `key != 0`.
 - **The Load's `adaptiveStreaming` ceiling is derived per session (`engine::sink_envelope`), and
   it was a 4K60 constant for EVERY codec until 2026-09-03 — which on webOS 10 refused every H.264
   stream: `docs/webos10-resource-allocation.md`.** Lab-measured 2026-08-27 on release 10.3.1: the

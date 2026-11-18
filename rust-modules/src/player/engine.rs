@@ -237,6 +237,9 @@ pub(crate) struct Engine {
     pub report_stop: Option<std::sync::Arc<threads::ReportStop>>, // ITS stop signal, not SHARED's
     /// Preview Load that must land unbound. The media join waits until the thread has returned.
     pub preview_abandon: bool,
+    /// The Dolby Vision landing guard ([`super::dv_start`]): built by [`dv_start_for`], re-armed at
+    /// every landing.
+    pub(super) dv_start: super::dv_start::Guard,
 }
 
 /// Test builds only: how many Engines have dropped (the exit's leak is observed by it staying put).
@@ -1201,11 +1204,19 @@ fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
 /// The anchor is `"provider":"nativejelly"` — the last key of `contents` and, by the test below,
 /// present exactly once in `PAYLOAD_AV`. A `replace` that finds nothing is a silent no-node, which
 /// is why the miss is logged rather than assumed away.
+/// Whether a Load of a route frozen as `dv` carries the `DolbyHdrInfo` node: it declares one and the
+/// `dvnonode` diagnostic does not hold it back. **The one predicate** [`with_dolby_hdr_info`] splices
+/// by and [`dv_start_for`] arms the Dolby Vision landing guard by, so the guard never watches a play
+/// whose Load sent no node.
+fn sends_dolby_hdr_info(dv: crate::metadata::DvPresentation) -> bool {
+    dv.declared().is_some() && !crate::metadata::dv_node_suppressed()
+}
+
 fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation) -> String {
     let Some(n) = dv.declared() else {
         return p.to_string();
     };
-    if crate::metadata::dv_node_suppressed() {
+    if !sends_dolby_hdr_info(dv) {
         #[cfg(feature = "devtriggers")]
         log(&format!(
             "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/nativejelly-dvnonode (direct play kept)",
@@ -1906,6 +1917,10 @@ fn start_bufferfeed_inner(
         report_th,
         report_stop: Some(report_stop),
         preview_abandon: false,
+        dv_start: dv_start_for(ps, {
+            let armed = SHARED.seek_to_ns.load(Ordering::Relaxed);
+            (armed >= 0).then_some(armed)
+        }),
     };
     // Select this session's direct-play seek mode (`SeekMode`, mod.rs, whose SCOPE note argues why
     // it is per session). `feed_stream` can downgrade it to `Reload` mid-session (the pipeline was
@@ -2518,7 +2533,7 @@ fn drain_one(q: Option<&mut Box<AuQueue>>) {
 /// keyframe; drop stale AUs past the B-frame reorder distance.
 /// prime-then-play buffer depth: how much of the post-seek stream to buffer (paused) before
 /// starting the clock. Enough to cover the pipeline's decode latency so the first frame is ready.
-const PRIME_NS: i64 = 700_000_000;
+pub(super) const PRIME_NS: i64 = 700_000_000;
 // Prime the AUDIO lane too before starting the (audioSync master) clock — else a rapid-seek drain
 // can start Play on an empty audio queue and leave audio silent until the next seek. Fallback:
 // start anyway once video buffers PRIME_VIDEO_MAX_NS without audio (audioless / briefly starved),
@@ -3035,7 +3050,46 @@ pub(crate) fn feed_both_lanes(mt: &MainThread, eng: &mut Engine) {
     try_prime(mt, eng);
 }
 
+/// The Dolby Vision landing guard ([`super::dv_start`]) for the Engine `ps`'s route is about to
+/// start, armed with `armed_target` (the seek armed for this first open, if any). **The only
+/// constructor** production and the pump tests use, so no test plants a rule production does not
+/// run. It reads the firmware row from the ATTEMPT's caps (`route::dv_first_picture`).
+pub(super) fn dv_start_for(ps: &crate::route::PlaybackSession, armed_target: Option<i64>) -> super::dv_start::Guard {
+    use super::dv_start::{Guard, Mode};
+    if !sends_dolby_hdr_info(crate::route::stream_dv_presentation(ps)) {
+        return Guard::inert();
+    }
+    let mode = if crate::route::preview_request(ps) {
+        Mode::Inert
+    } else if !crate::route::is_transcoding(ps) && crate::route::dv_withdrawable(ps) {
+        Mode::Act
+    } else {
+        // A Profile 5 direct play has no base layer to fall back to, and a remux that copies a
+        // declared video is a claim's fresh Load: there is no rung for either, so it only says so.
+        Mode::ReportOnly
+    };
+    Guard::armed(mode, crate::route::dv_first_picture(ps), armed_target)
+}
+
+/// Meet the landing keyframe (`kf_pts`, the access unit's `key`) with the Dolby Vision guard. True
+/// when the keyframe must be held back: a withdrawal is pending and the pump's driver reloads
+/// without the node. A report-only guard logs its line here and the keyframe feeds as before.
+fn meet_dv_landing(eng: &mut Engine, kf_pts: i64, key: c_int) -> bool {
+    use super::dv_start::{Landing, Step};
+    match eng.dv_start.land(&Landing { kf_pts, key, in_place: eng.flushed }) {
+        Step::Quiet => false,
+        Step::Report(r) => {
+            log(&r.line());
+            false
+        }
+        Step::Withdraw(_) => true,
+    }
+}
+
 fn feed_stream(mt: &MainThread, eng: &mut Engine) {
+    if eng.dv_start.landing_held() {
+        return; // the landing keyframe is held until the pump's driver reloads without the node
+    }
     let qp = match eng.aq_video.as_mut() {
         Some(q) => &mut **q as *mut AuQueue,
         None => return,
@@ -3066,6 +3120,11 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
         }
         let n = eng.pending_video.as_ref().unwrap().0;
         let (es, key, pts, len, data) = unsafe { crate::aq::au_fields(n) };
+        // An Engine started with no seek armed has no rebase to carry its landing: its first video
+        // keyframe is the one the Dolby Vision guard asks about ([`super::dv_start`]).
+        if !eng.rebase_pending && es == 1 && key != 0 && eng.dv_start.awaiting_landing() && meet_dv_landing(eng, pts, key) {
+            break;
+        }
         if eng.rebase_pending {
             if es == 1 && key != 0 {
                 let completing_in_place_seek = eng.flushed;
@@ -3090,6 +3149,14 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                         eng.pending_video = None;
                         continue;
                     }
+                }
+                // The landing, as the Dolby Vision guard meets it: AFTER the stale-keyframe drop (a
+                // stale keyframe is no landing) and BEFORE any `Seek`, `setTimeToDecode` or
+                // `pts_shift` write, so a withdrawn landing leaves the pipeline untouched. Not for a
+                // flushed keyframe in `Reload` mode: it anchors nothing and the pump's own reload is
+                // on its way.
+                if !(eng.flushed && super::seek_mode() == SeekMode::Reload) && meet_dv_landing(eng, pts, key) {
+                    break;
                 }
                 if eng.flushed && super::seek_mode() == SeekMode::NativeSeek {
                     // NATIVE in-place seek (#568): feed the REAL content PTS (pts_shift=0,
@@ -3209,8 +3276,9 @@ fn feed_stream(mt: &MainThread, eng: &mut Engine) {
                                                                                     // retained keyframe has returned `O` from sf_feed.
                 eng.presentation_rearm_pending = completing_in_place_seek && segment_installed;
                 log(&format!(
-                    "rebase: first post-seek keyframe pts={pts} -> pts_shift={}",
-                    SHARED.pts_shift.load(Ordering::Relaxed)
+                    "rebase: first post-seek keyframe pts={pts} -> pts_shift={} irap={}",
+                    SHARED.pts_shift.load(Ordering::Relaxed),
+                    crate::aq::hevc_irap_not_idr(key).map_or_else(|| "IDR".to_string(), crate::aq::hevc_irap_label),
                 ));
             } else {
                 eng.pending_video = None; // drop pre-keyframe AUs
@@ -3342,8 +3410,8 @@ fn audio_lead_in(fp: i64, opens: bool, start: Option<i64>) -> bool {
 /// only the video lane starts the clock. Called AFTER feed_stream each tick, so a same-tick rebase
 /// is already visible.
 fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
-    if eng.rebase_pending {
-        return; // wait for the video lane to publish pts_shift
+    if eng.rebase_pending || eng.dv_start.landing_held() {
+        return; // wait for the video lane to publish pts_shift (or for the withdrawal's reload)
     }
     let qp = match eng.aq_audio.as_mut() {
         Some(q) => &mut **q as *mut AuQueue,
@@ -3703,6 +3771,48 @@ mod payload_tests {
             el_present: false,
             ..Dovi::NONE
         }
+    }
+
+    /// A declared Profile 8.1 direct play whose declaration the route withdrew (upstream #1166)
+    /// sends the Load with no `DolbyHdrInfo` node, so no Dolby Vision splitter is built and the base
+    /// layer plays. A Profile 5 has no base layer, so its declaration cannot be withdrawn.
+    #[test]
+    fn dv_withdraw_payload_has_no_dolby_hdr_info() {
+        let env = SinkEnvelope { w: 3840, h: 2160, fps: 60 };
+        let mut ps = crate::route::PlaybackSession::IDLE;
+        assert!(crate::route::set_stream_declaration_for_test(
+            &mut ps,
+            "hevc",
+            "eac3",
+            23.976,
+            p8(),
+            false,
+            nj_platform::devcaps::dv::DvCapability::Supported,
+        ));
+        assert!(build_av_payload(&ps, "H265", "AC3 PLUS", env).contains("DolbyHdrInfo"));
+        assert!(crate::route::withdraw_dv_presentation(&mut ps, "test"));
+        let payload = build_av_payload(&ps, "H265", "AC3 PLUS", env);
+        assert!(!payload.contains("DolbyHdrInfo"), "{payload}");
+        assert_eq!(
+            crate::route::stream_dv_decision(&ps).capability,
+            nj_platform::devcaps::dv::DvCapability::Supported,
+            "the probed capability is kept"
+        );
+        assert!(!crate::route::withdraw_dv_presentation(&mut ps, "again"), "nothing left to withdraw");
+
+        let mut p5_route = crate::route::PlaybackSession::IDLE;
+        assert!(crate::route::set_stream_declaration_for_test(
+            &mut p5_route,
+            "hevc",
+            "eac3",
+            23.976,
+            p5(),
+            false,
+            nj_platform::devcaps::dv::DvCapability::Supported,
+        ));
+        assert!(!crate::route::dv_withdrawable(&p5_route));
+        assert!(!crate::route::withdraw_dv_presentation(&mut p5_route, "test"));
+        assert!(build_av_payload(&p5_route, "H265", "AC3 PLUS", env).contains("DolbyHdrInfo"));
     }
 
     #[test]
@@ -4214,6 +4324,7 @@ mod prime_livelock_tests {
             report_th: None,
             report_stop: None,
             preview_abandon: false,
+            dv_start: crate::player::dv_start::Guard::inert(),
         }
     }
 

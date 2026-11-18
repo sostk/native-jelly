@@ -4631,6 +4631,74 @@ pub(crate) fn stream_dv_decision(ps: &PlaybackSession) -> crate::metadata::DvDec
     ps.stream_dv_decision
 }
 
+/// Which first picture the Dolby Vision splitter of the set this play runs on takes: the current
+/// ATTEMPT's caps value ([`attempt_caps`]), never the process-wide `devcaps::caps()`, so a test
+/// plants the row on the attempt and the route reads no global (the player's `dv_start` guard asks
+/// this when it arms).
+pub(crate) fn dv_first_picture(ps: &PlaybackSession) -> nj_platform::devcaps::DvFirstPicture {
+    attempt_caps(ps).dv_first_picture
+}
+
+/// What a play with no Dolby Vision declaration would have planned for the stream `dovi`/`vcodec`
+/// describes, keeping the probed `capability`: `NotDv` for a usable base layer, a refusal for a
+/// Profile 5 or an unconverted dual layer. The declaration arm needs a `Supported` capability, so
+/// asking with `Unknown` is exactly the no-node rule (`Dovi::presentation`).
+fn dv_off_decision_for(
+    capability: nj_platform::devcaps::dv::DvCapability,
+    dovi: crate::metadata::Dovi,
+    vcodec: &str,
+) -> crate::metadata::DvDecision {
+    crate::metadata::DvDecision {
+        capability,
+        presentation: dovi.presentation_for_codec(false, nj_platform::devcaps::dv::DvCapability::Unknown, vcodec),
+    }
+}
+
+/// [`dv_off_decision_for`] the installed route's stream.
+fn dv_off_decision(ps: &PlaybackSession) -> crate::metadata::DvDecision {
+    dv_off_decision_for(ps.stream_dv_decision.capability, ps.stream_dovi, &ps.stream_vcodec)
+}
+
+/// Whether the installed route's Dolby Vision declaration can be withdrawn: it declares a node, and
+/// what a play without the node would have planned for the same stream is the base layer (a
+/// Profile 5, or an unconverted dual layer, has none, so there is nothing to fall back to).
+pub(crate) fn dv_withdrawable(ps: &PlaybackSession) -> bool {
+    stream_dv_presentation(ps).declared().is_some()
+        && dv_off_decision(ps).presentation == crate::metadata::DvPresentation::NotDv
+}
+
+/// Withdraw the installed route's Dolby Vision declaration for the rest of this play (upstream
+/// #1166): rewrite the stored presentation to what a play without the node would have planned,
+/// keeping the probed capability, so every later Load of the route (seek, reload, audio switch,
+/// recovery, foreground restore) is a base-layer play. Returns whether anything changed. `why` is
+/// the logged reason.
+///
+/// The file's own declaration (`src_dv_decision`) follows, so a rebuild that copies the video and
+/// re-derives the stream's declaration from it ([`copied_video_dv`]) keeps the node off, and so does
+/// the stored Auto Original candidate (`auto_original`): [`recover_original_direct`] installs its
+/// `dv_decision` verbatim, so a play that fell to HLS and came back to Original would otherwise
+/// declare the node again and meet the same landing. The scope is this play request's installed
+/// route and what it can return to, not the next play.
+pub(crate) fn withdraw_dv_presentation(ps: &mut PlaybackSession, why: &str) -> bool {
+    if !dv_withdrawable(ps) {
+        return false;
+    }
+    let off = dv_off_decision(ps);
+    ps.stream_dv_decision = off;
+    if ps.src_dv_decision.presentation.declared().is_some() {
+        ps.src_dv_decision = dv_off_decision_for(ps.src_dv_decision.capability, ps.src_dovi, &ps.src_vcodec);
+    }
+    if let Some(c) = ps.auto_original.as_mut().filter(|c| c.dv_decision.presentation.declared().is_some()) {
+        c.dv_decision = dv_off_decision_for(c.dv_decision.capability, c.dovi, &c.vcodec);
+    }
+    crate::player::log(&format!(
+        "dv: capability={} presentation={} (withdrawn: {why})",
+        off.capability.label(),
+        off.presentation.label(),
+    ));
+    true
+}
+
 /// A re-encoded server output (an HLS rung) carries no client-frozen source declaration.
 /// Centralizing the paired reset prevents a future route mutation from clearing the raw metadata
 /// while leaving a stale `Declare` behind for Load. A conversion that copies the video asks
@@ -4784,6 +4852,13 @@ fn set_stream_declaration_with_capability(
         s.runtime_ns = 0;
     } }
     true
+}
+
+/// Plant the capability snapshot the current attempt was planned under (tests): how a test puts a
+/// firmware row, such as the Dolby Vision first-picture row, where production reaches it.
+#[cfg(all(test, feature = "hostsim"))]
+pub(crate) fn set_attempt_caps_for_test(ps: &mut PlaybackSession, caps: std::sync::Arc<nj_platform::devcaps::Caps>) {
+    ps.attempt_caps = Some(caps);
 }
 
 #[cfg(test)]

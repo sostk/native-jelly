@@ -858,3 +858,63 @@ fn a_truncated_sei_never_panics_and_only_a_seen_header_drops_it() {
     assert_eq!(strip_hdr10plus_sei(&[39 << 1, 1, 4, 200, 0xb5, 0x00, 0x3c]), SeiStrip::Drop);
     assert_eq!(strip_hdr10plus_sei(&[39 << 1, 1, 4, 200, 0xb5]), SeiStrip::Keep);
 }
+
+// -- the keyframe class: which IRAP an HEVC access unit opens on (upstream #1166) ------------------
+//
+// A Dolby Vision splitter that takes only an IDR first (`devcaps::DvFirstPicture::IdrOnly`) skips a
+// CRA landing for good, so the player must be able to tell the two apart. The demux thread is the one
+// place that reads the NAL type; the class rides in the access unit's `key` (`aq::AuNode::key`).
+
+/// `nal_unit_type` `t` as the first byte of an HEVC NAL header.
+fn hevc_nal(t: u8) -> [u8; 3] {
+    [t << 1, 0x01, 0xAA]
+}
+
+#[test]
+fn irap_class_cra_and_bla_carry_their_nal_type() {
+    for t in [21u8, 16, 17, 18, 22, 23] {
+        let (class, _) = to_annexb_class(&avcc(&[&hevc_nal(t)]), true, &[]);
+        assert_eq!(class, Keyframe::HevcIrapNotIdr(t), "HEVC type {t}");
+        assert!(class.is_key(), "type {t} is still a keyframe");
+        assert_eq!(class.au_key(), c_int::from(t), "type {t} rides in the AU's key");
+        assert_eq!(crate::aq::hevc_irap_not_idr(class.au_key()), Some(t), "type {t} reads back");
+    }
+}
+
+#[test]
+fn irap_class_idr_is_clean() {
+    for t in [19u8, 20] {
+        let (class, _) = to_annexb_class(&avcc(&[&hevc_nal(t)]), true, &[]);
+        assert_eq!(class, Keyframe::Clean, "HEVC type {t} is an IDR");
+        assert_eq!(class.au_key(), crate::aq::AU_KEY);
+        assert_eq!(crate::aq::hevc_irap_not_idr(class.au_key()), None);
+    }
+    let (class, _) = to_annexb_class(&avcc(&[&hevc_nal(1)]), true, &[]);
+    assert_eq!(class, Keyframe::No);
+    assert_eq!((class.is_key(), class.au_key()), (false, 0));
+    assert_eq!(crate::aq::hevc_irap_not_idr(0), None);
+}
+
+#[test]
+fn irap_class_h264_keyframes_are_clean() {
+    let (idr, _) = to_annexb_class(&avcc(&[&[0x65, 0xAA, 0xBB]]), false, &[]);
+    assert_eq!((idr, idr.au_key()), (Keyframe::Clean, crate::aq::AU_KEY));
+    assert_eq!(Keyframe::of(true), Keyframe::Clean);
+    assert_eq!(Keyframe::of(false), Keyframe::No);
+    // A 16..=23 NAL type byte in an H.264 packet is not an HEVC class.
+    let (h264, _) = to_annexb_class(&avcc(&[&[0x41, 0x01]]), false, &[]);
+    assert_eq!(h264, Keyframe::No);
+}
+
+#[test]
+fn irap_class_a_cra_au_is_a_keyframe_with_parameter_sets() {
+    let param = [0u8, 0, 0, 1, 0x40, 0x01, 0x42, 0x01];
+    let cra = hevc_nal(21);
+    let (class, out) = to_annexb_class(&avcc(&[&cra]), true, &param);
+    assert!(class.is_key());
+    assert!(out.starts_with(&param), "a keyframe AU carries its parameter sets");
+    assert_eq!(&out[param.len()..], &[0, 0, 0, 1, cra[0], cra[1], cra[2]]);
+    // The first IRAP NAL of the AU names the picture, whatever precedes it.
+    let (class, _) = to_annexb_class(&avcc(&[&hevc_nal(35), &hevc_nal(39), &cra]), true, &[]);
+    assert_eq!(class, Keyframe::HevcIrapNotIdr(21));
+}

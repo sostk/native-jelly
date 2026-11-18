@@ -24,6 +24,7 @@ pub(crate) mod ass_timing; // subtitle event windows and conservative animation 
 pub(crate) mod ass_perf; // worker/render cost, publication/upload bytes and job counters
 pub(crate) mod ass; // pinned libass worker and immutable rendered frames
 pub(crate) mod ass_source; // bounded embedded scripts and subtitle presentation clock
+pub(crate) mod dv_start; // the Dolby Vision landing guard: withdraw the node when the splitter would skip the landing
 pub(crate) mod engine;
 pub(crate) mod lifecycle;
 pub(crate) mod machine;

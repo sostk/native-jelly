@@ -103,6 +103,51 @@ pub fn set_audio_converter(available: bool) {
 
 const CAPS_TABLE: &str = "/etc/umediaserver/device_codec_capability_config.json";
 
+/// Which first picture a set's Dolby Vision splitter (`libgstdvsplitter.so`, built only when a Load
+/// carries a `DolbyHdrInfo` node) takes after its init or a flush. Read by the player at a landing
+/// (`route::dv_first_picture`, through the attempt's caps), never by the planner or a server profile.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DvFirstPicture {
+    /// Any HEVC random access point, a CRA or a BLA included: the default, what [`Caps::assumed`]
+    /// and a table read promise. Only a firmware row ([`apply_dv_first_picture`]) takes it away.
+    #[default]
+    AnyIrap,
+    /// Only an IDR (NAL type 19 or 20): every other picture is skipped until one arrives, so a
+    /// landing on a CRA after a seek or on a fresh pipeline never produces a picture.
+    IdrOnly,
+}
+
+/// Firmware families whose Dolby Vision splitter takes only an HEVC IDR first, as read from the
+/// firmware images by upstream PlxNative (#1166). `5.6.2-21` (`jhericurl-jimna`) differs from
+/// `5.5.0-19` only in the scan's byte table, which admits 16 to 21 there, so it is not named.
+pub const DV_IDR_ONLY_FAMILIES: &[(&str, &str)] = &[
+    // LG C1, webOS 6.5.3-47: read from the image, not observed hanging on a C1.
+    (
+        "kisscurl-koli",
+        "libgstdvsplitter.so of the 6.5.3-47 image is the same scan as 5.5.0-19's: \
+         gst_dvsplitter_chain sends only NAL types 19 and 20 to the branch that sets found_first_IDR, \
+         and 16/17/18/21 only bump a counter, so a CRA or BLA first picture is skipped.",
+    ),
+    // LG CX, webOS 5.5.0-19: observed by the upstream reporter (84 and 16926 'non IDR. skip this
+    // buffer' trace lines and no picture after a seek; Dolby Vision Off played the same landings).
+    (
+        "jhericurl-jervisbay",
+        "libgstdvsplitter.so lets only an HEVC IDR (NAL 19 or 20) be the first picture after its init \
+         or a FLUSH_STOP; a Profile 8.1 film whose later random access points are CRAs skipped every \
+         buffer after a seek and on a resume.",
+    ),
+];
+
+/// Apply the Dolby Vision first-picture row for `codename` (case-insensitive) to `caps`, returning
+/// `true` when a row named it. Not an audio row: no audio debug flag skips it.
+pub fn apply_dv_first_picture(caps: &mut Caps, codename: &str) -> bool {
+    let hit = !codename.is_empty() && DV_IDR_ONLY_FAMILIES.iter().any(|(c, _)| c.eq_ignore_ascii_case(codename));
+    if hit {
+        caps.dv_first_picture = DvFirstPicture::IdrOnly;
+    }
+    hit
+}
+
 /// The decode-capability snapshot the playback stack derives from. `OnceLock` for the same
 /// reason as `tv::device::Info`: written exactly once, at boot, then read on every play decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,6 +214,12 @@ pub struct Caps {
     /// ([`set_audio_converter`]). False in `assumed()` and in the table read; [`effective_caps`]
     /// sets it for a play attempt.
     pub audio_converter: bool,
+    /// Which first picture this set's Dolby Vision splitter takes ([`DvFirstPicture`]):
+    /// [`DvFirstPicture::AnyIrap`] in [`Caps::assumed`] and in a table read;
+    /// [`DvFirstPicture::IdrOnly`] where a [`DV_IDR_ONLY_FAMILIES`] row says so or the
+    /// `dvfirstpicture` dev trigger asks. Carried by the attempt's caps; it never reaches the
+    /// server profile.
+    pub dv_first_picture: DvFirstPicture,
 }
 
 /// The value [`caps`] answers before [`probe`] has run: [`Caps::assumed`].
@@ -198,6 +249,7 @@ impl Caps {
             opus_max_channels: 0,
             native_audio_limits: Default::default(),
             audio_converter: false,
+            dv_first_picture: DvFirstPicture::AnyIrap,
         }
     }
 
@@ -543,6 +595,7 @@ fn parse(s: &str) -> Option<Caps> {
         opus_max_channels,
         native_audio_limits: Default::default(),
         audio_converter: false,
+        dv_first_picture: DvFirstPicture::AnyIrap,
     })
 }
 
@@ -788,6 +841,17 @@ pub fn probe() {
     let mut caps = caps;
     let ranks = std::fs::read_to_string("/etc/gst/gstcool.conf").unwrap_or_default();
     apply_audio_restrictions(&mut caps, &crate::tv::device::info().codename, &ranks);
+    if apply_dv_first_picture(&mut caps, &crate::tv::device::info().codename) {
+        nj_base::eventlog::log("devcaps: dv-first-picture=idr (this firmware's Dolby Vision splitter takes only an IDR first)");
+    }
+    // `dvfirstpicture` (a file holding `idr` or `any`) overrides the firmware row for this run: `idr`
+    // forces it on, to exercise the landing guard on a set no row names; `any` forces it off, so the
+    // no-picture watch can be exercised on a set a row covers.
+    match nj_base::devtrig::read("dvfirstpicture").as_deref() {
+        Some("idr") => caps.dv_first_picture = DvFirstPicture::IdrOnly,
+        Some("any") => caps.dv_first_picture = DvFirstPicture::AnyIrap,
+        _ => {}
+    }
     nj_base::eventlog::log(&format!(
         "devcaps: audio policy audio={} staged_opus_max={} limits={:?}",
         caps.audio, caps.opus_max_channels, caps.native_audio_limits,
@@ -1264,6 +1328,27 @@ mod tests {
         apply_audio_restrictions(&mut on, "unmeasured", "[rank]\nopusdec=0\n[sw_decoder]\navdec_opus=256");
         assert_eq!(on, table, "one enabled decoder suffices; positive ranks add nothing");
         assert_eq!(parse_gst_ranks("[rank]\n opusdec = 0\n[sw_decoder]\nopusdec=64").get("opusdec"), Some(&64));
+    }
+
+    #[test]
+    fn dv_first_picture_c1_and_cx_families_take_only_an_idr() {
+        for codename in ["kisscurl-koli", "Kisscurl-Koli", "jhericurl-jervisbay"] {
+            let mut c = Caps::assumed();
+            assert_eq!(c.dv_first_picture, DvFirstPicture::AnyIrap, "a table read promises any IRAP");
+            assert!(apply_dv_first_picture(&mut c, codename), "{codename}");
+            assert_eq!(c.dv_first_picture, DvFirstPicture::IdrOnly, "{codename}");
+            // The row takes away nothing else.
+            assert_eq!(c, Caps { dv_first_picture: DvFirstPicture::IdrOnly, ..Caps::assumed() });
+        }
+    }
+
+    #[test]
+    fn dv_first_picture_5_6_2_and_unknown_families_take_any_irap() {
+        for codename in ["jhericurl-jimna", "goldilocks2-grampians", "unmeasured", ""] {
+            let mut c = Caps::assumed();
+            assert!(!apply_dv_first_picture(&mut c, codename), "{codename:?}");
+            assert_eq!(c.dv_first_picture, DvFirstPicture::AnyIrap, "{codename:?}");
+        }
     }
 
     #[test]
