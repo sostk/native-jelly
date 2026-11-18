@@ -1511,6 +1511,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         eng.max_fed_video_pts = 0;
         eng.max_fed_audio_pts = 0;
         eng.audio_start_fp = None;
+        eng.audio_stale_dropped = 0;
         // Drop any AU held from BEFORE the seek (the per-lane BufferFull retry). drain_aq cleared the
         // QUEUES but not these pending AUs; feeding a stale pre-seek AU after the seek re-bases it to
         // the NEW pts_shift → a big A/V desync — the stale audio pts advances max_fed_audio_pts, then

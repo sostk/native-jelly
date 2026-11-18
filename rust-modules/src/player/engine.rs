@@ -200,6 +200,10 @@ pub(crate) struct Engine {
     /// first since the open or seek (`SHARED.first_audio_pts`) — once Starfish accepted it.
     /// `None` until then; reset with `max_fed_audio_pts`. See [`audio_lead_in`].
     pub audio_start_fp: Option<i64>,
+    /// Audio AUs the stale-ahead guard dropped since this open or seek ([`audio_stale_ahead`]);
+    /// reset with `max_fed_audio_pts`. Counts what the `a#` feed counter cannot (it counts
+    /// accepted AUs), and paces the event-log line that reports the drops.
+    pub audio_stale_dropped: u32,
     /// The feed-ahead throttle's reference position, run on between the pipeline's 5 Hz
     /// position reports (see [`FeedPace`]).
     pub feed_pace: FeedPace,
@@ -1885,6 +1889,7 @@ fn start_bufferfeed_inner(
         max_fed_video_pts: 0,
         max_fed_audio_pts: 0,
         audio_start_fp: None,
+        audio_stale_dropped: 0,
         feed_pace: FeedPace::default(),
         seek_base_pts: 0,
         prime_play: false,
@@ -2548,7 +2553,32 @@ const MAX_REBASE_DROPS: i32 = 240;
 // up to the poisoned mark → seconds of silence). Legit audio lead is bounded by the throttle to
 // ~MAX_FEED_AHEAD+AUDIO_SLACK (3.6s), so 5s has margin. It was 15s, and a stuck-retry seek fed
 // stale audio 14.9s ahead — 13s of user-audible silence after a rapid 10s-back tap burst.
+//
+// It applies only until the timeline's first audio AU has been accepted (see `audio_stale_ahead`):
+// stale audio is what the demuxer pushed before it took the seek, so it sits AT THE HEAD of the
+// audio queue, ahead of the first legitimate AU. Once audio has flowed, a later AU far past the
+// fed video is legitimate audio the demuxer read while the video sink answered BufferFull (a full
+// video queue is 4-6.6 s of a 4K remux, and the audio interleaved with it is as far ahead). The
+// throttle paces it; while a prime hold or an unknown presentation (PRES_NONE) lifts the
+// throttle, only the sink's BufferFull does. (The stale check runs BEFORE the throttle in the
+// lane, so the old unconditional bound dropped such an AU before the throttle could hold it.)
 const AUDIO_STALE_AHEAD_NS: i64 = 5_000_000_000;
+/// The stale-ahead drop is logged for the first AU dropped since an open or seek and then once per
+/// this many, so a long run of drops is visible in a device log without flooding it.
+const AUDIO_STALE_LOG_EVERY: u32 = 100;
+
+/// Whether an audio AU at fed pts `fp` is stale audio from before a seek's reopen, to be dropped.
+///
+/// Stale audio sits at the head of the audio queue, in front of the AU the demuxer marked as the
+/// first of the new timeline, so the guard applies only **until audio has been accepted since the
+/// open or seek** (`audio_opened`). After that, an AU far ahead of the fed video (`fed_video`,
+/// what the sink ACCEPTED) is audio the demuxer read while the video sink answered BufferFull, and
+/// the feed-ahead throttle or the sink's own BufferFull paces it. An AU in the timeline's lead-in
+/// ([`audio_lead_in`]) is never stale, and with no video accepted yet there is nothing to measure
+/// against.
+fn audio_stale_ahead(fp: i64, lead_in: bool, fed_video: i64, audio_opened: bool) -> bool {
+    !audio_opened && !lead_in && fed_video > 0 && fp > fed_video + AUDIO_STALE_AHEAD_NS
+}
 /// How far past the start of its timeline the audio lane may feed whatever the clock says.
 ///
 /// **A track whose audio starts late must still reach Starfish before the clock can move.** An
@@ -3343,11 +3373,23 @@ fn feed_audio_lane(mt: &MainThread, eng: &mut Engine) {
         let lead_in = audio_lead_in(fp, opens, eng.audio_start_fp);
         // Stale drifted audio from before a seek's reopen: far AHEAD of the freshly-anchored video.
         // Drop it (else it poisons max_fed_audio_pts and stalls the audio clock → playback sticks).
-        // A late-starting track is far ahead too, legitimately, so it is measured from its own
-        // start as well as from the video (see AUDIO_LEAD_IN_NS).
-        let stale_ref = eng.max_fed_video_pts.max(eng.audio_start_fp.unwrap_or(i64::MIN));
-        if !lead_in && eng.max_fed_video_pts > 0 && fp > stale_ref + AUDIO_STALE_AHEAD_NS {
+        // Only until audio has flowed since the open or seek: audio the demuxer read past a
+        // backpressured video sink is far ahead too, legitimately (see `audio_stale_ahead`).
+        let audio_opened = eng.audio_start_fp.is_some() || eng.max_fed_audio_pts > 0;
+        if audio_stale_ahead(fp, lead_in, eng.max_fed_video_pts, audio_opened) {
             eng.pending_audio = None;
+            eng.audio_stale_dropped = eng.audio_stale_dropped.saturating_add(1);
+            // Silent drops are how a remux lost 75 s of its audio upstream: say so, paced.
+            if eng.audio_stale_dropped == 1 || eng.audio_stale_dropped % AUDIO_STALE_LOG_EVERY == 0 {
+                log(&format!(
+                    "feed: audio dropped as stale ahead: fed={}ms is {}ms past the video fed so far \
+                     ({}ms), before any audio of this timeline was accepted ({} dropped since the open/seek)",
+                    fp / 1_000_000,
+                    (fp - eng.max_fed_video_pts) / 1_000_000,
+                    eng.max_fed_video_pts / 1_000_000,
+                    eng.audio_stale_dropped
+                ));
+            }
             continue;
         }
         if fp < eng.max_fed_audio_pts - STALE_BACKJUMP_NS {
@@ -4155,6 +4197,7 @@ mod prime_livelock_tests {
             max_fed_video_pts: 0,
             max_fed_audio_pts: 0,
             audio_start_fp: None,
+            audio_stale_dropped: 0,
             feed_pace: FeedPace::default(),
             seek_base_pts: 0,
             prime_play: true,
@@ -6417,6 +6460,91 @@ mod late_audio_start_tests {
         assert!(eng.max_fed_video_pts > 0, "PRECONDITION FAILED: the host sink fed no video");
         assert_eq!(eng.max_fed_audio_pts, 0, "stale audio must not reach the sink");
         assert_eq!(eng.audio_start_fp, None);
+    }
+}
+
+/// **Audio the demuxer read past a backpressured video sink is fed, not dropped as stale**
+/// (upstream #1343). While the video sink answers BufferFull the demuxer keeps reading: a full
+/// video queue is 4-6.6 s of a 4K remux, and the audio interleaved with it is that far past
+/// `max_fed_video_pts`. The stale-ahead guard used to drop every such AU, silently — on the
+/// reporter's set 75 s of a 204 s remux's audio — because it measured against the fed video even
+/// after this timeline's audio had flowed. The guard exists for pre-seek audio at the HEAD of the
+/// queue, so it now applies only until audio has been accepted since the open or seek.
+#[cfg(all(test, feature = "hostsim"))]
+mod backpressured_audio_tests {
+    use super::*;
+
+    const FED_VIDEO_NS: i64 = 20_000_000_000;
+    const A_STEP_NS: i64 = 32_000_000;
+    /// The first queued AU: past the fed video by more than [`AUDIO_STALE_AHEAD_NS`].
+    const FIRST_QUEUED_NS: i64 = FED_VIDEO_NS + 5_500_000_000;
+    const QUEUED: i64 = 15;
+
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            crate::player::ffi_host::force_clocksink_for_test(false);
+            SHARED.first_audio_pts.store(i64::MIN, Ordering::Relaxed);
+            SHARED.pres_fed.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// A playing engine whose audio has flowed since 1 s, whose video lane is parked at
+    /// [`FED_VIDEO_NS`] behind a full sink, and whose audio queue holds [`QUEUED`] AUs the
+    /// demuxer read past it. Presentation is unknown, so the feed-ahead throttle is lifted.
+    fn backpressured(audio_flowed: bool) -> Engine {
+        let mut eng = super::prime_livelock_tests::engine_after_reload();
+        eng.prime_play = false;
+        eng.max_fed_video_pts = FED_VIDEO_NS;
+        if audio_flowed {
+            eng.audio_start_fp = Some(1_000_000_000);
+            eng.max_fed_audio_pts = FIRST_QUEUED_NS - A_STEP_NS;
+        }
+        let au = [0u8; 64];
+        let qa = &mut **eng.aq_audio.as_mut().unwrap() as *mut crate::aq::AuQueue;
+        for i in 0..QUEUED {
+            crate::aq::aq_push(qa, au.as_ptr(), au.len() as c_int, FIRST_QUEUED_NS + i * A_STEP_NS, 1, 2);
+        }
+        SHARED.first_audio_pts.store(1_000_000_000, Ordering::Relaxed);
+        SHARED.pres_fed.store(PRES_NONE, Ordering::Relaxed);
+        eng
+    }
+
+    fn arm() -> Restore {
+        crate::player::ffi_host::force_clocksink_for_test(true);
+        SHARED.seek_to_ns.store(-1, Ordering::Relaxed);
+        Restore
+    }
+
+    fn run_ticks(eng: &mut Engine) {
+        let mt = unsafe { nj_base::task::MainThread::assume() };
+        for _ in 0..8 {
+            feed_both_lanes(&mt, eng);
+        }
+    }
+
+    #[test]
+    fn audio_read_past_a_full_video_sink_reaches_the_sink() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm();
+        let mut eng = backpressured(true);
+        run_ticks(&mut eng);
+        assert_eq!(
+            eng.max_fed_audio_pts,
+            FIRST_QUEUED_NS + (QUEUED - 1) * A_STEP_NS,
+            "every queued AU was fed, none dropped as stale"
+        );
+        assert_eq!(eng.audio_stale_dropped, 0);
+    }
+
+    #[test]
+    fn stale_audio_before_this_timeline_flowed_is_still_dropped_and_counted() {
+        let _serial = nj_base::testlock::serial();
+        let _restore = arm();
+        let mut eng = backpressured(false);
+        run_ticks(&mut eng);
+        assert_eq!(eng.max_fed_audio_pts, 0, "stale audio must not reach the sink");
+        assert_eq!(eng.audio_stale_dropped, QUEUED as u32);
     }
 }
 
