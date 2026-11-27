@@ -300,5 +300,6 @@
   "settings.consent.placeholder.webos_codename_short": "кодовое название webOS",
   "settings.account.switch_user": "Сменить пользователя",
   "settings.account.add_user": "Добавить пользователя",
+  "settings.account.loading": "Учётная запись ещё загружается. Если это не проходит, перезапустите Native Jelly.",
   "settings.account.sign_out_of": "Выйти: {name}"
 }

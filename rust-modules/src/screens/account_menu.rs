@@ -2,7 +2,9 @@
 //! from the top-left profile chip. Switch Plex Home profile ("Change profile" → who's-watching),
 //! "Sign out", "Sign in", Settings, and — in a lab build — "Send diagnostics". Signed in to
 //! Jellyfin it is that user's menu instead: headed "name · server", with *Switch user* (when
-//! someone else is kept on this television), *Add user* and *Sign out of name*.
+//! someone else is kept on this television), *Add user* and *Sign out of name*. Until the session
+//! settles (the storage helper has not answered) it is a note that the account is still loading,
+//! with Settings under it ([`pending_form`], #51).
 //!
 //! **Navigation owns its lifetime, its phase, its input scope and its dim.** It was
 //! `ui/account_menu.rs` — a `Popover` plus three `static mut`s (`POP`, `TABLE`, `ROWS`) driven by
@@ -255,6 +257,19 @@ fn jellyfin_form(jf: &JfAccount, lab: bool) -> (String, Form<Action, Action, Inf
     (header, Form::new().section(sec))
 }
 
+/// The menu while the session has not settled (`peek_settled()` is `None`: the storage helper has
+/// not answered yet). There is no account to describe, so it says the account is still loading and
+/// keeps Settings, which is about the software and offered in every state. Never an empty table,
+/// whose generic label ("No tracks") is all #51 found in the menu. [`AccountMenuScreen::build`]
+/// replaces it with the real menu once storage answers.
+fn pending_form() -> (String, Form<Action, Action, Infallible>) {
+    let header = nj_platform::i18n::msg::settings_account_title().to_string();
+    let sec = FormSection::from_head(Section::new(header.clone()))
+        .note(nj_platform::i18n::msg::settings_account_loading())
+        .item(Action::Settings, RowKind::Button, Action::Settings, action_row(Action::Settings));
+    (header, Form::new().section(sec))
+}
+
 /// One action's row. Rows that leave for another screen carry the drill-in chevron ("Sign out"
 /// acts in place); rows whose action ends something in place are destructive and so never where
 /// the menu's focus starts ([`crate::ui::table::TableView::opening_row`]): with *Change profile*
@@ -302,6 +317,8 @@ pub(crate) struct AccountMenuScreen {
     /// ([`crate::auth::owner::SessionSnapshot::switch_refused`]) — a change rebuilds them.
     switch_refused: bool,
     built: bool,
+    /// [`pending_form`] is up while the session has not settled.
+    pending: bool,
 }
 
 impl AccountMenuScreen {
@@ -311,18 +328,30 @@ impl AccountMenuScreen {
             header: nj_platform::i18n::msg::settings_account_title().to_string(),
             form: FormTable::new(crate::screens::registry::BAND),
             built: false,
+            pending: false,
             session_watch: Default::default(),
             switch_refused: false,
         }
     }
 
-    /// Capture a settled session without blocking storage.
+    /// Capture a settled session without blocking storage. Until one settles the menu is
+    /// [`pending_form`], and `built` stays false so the next Tick tries again.
     fn build(&mut self, switch_refused: bool) {
         if self.built {
             return;
         }
-        let Some(sess) = crate::catalog::session::peek_settled() else { return };
+        let Some(sess) = crate::catalog::session::peek_settled() else {
+            if !self.pending {
+                self.pending = true;
+                let (header, form) = pending_form();
+                self.header = header;
+                self.form.table.compact = true;
+                self.form.set_or_open(form, None);
+            }
+            return;
+        };
         self.built = true;
+        self.pending = false;
         let keep = self.form.selected_id().copied();
         let cur = crate::catalog::session::current();
         let acc = sess.account(cur.as_ref());
@@ -675,6 +704,29 @@ mod tests {
         tick(&mut menu, &published(true));
         assert_eq!(menu.form.selected_id(), Some(&Action::Settings),
             "a removed row's focus fell onto Sign out");
+    }
+
+    /// **#51: storage that has not answered is not an empty menu.** While the session authority is
+    /// Blocked (the storage helper is not up yet) `peek_settled()` answers `None`. The menu used
+    /// to build nothing, so `TableView` drew its generic empty label ("No tracks") and Settings
+    /// could not be reached for the whole run. It now says the account is still loading and
+    /// keeps Settings, and becomes the real menu once storage answers.
+    #[test]
+    fn a_session_that_has_not_settled_still_offers_settings_and_says_why() {
+        let _serial = nj_base::testlock::serial();
+        let _session = crate::catalog::session::TempSession::new("account-menu-unsettled");
+        crate::catalog::session::install_transient_for_test(false);
+        assert!(crate::catalog::session::peek_settled().is_none(), "rig: the session is unsettled");
+
+        let mut menu = AccountMenuScreen::new(EntryId(0));
+        tick(&mut menu, &published(false));
+        assert_eq!(menu_rows(&menu), vec![Action::Settings], "Settings stays reachable");
+        assert_eq!(menu.form.selected_id(), Some(&Action::Settings));
+        assert!(menu.form.table.n_rows() > 1, "the note explaining the wait is drawn above Settings");
+
+        crate::catalog::session::save(&local(Session { account_token: "acct".into(), ..Default::default() }));
+        tick(&mut menu, &published(false));
+        assert!(menu_rows(&menu).contains(&Action::SignOut), "storage answering builds the real menu");
     }
 
     fn owner(title: &str) -> HomeUserRef {
@@ -1064,6 +1116,15 @@ mod tests {
             form_table.table.compact = true;
             form_table.set(form, None);
             let what = format!("{} jellyfin", language.tag());
+            out.extend(form_table.table.app_fit_failures(crate::ui::table::MENU_MAX_W, &what));
+            out.extend(form_table.table.app_fit_failures_hugged(&what));
+            // The menu while storage has not answered (#51): all app text.
+            let (_, form) = pending_form();
+            let mut form_table = FormTable::<Action, Action, Infallible>::new(crate::screens::registry::BAND);
+            form_table.table.compact = true;
+            form_table.set(form, None);
+            let what = format!("{} pending", language.tag());
+            out.extend(form_table.table.menu_cap_failure(&nj_base::fontcov::advances::ShippedMeasure, &what));
             out.extend(form_table.table.app_fit_failures(crate::ui::table::MENU_MAX_W, &what));
             out.extend(form_table.table.app_fit_failures_hugged(&what));
         }

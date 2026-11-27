@@ -297,5 +297,6 @@
   "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS",
   "settings.account.switch_user": "Cambiar de usuario",
   "settings.account.add_user": "Añadir usuario",
+  "settings.account.loading": "Tu cuenta aún se está cargando. Si no cambia, reinicia Native Jelly.",
   "settings.account.sign_out_of": "Cerrar sesión de {name}"
 }
