@@ -99,7 +99,10 @@ impl ChromeSnapshot {
             let current = captured.map_or_else(crate::catalog::session::current, |(profile, _)| profile.user.clone());
             let account = if let Some((_, saved)) = captured { saved.account(current.as_ref()) }
                 else { crate::catalog::session::peek().account(current.as_ref()) };
-            self.thumb = current.map(|user| user.thumb).unwrap_or_default();
+            // A Jellyfin user has no Plex profile thumb; their own picture stands in its place.
+            self.thumb = current.map(|user| user.thumb).filter(|thumb| !thumb.is_empty())
+                .or_else(|| crate::jf::store::current().map(|user| user.image()))
+                .unwrap_or_default();
             let label = crate::screens::account_menu::chip_label(&account);
             let initial = account.name.as_deref().and_then(|name| name.chars().next())
                 .map(|c| c.to_uppercase().to_string()).unwrap_or_default();

@@ -46,6 +46,8 @@ pub struct SignedIn {
     pub server_version: String,
     /// The DeviceId basis the token was minted under (see [`seat::Seat::device_user`]).
     pub device_user: String,
+    /// The user's own picture as the server tagged it (`PrimaryImageTag`), `""` when they have none.
+    pub image_tag: String,
 }
 
 impl SignedIn {
@@ -93,6 +95,7 @@ fn finish(info: &PublicSystemInfo, a: AuthenticationResult, device_user: &str) -
         server_name: info.server_name.clone(),
         server_version: info.version.clone(),
         device_user: device_user.to_string(),
+        image_tag: a.user.primary_image_tag.unwrap_or_default(),
     })
 }
 
@@ -188,6 +191,8 @@ pub struct PublicUser {
     pub id: String,
     pub name: String,
     pub has_password: bool,
+    /// Their picture's `PrimaryImageTag`, `""` when they have none.
+    pub image_tag: String,
 }
 
 /// `GET /Users/Public` — the people the server shows on its own sign-in screen. Anonymous. An
@@ -212,7 +217,7 @@ fn parse_public_users(body: &[u8]) -> Result<Vec<PublicUser>, AuthError> {
     Ok(users
         .into_iter()
         .filter(|u| !u.id.is_empty() && !u.name.trim().is_empty())
-        .map(|u| PublicUser { id: u.id, name: u.name, has_password: u.has_password })
+        .map(|u| PublicUser { id: u.id, name: u.name, has_password: u.has_password, image_tag: u.primary_image_tag.unwrap_or_default() })
         .collect())
 }
 
@@ -244,14 +249,24 @@ pub fn probe_first(candidates: &[Origin], client_id: &str) -> Result<(Origin, Pu
 /// (401/403) is [`AuthError::BadCredentials`] — the sign-in was revoked or has expired — and
 /// silence is [`AuthError::Unreachable`]. The who's-watching screen asks before switching, so a
 /// revoked user is asked to sign in again rather than shown a server that "cannot be reached".
-pub fn check_token(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> Result<(), AuthError> {
+///
+/// An honoured token answers with the user's picture tag as the server has it now (`""`: no
+/// picture), so a picture changed on the server, or a user kept by a build that did not record
+/// one, is up to date by the time they are switched to. `None`: the answer did not say.
+pub fn check_token(origin: &Origin, client_id: &str, token: &str, device_user: &str) -> Result<Option<String>, AuthError> {
     credential_may_go(origin)?;
     let c = crate::catalog::unregistered_client(origin.clone(), token, client_id);
-    match Jf::for_sign_in(&c, device_user).status("/Users/Me", Method::Get, None) {
+    match Jf::for_sign_in(&c, device_user).reply("/Users/Me", Method::Get, None) {
         None => Err(AuthError::Unreachable),
-        Some(s) if (200..300).contains(&s) => Ok(()),
-        Some(s) => Err(status_error(s)),
+        Some(r) if r.ok() => Ok(image_tag_of_me(&r.body)),
+        Some(r) => Err(status_error(r.status)),
     }
+}
+
+/// The picture tag a `GET /Users/Me` answer carries; `None` when the answer is not a user.
+fn image_tag_of_me(body: &[u8]) -> Option<String> {
+    let me: UserDto = serde_json::from_slice(body).ok()?;
+    (!me.id.is_empty()).then(|| me.primary_image_tag.unwrap_or_default())
 }
 
 /// [`sign_out`] for a token no registered client holds any more — a sign-out revokes the registry
@@ -279,15 +294,34 @@ mod tests {
     /// name dropped, and anything that is not that list a malformed answer.
     #[test]
     fn a_public_user_list_reads_names_and_password_flags() {
-        let body = br#"[{"Name":"Alex","Id":"a1","HasPassword":true},{"Name":"Kids","Id":"k2","HasPassword":false},
+        let body = br#"[{"Name":"Alex","Id":"a1","HasPassword":true,"PrimaryImageTag":"p1"},{"Name":"Kids","Id":"k2","HasPassword":false},
             {"Name":"","Id":"x"},{"Name":"Ghost"}]"#;
         let users = parse_public_users(body).unwrap();
         assert_eq!(users, vec![
-            PublicUser { id: "a1".into(), name: "Alex".into(), has_password: true },
-            PublicUser { id: "k2".into(), name: "Kids".into(), has_password: false },
+            PublicUser { id: "a1".into(), name: "Alex".into(), has_password: true, image_tag: "p1".into() },
+            PublicUser { id: "k2".into(), name: "Kids".into(), has_password: false, image_tag: String::new() },
         ]);
         assert_eq!(parse_public_users(b"[]").unwrap(), vec![]);
         assert_eq!(parse_public_users(b"{}"), Err(AuthError::Malformed));
+    }
+
+    /// A sign-in and a token check both carry the user's picture tag; a user without a picture is
+    /// `""`, and a check whose answer is not a user says nothing about it.
+    #[test]
+    fn a_sign_in_and_a_token_check_read_the_users_picture_tag() {
+        let info = PublicSystemInfo { id: "srv".into(), server_name: "Home".into(), ..Default::default() };
+        let a: AuthenticationResult = serde_json::from_slice(
+            br#"{"AccessToken":"t","ServerId":"srv","User":{"Id":"u1","Name":"Alex","PrimaryImageTag":"p1"}}"#,
+        ).unwrap();
+        assert_eq!(finish(&info, a, "alex").unwrap().image_tag, "p1");
+        let a: AuthenticationResult =
+            serde_json::from_slice(br#"{"AccessToken":"t","User":{"Id":"u1","Name":"Alex"}}"#).unwrap();
+        assert_eq!(finish(&info, a, "alex").unwrap().image_tag, "");
+
+        assert_eq!(image_tag_of_me(br#"{"Id":"u1","Name":"Alex","PrimaryImageTag":"p2"}"#), Some("p2".into()));
+        assert_eq!(image_tag_of_me(br#"{"Id":"u1","Name":"Alex"}"#), Some(String::new()));
+        assert_eq!(image_tag_of_me(br#"{"Name":"Alex"}"#), None);
+        assert_eq!(image_tag_of_me(b"not json"), None);
     }
 
     #[test]
@@ -300,6 +334,7 @@ mod tests {
             server_name: "Home".into(),
             server_version: "12.0.0".into(),
             device_user: "cursor".into(),
+            image_tag: String::new(),
         };
         let seat = s.seat();
         assert_eq!((seat.server_id.as_str(), seat.device_user.as_str()), ("abcd", "cursor"));

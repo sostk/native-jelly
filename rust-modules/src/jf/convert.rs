@@ -686,6 +686,19 @@ mod tests {
         assert!(jf_image_path("https://metadata-static.plex.tv/x.jpg", 1, 1, false).is_none());
     }
 
+    /// A user is not an item: their picture is `/UserImage` for their own id, tagged, and a user
+    /// without a tag has no picture to fetch.
+    #[test]
+    fn a_users_picture_translates_to_their_user_image() {
+        let id = "2458236eb91142588b56c935b3e1dea5";
+        let path = crate::jf::images::user_image(id, "9e05");
+        assert_eq!(
+            jf_image_path(&path, 256, 256, false).unwrap(),
+            format!("/UserImage?userId={id}&maxWidth=256&maxHeight=256&quality=90&tag=9e05")
+        );
+        assert_eq!(crate::jf::images::user_image(id, ""), "");
+    }
+
     #[test]
     fn a_persisted_artwork_path_resolves_without_this_process_having_minted_it() {
         let never_minted = "/library/metadata/1/art/eeeeeeeeeeeee00000000000000000ff-bt";

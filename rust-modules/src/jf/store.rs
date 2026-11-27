@@ -56,6 +56,11 @@ pub struct Stored {
     /// a different basis would present the token from a device the server never issued it to.
     #[serde(default)]
     pub device_user: String,
+    /// The user's picture as the server tagged it (`PrimaryImageTag`); `""` when they have none
+    /// or a build that did not record it kept them. Not written while empty, so a record with no
+    /// picture is byte-for-byte what an earlier build wrote.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub image_tag: String,
 }
 
 impl Stored {
@@ -75,7 +80,13 @@ impl Stored {
             server_name: s.server_name.clone(),
             server_version: s.server_version.clone(),
             device_user: s.device_user.clone(),
+            image_tag: s.image_tag.clone(),
         }
+    }
+
+    /// The user's picture as an artwork path ([`super::images::user_image`]), `""` without one.
+    pub fn image(&self) -> String {
+        super::images::user_image(&self.user_id, &self.image_tag)
     }
 
     pub fn origin(&self) -> Option<Origin> {
@@ -198,6 +209,19 @@ impl Roster {
             a => a,
         };
         true
+    }
+
+    /// Record the kept user `user_id`'s (on `server`) picture tag as the server has it now.
+    /// `false` when no such user is kept or the tag is unchanged — nothing to write.
+    pub fn set_image_tag(&mut self, server: &str, user_id: &str, tag: &str) -> bool {
+        let probe = Stored { server: server.to_owned(), user_id: user_id.to_owned(), ..Stored::default() };
+        match self.users.iter_mut().find(|u| u.same_user(&probe)) {
+            Some(u) if u.image_tag != tag => {
+                u.image_tag = tag.to_owned();
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Sign every user out and keep only the server signed in to last.
@@ -336,6 +360,12 @@ pub fn activate(server: &str, user_id: &str) -> bool {
     with_roster(|r| r.activate(server, user_id))
 }
 
+/// Record the kept user's picture tag ([`Roster::set_image_tag`]). Memory only; `true` means it
+/// changed and [`persist`] should write it.
+pub fn set_image_tag(server: &str, user_id: &str, tag: &str) -> bool {
+    with_roster(|r| r.set_image_tag(server, user_id, tag))
+}
+
 /// Stop keeping the user `user_id` on `server`. Memory only; [`persist`] writes the result.
 pub fn forget_user(server: &str, user_id: &str) -> bool {
     with_roster(|r| r.forget(server, user_id))
@@ -440,6 +470,7 @@ mod tests {
             server_name: "Home".into(),
             server_version: "12.0.0".into(),
             device_user: "cursor".into(),
+            image_tag: String::new(),
         }
     }
 
@@ -516,6 +547,33 @@ mod tests {
         let s = Stored::new(&Origin::parse("http://10.0.0.2:8096").unwrap(), &signed_in());
         assert!(!session::set_jellyfin_sign_in(Some(serde_json::to_value(&s).unwrap())),
             "without a client_id the record may be a session that failed to read");
+    }
+
+    /// A user's picture tag is kept with them and updated in place, and a user without one writes
+    /// no `image_tag` at all — the record an earlier build wrote, unchanged.
+    #[test]
+    fn a_users_picture_tag_is_kept_and_updated_in_place() {
+        // Jellyfin user ids are GUIDs; the artwork path is keyed by one.
+        let (a, b) = ("aaaaaaaaaaaaa000000000000000000a", "bbbbbbbbbbbbb000000000000000000b");
+        let mut r = Roster::default();
+        r.remember(user(a, "ta"));
+        r.remember(user(b, "tb"));
+        let server = r.users[0].server.clone();
+        let written = r.to_value().unwrap();
+        assert!(written.get("image_tag").is_none());
+        assert!(written["users"].as_array().unwrap().iter().all(|u| u.get("image_tag").is_none()));
+
+        assert!(r.set_image_tag(&server, a, "p1"));
+        assert!(!r.set_image_tag(&server, a, "p1"), "the same tag again changes nothing");
+        assert!(!r.set_image_tag(&server, "nobody", "p1"), "only a kept user has a picture to record");
+        assert_eq!(r.active, Some(0), "recording a picture does not switch anyone");
+
+        let back = Roster::from_value(&r.to_value().unwrap()).unwrap();
+        let kept_a = back.users.iter().find(|u| u.user_id == a).unwrap();
+        assert_eq!(kept_a.image_tag, "p1");
+        assert_eq!(kept_a.image(), super::super::images::user_image(a, "p1"));
+        assert!(!kept_a.image().is_empty());
+        assert_eq!(back.users.iter().find(|u| u.user_id == b).unwrap().image(), "", "no tag, no picture");
     }
 
     fn user(id: &str, token: &str) -> Stored {

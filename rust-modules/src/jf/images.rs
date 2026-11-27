@@ -84,6 +84,18 @@ pub fn person_thumb(p: &BaseItemDto) -> String {
         .unwrap_or_default()
 }
 
+/// The artwork slot a Jellyfin USER's picture is held under — a user is not an item, so its
+/// request is `/UserImage`, not `/Items/{id}/Images`.
+const USER_SLOT: &str = "userImage";
+
+/// A Jellyfin user's own picture as an artwork path, `""` without a tag (no picture). Held in the
+/// same shape as an item's art so the poster store memoizes, caches and evicts it like any other
+/// image; [`jf_image_path`] turns it into `/UserImage?userId=…`. The tag rides in the path, so a
+/// picture changed on the server is a new key rather than a stale cached one.
+pub fn user_image(user_id: &str, tag: &str) -> String {
+    art_path(user_id, USER_SLOT, Some(tag))
+}
+
 /// `{guid}-{tag}` → (`guid`, `tag`); a bare tag (an app-built path) → (`None`, `tag`).
 pub(crate) fn split_art_tag(seg: &str) -> (Option<&str>, &str) {
     match seg.split_at_checked(32) {
@@ -103,6 +115,24 @@ pub fn jf_image_path(src: &str, w: i64, h: i64, png: bool) -> Option<String> {
         Some((g, t)) => (g.map(str::to_string), Some(t).filter(|t| !t.is_empty())),
         None => (None, None),
     };
+    let mut q = if slot == USER_SLOT {
+        let user = carried.or_else(|| ids::guid_of(rk))?;
+        format!("/UserImage?userId={user}&maxWidth={w}&maxHeight={h}&quality=90")
+    } else {
+        item_image_path(rk, slot, carried, w, h)?
+    };
+    if let Some(tag) = tag {
+        q.push_str("&tag=");
+        q.push_str(&crate::catalog::urlenc_str(tag));
+    }
+    if png {
+        q.push_str("&format=Png");
+    }
+    Some(q)
+}
+
+/// `/Items/{owner}/Images/{type}?…` for an item's artwork slot, without its tag or format.
+fn item_image_path(rk: i64, slot: &str, carried: Option<String>, w: i64, h: i64) -> Option<String> {
     let image_type = match slot {
         "thumb" => "Primary",
         "art" => "Backdrop",
@@ -114,15 +144,7 @@ pub fn jf_image_path(src: &str, w: i64, h: i64, png: bool) -> Option<String> {
     let owner = if slot == "clearLogo" { logo_owner(rk) } else { None }
         .or(carried)
         .or_else(|| ids::guid_of(rk))?;
-    let mut q = format!("/Items/{owner}/Images/{image_type}?maxWidth={w}&maxHeight={h}&quality=90");
-    if let Some(tag) = tag {
-        q.push_str("&tag=");
-        q.push_str(&crate::catalog::urlenc_str(tag));
-    }
-    if png {
-        q.push_str("&format=Png");
-    }
-    Some(q)
+    Some(format!("/Items/{owner}/Images/{image_type}?maxWidth={w}&maxHeight={h}&quality=90"))
 }
 
 /// The four ambient-wash corners from the backdrop's BlurHash, else the poster's.

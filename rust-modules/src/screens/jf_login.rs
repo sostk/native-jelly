@@ -168,6 +168,8 @@ struct Person {
     has_password: bool,
     /// Already signed in on this television: their position in the roster, to switch to.
     on_tv: Option<u8>,
+    /// Their picture's artwork path (`jf::images::user_image`), `""` without one.
+    picture: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,7 +251,9 @@ impl JfLoginScreen {
                 s.adding = true;
                 s.stage = Stage::Credentials;
                 s.user = TextBuffer::new(name.clone(), name.len());
-                s.picked = Some(Person { id, name, has_password: true, on_tv: None });
+                let probe = crate::jf::store::Stored { server: server.clone(), user_id: id.clone(), ..Default::default() };
+                let picture = crate::jf::store::roster().users.iter().find(|u| u.same_user(&probe)).map(|u| u.image()).unwrap_or_default();
+                s.picked = Some(Person { id, name, has_password: true, on_tv: None, picture });
                 s.error = Some(msg::jellyfin_login_error_expired().to_owned());
             }
             return s;
@@ -630,7 +634,8 @@ impl JfLoginScreen {
                     .map(|u| {
                         let probe = crate::jf::store::Stored { server: origin.clone(), user_id: u.id.clone(), ..Default::default() };
                         let on_tv = roster.users.iter().position(|kept| kept.same_user(&probe)).map(|i| i as u8);
-                        Person { id: u.id, name: u.name, has_password: u.has_password, on_tv }
+                        let picture = crate::jf::images::user_image(&u.id, &u.image_tag);
+                        Person { id: u.id, name: u.name, has_password: u.has_password, on_tv, picture }
                     })
                     .collect();
                 let nobody = people.is_empty();
@@ -1147,7 +1152,8 @@ impl JfLoginScreen {
     /// their name, the server — and *Not name?* beside them.
     fn draw_person_card(&self, p: Painter, person: &Person, rect: Rect, change_x: f32) {
         let disc = Rect::new(rect.x, rect.cy() - CARD_DISC * 0.5, CARD_DISC, CARD_DISC);
-        crate::ui::widgets::avatar_disc(p, disc, &person.name, &person.id, false, theme::size::HEADLINE);
+        let picture = (crate::catalog::current_server().raw(), person.picture.as_str());
+        crate::ui::widgets::avatar_disc(p, disc, &person.name, &person.id, picture, false, theme::size::HEADLINE);
         let tx = disc.x + disc.w + theme::space::MD;
         let tw = (change_x - theme::space::MD - tx).max(0.0);
         TextView::new(&person.name, theme::size::BODY, theme::TEXT_PRIMARY)
@@ -1177,7 +1183,8 @@ impl JfLoginScreen {
         let p = if on_tv && !focused { p.alpha(0.55) } else { p };
         let name = match person {
             Some(person) => {
-                crate::ui::widgets::avatar_disc(p, r, &person.name, &person.id, focused, theme::size::DISPLAY);
+                let picture = (crate::catalog::current_server().raw(), person.picture.as_str());
+                crate::ui::widgets::avatar_disc(p, r, &person.name, &person.id, picture, focused, theme::size::DISPLAY);
                 person.name.as_str()
             }
             None => {
@@ -1890,6 +1897,7 @@ mod tests {
             server_name: "Living Room".into(),
             server_version: "10.11.0".into(),
             device_user: "sam".into(),
+            image_tag: String::new(),
         };
         store::set_live(Some(Stored::new(&origin, &signed_in)));
         store::set_live(None);
@@ -2005,7 +2013,7 @@ mod tests {
     }
 
     fn person(name: &str, has_password: bool, on_tv: Option<u8>) -> Person {
-        Person { id: format!("id-{name}"), name: name.into(), has_password, on_tv }
+        Person { id: format!("id-{name}"), name: name.into(), has_password, on_tv, picture: String::new() }
     }
 
     /// *Add a user* opens on the server's list: its people, *Other user* and Quick Connect, walked

@@ -4,7 +4,8 @@
 //! The approved design (2026-10-09, "Multi-user profiles", board 1) is the old Plex Home picker's
 //! layout without its PIN pad: a centred HERO title, a row of large circles whose focused one grows
 //! and wears the focus rim, the names under them, and the server they belong to along the bottom.
-//! Each person is their initial on a disc in their own tone (`widgets::avatar_disc`).
+//! Each person is their own picture, else their initial on a disc in their own tone
+//! (`widgets::avatar_disc`).
 //!
 //! The screen never handles a token. A pick is the user's POSITION in the roster it showed. It
 //! first asks the app whether the server still honours that user (`JfAuthCmd::CheckKept`, the
@@ -75,6 +76,8 @@ const PLUS: f32 = 76.0;
 struct Person {
     id: String,
     name: String,
+    /// Their picture's artwork path (`jf::store::Stored::image`), `""` without one.
+    picture: String,
 }
 
 pub(crate) struct JfUsersScreen {
@@ -101,6 +104,7 @@ impl JfUsersScreen {
             .map(|u| Person {
                 id: u.user_id.clone(),
                 name: if u.user_name.trim().is_empty() { u.user_id.clone() } else { u.user_name.clone() },
+                picture: u.image(),
             })
             .collect();
         let server = roster
@@ -251,7 +255,8 @@ impl JfUsersScreen {
         let name = match self.people.get(i) {
             Some(person) => {
                 let size = if self.grid() == FULL { theme::size::HERO } else { theme::size::DISPLAY };
-                crate::ui::widgets::avatar_disc(p, r, &person.name, &person.id, focused, size);
+                let picture = (crate::catalog::current_server().raw(), person.picture.as_str());
+                crate::ui::widgets::avatar_disc(p, r, &person.name, &person.id, picture, focused, size);
                 person.name.as_str()
             }
             None => {
@@ -462,7 +467,7 @@ mod tests {
 
     fn screen(names: &[&str], active: Option<usize>) -> JfUsersScreen {
         let mut s = JfUsersScreen::new(EntryId(3));
-        s.people = names.iter().map(|n| Person { id: format!("id-{n}"), name: n.to_string() }).collect();
+        s.people = names.iter().map(|n| Person { id: format!("id-{n}"), name: n.to_string(), picture: String::new() }).collect();
         s.active = active;
         s
     }

@@ -70,7 +70,15 @@ pub(super) fn execute(bridge: &mut super::bridge::Bridge, command: JfAuthCmd) {
                 return;
             };
             answer("jf check user", reply, move || {
-                JfAuthReply::Checked(index, crate::jf::auth::check_token(&origin, &client_id, &user.token, &user.device_user))
+                let verdict = crate::jf::auth::check_token(&origin, &client_id, &user.token, &user.device_user);
+                // The picture as the server has it now, recorded before the switch it precedes: a
+                // user kept without one (or who changed it) wears it from their first frame.
+                if let Ok(Some(tag)) = &verdict {
+                    if crate::jf::store::set_image_tag(&user.server, &user.user_id, tag) {
+                        let _ = crate::jf::store::persist(&crate::jf::store::roster());
+                    }
+                }
+                JfAuthReply::Checked(index, verdict.map(|_| ()))
             })
         }
     }

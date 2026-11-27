@@ -76,20 +76,33 @@ impl Glass {
     }
 }
 
-/// **A person's avatar**: their initial, centred on a disc in their own tone
-/// ([`theme::AVATAR_TONES`], picked by `id` so one person keeps one colour). The who's-watching
-/// screen and *Add a user* draw people with it; a focused disc wears the focus rim around it.
-pub(crate) fn avatar_disc(p: Painter, rect: Rect, name: &str, id: &str, focused: bool, size: i32) {
-    let tone = theme::AVATAR_TONES[avatar_tone(id)];
+/// **A person's avatar**: their own picture when they have one, else their initial, centred on a
+/// disc in their own tone ([`theme::AVATAR_TONES`], picked by `id` so one person keeps one colour).
+/// The who's-watching screen and *Add a user* draw people with it; a focused disc wears the focus
+/// rim around it.
+///
+/// `picture` is the server the picture is on and its artwork path (`""`: none). The initial stands
+/// in while it loads and for good when it fails, so a person is never a blank circle.
+pub(crate) fn avatar_disc(p: Painter, rect: Rect, name: &str, id: &str, picture: (u16, &str), focused: bool, size: i32) {
     let r = rect.w.min(rect.h) * 0.5;
-    p.rrect(rect, r, r, tone);
+    let (src, path) = picture;
+    let (t, tw, th) = resolve_tex_wh_on(src, path, AVATAR_RES, AVATAR_RES, 0);
+    if t != 0 {
+        p.tex_stroked(t, rect.cover_uv(tw, th, crate::ui::Crop::Centre), rect, r, theme::TINT_WHITE, 0.0);
+    } else {
+        p.rrect(rect, r, r, theme::AVATAR_TONES[avatar_tone(id)]);
+        let initial: String = name.trim().chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+        let text = CString::new(initial).unwrap_or_default();
+        Label::new(text.as_ptr(), size, theme::TEXT_PRIMARY).bold().h(HAlign::Center).v(VAlign::Middle).draw(p, rect);
+    }
     if focused {
         p.rring(rect, r, 5.0, theme::CONTROL_RIM_FOCUS_UNKEYED);
     }
-    let initial: String = name.trim().chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
-    let text = CString::new(initial).unwrap_or_default();
-    Label::new(text.as_ptr(), size, theme::TEXT_PRIMARY).bold().h(HAlign::Center).v(VAlign::Middle).draw(p, rect);
 }
+
+/// The square an avatar picture is fetched at: the who's-watching circle at its focused size,
+/// one request for every disc size, so a picture is fetched once and reused.
+const AVATAR_RES: c_int = 256;
 
 /// Which of [`theme::AVATAR_TONES`] belongs to the person `id` — a stable hash, never their
 /// position in a list, so a list that reorders does not repaint anyone.

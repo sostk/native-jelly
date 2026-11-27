@@ -10,7 +10,8 @@ The Jellyfin record in the session file (`session::set_jellyfin_sign_in`, with a
 fallback) is a **roster**, version 2:
 
 - every kept user (`users`, newest first, at most `MAX_USERS` = 12): server, token, user id and
-  name, server id and name, and the DeviceId basis the token was minted under;
+  name, server id and name, the DeviceId basis the token was minted under, and their picture's
+  `PrimaryImageTag` (`image_tag`, left out while they have none);
 - the **active** user's fields again at the top level, exactly where a version-1 record kept them,
   so an older build still finds a working sign-in;
 - `recent_server`: the server signed in to last (address, name, id; never a user or a token), which
@@ -28,6 +29,16 @@ publishes it on every roster change. An install upgraded from one user kept that
 empty key; boot gives it to the active user once (`session::adopt_unscoped_profile`), list by list,
 never over a list that user already has. Telemetry consent and the playback, language and
 Automatically Sign In preferences belong to the whole television.
+
+## Pictures
+
+A person is drawn as their own Jellyfin picture when they have one, else their initial on a disc
+(`widgets::avatar_disc`): on *Who's watching?*, on *Add a user* and in the top-left profile chip.
+The picture is an artwork path (`jf::images::user_image`) that `jf_image_path` turns into
+`/UserImage?userId=…&tag=…`, so the poster store caches it like any other image and a new tag is a
+new key. The tag is learned at sign-in, from `GET /Users/Public` on *Add a user*, and from the
+`GET /Users/Me` that checks a pick on *Who's watching?* — so a user kept by an earlier build wears
+their picture from the first time they are picked.
 
 ## The flows
 

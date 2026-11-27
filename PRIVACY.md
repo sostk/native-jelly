@@ -42,11 +42,12 @@ test Native Jelly itself, is started only by explicitly arming it on that build,
 never leave the device it was made on.
 
 Native Jelly stores the address, name, identifier and version of the Jellyfin server you signed in
-to, and for each person signed in on this television their user name and user identifier there,
-the access token that server issued to this television and the device identifier it was issued
+to, and for each person signed in on this television their user name, user identifier and profile
+picture tag there, the access token that server issued to this television and the device identifier it was issued
 under, in one file created with mode 0600. It never stores your password. Up to twelve people can
 be signed in at once; the Who's watching? screen lists them by name. It also keeps downloaded
-artwork (posters, backdrops and cast images, cached as bounded files for reuse across restarts);
+artwork (posters, backdrops, cast images and the profile pictures of the people signed in, cached as
+bounded files for reuse across restarts);
 for each person their Home library choices, recent searches, last library, sort choices and
 subtitle timing adjustments, kept apart from everyone else's; your playback quality, Direct Play
 and app language preferences, which the whole television shares; and local technical
