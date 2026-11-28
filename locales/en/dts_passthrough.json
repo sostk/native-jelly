@@ -4,7 +4,7 @@
     "description": "Playback preference title: send DTS audio unchanged to an external receiver."
   },
   "settings.playback.dts_passthrough.copy": {
-    "value": "Send DTS soundtracks unchanged to an AV receiver or soundbar, which decodes them. On HDMI eARC/ARC, DTS-HD MA travels inside the TV's Dolby Digital Plus pass-through; otherwise, and on optical, DTS plays as its 5.1 core. Used only while the TV's sound goes to that output; set Digital Sound Output to Pass Through.",
+    "value": "Send DTS and Dolby TrueHD soundtracks unchanged to an AV receiver or soundbar, which decodes them. On HDMI eARC/ARC, DTS-HD MA travels inside the TV's Dolby Digital Plus pass-through; TrueHD, DTS:X and high-bitrate DTS-HD MA also need HBR support, which a separate package can add on a rooted TV. Otherwise, and on optical, DTS plays as its 5.1 core and TrueHD as Dolby Digital. Used only while the TV's sound goes to that output; set Digital Sound Output to Pass Through.",
     "description": "Playback preference explanation."
   }
 }

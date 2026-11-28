@@ -68,6 +68,7 @@ The player provides a TV-focused playback experience with playback controls and 
 * Media details
 * Playback controls
 * Audio track selection
+* DTS, DTS-HD and (on rooted TVs) Dolby TrueHD / Atmos sent unchanged to an AV receiver or soundbar
 * Subtitle selection
 * Resume playback
 * Remote-friendly navigation
@@ -93,6 +94,45 @@ The project is based on the native architecture of PLX Native, which targets old
 Compatibility can vary between television models, webOS versions and hardware generations.
 
 If you test Native Jelly on a television that is not currently covered by the project, feedback and testing reports are very welcome.
+
+---
+
+## Lossless audio to a receiver
+
+Many LG televisions cannot decode DTS, and none plays Dolby TrueHD from an app. With an AV receiver
+or soundbar, Native Jelly can send these soundtracks to it unchanged, and the receiver decodes them.
+
+**Turn it on**
+
+1. Connect the receiver by HDMI eARC/ARC or optical, and make it the TV's sound output
+   (*Settings → Sound → Sound Out*).
+2. Set *Settings → Sound → Advanced Settings → Digital Sound Output* to **Pass Through**.
+3. In Native Jelly, open *Settings → Video & playback → Lossless audio to receiver* and choose **On**.
+
+The setting is used only while the sound goes to a receiver, and the output is checked again at the
+start of every playback: on the TV's own speakers these bitstreams would be loud noise, so there the
+TV's ordinary audio path is used.
+
+**What reaches the receiver**
+
+| Soundtrack | Without HBR | With HBR (rooted TV, see below) |
+|---|---|---|
+| DTS | DTS 5.1 core | DTS |
+| DTS-HD MA | full DTS-HD MA up to about 6 Mb/s on webOS 6 over HDMI; otherwise its DTS 5.1 core | full rate |
+| DTS:X | its DTS-HD MA or DTS core layers, as above | DTS:X |
+| Dolby TrueHD / Atmos | converted to Dolby Digital on the TV | TrueHD and Atmos |
+
+**HBR on rooted TVs.** Full-rate DTS-HD MA, DTS:X and TrueHD/Atmos need the TV's HDMI eARC link in
+its 8-channel high-bitrate mode, which LG does not open to apps. On a rooted TV the `earc_route`
+kernel module from [dts_restore_plus](https://github.com/josippapez/dts_restore_plus) can. Native
+Jelly does not install kernel modules itself: it uses HBR automatically whenever a package on the TV
+provides the module's `/dev/earc_route` lease node in Native Jelly's sandbox, and behaves exactly as
+without HBR when none does. Support for this in dts_restore_plus's **DTS Enabler** app (Homebrew
+Channel) for webOS 6 is being proposed upstream; until it is available there, HBR is for people who
+build and load the module themselves. Tested on an LG C1 (webOS 6) with a Sony STR-DN1080 and with
+an LG soundbar on eARC.
+
+Details for developers: [docs/playback-settings.md](docs/playback-settings.md).
 
 ---
 
