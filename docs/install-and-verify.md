@@ -12,7 +12,7 @@ You can skip the Developer Mode and computer setup below. If your existing Homeb
 
 You will need:
 
-- an LG TV running **webOS 4.0 or newer**; check the [compatibility notes](../README.md#will-it-work-on-my-television), since playback support varies by model;
+- an LG TV running **webOS 4.0 or newer**; check the [compatibility notes](../README.md#will-it-work-on-my-tv), since playback support varies by model;
 - a **Jellyfin server** you can reach on your network;
 - a Mac, Windows PC, or Linux computer for the setup described here;
 - the TV and computer on the **same local network**.
@@ -98,7 +98,7 @@ Open **Native Jelly** from the TV's app launcher. Enter your Jellyfin server add
 
 **Installation is complete.** You can now use Native Jelly from the TV launcher. The remaining setup responsibility is keeping Developer Mode active, as described below.
 
-Native Jelly is free and open source. If it's useful to you, you can [support it on Ko-fi](https://ko-fi.com/0xbeb).
+Native Jelly is free and open source. If it's useful to you, you can [support it on Ko-fi](https://ko-fi.com/swastikpoudel).
 
 ## Important: Developer Mode expires
 

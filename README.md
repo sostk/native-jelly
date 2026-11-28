@@ -1,362 +1,69 @@
 # Native Jelly
 
-A fast, unofficial **Jellyfin client for LG webOS televisions**.
+A fast, unofficial **Jellyfin client for LG webOS TVs**. Its interface is drawn natively on the TV's
+GPU, not in a web page, and video goes straight to the TV's own hardware decoder.
 
-**Native, not a web page** — Native Jelly is designed to provide a smooth, responsive TV experience using the television's native graphics and video capabilities.
+Native Jelly is built on [PlxNative](https://github.com/GLinnik21/plx-native), the native Plex client
+by Gleb Linnik ([GLinnik21](https://github.com/GLinnik21)), and adapted for Jellyfin. Its player,
+interface and architecture are his work; see [credits](docs/credits.md).
 
-Native Jelly is based on [PLX Native](https://github.com/GLinnik21/plx-native), originally created by **GLinnik21**. The project has been substantially adapted and extended to work with **Jellyfin**.
+![Native Jelly's home screen](docs/screenshots/home.jpg)
 
-> **Native Jelly is an independent project and is not affiliated with or endorsed by Jellyfin, LG Electronics, or the original PLX Native project.**
-
----
-
-## Why Native Jelly?
-
-Jellyfin provides an excellent open-source media server, but the quality of the client experience can vary considerably between platforms.
-
-Native Jelly aims to provide a **fast, modern and TV-focused Jellyfin experience** on LG webOS televisions.
-
-The project builds on the native architecture of PLX Native rather than relying on a traditional browser-based application.
-
-The goal is simple:
-
-* Fast navigation
-* Smooth remote control interaction
-* Native-feeling TV interface
-* Efficient video playback
-* Support for Jellyfin servers
-* Designed specifically for the 10-foot TV experience
-
----
-
-## What it looks like
-
-Native Jelly is designed around a modern streaming-service style interface, with large artwork, clear focus states and layouts designed for navigation using an LG Magic Remote or directional remote.
-
-### Home
-
-The home screen provides quick access to your Jellyfin content and recently watched media.
-
-### Libraries
-
-Browse your Jellyfin libraries using a TV-friendly grid and navigation system.
-
-### Search
-
-Search your Jellyfin library and quickly find movies, TV shows and other available media.
-
-### Details
-
-View artwork, metadata, descriptions and available playback options before starting a movie or episode.
-
-### Player
-
-The player provides a TV-focused playback experience with playback controls and support for available audio and subtitle tracks.
-
-> Screenshots will be added as Native Jelly develops.
-
----
+[Website](https://nativejelly.com) · [Install](docs/install-and-verify.md) ·
+[Latest release](https://github.com/sostk/native-jelly/releases/latest) ·
+[Troubleshooting](docs/troubleshooting.md) · [Support on Ko-fi](https://ko-fi.com/swastikpoudel)
 
 ## Features
 
-* **Native TV-focused interface**
-* **Jellyfin server support**
-* Browse Jellyfin libraries
-* Movie and TV show browsing
-* Search
-* Continue watching
-* Media details
-* Playback controls
-* Audio track selection
-* TrueHD, FLAC and other audio the television cannot decode converted to Dolby Digital on the TV, so the server sends the file unchanged
-* DTS, DTS-HD and (on rooted TVs) Dolby TrueHD / Atmos sent unchanged to an AV receiver or soundbar
-* Subtitle selection, with audio and subtitle preferences saved to your Jellyfin account
-* Each Jellyfin user's own picture on Who's watching?
-* Resume playback
-* Remote-friendly navigation
-* Designed for LG webOS televisions
-* Native video playback where supported by the television
-* Support for server-side transcoding where required
-* Designed for 10-foot viewing distances
-
-Additional Jellyfin functionality will continue to be added as development progresses.
-
----
-
-## LG webOS Support
-
-Native Jelly is intended for **LG webOS televisions**.
-
-The project is based on the native architecture of PLX Native, which targets older LG webOS televisions as well as newer devices.
-
-### Minimum webOS version
-
-**webOS 4.0 or newer** is currently targeted.
-
-Compatibility can vary between television models, webOS versions and hardware generations.
-
-If you test Native Jelly on a television that is not currently covered by the project, feedback and testing reports are very welcome.
-
----
-
-## Lossless audio to a receiver
-
-Many LG televisions cannot decode DTS, and none plays Dolby TrueHD from an app. With an AV receiver
-or soundbar, Native Jelly can send these soundtracks to it unchanged, and the receiver decodes them.
-
-**Turn it on**
-
-1. Connect the receiver by HDMI eARC/ARC or optical, and make it the TV's sound output
-   (*Settings → Sound → Sound Out*).
-2. Set *Settings → Sound → Advanced Settings → Digital Sound Output* to **Pass Through**.
-3. In Native Jelly, open *Settings → Video & playback → Lossless audio to receiver* and choose **On**.
-
-The setting is used only while the sound goes to a receiver, and the output is checked again at the
-start of every playback: on the TV's own speakers these bitstreams would be loud noise, so there the
-TV's ordinary audio path is used.
-
-**What reaches the receiver**
-
-| Soundtrack | Without HBR | With HBR (rooted TV, see below) |
-|---|---|---|
-| DTS | DTS 5.1 core | DTS |
-| DTS-HD MA | full DTS-HD MA up to about 6 Mb/s on webOS 6 over HDMI; otherwise its DTS 5.1 core | full rate |
-| DTS:X | its DTS-HD MA or DTS core layers, as above | DTS:X |
-| Dolby TrueHD / Atmos | converted to Dolby Digital on the TV | TrueHD and Atmos |
-
-**HBR on rooted TVs.** Full-rate DTS-HD MA, DTS:X and TrueHD/Atmos need the TV's HDMI eARC link in
-its 8-channel high-bitrate mode, which LG does not open to apps. On a rooted TV the `earc_route`
-kernel module from [dts_restore_plus](https://github.com/josippapez/dts_restore_plus) can. Native
-Jelly does not install kernel modules itself: it uses HBR automatically whenever a package on the TV
-provides the module's `/dev/earc_route` lease node in Native Jelly's sandbox, and behaves exactly as
-without HBR when none does.
-
-On a rooted webOS 6 TV (kernel 4.4, Homebrew Channel) there are two ways to install it, both opt-in:
-
-- **From Native Jelly.** With *Lossless audio to receiver* on, *Settings → Video & playback* shows
-  *Atmos, TrueHD and DTS:X (root)*. Choose **Download and install** and confirm: Native Jelly
-  downloads the module from this repository at a pinned commit, refuses it unless its SHA-256 matches
-  the one built into the app, and installs it as root through the Homebrew Channel, loaded now and at
-  every start of the TV. **Remove** undoes it.
-- **With Native Jelly HBR**, a small companion app in [`companion/hbr/`](companion/hbr/) that does
-  the same in five guided steps. The module runs in the TV's kernel, so use it at your
-own risk. Support for webOS 6 in dts_restore_plus's **DTS Enabler** app is being proposed upstream;
-once it is there, that app replaces this one. Tested on an LG C1 (webOS 6) with a Sony STR-DN1080 and with
-an LG soundbar on eARC.
-
-Details for developers: [docs/playback-settings.md](docs/playback-settings.md).
-
----
-
-## Developer Mode
-
-**Root access is not required.**
-
-Native Jelly can be installed on a standard LG webOS television using **LG Developer Mode**.
-
-Developer Mode allows applications to be installed outside the LG Content Store.
-
-Keep in mind that LG Developer Mode installations require periodic renewal. If Developer Mode expires, applications installed through it may be removed.
-
-For installation instructions, see:
-
-* [Installation Guide](docs/install-and-verify.md)
-* [Troubleshooting](docs/troubleshooting.md)
-
----
-
-## Installing
-
-The recommended installation process is:
-
-1. Enable **Developer Mode** on your LG webOS television.
-2. Connect the television and computer to the same network.
-3. Install **webOS Dev Manager**.
-4. Build or download the Native Jelly `.ipk`.
-5. Install the package on your television.
-6. Launch Native Jelly from the LG launcher.
-
-Detailed installation and verification instructions are available in:
-
-**[docs/install-and-verify.md](docs/install-and-verify.md)**
-
-### Homebrew Channel
-
-If Native Jelly is made available through Homebrew Channel, it can also be installed and updated through the Homebrew ecosystem.
-
----
-
-## Building
-
-Native Jelly is based on the PLX Native codebase and retains its native build architecture.
-
-For development and build instructions, see:
-
-**[docs/building.md](docs/building.md)**
-
-The build documentation contains the required development environment, build process and testing workflow.
-
----
-
-## Known Issues
-
-Native Jelly is actively being developed and tested.
-
-Compatibility can vary depending on:
-
-* LG TV model
-* webOS version
-* TV chipset
-* Video codec
-* Audio codec
-* Subtitle format
-* Jellyfin server configuration
-* Direct Play vs transcoding
-
-If you encounter a problem, please check:
-
-**[Troubleshooting](docs/troubleshooting.md)**
-
-If the issue is not covered, please open an issue and include:
-
-* LG TV model
-* webOS version
-* Native Jelly version
-* Jellyfin server version
-* Playback mode
-* Media codec information
-* Relevant logs
-
-Testing on additional LG television models is especially helpful.
-
----
-
-## Privacy
-
-Native Jelly is designed to communicate with **your Jellyfin server**.
-
-Your media library is not sent to the Native Jelly project.
-
-Native Jelly does not require a third-party media catalogue to browse your Jellyfin library.
-
-For the complete privacy statement, see:
-
-**[PRIVACY.md](PRIVACY.md)**
-
----
-
-## Scope
-
-Native Jelly is primarily focused on providing a **Jellyfin client for LG webOS televisions**.
-
-The project is intentionally focused on the TV experience rather than attempting to reproduce every feature available in every Jellyfin client.
-
-The focus is:
-
-* Movies
-* TV shows
-* Library browsing
-* Search
-* Playback
-* Subtitles
-* Audio tracks
-* Continue watching
-* A responsive TV interface
-
-More functionality may be added as the project develops.
-
----
-
-## Contributing
-
-Issues and pull requests are welcome.
-
-If you have an LG television that behaves differently from the development hardware, please consider reporting it.
-
-Useful information includes:
-
-* TV model
-* webOS version
-* Jellyfin server version
-* Media information
-* Steps to reproduce the problem
-* Logs
-
-For development and build information, see:
-
-**[docs/building.md](docs/building.md)**
-
-Security issues should be reported through:
-
-**[SECURITY.md](SECURITY.md)**
-
----
-
-## Credits & Attribution
-
-Native Jelly would not exist without the work that went into **PLX Native**.
-
-### PLX Native
-
-Original project:
-
-**https://github.com/GLinnik21/plx-native**
-
-Original author:
-
-**GLinnik21 / Gleb Linnik**
-
-Native Jelly is based on the PLX Native codebase and retains portions of its original architecture and implementation.
-
-We would like to give full credit to **GLinnik21** for creating PLX Native and for the technical foundation on which Native Jelly is built.
-
-Thank you for making the original project available to build upon.
-
----
-
-## Original Project
-
-You can find the original PLX Native project here:
-
-**[PLX Native](https://github.com/GLinnik21/plx-native)**
-
-Please refer to the original project for its history, original documentation and upstream development.
-
----
-
-## Third-Party Components
-
-Native Jelly contains or builds upon third-party components.
-
-Their respective licences and notices can be found in:
-
-* `THIRD-PARTY-NOTICES.md`
-* `licenses/`
-
-Please retain these notices when redistributing Native Jelly.
-
----
-
-## Licence
-
-Native Jelly is distributed under the **GPL-3.0-or-later** licence, subject to the applicable licensing terms of the original PLX Native project and its third-party components.
-
-See:
-
-**[LICENSE](LICENSE)**
-
-The original PLX Native project and its associated branding remain the work of their respective authors.
-
-Native Jelly does not claim ownership of the original PLX Native name, artwork or branding.
-
----
-
-## Trademarks & Disclaimer
-
-Native Jelly is an independent community project.
-
-**Native Jelly is not affiliated with, endorsed by, or sponsored by Jellyfin, LG Electronics, or the original PLX Native project.**
-
-"Jellyfin", "LG", "webOS" and other trademarks belong to their respective owners.
-
-Native Jelly uses these names only to identify the services, platforms and technologies with which the software is intended to work.
+- Sign in to your Jellyfin server; several users on one TV, each with their own picture
+- Home, Continue Watching, your libraries (movies, shows, mixed and home videos) and Search
+- Plays files directly when the TV can decode them; your server converts the rest
+- Audio the TV cannot decode (TrueHD, FLAC, LPCM) converted to Dolby Digital on the TV
+- DTS and Dolby TrueHD sent unchanged to an AV receiver or soundbar —
+  [lossless audio](docs/lossless-audio.md)
+- Dolby Vision, HDR10, audio and subtitle track choice, styled subtitles, scrub previews, Up Next
+- English, Spanish, Belarusian and Russian
+
+## Install
+
+No root is needed. Install the `.ipk` from the
+[latest release](https://github.com/sostk/native-jelly/releases/latest) with the
+[Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel) or with Developer Mode and
+[dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop). Step by step, including how
+to check the download: [docs/install-and-verify.md](docs/install-and-verify.md).
+
+## Will it work on my TV?
+
+Native Jelly starts on **webOS 4.0 and newer**. Video playback is verified on an LG C1 (2021,
+webOS 6) and reported by users on other 2021 sets; on other models it is only known to start. If you
+try it on another TV, please [tell us what happened](https://github.com/sostk/native-jelly/issues),
+whether it worked or not. Current limits are listed in each
+[release note](https://github.com/sostk/native-jelly/releases/latest).
+
+## Documentation
+
+| | |
+|---|---|
+| [Install and verify](docs/install-and-verify.md) | Installing, updating, checking the download, Developer Mode |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems, and what to include in a report |
+| [Lossless audio](docs/lossless-audio.md) | DTS and TrueHD to a receiver, and HBR on rooted TVs |
+| [Privacy](PRIVACY.md) | What the app sends, and to whom (crash reports and analytics are opt-in) |
+| [Building](docs/building.md) | Development environment, build and tests |
+| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | How to contribute, and how to report a vulnerability |
+| [Release notes](docs/release-notes/) | What changed in each version |
+| [Credits](docs/credits.md) | PlxNative, third-party components, licence and trademarks |
+
+## Support
+
+Native Jelly is free and open source. If it is useful to you, you can
+[support it on Ko-fi](https://ko-fi.com/swastikpoudel).
+
+## Credits and licence
+
+Native Jelly is built on [PlxNative](https://github.com/GLinnik21/plx-native) by Gleb Linnik, adapted
+for Jellyfin. It is licensed under [GPL-3.0-or-later](LICENSE); third-party notices are in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), and the full credits in
+[docs/credits.md](docs/credits.md).
+
+Native Jelly is not affiliated with, endorsed by, or sponsored by Jellyfin, LG Electronics, or the
+PlxNative project.

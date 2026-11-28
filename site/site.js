@@ -15,7 +15,7 @@
   // moves it further down, so the reset can never pull it back into view and
   // flicker, and scrolling down again replays the animation.
   function initReveal() {
-    window.plxReveal = true;
+    window.njReveal = true;
     if (reducedMotion() || !("IntersectionObserver" in window)) {
       html.classList.remove("reveal");
       return;
@@ -117,7 +117,7 @@
   // without JS; with JS they are replaced by a single pause/play button,
   // always shown. Nothing is downloaded (preload="none") until the browser
   // has said it will play the video by itself (the probe in index.html's
-  // head, window.plxAutoplay): where it will not (iOS Low Power Mode, a
+  // head, window.njAutoplay): where it will not (iOS Low Power Mode, a
   // browser set never to auto-play), the poster and the play button stay,
   // and a tap loads and starts the video in the same gesture. Reduced motion
   // starts paused, and a viewer's pause is never overridden.
@@ -190,7 +190,7 @@
     } else {
       near = true;
     }
-    (window.plxAutoplay || Promise.resolve(true)).then((plays) => {
+    (window.njAutoplay || Promise.resolve(true)).then((plays) => {
       if (mayAutoplay === null) {
         mayAutoplay = plays;
         refused = !plays;
@@ -399,7 +399,7 @@
     };
 
     if (scene && !cssDriven) {
-      (window.plxAutoplay || Promise.resolve(true)).then((plays) => {
+      (window.njAutoplay || Promise.resolve(true)).then((plays) => {
         if (plays) return;
         refused = true;
         measure();
@@ -557,7 +557,7 @@
   // Writes one inline style property, skipping the write when the value has
   // not changed: most scroll frames leave most elements where they were.
   function set(el, prop, value) {
-    const last = el.__plxStyle || (el.__plxStyle = {});
+    const last = el.__njStyle || (el.__njStyle = {});
     if (last[prop] === value) return;
     last[prop] = value;
     el.style[prop] = value;
