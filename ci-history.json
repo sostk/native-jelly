@@ -1,4 +1,4 @@
-{"updated":"2026-11-28T03:24:58Z",
+{"updated":"2026-11-28T03:36:49Z",
 "ci":[
 {"id":38030063075,"at":"2026-10-10T06:11:19Z","sha":"98480e53b","title":"Merge pull request #13 from sostk/fix/profiles-first-paint","pr":null,"jobs":{"host unit tests (hostsim)":250,"host unit tests (default features)":306,"host lint + type-checks":197,"host python/shell/C gates":340,"cross-build (armv7) + artifact assertions":238,"host checks (NOT a device gate)":4}},
 {"id":38044108563,"at":"2026-10-10T10:12:39Z","sha":"3c0ebcf63","title":"Merge pull request #15 from sostk/ci/sentry-project-native-jelly","pr":null,"jobs":{"host unit tests (default features)":320,"host unit tests (hostsim)":215,"host python/shell/C gates":338,"cross-build (armv7) + artifact assertions":243,"host lint + type-checks":143,"host checks (NOT a device gate)":3}},
@@ -58,5 +58,6 @@
 {"id":44017553278,"at":"2026-11-17T04:29:40Z","sha":"3ccdb3f59","title":"player: convert TrueHD, FLAC and LPCM audio to AC-3 on the television","pr":null,"jobs":{"Windows launcher syntax":16,"macOS simulator build + launch":1225,"Linux simulator build + launch":262}},
 {"id":44060437986,"at":"2026-11-17T09:58:14Z","sha":"116bff915","title":"library: name an assorted library's listing \"All\"; honest Atmos plan log","pr":null,"jobs":{"Linux simulator build + launch":268,"Windows launcher syntax":18,"macOS simulator build + launch":838}},
 {"id":46072233407,"at":"2026-11-27T21:44:28Z","sha":"a8113639d","title":"jf: show each user's own picture on Who's watching?, Add a user and the profile chip","pr":null,"jobs":{"macOS simulator build + launch":1077,"Windows launcher syntax":13,"Linux simulator build + launch":300}},
-{"id":46085859802,"at":"2026-11-28T00:03:48Z","sha":"1b9b7c5a5","title":"account menu: while storage has not answered, say the account is loading and keep Settings","pr":null,"jobs":{"Windows launcher syntax":14,"macOS simulator build + launch":586,"Linux simulator build + launch":279}}
+{"id":46085859802,"at":"2026-11-28T00:03:48Z","sha":"1b9b7c5a5","title":"account menu: while storage has not answered, say the account is loading and keep Settings","pr":null,"jobs":{"Windows launcher syntax":14,"macOS simulator build + launch":586,"Linux simulator build + launch":279}},
+{"id":46102275763,"at":"2026-11-28T03:19:12Z","sha":"079e4e0df","title":"jellyfin: make Remove from Continue Watching stick, by hiding the card on the TV","pr":null,"jobs":{"Linux simulator build + launch":305,"Windows launcher syntax":13,"macOS simulator build + launch":1036}}
 ]}
