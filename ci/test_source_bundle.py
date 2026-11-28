@@ -453,5 +453,32 @@ class RepositoryTreeScan(unittest.TestCase):
         self.assertEqual(failures, [])
 
 
+
+class EmbeddedSourceTests(unittest.TestCase):
+    """The binary embeds files with include_str!/include_bytes!; the source bundle must carry every
+    one, or the corresponding-source rebuild cannot compile it. v0.11.0's first release run failed
+    exactly here: the HBR installer under companion/ was embedded but not bundled."""
+
+    def test_every_embedded_file_is_in_the_bundle(self):
+        import re
+        from source_bundle import allowed
+        repo = Path(__file__).resolve().parents[1]
+        pattern = re.compile(r'include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)')
+        missing = []
+        for rs in (repo / 'rust-modules').rglob('*.rs'):
+            if 'target' in rs.parts:
+                continue
+            text = rs.read_text(errors='replace')
+            # Test-only embeds are compiled only by `cargo test`, never by the release build.
+            cut = text.find('#[cfg(test)]')
+            for m in pattern.finditer(text if cut < 0 else text[:cut]):
+                target = (rs.parent / m.group(1)).resolve()
+                if not target.is_relative_to(repo) or not target.is_file():
+                    continue
+                name = target.relative_to(repo).as_posix()
+                if not allowed(name):
+                    missing.append(f'{rs.relative_to(repo)} embeds {name}')
+        self.assertEqual(missing, [])
+
 if __name__ == '__main__':
     unittest.main()
