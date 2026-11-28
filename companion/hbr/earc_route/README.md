@@ -1,7 +1,8 @@
-# earc_route: the HBR support Native Jelly installs on rooted TVs
+# earc_route: the HBR support the Native Jelly HBR companion app installs on rooted TVs
 
 A Linux kernel module, **GPL-2.0-only** (`LICENSE`, `NOTICE`); it is a separate program that Native
-Jelly ships beside itself, never links, and loads only when the owner installs it from Settings.
+Jelly never ships or links. The companion app in `companion/hbr/` installs it when the owner turns
+HBR on there.
 
 ## Why it exists
 
@@ -45,5 +46,4 @@ sh build.sh /path/to/capture        # writes out/earc_route-4.4.ko and out/earc_
 sh test/legacy-audio/run.sh /path/to/capture   # QEMU host test, 1 and 4 CPUs
 ```
 
-`ci/check-packaged-elf.py` accepts the module in the package only with the SHA-256 recorded in
-`out/earc_route-4.4.json`.
+`../build.sh` packages the module only with the SHA-256 recorded in `out/earc_route-4.4.json`.

@@ -127,9 +127,14 @@ its 8-channel high-bitrate mode, which LG does not open to apps. On a rooted TV 
 kernel module from [dts_restore_plus](https://github.com/josippapez/dts_restore_plus) can. Native
 Jelly does not install kernel modules itself: it uses HBR automatically whenever a package on the TV
 provides the module's `/dev/earc_route` lease node in Native Jelly's sandbox, and behaves exactly as
-without HBR when none does. Support for this in dts_restore_plus's **DTS Enabler** app (Homebrew
-Channel) for webOS 6 is being proposed upstream; until it is available there, HBR is for people who
-build and load the module themselves. Tested on an LG C1 (webOS 6) with a Sony STR-DN1080 and with
+without HBR when none does.
+
+That package is **Native Jelly HBR**, a small companion app in [`companion/hbr/`](companion/hbr/)
+(webOS 6, kernel 4.4, rooted with the Homebrew Channel). Install it, open Native Jelly once, then open
+Native Jelly HBR and follow its five steps; *Turn on HBR* loads the module now and at every start of
+the TV, and *Turn off and remove* undoes it. The module runs in the TV's kernel, so use it at your
+own risk. Support for webOS 6 in dts_restore_plus's **DTS Enabler** app is being proposed upstream;
+once it is there, that app replaces this one. Tested on an LG C1 (webOS 6) with a Sony STR-DN1080 and with
 an LG soundbar on eARC.
 
 Details for developers: [docs/playback-settings.md](docs/playback-settings.md).

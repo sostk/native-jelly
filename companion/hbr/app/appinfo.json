@@ -1,0 +1,15 @@
+{
+  "id": "com.sostk.nativejelly.hbr",
+  "version": "0.1.0",
+  "vendor": "sostk",
+  "type": "web",
+  "main": "index.html",
+  "title": "Native Jelly HBR",
+  "appDescription": "HBR audio (TrueHD, Atmos, DTS:X) for Native Jelly on rooted LG webOS 6 TVs",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "iconColor": "#090810",
+  "bgColor": "#090810",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true
+}

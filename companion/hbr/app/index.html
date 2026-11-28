@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Native Jelly HBR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+  </div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="top">
+    <img class="logo" src="largeIcon.png" alt="">
+    <div class="brand">
+      <div class="name">Native Jelly <span class="grad">HBR</span></div>
+      <div class="sub">Lossless TrueHD, Atmos and DTS:X to your receiver</div>
+    </div>
+    <div id="pill" class="pill pill-wait"><span class="dot"></span><span id="pillText">Checking this TV…</span></div>
+  </header>
+
+  <nav class="stepper" id="stepper">
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <!-- tabs are filled in by app.js -->
+  </nav>
+
+  <section class="card" id="card">
+    <div class="card-copy">
+      <div class="kicker" id="kicker">Step 1 of 5</div>
+      <h1 id="title">Rooted TV with the Homebrew Channel</h1>
+      <p id="text">Checking…</p>
+      <div class="actions" id="actions"></div>
+    </div>
+    <div class="art" id="art"></div>
+  </section>
+
+  <footer class="foot">
+    <span id="facts">Kernel –</span>
+    <span class="sep">•</span>
+    <span>Runs earc_route (GPL-2.0) in the TV's kernel: use at your own risk. Source included. Not affiliated with LG.</span>
+  </footer>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -76,7 +76,9 @@ this engine (a direct play needs a video track), so the picture count always adv
 never opens it for an app. On rooted TVs the `earc_route` kernel module of
 [dts_restore_plus](https://github.com/josippapez/dts_restore_plus) can: while a process holds its
 lease, it makes LG configure the eARC link as 8 channels at 192 kHz. Native Jelly does not ship or
-install the module; it only uses a lease node something else has put in its sandbox
+install the module; it only uses a lease node something else has put in its sandbox. Until
+dts_restore_plus offers its webOS 6 build, that something is the separate companion app in
+`companion/hbr/` (Native Jelly HBR), which installs the module, its boot hook and the node
 (`/dev/earc_route`), opened only when `/sys/dev/char/<major>:<minor>/uevent` names `earc_route`,
 because its number changes per load. During a playback the app writes `2` to the node and writes
 4x larger bursts, and closes it when playback ends. Without the node nothing changes. Tested on an
