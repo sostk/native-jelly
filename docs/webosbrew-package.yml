@@ -63,15 +63,18 @@ description: |
   * Up to twelve Jellyfin users on one television, with **Who's watching?** at start
   * Your libraries, Home, Search and Continue Watching
   * Plays a file directly when the television can decode it; anything else is remuxed or transcoded by your server, which also records where you stopped and what you finished
-  * Choose audio and subtitle tracks, including image subtitles, and adjust subtitle timing, size and position
-  * English, Spanish and Belarusian, following the television's language
+  * Choose audio and subtitle tracks, including image subtitles, and adjust subtitle timing, size and position; audio and subtitle preferences are saved to your Jellyfin account
+  * Audio the television cannot decode, such as TrueHD or FLAC, is converted to Dolby Digital on the television, so your server sends the file unchanged
+  * With an AV receiver or soundbar, DTS and Dolby TrueHD soundtracks can be sent to it unchanged (**Settings → Video & playback → Lossless audio to receiver**)
+  * English, Spanish, Belarusian and Russian, following the television's language
 
   **Scope — please read before installing**
 
   * **Video playback is verified on one television:** an LG C1 (2021) on webOS 6.5.3, including transcoded films with subtitles, seeking and track changes. On every other firmware from webOS 4.0 up the app is only known to start. If you try it on another set, please [report what happened](https://github.com/sostk/native-jelly/issues), whether it worked or not.
   * **Movies and TV shows only.** No music, photos or live TV.
   * **A server reached over plain http receives your password unencrypted.** Native Jelly asks before it connects to one, with a stronger warning for an internet address, and **Settings → Unencrypted connections** lists and revokes what you allowed. Use your server's https address when it has one.
-  * **Known issues:** playback can fail from a server reached over https through a reverse proxy; a re-encode is always H.264; Auto quality away from home has not been tried on a television.
+  * **Optional, rooted webOS 6 TVs only:** Dolby TrueHD and Atmos, DTS:X and full-rate DTS-HD MA need a kernel module that Native Jelly does not include. If you choose **Download and install** under **Settings → Video & playback → Atmos, TrueHD and DTS:X (root)** and confirm, the app downloads it from its GitHub repository, checks it, and installs it as root through the Homebrew Channel, loaded at every start. It runs in the television's kernel and was tested on one LG C1; **Remove** undoes it. Nothing is installed unless you choose it.
+  * **Known issues:** direct play of some large Dolby Vision Profile 8 files with Atmos stops after about 45 seconds; playback can fail from a server reached over https through a reverse proxy; a re-encode is always H.264; Auto quality away from home has not been tried on a television.
 
   Crash reports and usage analytics are both off until you choose to share them; the [privacy policy](https://github.com/sostk/native-jelly/blob/main/PRIVACY.md) lists exactly what each contains.
 

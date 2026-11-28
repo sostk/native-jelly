@@ -68,8 +68,10 @@ The player provides a TV-focused playback experience with playback controls and 
 * Media details
 * Playback controls
 * Audio track selection
+* TrueHD, FLAC and other audio the television cannot decode converted to Dolby Digital on the TV, so the server sends the file unchanged
 * DTS, DTS-HD and (on rooted TVs) Dolby TrueHD / Atmos sent unchanged to an AV receiver or soundbar
-* Subtitle selection
+* Subtitle selection, with audio and subtitle preferences saved to your Jellyfin account
+* Each Jellyfin user's own picture on Who's watching?
 * Resume playback
 * Remote-friendly navigation
 * Designed for LG webOS televisions

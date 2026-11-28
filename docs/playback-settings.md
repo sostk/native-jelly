@@ -41,7 +41,7 @@ Three routes, chosen per title, best first:
 
 | Route | Carries | Needs |
 |---|---|---|
-| DD+ carrier, HBR | DTS-HD MA and DTS:X at full rate, TrueHD and Atmos (MAT) | webOS 6, and `/dev/earc_route` from a separate package on a rooted TV |
+| DD+ carrier, HBR | DTS-HD MA and DTS:X at full rate, TrueHD and Atmos (MAT) | webOS 6, and `/dev/earc_route` from the HBR install (this page's row, or the companion app) on a rooted TV |
 | DD+ carrier, 192 kHz | DTS-HD MA up to ~6 Mb/s per frame (larger frames send their core) | webOS 6, and a receiver LG passes Dolby Digital Plus through to |
 | PCM core | the DTS 5.1 core | any receiver on ARC/eARC or optical |
 
