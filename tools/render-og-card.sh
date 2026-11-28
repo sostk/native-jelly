@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Render site/og/card.html to site/media/og-card.jpg, the 1200x630 link-preview image that
-# nativejelly.com advertises through its og:image / twitter:image tags.
+# the website advertises through its og:image / twitter:image tags.
 #
 #   tools/render-og-card.sh                           # the card as committed (docs/screenshots/home.jpg)
 #   tools/render-og-card.sh --shot IMG --out FILE     # another screenshot, somewhere else
@@ -64,7 +64,9 @@ chrome="$(find_chrome)"
 [ -s "$tmp" ] || { echo "render-og-card: $chrome wrote no screenshot" >&2; exit 1; }
 if command -v sips >/dev/null 2>&1; then
   sips -s format jpeg -s formatOptions 86 "$tmp" --out "$out" >/dev/null
-else
+elif command -v magick >/dev/null 2>&1; then
   magick "$tmp" -quality 86 "$out"
+else
+  python3 -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2], quality=86)' "$tmp" "$out"
 fi
 file "$out"

@@ -9,7 +9,7 @@ interface and architecture are his work; see [credits](docs/credits.md).
 
 ![Native Jelly's home screen](docs/screenshots/home.jpg)
 
-[Website](https://nativejelly.com) · [Install](docs/install-and-verify.md) ·
+[Website](https://sostk.github.io/native-jelly/) · [Install](docs/install-and-verify.md) ·
 [Latest release](https://github.com/sostk/native-jelly/releases/latest) ·
 [Troubleshooting](docs/troubleshooting.md) · [Support on Ko-fi](https://ko-fi.com/swastikpoudel)
 

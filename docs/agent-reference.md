@@ -176,7 +176,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew; deploy/run use y
     the failing message says the same. Run it locally with
     `python3 ci/check-build-budgets.py --graph --src rust-modules/src` plus one `--src` per layer crate,
     as `ci.yml` spells it (add `--binary <path>` to grade a stripped binary); `ci/test_build_budgets.py` covers pass, fail, warn and the json schema.
-  - *Live chart.* https://nativejelly.com/ci/ (`site/ci/index.html`, noindex, not linked from the
+  - *Live chart.* https://sostk.github.io/native-jelly/ci/ (`site/ci/index.html`, noindex, not linked from the
     landing page) plots every CI job's minutes per successful `main` push, with a 7-run median and
     numbered markers on pushes titled `Build:` / `CI:` / `Check:`. It reads `ci-history.json` from
     the orphan `ci-metrics` branch (raw.githubusercontent.com), which `.github/workflows/ci-metrics.yml`

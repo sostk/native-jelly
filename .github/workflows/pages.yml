@@ -64,7 +64,6 @@ jobs:
           cp site/credits.html _site/credits.html
           cp site/styles.css _site/styles.css
           cp site/site.js _site/site.js
-          cp site/CNAME _site/CNAME
           cp site/robots.txt _site/robots.txt
           cp site/sitemap.xml _site/sitemap.xml
           cp site/404.html _site/404.html
@@ -180,27 +179,33 @@ jobs:
               site / "styles.css",
               site / "site.js",
           ]
+          # The site is a GitHub Pages PROJECT site, served under /native-jelly/: a ref starting
+          # with that base is site-absolute; any other "/..." ref points at the root of
+          # sostk.github.io, outside this site, and is reported missing (it 404s live); everything
+          # else resolves against the directory of the file that holds it.
+          BASE = "/native-jelly/"
           all_refs = set()
           for src in sources:
               if src.exists():
-                  all_refs |= local_refs(src.read_text(encoding="utf-8"))
+                  all_refs |= {(src, ref) for ref in local_refs(src.read_text(encoding="utf-8"))}
 
           local_ref_count = 0
           missing = []
           escaped = []
-          for ref in sorted(all_refs):
+          for src, ref in sorted(all_refs, key=lambda r: (str(r[0]), r[1])):
               if not is_local(ref):
                   continue
               clean = ref.split("#", 1)[0].split("?", 1)[0]
               if not clean:
                   continue
               local_ref_count += 1
-              # The doc pages (install/, troubleshooting/) are one path segment deep, so
-              # tools/render-doc-page.py emits root-absolute refs ("/styles.css", "/install/")
-              # rather than "../styles.css". Path.__truediv__ treats an absolute right-hand
-              # side as a full replacement, not a join, so strip the leading "/" first —
-              # these are root-of-site paths, not filesystem-absolute ones.
-              resolved = (site / clean.lstrip("/")).resolve()
+              if clean.startswith(BASE):
+                  resolved = (site / clean[len(BASE):]).resolve()
+              elif clean.startswith("/"):
+                  missing.append((f"{ref} (in {src.relative_to(site)}: outside {BASE})", "sostk.github.io" + clean))
+                  continue
+              else:
+                  resolved = (src.parent / clean).resolve()
               try:
                   resolved.relative_to(site.resolve())
               except ValueError:

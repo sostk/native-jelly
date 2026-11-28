@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Render one of docs/{install-and-verify,troubleshooting}.md into a standalone HTML page
-for nativejelly.com, wrapped in the site's own header/footer and styled with site/styles.css.
+for the project site (https://sostk.github.io/native-jelly/), wrapped in the site's own header/footer and styled with site/styles.css.
 
 Used by `.github/workflows/pages.yml` ("Stage _site") and locally:
 
@@ -50,7 +50,10 @@ except ImportError:  # pragma: no cover - operator-facing message, not exercised
 
 REPO = "sostk/native-jelly"
 GITHUB_BLOB = f"https://github.com/{REPO}/blob/main"
-SITE_ORIGIN = "https://nativejelly.com"
+SITE_ORIGIN = "https://sostk.github.io/native-jelly"
+# The site is a GitHub Pages project site, served under /native-jelly/. Root-relative refs must
+# carry that prefix; set it to "/" if the site moves to a domain of its own.
+SITE_BASE = "/native-jelly/"
 
 # Same card every other page reuses for link previews (site/media/og-card.jpg, staged to
 # _site/media/og-card.jpg by pages.yml); these two docs have no screenshot of their own.
@@ -63,7 +66,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 # The only two docs rendered as site pages. Adding a third page means adding it here.
 PAGES = {
     "install-and-verify.md": {
-        "route": "/install/",
+        "route": "install/",
         "title": "Install Native Jelly on LG webOS TV — No Root Required",
         # Short, sensible label for the breadcrumb rich result (not derived from the SEO
         # title above by splitting on " — ": that title no longer ends in "Native Jelly").
@@ -74,7 +77,7 @@ PAGES = {
         ),
     },
     "troubleshooting.md": {
-        "route": "/troubleshooting/",
+        "route": "troubleshooting/",
         "title": "Native Jelly Troubleshooting — LG webOS Installation & Playback",
         "name": "Troubleshooting",
         "description": (
@@ -147,7 +150,7 @@ def rewrite_href(href: str, doc_dir: Path) -> str:
     basename = repo_path.rsplit("/", 1)[-1]
     page = PAGES.get(basename)
     if page is not None and repo_path == f"docs/{basename}":
-        target = page["route"]
+        target = SITE_BASE + page["route"]
     else:
         target = f"{GITHUB_BLOB}/{repo_path}"
     return f"{target}#{frag}" if frag else target
@@ -338,13 +341,13 @@ def render_page(md_path: str) -> str:
 
     body, first_heading_id, headings = render_markdown(doc_path, doc_repo_rel)
     aria_labelledby = f' aria-labelledby="{first_heading_id}"' if first_heading_id else ""
-    canonical = f"{SITE_ORIGIN}{page['route']}"
+    canonical = f"{SITE_ORIGIN}/{page['route']}"
 
     return PAGE_TEMPLATE.format(
         description=html.escape(page["description"], quote=True),
         title=html.escape(page["title"]),
         canonical=canonical,
-        root="/",
+        root=SITE_BASE,
         og_image=OG_IMAGE,
         og_image_alt=html.escape(OG_IMAGE_ALT, quote=True),
         schema_json=article_json(basename, page, canonical, headings),

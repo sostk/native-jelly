@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://nativejelly.com/sitemap.xml
+Sitemap: https://sostk.github.io/native-jelly/sitemap.xml
