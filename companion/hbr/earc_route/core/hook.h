@@ -1,0 +1,68 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Shared types a target uses to describe its hooks: where, what to check, what to change. */
+#ifndef EARC_CORE_HOOK_H
+#define EARC_CORE_HOOK_H
+
+typedef unsigned char u8;
+typedef unsigned int u32;
+typedef unsigned long u64;
+typedef long s64;
+
+/* x0..x30, sp, pc (+256), pstate (+264): the user_pt_regs prefix, ABI on 4.4, 5.4 and 6.12. */
+struct target_pt_regs { u64 regs[31]; u64 sp; u64 pc; u64 pstate; };
+_Static_assert(__builtin_offsetof(struct target_pt_regs, pc) == 256, "pt_regs pc");
+_Static_assert(__builtin_offsetof(struct target_pt_regs, pstate) == 264, "pt_regs pstate");
+
+#define EARC_BRK_IMMEDIATE 0x4c31U
+#define EARC_BRK_INSTRUCTION (0xd4200000U | (EARC_BRK_IMMEDIATE << 5))
+
+enum earc_when {
+    EARC_WHEN_EARC_PORT = 1,  /* eARC on, the lease is the main audio, x[reg] == value */
+    EARC_WHEN_LEASE,          /* the lease is the main audio */
+    EARC_WHEN_LEASE_DEVICE,   /* *(u32 *)(*(u64 *)(x[reg] + a) + b) is the leased renderer */
+    EARC_WHEN_ANY_LEASE_PORT, /* eARC on, any lease held, x[reg] == value */
+    EARC_WHEN_ANY_LEASE,      /* any lease held */
+};
+enum earc_action {
+    EARC_SET_REG = 1,  /* x[reg] = value; counts overrides */
+    EARC_CLEAR_U64,    /* *(u64 *)(x[reg] + a) = 0 if set; counts mix_clears */
+    EARC_CARRIER,      /* sp + a holds an SRC format: keep 192k/8ch/16bit; counts src_fixes */
+    EARC_CONNECT_LEASED, /* x22 = 0, x[reg] = value, u32 at sp + a = leased renderer, x0..x2 = the
+                          * conn_* lookup, resume at function + jump instead of the replaced
+                          * instruction; counts overrides */
+    EARC_ES_FORCE,       /* u32s at sp + a, +4, +8 and at x[reg] + value = the es_out, es_mode,
+                          * es_ch and es_type parameters, each only when set; counts overrides */
+};
+
+#define WHEN_EARC_PORT(r, v) .when = EARC_WHEN_EARC_PORT, .when_reg = r, .when_value = v
+#define WHEN_LEASE() .when = EARC_WHEN_LEASE
+#define WHEN_LEASE_DEVICE(r, x, y) .when = EARC_WHEN_LEASE_DEVICE, .when_reg = r, .when_a = x, .when_b = y
+#define WHEN_ANY_LEASE_PORT(r, v) .when = EARC_WHEN_ANY_LEASE_PORT, .when_reg = r, .when_value = v
+#define WHEN_ANY_LEASE() .when = EARC_WHEN_ANY_LEASE
+#define SET_REG(r, v) .action = EARC_SET_REG, .reg = r, .value = v
+#define CLEAR_U64(r, x) .action = EARC_CLEAR_U64, .reg = r, .a = x
+#define CARRIER(x) .action = EARC_CARRIER, .a = x
+#define ES_FORCE(x, r, v) .action = EARC_ES_FORCE, .a = x, .reg = r, .value = v
+/* A SET_REG value taken from the arc_type module parameter at hook time. */
+#define EARC_PARAM_VALUE 0xffffffffU
+/* A SET_REG value taken from the es_rate module parameter; 0 there leaves the register alone. */
+#define EARC_PARAM_RATE 0xfffffffeU
+#define CONNECT_LEASED(r, v, x, to) .action = EARC_CONNECT_LEASED, .reg = r, .value = v, .a = x, .jump = to
+
+/* function is an EF_ index of the target's EARC_FUNCTIONS; the site, its address + offset,
+ * holds word (pinned by the function's shape), which then runs from a resume slot. */
+struct earc_hook {
+    u8 function;
+    u32 offset, word;
+    u8 when, when_reg, action, reg;
+    u32 when_value, when_a, when_b, value, a, jump;
+};
+
+/* The replaced instruction runs from a slot in module text, so it must not be PC-relative. */
+#define EARC_RELOCATABLE(word) \
+    (((word) & 0x1f000000U) != 0x10000000U && ((word) & 0x3b000000U) != 0x18000000U && \
+     ((word) & 0x7c000000U) != 0x14000000U && ((word) & 0xff000010U) != 0x54000000U && \
+     ((word) & 0x7e000000U) != 0x34000000U && ((word) & 0x7e000000U) != 0x36000000U && \
+     ((word) & 0xfe000000U) != 0xd6000000U && ((word) & 0xff000000U) != 0xd4000000U)
+
+#endif

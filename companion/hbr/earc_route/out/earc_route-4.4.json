@@ -1,0 +1,38 @@
+{
+  "module": "earc_route-4.4.ko",
+  "generation": "4.4",
+  "moduleSha256": "f0795a347d5a504bf999b01e6df00a31f3c1d7a66f5cfcb3bab8379bc3ee064d",
+  "vermagic": "4.4.84 SMP preempt mod_unload aarch64",
+  "abi": {
+    "size": "0x300",
+    "vermagic": [
+      "4.4.84 SMP preempt mod_unload aarch64"
+    ],
+    "init_module": "0x158",
+    "cleanup_module": null
+  },
+  "imports": [
+    "__copy_from_user",
+    "get_online_cpus",
+    "kallsyms_lookup_name",
+    "misc_deregister",
+    "misc_register",
+    "param_get_uint",
+    "param_set_uint",
+    "printk",
+    "put_online_cpus"
+  ],
+  "exportsByKernelSha256": {
+    "10adace3603b44e1b900f7c9d1990e65adb6ad2f9becbaac4fe8305635681605": {
+      "misc_deregister": "0xffffffc000472548",
+      "kallsyms_lookup_name": "0xffffffc000121c30",
+      "param_set_uint": "0xffffffc0000c1ff0",
+      "put_online_cpus": "0xffffffc0000a4e48",
+      "get_online_cpus": "0xffffffc0000a5050",
+      "printk": "0xffffffc000163960",
+      "misc_register": "0xffffffc000472358",
+      "param_get_uint": "0xffffffc0000c1ec8",
+      "__copy_from_user": "0xffffffc0003c9400"
+    }
+  }
+}

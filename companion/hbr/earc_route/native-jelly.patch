@@ -1,0 +1,363 @@
+diff --git a/webos25/kmod/core/core.h b/webos25/kmod/core/core.h
+index f1eed0f..81e2cf9 100644
+--- a/webos25/kmod/core/core.h
++++ b/webos25/kmod/core/core.h
+@@ -10,6 +10,10 @@ extern struct target_module __this_module;
+ #define EARC_HOOK_COUNT (sizeof earc_hooks / sizeof earc_hooks[0])
+ 
+ static u32 earc_enabled = 1, earc_hits, earc_overrides, earc_mix_clears, earc_src_fixes;
++/* Experiment knobs: eARC encoded type for SET_REG hooks valued EARC_PARAM_VALUE, and the
++ * resource-manager lookup the connect hook makes (device type, subtype, index offset). */
++static u32 earc_arc_type = 6, earc_conn_type = 7, earc_conn_sub = 2, earc_conn_add;
++static u32 earc_es_out = ~0U, earc_es_mode = ~0U, earc_es_ch = ~0U, earc_es_type = ~0U, earc_es_rate;
+ static struct earc_code earc_fns[EF_COUNT];
+ static u64 earc_sites[EARC_HOOK_COUNT];
+ /* Per hook: the replaced instruction, then B back to the next one; UDF until filled at load. */
+@@ -32,6 +36,10 @@ static int earc_hook_wanted(const struct earc_hook *hook, const struct target_pt
+             && (u32)regs->regs[hook->when_reg] == hook->when_value;
+     case EARC_WHEN_LEASE:
+         return leased - 1 == *earc_main_index;
++    case EARC_WHEN_ANY_LEASE_PORT:
++        return *earc_on && (u32)regs->regs[hook->when_reg] == hook->when_value;
++    case EARC_WHEN_ANY_LEASE:
++        return 1;
+     case EARC_WHEN_LEASE_DEVICE:
+         base = regs->regs[hook->when_reg];
+         base = base ? *(u64 *)(base + hook->when_a) : 0;
+@@ -40,16 +48,22 @@ static int earc_hook_wanted(const struct earc_hook *hook, const struct target_pt
+     return 0;
+ }
+ 
+-static void earc_hook_apply(const struct earc_hook *hook, struct target_pt_regs *regs)
++/* Returns the address to resume at instead of the resume slot, or 0. */
++static u64 earc_hook_apply(const struct earc_hook *hook, struct target_pt_regs *regs)
+ {
+     u32 *format;
+     u64 *field;
+     switch (hook->action) {
+-    case EARC_SET_REG:
+-        if ((u32)regs->regs[hook->reg] != hook->value)
++    case EARC_SET_REG: {
++        u32 value = hook->value == EARC_PARAM_VALUE ? __atomic_load_n(&earc_arc_type, __ATOMIC_RELAXED)
++                  : hook->value == EARC_PARAM_RATE ? __atomic_load_n(&earc_es_rate, __ATOMIC_RELAXED) : hook->value;
++        if (!value)
++            break;
++        if ((u32)regs->regs[hook->reg] != value)
+             __atomic_add_fetch(&earc_overrides, 1, __ATOMIC_RELAXED);
+-        regs->regs[hook->reg] = hook->value;
++        regs->regs[hook->reg] = value;
+         break;
++    }
+     case EARC_CLEAR_U64:
+         field = regs->regs[hook->reg] ? (u64 *)(regs->regs[hook->reg] + hook->a) : 0;
+         if (field && *field) {
+@@ -66,22 +80,54 @@ static void earc_hook_apply(const struct earc_hook *hook, struct target_pt_regs
+             __atomic_add_fetch(&earc_src_fixes, 1, __ATOMIC_RELAXED);
+         }
+         break;
++    case EARC_ES_FORCE: {
++        u32 knobs[4], index, changed = 0;
++        knobs[0] = __atomic_load_n(&earc_es_out, __ATOMIC_RELAXED);
++        knobs[1] = __atomic_load_n(&earc_es_mode, __ATOMIC_RELAXED);
++        knobs[2] = __atomic_load_n(&earc_es_ch, __ATOMIC_RELAXED);
++        knobs[3] = __atomic_load_n(&earc_es_type, __ATOMIC_RELAXED);
++        for (index = 0; index < 4; index++) {
++            u32 *slot = index < 3 ? (u32 *)(regs->sp + hook->a + 4 * index)
++                                  : (u32 *)(regs->regs[hook->reg] + hook->value);
++            if (knobs[index] != ~0U && *slot != knobs[index]) {
++                *slot = knobs[index];
++                changed = 1;
++            }
++        }
++        if (knobs[0] != ~0U && earc_arc_format && *earc_arc_format != knobs[0]) {
++            *earc_arc_format = knobs[0];
++            changed = 1;
++        }
++        if (changed)
++            __atomic_add_fetch(&earc_overrides, 1, __ATOMIC_RELAXED);
++        break;
+     }
++    case EARC_CONNECT_LEASED:
++        regs->regs[22] = 0;
++        regs->regs[hook->reg] = hook->value;
++        *(u32 *)(regs->sp + hook->a) = APP_ROUTE() - 1;
++        regs->regs[0] = APP_ROUTE() - 1 + __atomic_load_n(&earc_conn_add, __ATOMIC_RELAXED);
++        regs->regs[1] = __atomic_load_n(&earc_conn_type, __ATOMIC_RELAXED);
++        regs->regs[2] = __atomic_load_n(&earc_conn_sub, __ATOMIC_RELAXED);
++        __atomic_add_fetch(&earc_overrides, 1, __ATOMIC_RELAXED);
++        return earc_fns[hook->function].address + hook->jump;
++    }
++    return 0;
+ }
+ 
+ /* BRK exception context: touches the saved registers and LG's own structures only. */
+ static int earc_break(struct target_pt_regs *regs, unsigned int syndrome)
+ {
+     unsigned int index;
++    u64 resume;
+     if (!regs || syndrome != (0xf2000000U | EARC_BRK_IMMEDIATE) || (regs->pstate & 15) != 5)
+         return 1;
+     for (index = 0; index < EARC_HOOK_COUNT; index++) {
+         const struct earc_hook *hook = &earc_hooks[index];
+         if (regs->pc != earc_sites[index])
+             continue;
+-        if (earc_hook_wanted(hook, regs))
+-            earc_hook_apply(hook, regs);
+-        regs->pc = (u64)earc_slots[index];
++        resume = earc_hook_wanted(hook, regs) ? earc_hook_apply(hook, regs) : 0;
++        regs->pc = resume ? resume : (u64)earc_slots[index];
+         __atomic_add_fetch(&earc_hits, 1, __ATOMIC_RELAXED);
+         return 0;
+     }
+@@ -112,6 +158,7 @@ static const char *earc_verify(void)
+         u64 site = earc_fns[hook->function].address + hook->offset, slot = (u64)&earc_slots[index][1];
+         s64 back = (s64)(site + 4 - slot);
+         if (hook->offset + 4 > 4 * earc_fns[hook->function].count || !EARC_RELOCATABLE(hook->word)
++            || (hook->action == EARC_CONNECT_LEASED && hook->jump + 4 > 4 * earc_fns[hook->function].count)
+             || back >= (1L << 27) || back < -(1L << 27))
+             return earc_functions[hook->function].name;
+         earc_sites[index] = site;
+@@ -206,6 +253,15 @@ int init_module(void)
+ EARC_THIS_MODULE(EARC_NAME, init_module, 0);
+ EARC_PARAM_TABLE = {
+     EARC_PARAM_UINT("enabled", 0644, earc_enabled),
++    EARC_PARAM_UINT("arc_type", 0644, earc_arc_type),
++    EARC_PARAM_UINT("conn_type", 0644, earc_conn_type),
++    EARC_PARAM_UINT("conn_sub", 0644, earc_conn_sub),
++    EARC_PARAM_UINT("conn_add", 0644, earc_conn_add),
++    EARC_PARAM_UINT("es_out", 0644, earc_es_out),
++    EARC_PARAM_UINT("es_mode", 0644, earc_es_mode),
++    EARC_PARAM_UINT("es_ch", 0644, earc_es_ch),
++    EARC_PARAM_UINT("es_type", 0644, earc_es_type),
++    EARC_PARAM_UINT("es_rate", 0644, earc_es_rate),
+     EARC_PARAM_UINT("hits", 0444, earc_hits),
+     EARC_PARAM_UINT("lease", 0444, app_route),
+     EARC_PARAM_UINT("mix_clears", 0444, earc_mix_clears),
+diff --git a/webos25/kmod/core/hook.h b/webos25/kmod/core/hook.h
+index 5c0256f..62246d5 100644
+--- a/webos25/kmod/core/hook.h
++++ b/webos25/kmod/core/hook.h
+@@ -20,19 +20,34 @@ enum earc_when {
+     EARC_WHEN_EARC_PORT = 1,  /* eARC on, the lease is the main audio, x[reg] == value */
+     EARC_WHEN_LEASE,          /* the lease is the main audio */
+     EARC_WHEN_LEASE_DEVICE,   /* *(u32 *)(*(u64 *)(x[reg] + a) + b) is the leased renderer */
++    EARC_WHEN_ANY_LEASE_PORT, /* eARC on, any lease held, x[reg] == value */
++    EARC_WHEN_ANY_LEASE,      /* any lease held */
+ };
+ enum earc_action {
+     EARC_SET_REG = 1,  /* x[reg] = value; counts overrides */
+     EARC_CLEAR_U64,    /* *(u64 *)(x[reg] + a) = 0 if set; counts mix_clears */
+     EARC_CARRIER,      /* sp + a holds an SRC format: keep 192k/8ch/16bit; counts src_fixes */
++    EARC_CONNECT_LEASED, /* x22 = 0, x[reg] = value, u32 at sp + a = leased renderer, x0..x2 = the
++                          * conn_* lookup, resume at function + jump instead of the replaced
++                          * instruction; counts overrides */
++    EARC_ES_FORCE,       /* u32s at sp + a, +4, +8 and at x[reg] + value = the es_out, es_mode,
++                          * es_ch and es_type parameters, each only when set; counts overrides */
+ };
+ 
+ #define WHEN_EARC_PORT(r, v) .when = EARC_WHEN_EARC_PORT, .when_reg = r, .when_value = v
+ #define WHEN_LEASE() .when = EARC_WHEN_LEASE
+ #define WHEN_LEASE_DEVICE(r, x, y) .when = EARC_WHEN_LEASE_DEVICE, .when_reg = r, .when_a = x, .when_b = y
++#define WHEN_ANY_LEASE_PORT(r, v) .when = EARC_WHEN_ANY_LEASE_PORT, .when_reg = r, .when_value = v
++#define WHEN_ANY_LEASE() .when = EARC_WHEN_ANY_LEASE
+ #define SET_REG(r, v) .action = EARC_SET_REG, .reg = r, .value = v
+ #define CLEAR_U64(r, x) .action = EARC_CLEAR_U64, .reg = r, .a = x
+ #define CARRIER(x) .action = EARC_CARRIER, .a = x
++#define ES_FORCE(x, r, v) .action = EARC_ES_FORCE, .a = x, .reg = r, .value = v
++/* A SET_REG value taken from the arc_type module parameter at hook time. */
++#define EARC_PARAM_VALUE 0xffffffffU
++/* A SET_REG value taken from the es_rate module parameter; 0 there leaves the register alone. */
++#define EARC_PARAM_RATE 0xfffffffeU
++#define CONNECT_LEASED(r, v, x, to) .action = EARC_CONNECT_LEASED, .reg = r, .value = v, .a = x, .jump = to
+ 
+ /* function is an EF_ index of the target's EARC_FUNCTIONS; the site, its address + offset,
+  * holds word (pinned by the function's shape), which then runs from a resume slot. */
+@@ -40,7 +55,7 @@ struct earc_hook {
+     u8 function;
+     u32 offset, word;
+     u8 when, when_reg, action, reg;
+-    u32 when_value, when_a, when_b, value, a;
++    u32 when_value, when_a, when_b, value, a, jump;
+ };
+ 
+ /* The replaced instruction runs from a slot in module text, so it must not be PC-relative. */
+diff --git a/webos25/kmod/target/legacy-audio/target.h b/webos25/kmod/target/legacy-audio/target.h
+index fc8fda2..61ce96d 100644
+--- a/webos25/kmod/target/legacy-audio/target.h
++++ b/webos25/kmod/target/legacy-audio/target.h
+@@ -21,7 +21,8 @@
+     X(_arc_connect_output, 224, 0x757c904c) \
+     X(_AUDIO_ConnectRenderer, 190, 0xfbd15345) \
+     X(_AUDIO_ConnectOutput_FindOutCtrlModule, 290, 0x6d51cac6) \
+-    X(_AUDIO_ConnectOutput_FindConnectModule, 508, 0x4d33bae8)
++    X(_AUDIO_ConnectOutput_FindConnectModule, 508, 0x4d33bae8) \
++    X(_AUDIO_ConnectOutput_FindOutModule, 352, 0x47d00ffc)
+ #include "../../core/code.h"
+ 
+ /* Encoded types: 3 = ARC port; 6 = MAT, LG's HBR passthrough. The shapes pin these values
+@@ -29,17 +30,35 @@
+  * request + 0x68 = mix flag, and _AUDIO_SetSRCFormat's format at sp + 0x40. */
+ static const struct earc_hook earc_hooks[] = {
+     /* AUDIO_SetIecOutEncodedType(port, type): eARC carries the leased stream as HBR. */
+-    {EF_AUDIO_SetIecOutEncodedType, 0, 0xa9bd7bfd, WHEN_EARC_PORT(0, 3), SET_REG(1, 6)},
++    {EF_AUDIO_SetIecOutEncodedType, 0, 0xa9bd7bfd, WHEN_ANY_LEASE_PORT(0, 3), SET_REG(1, EARC_PARAM_VALUE)},
+     /* sndout_earc_output_type(kcontrol, request): clear LG's eARC mix flag. */
+     {EF_sndout_earc_output_type, 0, 0xd10203ff, WHEN_LEASE(), CLEAR_U64(1, 0x68)},
+     /* _AUDIO_SetSRCFormat before its output defaults: x19 = renderer. */
+     {EF__AUDIO_SetSRCFormat, 0x6c, 0x52800400, WHEN_LEASE_DEVICE(19, 0x1b0, 0x8c), CARRIER(0x40)},
++    /* sndout_connect_output (LG's inlined _earc_connect_output) at `add x0, sp, #0x90`, before
++     * it asks for the main audio: the carrier plays on the leased renderer (dtsdec's sink
++     * index), not on the main decoder, which has no decoder info then (should_connect 0).
++     * Take LG's bypass branch at its device lookup (+0x2c4: AUDIO_RM_GetDeviceIndex(x0, x1, x2)
++     * from the conn_* parameters, then SetIecOutEncodedType(3, 5), connect eARC, arc_bypass) for
++     * the leased renderer, with no decoder info (x22) and output 5 (w23). */
++    {EF_sndout_connect_output, 0x94, 0x910243e0, WHEN_ANY_LEASE(), CONNECT_LEASED(23, 5, 0x90, 0x2c4)},
++    /* _AUDIO_ConnectOutput_FindOutModule, eARC port, at `ldp w6, w7, [sp, #0x44]` just before it
++     * sends the ARC module its es-out (sp + 0x44), mode (+0x48) and channels (+0x4c) and the eARC
++     * channel type (x21 + 0xf68): override each from the es_* parameters (unset: LG's value). */
++    /* _AUDIO_ConnectOutput_FindOutCtrlModule, ES-renderer branch, at `mov w28, w25`: the input rate
++     * that becomes the eARC transmitter clock and format rate (LG's default 48000 without decoder
++     * info). es_rate (e.g. 192000) replaces it; 0 leaves LG's value. */
++    {EF__AUDIO_ConnectOutput_FindOutCtrlModule, 0x22c, 0x2a1903fc, WHEN_ANY_LEASE(), SET_REG(25, EARC_PARAM_RATE)},
++    {EF__AUDIO_ConnectOutput_FindOutModule, 0xc4, 0x29489fe6, WHEN_ANY_LEASE(), ES_FORCE(0x44, 21, 0xf68)},
+ };
+ 
+ /* LG's eARC-on byte and main renderer index: the one byte store in sndout_earc_onoff and the
+  * one word load in AUDIO_GetMainAudioIndex, cross-checked against their kallsyms names. */
+ static volatile u8 *earc_on;
+ static volatile u32 *earc_main_index;
++/* LG's eARC output mode/format (0 PCM, 1 ES), read by KDRV_AUDIO_UpdateArcSamplingFreq for the
++ * transmitter format; only the es_out experiment writes it. */
++static volatile u32 *earc_arc_format;
+ 
+ static const char *earc_target_derive(const struct earc_code *fns)
+ {
+@@ -52,6 +71,7 @@ static const char *earc_target_derive(const struct earc_code *fns)
+     if (scan.found != 1 || scan.address != kallsyms_lookup_name("_gMainAudioIndex"))
+         return "_gMainAudioIndex";
+     earc_main_index = (volatile u32 *)scan.address;
++    earc_arc_format = (volatile u32 *)kallsyms_lookup_name("gArcOutModeFormat");
+     return 0;
+ }
+ 
+diff --git a/webos25/kmod/test/legacy-audio/harness.c b/webos25/kmod/test/legacy-audio/harness.c
+index 5ac8122..062c349 100644
+--- a/webos25/kmod/test/legacy-audio/harness.c
++++ b/webos25/kmod/test/legacy-audio/harness.c
+@@ -25,6 +25,36 @@ extern void msleep(unsigned int);
+ extern int AUDIO_SetIecOutEncodedType(u32, u32);
+ extern int sndout_earc_output_type(void *, void *);
+ extern void _AUDIO_SetSRCFormat(void *, u32, u32, u32, u32, u32, u32);
++extern void sndout_connect_output(u32);
++extern u8 gAlsaSndoutOutputInfo[];
++extern volatile u32 __logm_fd_alsa_dec;
++extern volatile u32 __logm_fd_alsa_se;
++extern volatile u32 __logm_fd_alsa_sif;
++extern volatile u32 __logm_fd_aud;
++extern volatile u32 __logm_fd_aud_aad;
++extern volatile u32 __logm_fd_aud_alsa;
++extern volatile u32 __logm_fd_aud_bc;
++extern volatile u32 __logm_fd_aud_buf;
++extern volatile u32 __logm_fd_aud_buf_man;
++extern volatile u32 __logm_fd_aud_buf_poll;
++extern volatile u32 __logm_fd_aud_captur;
++extern volatile u32 __logm_fd_aud_chip;
++extern volatile u32 __logm_fd_aud_cm;
++extern volatile u32 __logm_fd_aud_decoder;
++extern volatile u32 __logm_fd_aud_drv;
++extern volatile u32 __logm_fd_aud_encoder;
++extern volatile u32 __logm_fd_aud_hal;
++extern volatile u32 __logm_fd_aud_imc;
++extern volatile u32 __logm_fd_aud_imc_noti;
++extern volatile u32 __logm_fd_aud_mip;
++extern volatile u32 __logm_fd_aud_mlp;
++extern volatile u32 __logm_fd_aud_modlist;
++extern volatile u32 __logm_fd_aud_pdm;
++extern volatile u32 __logm_fd_aud_proc;
++extern volatile u32 __logm_fd_aud_render;
++extern volatile u32 __logm_fd_aud_rm;
++extern volatile u32 __logm_fd_aud_uimc;
++extern volatile u32 sndout_earc_state[] __asm__("__logm_fd_alsa_sndout");
+ extern u32 g_AudArcIecOutEncodedType[], g_AudSpdifIecOutEncodedType[];
+ extern volatile u8 _gSndOutEarcOnOff;
+ extern volatile u32 _gMainAudioIndex, gEarcOutputType[], __logm_fd_alsa_sndout, __logm_fd_aud_master;
+@@ -122,6 +152,49 @@ static u32 src(u32 device_index, u32 rate, u32 channels, u32 bits)
+     return captured_src[5] == 192000 && captured_src[6] == 8 && captured_src[7] == 16;
+ }
+ 
++/* LG's eARC connect with eARC on, mode 2, MAT and mixing on; returns its arc_bypass byte. */
++static u32 bypass(void)
++{
++    volatile u8 *info = gAlsaSndoutOutputInfo;
++    volatile u32 *earc = sndout_earc_state;
++    __logm_fd_alsa_dec = 0;
++    __logm_fd_alsa_se = 0;
++    __logm_fd_alsa_sif = 0;
++    __logm_fd_alsa_sndout = 0;
++    __logm_fd_aud = 0;
++    __logm_fd_aud_aad = 0;
++    __logm_fd_aud_alsa = 0;
++    __logm_fd_aud_bc = 0;
++    __logm_fd_aud_buf = 0;
++    __logm_fd_aud_buf_man = 0;
++    __logm_fd_aud_buf_poll = 0;
++    __logm_fd_aud_captur = 0;
++    __logm_fd_aud_chip = 0;
++    __logm_fd_aud_cm = 0;
++    __logm_fd_aud_decoder = 0;
++    __logm_fd_aud_drv = 0;
++    __logm_fd_aud_encoder = 0;
++    __logm_fd_aud_hal = 0;
++    __logm_fd_aud_imc = 0;
++    __logm_fd_aud_imc_noti = 0;
++    __logm_fd_aud_master = 0;
++    __logm_fd_aud_mip = 0;
++    __logm_fd_aud_mlp = 0;
++    __logm_fd_aud_modlist = 0;
++    __logm_fd_aud_pdm = 0;
++    __logm_fd_aud_proc = 0;
++    __logm_fd_aud_render = 0;
++    __logm_fd_aud_rm = 0;
++    __logm_fd_aud_uimc = 0;
++    *(volatile u32 *)(info + 0x294) = 0x20;
++    *(volatile u32 *)(info + 0x26c) = 0;
++    info[0x260] = 1;
++    info[0x2fa] = 0;
++    earc[2] = 2; earc[3] = 6; earc[4] = 8; earc[5] = 192000; earc[6] = 1;
++    sndout_connect_output(0);
++    return info[0x2fa];
++}
++
+ static u32 stress_calls, stress_errors;
+ 
+ /* Hammers the three hooked LG functions while the lease toggles, from several CPUs. */
+@@ -188,18 +261,28 @@ static void policy_tests(void)
+     _gSndOutEarcOnOff = 1;
+     _gMainAudioIndex = 0;
+     check(iec(0) == 0 && mix(1) == 1 && !src(0, 192000, 8, 16), "no lease: stock PCM, mixing, 48k/32 converter");
++    check(bypass() == 0, "no lease: eARC connect stays on the mixer");
+ 
+     check(sys_write(first, "1", 1) == 1 && param("lease") == 1, "lease 1 taken");
+     check(iec(0) == 6, "lease on main 0: eARC encoded type forced to HBR(6)");
+     check(iec(1) == 6, "lease on main 0: DD request also forced to HBR");
+     check(mix(0) == 0, "lease: LG eARC mix flag cleared");
++    {
++        u32 hits = param("hits"), overrides = param("overrides"), taken = bypass();
++        printk("\0016LEGACY_AUDIO: bypass=%u arc_type=%u hits+%u overrides+%u\n", taken, ARC_TYPE,
++               param("hits") - hits, param("overrides") - overrides);
++        /* arc_bypass needs a resource-manager device, which the emulation has none of. */
++        check(param("overrides") - overrides == 2 && ARC_TYPE == 6 && taken == 0,
++              "lease: eARC connect takes LG's bypass branch with the HBR type");
++    }
+     check(src(0, 192000, 8, 16), "lease: converter kept at 192k/8ch/16bit");
+     check(!src(1, 192000, 8, 16), "lease: other renderer converter untouched");
+     check(!src(0, 48000, 2, 16), "lease: stereo 48k converter untouched");
+     AUDIO_SetIecOutEncodedType(2, 1);
+     check(*(volatile u32 *)g_AudSpdifIecOutEncodedType == 1 && ARC_TYPE == 6, "optical port untouched");
+     _gMainAudioIndex = 1;
+-    check(iec(0) == 0 && mix(1) == 1, "lease for renderer 0 ignored while main audio is 1");
++    /* C1: dtsdec plays on renderer 1 while LG's main audio stays 0, so the HBR type follows any lease. */
++    check(iec(0) == 6 && mix(1) == 1, "lease for renderer 0 keeps HBR while main audio is 1, mixing untouched");
+     _gMainAudioIndex = 0;
+     _gSndOutEarcOnOff = 0;
+     check(iec(0) == 0, "eARC off: stock type kept");
