@@ -183,6 +183,12 @@ requested by sending the transcode profile with no Embed/External method for it.
 * `api_key` / `X-Emby-Token` / `/emby` are gone on 12.0, not merely deprecated.
 * ~~There is no `ActiveEncodings` route; transcodes stop via the Stopped report.~~ Wrong, inferred
   from the OpenAPI document, which hides the route; see S4.
-* No `HideFromResume`: "Remove from Continue Watching" resets the resume position to 0.
+* No `HideFromResume`. Resetting the resume position to 0 is not a removal either: the episode
+  moves to Next Up, which lists the next unwatched episode of any series with activity
+  (measured on 12.4.0). Marking the series unwatched (`DELETE /UserPlayedItems/{seriesId}`) does
+  take it off both, but clears every started episode's position and `LastPlayedDate` on every
+  device. "Remove from Continue Watching" therefore writes nothing to the server: it keeps the
+  removal on the television, per series or item, until newer activity
+  (`jf::api::remove_from_continue_watching`).
 * `/Sessions/Playing/Progress` reports below the server's minimum resume percentage do not
   set a resume point (`resume_ticks_after_report` was 0 for a 1 s report).

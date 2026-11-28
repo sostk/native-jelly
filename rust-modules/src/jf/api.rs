@@ -610,14 +610,62 @@ impl<'a> Jf<'a> {
         self.ok(&Q::new(format!("/UserPlayedItems/{guid}")).s("userId", &uid).build(), Method::Delete, None)
     }
 
-    /// Jellyfin has no hide flag: an item leaves Resume when its position is cleared, so this
-    /// resets the resume point (docs/jellyfin-port.md records the difference from PMS).
+    /// **Remove from Continue Watching.** Jellyfin has no hide flag, and clearing the resume point
+    /// does not do it either: the episode moves to Next Up, which lists the next unwatched episode
+    /// of any series with recent activity. So the card is hidden on this television only
+    /// ([`super::store::DeckHide`]): the series for an episode, the item otherwise. Nothing is
+    /// written to the server, so every resume point and the viewing history stay as they were, and
+    /// the card comes back once the item or series is played again
+    /// ([`Self::continue_watching_items`]). A removal is not seen by other devices.
     pub fn remove_from_continue_watching(&self, rk: &str) -> bool {
         let (Some(guid), Some(uid)) = (self.guid(rk), self.user_id()) else { return false };
-        self.post_ok(
-            &Q::new(format!("/UserItems/{guid}/UserData")).s("userId", &uid).build(),
-            Some(&serde_json::json!({ "PlaybackPositionTicks": 0 })),
-        )
+        let Some(item) = self.items(Q::new("/Items").s("Ids", &guid).s("Fields", "")).and_then(|r| r.items.into_iter().next()) else {
+            return false;
+        };
+        let series_last = item.series_id.as_deref().and_then(|s| self.series_last_played(&ids::normalize(s)));
+        let server = self.origin().base();
+        if !super::store::hide_on_deck(&server, &uid, deck_hide(&item, series_last)) {
+            return false;
+        }
+        persist_roster();
+        true
+    }
+
+    /// The newest `LastPlayedDate` among the episodes of `series` (never-played ones sort last).
+    fn series_last_played(&self, series: &str) -> Option<String> {
+        let r = self.items(Q::new("/Items").s("ParentId", series).b("Recursive", true).s("IncludeItemTypes", "Episode")
+            .s("SortBy", "DatePlayed").s("SortOrder", "Descending").i("Limit", 1).s("Fields", "").b("EnableImages", false))?;
+        r.items.into_iter().next()?.user_data?.last_played_date
+    }
+
+    /// Drop the cards this user removed on this television, unless the item or its series was
+    /// played since; a removal that activity outdated is forgotten.
+    fn without_hidden(&self, rows: Vec<BaseItemDto>) -> Vec<BaseItemDto> {
+        let Some(uid) = self.user_id() else { return rows };
+        let server = self.origin().base();
+        let hidden = super::store::deck_hidden(&server, &uid);
+        if hidden.is_empty() {
+            return rows;
+        }
+        let mut forgot = false;
+        let rows = rows.into_iter().filter(|it| {
+            let series = it.series_id.as_deref().map(ids::normalize);
+            let key = series.clone().unwrap_or_else(|| ids::normalize(&it.id));
+            let Some(h) = hidden.iter().find(|h| h.key == key) else { return true };
+            let last = match &series {
+                Some(s) => self.series_last_played(s),
+                None => it.user_data.as_ref().and_then(|u| u.last_played_date.clone()),
+            };
+            if last.is_some_and(|l| played_after(&l, &h.seen)) {
+                forgot |= super::store::unhide_on_deck(&server, &uid, &key);
+                return true;
+            }
+            false
+        }).collect();
+        if forgot {
+            persist_roster();
+        }
+        rows
     }
 
     // ---- shelves ---------------------------------------------------------------------------
@@ -712,8 +760,8 @@ impl<'a> Jf<'a> {
             .b("EnableResumable", false).b("EnableRewatching", false)).unwrap_or_default();
         let in_progress_series: std::collections::HashSet<String> = resume.items.iter()
             .filter_map(|i| i.series_id.as_deref().map(ids::normalize)).collect();
-        let mut rows = resume.items;
-        for it in next.items {
+        let mut rows = self.without_hidden(resume.items);
+        for it in self.without_hidden(next.items) {
             if rows.len() as i64 >= count {
                 break;
             }
@@ -898,9 +946,77 @@ fn parse<T: DeserializeOwned>(path: &str, body: &[u8]) -> Option<T> {
     }
 }
 
+/// What a Remove from Continue Watching keeps for `item`: its series for an episode, the item
+/// otherwise, with the newest `LastPlayedDate` the server had. For an episode that is the series'
+/// (`series_last`) or, when that could not be read, the episode's own, so a failed lookup never
+/// keeps an empty date that the next refresh would take as "played since".
+fn deck_hide(item: &BaseItemDto, series_last: Option<String>) -> super::store::DeckHide {
+    let own = item.user_data.as_ref().and_then(|u| u.last_played_date.clone());
+    match item.series_id.as_deref() {
+        Some(series) => super::store::DeckHide {
+            key: ids::normalize(series),
+            seen: series_last.into_iter().chain(own).max_by(|a, b| a.get(..19).cmp(&b.get(..19))).unwrap_or_default(),
+        },
+        None => super::store::DeckHide { key: ids::normalize(&item.id), seen: own.unwrap_or_default() },
+    }
+}
+
+/// Save the Jellyfin roster on the storage worker, reading it when the write runs so that writes
+/// queued close together cannot land an older snapshot last.
+fn persist_roster() {
+    let _ = nj_base::storage_worker::submit_retained(|| super::store::persist(&super::store::roster()));
+}
+
+/// Whether `last` is newer than `seen`; both are the server's ISO-8601 UTC dates, compared to the
+/// second because Jellyfin writes a varying number of fraction digits.
+fn played_after(last: &str, seen: &str) -> bool {
+    let sec = |d: &str| d.get(..19).unwrap_or(d).to_owned();
+    sec(last) > sec(seen)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn deck_item(id: &str, series: Option<&str>, last: Option<&str>) -> BaseItemDto {
+        BaseItemDto {
+            id: id.into(),
+            series_id: series.map(Into::into),
+            user_data: Some(super::super::models::UserItemData { last_played_date: last.map(Into::into), ..Default::default() }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn removing_an_episode_hides_its_series_at_the_newest_date_the_server_had() {
+        let ep = deck_item("e1", Some("S1"), Some("2026-11-20T10:00:00.1Z"));
+        let h = deck_hide(&ep, Some("2026-11-22T08:00:00.5Z".into()));
+        assert_eq!(h.key, ids::normalize("S1"), "an episode is hidden by its series, so Next Up cannot bring it back");
+        assert_eq!(h.seen, "2026-11-22T08:00:00.5Z");
+    }
+
+    #[test]
+    fn a_failed_series_lookup_keeps_the_episodes_own_date_rather_than_none() {
+        // An empty `seen` reads as "played since" on the next refresh and brings the card straight
+        // back, so the episode's own date is the floor.
+        let ep = deck_item("e1", Some("S1"), Some("2026-11-20T10:00:00.1Z"));
+        assert_eq!(deck_hide(&ep, None).seen, "2026-11-20T10:00:00.1Z");
+        assert!(!played_after("2026-11-20T10:00:00.9Z", &deck_hide(&ep, None).seen));
+    }
+
+    #[test]
+    fn removing_a_movie_hides_the_movie_at_its_own_date() {
+        let h = deck_hide(&deck_item("M1", None, Some("2026-11-23T10:00:00Z")), None);
+        assert_eq!((h.key.as_str(), h.seen.as_str()), (ids::normalize("M1").as_str(), "2026-11-23T10:00:00Z"));
+    }
+
+    #[test]
+    fn played_after_compares_server_dates_to_the_second() {
+        assert!(played_after("2026-11-24T12:52:47.1Z", "2026-11-24T12:52:46.9433933Z"));
+        assert!(!played_after("2026-11-24T12:52:46.9Z", "2026-11-24T12:52:46.1234567Z"), "same second is not newer");
+        assert!(!played_after("2026-11-23T21:22:11Z", "2026-11-24T07:42:56Z"));
+        assert!(played_after("2026-11-23T21:22:11Z", ""), "a removal that saw no date yields to any play");
+    }
 
     #[test]
     fn plex_sort_expressions_translate_to_items_sorts() {

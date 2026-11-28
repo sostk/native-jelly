@@ -36,6 +36,20 @@ const VERSION: u32 = 2;
 /// At most this many users are kept. A sign-in past it replaces the user signed in longest ago.
 pub const MAX_USERS: usize = 12;
 
+/// At most this many Continue Watching removals are kept per user; past it the oldest goes.
+const MAX_DECK_HIDDEN: usize = 32;
+
+/// **One card taken off Continue Watching on this television** — Jellyfin has no hide flag, so the
+/// removal is kept here. `key` is the series (for an episode) or the item, normalized; `seen` is
+/// the newest `LastPlayedDate` the server had for it when it was removed. Activity newer than that
+/// brings the card back, so both sides of the comparison are the server's clock.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckHide {
+    pub key: String,
+    #[serde(default)]
+    pub seen: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stored {
     #[serde(default)]
@@ -61,6 +75,9 @@ pub struct Stored {
     /// picture is byte-for-byte what an earlier build wrote.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub image_tag: String,
+    /// Cards this user removed from Continue Watching ([`DeckHide`]). Not written while empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deck_hidden: Vec<DeckHide>,
 }
 
 impl Stored {
@@ -81,6 +98,7 @@ impl Stored {
             server_version: s.server_version.clone(),
             device_user: s.device_user.clone(),
             image_tag: s.image_tag.clone(),
+            deck_hidden: Vec::new(),
         }
     }
 
@@ -178,7 +196,12 @@ impl Roster {
 
     /// Keep `s` and make it the active user: it replaces the same user's older sign-in (a fresh
     /// token) and moves to the front. Past [`MAX_USERS`] the user at the back is dropped.
-    pub fn remember(&mut self, s: Stored) {
+    pub fn remember(&mut self, mut s: Stored) {
+        if let Some(old) = self.users.iter().find(|u| u.same_user(&s)) {
+            if s.deck_hidden.is_empty() {
+                s.deck_hidden = old.deck_hidden.clone();
+            }
+        }
         self.users.retain(|u| !u.same_user(&s));
         self.recent = Some(RecentServer::of(&s));
         self.users.insert(0, s);
@@ -222,6 +245,31 @@ impl Roster {
             }
             _ => false,
         }
+    }
+
+    /// The kept user `user_id` (on `server`), for a change to it.
+    fn user_mut(&mut self, server: &str, user_id: &str) -> Option<&mut Stored> {
+        let probe = Stored { server: server.to_owned(), user_id: user_id.to_owned(), ..Stored::default() };
+        self.users.iter_mut().find(|u| u.same_user(&probe))
+    }
+
+    /// Keep `hide` for the user, replacing an earlier one for the same key. `false` when no such
+    /// user is kept.
+    pub fn hide_on_deck(&mut self, server: &str, user_id: &str, hide: DeckHide) -> bool {
+        let Some(u) = self.user_mut(server, user_id) else { return false };
+        u.deck_hidden.retain(|h| h.key != hide.key);
+        u.deck_hidden.push(hide);
+        let over = u.deck_hidden.len().saturating_sub(MAX_DECK_HIDDEN);
+        u.deck_hidden.drain(..over);
+        true
+    }
+
+    /// Drop the user's removal of `key`. `false` when there was none.
+    pub fn unhide_on_deck(&mut self, server: &str, user_id: &str, key: &str) -> bool {
+        let Some(u) = self.user_mut(server, user_id) else { return false };
+        let before = u.deck_hidden.len();
+        u.deck_hidden.retain(|h| h.key != key);
+        u.deck_hidden.len() != before
     }
 
     /// Sign every user out and keep only the server signed in to last.
@@ -364,6 +412,21 @@ pub fn activate(server: &str, user_id: &str) -> bool {
 /// changed and [`persist`] should write it.
 pub fn set_image_tag(server: &str, user_id: &str, tag: &str) -> bool {
     with_roster(|r| r.set_image_tag(server, user_id, tag))
+}
+
+/// Keep a Continue Watching removal ([`Roster::hide_on_deck`]). Memory only.
+pub fn hide_on_deck(server: &str, user_id: &str, hide: DeckHide) -> bool {
+    with_roster(|r| r.hide_on_deck(server, user_id, hide))
+}
+
+/// Drop a Continue Watching removal ([`Roster::unhide_on_deck`]). Memory only.
+pub fn unhide_on_deck(server: &str, user_id: &str, key: &str) -> bool {
+    with_roster(|r| r.unhide_on_deck(server, user_id, key))
+}
+
+/// The user's Continue Watching removals.
+pub fn deck_hidden(server: &str, user_id: &str) -> Vec<DeckHide> {
+    with_roster(|r| r.user_mut(server, user_id).map(|u| u.deck_hidden.clone()).unwrap_or_default())
 }
 
 /// Stop keeping the user `user_id` on `server`. Memory only; [`persist`] writes the result.
@@ -584,6 +647,32 @@ mod tests {
             device_user: id.into(),
             ..Stored::new(&Origin::parse("http://10.0.0.2:8096").unwrap(), &signed_in())
         }
+    }
+
+    #[test]
+    fn deck_removals_are_per_user_capped_and_survive_a_fresh_sign_in() {
+        let server = "http://10.0.0.2:8096";
+        let mut r = Roster::default();
+        r.remember(user("a", "t1"));
+        r.remember(user("b", "t2"));
+        let hide = |k: &str| DeckHide { key: k.into(), seen: "2026-11-24T00:00:00Z".into() };
+        assert!(r.hide_on_deck(server, "a", hide("s1")));
+        assert!(r.hide_on_deck(server, "a", hide("s1")), "the same key again replaces it");
+        assert!(!r.hide_on_deck(server, "nobody", hide("s1")));
+        assert_eq!(r.user_mut(server, "a").unwrap().deck_hidden.len(), 1);
+        assert!(r.user_mut(server, "b").unwrap().deck_hidden.is_empty(), "another user's deck is untouched");
+        for i in 0..40 {
+            r.hide_on_deck(server, "a", hide(&format!("k{i}")));
+        }
+        let kept = &r.user_mut(server, "a").unwrap().deck_hidden;
+        assert_eq!(kept.len(), MAX_DECK_HIDDEN);
+        assert_eq!(kept.last().unwrap().key, "k39", "the oldest go first");
+        r.remember(user("a", "fresh-token"));
+        assert_eq!(r.user_mut(server, "a").unwrap().deck_hidden.len(), MAX_DECK_HIDDEN, "a new token keeps the removals");
+        assert!(r.unhide_on_deck(server, "a", "k39"));
+        assert!(!r.unhide_on_deck(server, "a", "k39"));
+        let v = serde_json::to_value(user("c", "t")).unwrap();
+        assert!(v.get("deck_hidden").is_none(), "an empty list is not written, so older builds read the same record");
     }
 
     /// A record an earlier build wrote — one sign-in, no `users` — is a roster of one, active.
