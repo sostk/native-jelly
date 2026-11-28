@@ -633,6 +633,10 @@ pub struct Session {
     pub(crate) root_back: RootBack,
     #[serde(default, deserialize_with = "de_soft_instant_dpad_seeking", skip_serializing_if = "is_default_instant_dpad_seeking")]
     pub(crate) instant_dpad_seeking: InstantDpadSeeking,
+    /// **DTS to a receiver as IEC 61937 bursts** — see [`DtsPassthrough`]. Install-wide, skipped
+    /// at the default like [`Session::skip_interval`].
+    #[serde(default, deserialize_with = "de_soft_dts_passthrough", skip_serializing_if = "is_default_dts_passthrough")]
+    pub(crate) dts_passthrough: DtsPassthrough,
     #[serde(default, deserialize_with = "de_soft_episode_navigation", skip_serializing_if = "is_default_episode_navigation")]
     pub(crate) episode_navigation: EpisodeNavigation,
     /// **Device-wide ambient memory**: the last hero `UltraBlurColors` envelope Home actually
@@ -757,6 +761,8 @@ struct CanonicalSessionPreferences {
     root_back: RootBack,
     #[serde(default, deserialize_with = "de_soft_instant_dpad_seeking", skip_serializing_if = "is_default_instant_dpad_seeking")]
     instant_dpad_seeking: InstantDpadSeeking,
+    #[serde(default, deserialize_with = "de_soft_dts_passthrough", skip_serializing_if = "is_default_dts_passthrough")]
+    dts_passthrough: DtsPassthrough,
     #[serde(default, deserialize_with = "de_soft_episode_navigation", skip_serializing_if = "is_default_episode_navigation")]
     episode_navigation: EpisodeNavigation,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
@@ -800,6 +806,7 @@ impl Default for CanonicalSessionPreferences {
             skip_interval: SkipInterval::Seconds10,
             root_back: RootBack::PlatformHome,
             instant_dpad_seeking: InstantDpadSeeking::Off,
+            dts_passthrough: DtsPassthrough::Off,
             episode_navigation: EpisodeNavigation::On,
             plaintext_consent: Vec::new(),
             server_key_pins: Vec::new(),
@@ -865,6 +872,7 @@ fn split_public(session: &Session) -> Result<nj_platform::storage::state::Public
         skip_interval: session.skip_interval,
         root_back: session.root_back.clone(),
         instant_dpad_seeking: session.instant_dpad_seeking,
+        dts_passthrough: session.dts_passthrough,
         episode_navigation: session.episode_navigation,
         plaintext_consent: session.plaintext_consent.clone(),
         server_key_pins: session.server_key_pins.clone(),
@@ -942,6 +950,7 @@ pub(crate) fn join_canonical(
         skip_interval: preferences.skip_interval,
         root_back: preferences.root_back,
         instant_dpad_seeking: preferences.instant_dpad_seeking,
+        dts_passthrough: preferences.dts_passthrough,
         episode_navigation: preferences.episode_navigation,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
@@ -978,6 +987,7 @@ fn public_session(public: &nj_platform::storage::state::PublicPayload) -> Sessio
         skip_interval: preferences.skip_interval,
         root_back: preferences.root_back,
         instant_dpad_seeking: preferences.instant_dpad_seeking,
+        dts_passthrough: preferences.dts_passthrough,
         episode_navigation: preferences.episode_navigation,
         plaintext_consent: preferences.plaintext_consent,
         server_key_pins: preferences.server_key_pins,
@@ -1456,6 +1466,26 @@ fn de_soft_instant_dpad_seeking<'de, D: Deserializer<'de>>(d: D) -> Result<Insta
     Ok(serde_json::from_value(v).unwrap_or_default())
 }
 fn is_default_instant_dpad_seeking(value: &InstantDpadSeeking) -> bool { *value == InstantDpadSeeking::default() }
+
+/// Send DTS to a receiver as IEC 61937 bursts (`devcaps::set_dts_passthrough`). Off by default:
+/// the bursts are noise to anything but a DTS decoder, and only the owner knows one is attached.
+/// Unknown persisted values use the default.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DtsPassthrough {
+    #[default]
+    Off,
+    On,
+}
+impl DtsPassthrough {
+    pub(crate) const LADDER: [Self; 2] = [Self::Off, Self::On];
+    pub(crate) fn is_on(self) -> bool { self == Self::On }
+}
+fn de_soft_dts_passthrough<'de, D: Deserializer<'de>>(d: D) -> Result<DtsPassthrough, D::Error> {
+    let Ok(v) = serde_json::Value::deserialize(d) else { return Ok(DtsPassthrough::default()); };
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+fn is_default_dts_passthrough(value: &DtsPassthrough) -> bool { *value == DtsPassthrough::default() }
 
 /// Install-wide playback navigation option; unknown persisted values use the safe default.
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -2685,6 +2715,10 @@ impl Session {
     }
 
     pub(crate) fn instant_dpad_seeking(&self) -> InstantDpadSeeking { self.instant_dpad_seeking }
+    pub(crate) fn dts_passthrough(&self) -> DtsPassthrough { self.dts_passthrough }
+    pub(crate) fn with_dts_passthrough(&self, value: DtsPassthrough) -> Self {
+        let mut next = self.clone(); next.dts_passthrough = value; next
+    }
     pub(crate) fn with_instant_dpad_seeking(&self, value: InstantDpadSeeking) -> Self {
         let mut next = self.clone(); next.instant_dpad_seeking = value; next
     }
@@ -6334,6 +6368,20 @@ mod playback_navigation_preferences_tests {
         let json = serde_json::to_string(&s).unwrap();
         assert!(!json.contains("instant_dpad_seeking"));
         assert!(!json.contains("episode_navigation"));
+    }
+    #[test]
+    fn dts_passthrough_defaults_off_omits_and_survives_the_split() {
+        for raw in ["null", "42", "\"future\"", "true"] {
+            let s: Session = serde_json::from_str(&format!("{{\"dts_passthrough\":{raw}}}")).unwrap();
+            assert_eq!(s.dts_passthrough(), DtsPassthrough::Off, "{raw}");
+        }
+        assert!(!serde_json::to_string(&Session::default()).unwrap().contains("dts_passthrough"));
+        let s = Session::default().with_dts_passthrough(DtsPassthrough::On);
+        let (public, protected) = split_canonical(&s).unwrap();
+        for restored in [join_canonical(&public, &protected).unwrap(), public_session(&public),
+            serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap()] {
+            assert_eq!(restored.dts_passthrough(), DtsPassthrough::On);
+        }
     }
     #[test]
     fn both_options_survive_public_protected_split_and_join() {

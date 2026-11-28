@@ -171,7 +171,7 @@ impl PickerPage {
     }
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
-            Value::Quality(_) | Value::DirectPlay(_) | Value::NextEpisode(_) | Value::SkipInterval(_) | Value::InstantDpadSeeking(_) | Value::EpisodeNavigation(_) | Value::SubtitleSize(_) | Value::SubtitlePosition(_) => self.txn.save_local(&mut self.state.io, value, fx),
+            Value::Quality(_) | Value::DirectPlay(_) | Value::NextEpisode(_) | Value::SkipInterval(_) | Value::InstantDpadSeeking(_) | Value::EpisodeNavigation(_) | Value::DtsPassthrough(_) | Value::SubtitleSize(_) | Value::SubtitlePosition(_) => self.txn.save_local(&mut self.state.io, value, fx),
             value => {
                 let mut update = PreferenceUpdate::default();
                 match (self.state.field, value) {

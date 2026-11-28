@@ -9166,6 +9166,20 @@ pub(crate) fn restore_instant_dpad_seeking(value: InstantDpadSeeking) {
     nj_base::testlock::assert_held("playback navigation preference");
     INSTANT_DPAD_SEEKING.store(value.index(), Ordering::Relaxed);
 }
+/// The DTS passthrough setting; `devcaps` holds the one copy every play attempt reads.
+pub(crate) fn dts_passthrough() -> DtsPassthrough {
+    if nj_platform::devcaps::dts_passthrough() { DtsPassthrough::On } else { DtsPassthrough::Off }
+}
+pub(crate) fn restore_dts_passthrough(value: DtsPassthrough) {
+    nj_platform::devcaps::set_dts_passthrough(value.is_on());
+}
+pub(crate) fn set_dts_passthrough(value: DtsPassthrough) -> bool {
+    let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_dts_passthrough(value)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::catalog::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_dts_passthrough(value); nj_machine::idle::invalidate(); }
+    saved
+}
 pub(crate) fn set_instant_dpad_seeking(value: InstantDpadSeeking) -> bool {
     let saved = crate::catalog::session::update_with_outcome(|s| Some(s.with_instant_dpad_seeking(value)))
         .is_some_and(|write| matches!(write.classify(),

@@ -25,6 +25,27 @@ Disabled needs no confirmation.
 
 Audio passthrough remains the television's Digital Sound Output setting.
 
+## DTS passthrough
+
+**Playback → DTS passthrough** (off by default, saved on this television) sends a DTS track's
+core to an external receiver unconverted. Many sets have no DTS decoder: declared as `DTS`, a
+webOS 6 C1 refuses the Load with `type=18 num=601` before any picture. With the setting on and
+`com.webos.service.audio/getSoundOutput` reporting an HDMI ARC or optical output (`external_arc`,
+its soundbar variants such as `external_arc_sound_alive` or `external_arc_sound_mode_sync`, or
+`external_optical`), the app
+packs each 48 kHz DTS core frame into an IEC 61937 burst (as FFmpeg's `spdif` muxer does) and
+declares the stream `PCM` with `pcmInfo` S16LE stereo 48 (kHz). LG allocates a PCM decoder
+instead, and a receiver set to passthrough sees DTS. Any other sound output keeps the setting
+inert, because the bursts are noise on the TV's own speakers. The output is read again when each
+DTS playback starts, and an output that does not answer within about a second counts as unknown,
+so a switch from the receiver to the speakers since the last playback never plays the bursts.
+
+Only the 5.1 core is sent: DTS-HD MA and DTS:X extensions are dropped, so the receiver shows
+DTS, not DTS-HD MA. The setting admits DTS up to 8 channels for the same reason. A core that
+does not fit the burst period (1536 kb/s at 512 samples per frame needs 2044 of 2040 bytes) is
+refused before any audio is fed, so the open recovery converts it on the server. Full DTS-HD MA
+or TrueHD would need an 8-channel 192 kHz PCM input; this player's PCM input is stereo 48 kHz.
+
 ## Jellyfin user preferences
 
 **Audio & subtitles** edits the four playback fields of the signed-in user's Jellyfin

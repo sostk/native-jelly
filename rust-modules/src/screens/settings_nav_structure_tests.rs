@@ -124,7 +124,8 @@ fn every_playback_field_pushes_its_picker() {
         [SettingsPage::Picker(PickerKind::Quality), SettingsPage::Picker(PickerKind::DirectPlay),
          SettingsPage::Picker(PickerKind::SubtitleSize), SettingsPage::Picker(PickerKind::SubtitlePosition),
          SettingsPage::Picker(PickerKind::NextEpisode), SettingsPage::Picker(PickerKind::SkipInterval),
-         SettingsPage::Picker(PickerKind::InstantDpadSeeking), SettingsPage::Picker(PickerKind::EpisodeNavigation)]);
+         SettingsPage::Picker(PickerKind::InstantDpadSeeking), SettingsPage::Picker(PickerKind::EpisodeNavigation),
+         SettingsPage::Picker(PickerKind::DtsPassthrough)]);
     assert_every_nav_item_pushes_exactly_its_dest("playback", &items, &|| consent_opened(SettingsPage::Playback));
 }
 

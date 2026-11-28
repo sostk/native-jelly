@@ -1,0 +1,10 @@
+{
+  "settings.playback.dts_passthrough": {
+    "value": "DTS passthrough",
+    "description": "Playback preference title: send DTS audio unchanged to an external receiver."
+  },
+  "settings.playback.dts_passthrough.copy": {
+    "value": "Send DTS soundtracks unchanged to an AV receiver or soundbar on HDMI ARC/eARC or optical, which decodes them. DTS-HD MA and DTS:X play as their DTS 5.1 core. Used only while the TV's sound goes to that output; set Digital Sound Output to Pass Through.",
+    "description": "Playback preference explanation."
+  }
+}

@@ -41,6 +41,7 @@ pub mod jail_repair;
 pub mod caps;
 pub mod toast;
 pub mod volume;
+pub mod sound_output;
 
 const OS_INFO: &str = "/var/run/nyx/os_info.json";
 

@@ -3979,6 +3979,33 @@ fn dts_core_channels(core: &[u8]) -> Option<u32> {
     AMODE_CHANNELS.get(usize::from(amode)).map(|ch| ch + lfe)
 }
 
+/// One 48 kHz DTS core frame as an IEC 61937 burst, little-endian S16 stereo: the bytes FFmpeg's
+/// spdif muxer writes and dts_restore_plus's passthrough feeds LG's PCM input. A receiver on S/PDIF
+/// or ARC sees the original DTS bitstream; nothing is decoded. `None` when the core is not 48 kHz,
+/// has an unusual block count, or does not fit its period (a 1536 kb/s core needs 2044 of 2040 bytes).
+fn dts_iec61937(core: &[u8]) -> Option<Vec<u8>> {
+    if core.len() < 9 || core[..4] != [0x7f, 0xfe, 0x80, 0x01] || (core[8] >> 2) & 0x0f != 13 {
+        return None;
+    }
+    let blocks = ((usize::from(core[4]) << 8 | usize::from(core[5])) >> 2 & 0x7f) + 1;
+    let kind: u16 = match blocks { 16 => 0x0b, 32 => 0x0c, 64 => 0x0d, _ => return None };
+    let period = blocks << 7;
+    let len = core.len();
+    if len + (len & 1) > period - 8 {
+        return None;
+    }
+    let mut out = vec![0u8; period];
+    out[..2].copy_from_slice(&0xf872u16.to_le_bytes());
+    out[2..4].copy_from_slice(&0x4e1fu16.to_le_bytes());
+    out[4..6].copy_from_slice(&kind.to_le_bytes());
+    out[6..8].copy_from_slice(&(((len + 1) & !1) as u16 * 8).to_le_bytes());
+    for (i, pair) in core.chunks(2).enumerate() {
+        out[8 + 2 * i] = pair.get(1).copied().unwrap_or(0);
+        out[9 + 2 * i] = pair[0];
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod dts_core_tests {
     use super::{dts_core_channels, dts_core_packet};
@@ -4002,6 +4029,27 @@ mod dts_core_tests {
         assert_eq!(with(13, 1), Some(8));
         assert_eq!(with(16, 0), None);
         assert_eq!(dts_core_channels(&frame[..10]), None);
+    }
+
+    #[test]
+    fn iec61937_burst_matches_ffmpeg_spdif() {
+        // 512-sample, 48 kHz core of 1004 bytes (odd length exercises the swap padding).
+        let mut core = vec![0u8; 1003];
+        core[..4].copy_from_slice(&[0x7f, 0xfe, 0x80, 0x01]);
+        core[4] = 0xfc; core[5] = 0x3c; // NBLKS=15 -> 16 blocks
+        core[8] = 13 << 2;
+        core[1002] = 0xab;
+        let out = super::dts_iec61937(&core).unwrap();
+        assert_eq!(out.len(), 2048);
+        assert_eq!(out[..8], [0x72, 0xf8, 0x1f, 0x4e, 0x0b, 0x00, 0x60, 0x1f]);
+        assert_eq!(out[8..12], [0xfe, 0x7f, 0x01, 0x80]);
+        assert_eq!((out[8 + 1002], out[9 + 1002]), (0, 0xab));
+        assert!(out[8 + 1004..].iter().all(|b| *b == 0));
+        assert!(super::dts_iec61937(&vec![0u8; 2041]).is_none());
+        let mut big = core.clone(); big.resize(2041, 0);
+        assert!(super::dts_iec61937(&big).is_none(), "1536 kb/s cores do not fit");
+        let mut khz44 = core.clone(); khz44[8] = 12 << 2;
+        assert!(super::dts_iec61937(&khz44).is_none());
     }
 
     fn core() -> Vec<u8> {
@@ -9021,6 +9069,7 @@ pub(crate) fn demux(
     path: String,
     acodec: String,
     achannels: i64,
+    dts_iec: bool,
     expected_p7: bool,
     runtime_ns: i64,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
@@ -9428,8 +9477,12 @@ pub(crate) fn demux(
                 let dts_audio = ai >= 0 && std::ffi::CStr::from_ptr(avcodec_get_name(
                     (*stream_codecpar(*streams.add(ai as usize))).codec_id
                 )).to_bytes() == b"dts";
+                let dts_iec = dts_audio && dts_iec;
                 if dts_audio {
                     crate::player::log("ff: DTS core extraction on (DTS-HD extensions discarded)");
+                }
+                if dts_iec {
+                    crate::player::log("ff: DTS core as IEC 61937 bursts in S16LE stereo PCM");
                 }
                 if let Some((fi, ch)) = aac_adts {
                     crate::player::log(&format!(
@@ -9898,10 +9951,31 @@ pub(crate) fn demux(
                             } else {
                                 None
                             };
+                        let dts_burst: Option<Vec<u8>> = match dts_core.as_deref() {
+                            Some(core) if dts_iec => {
+                                let Some(burst) = dts_iec61937(core) else {
+                                    crate::player::log("ff: DTS core does not fit an IEC 61937 burst; refusing audio feed");
+                                    if headroom.first_audio_ns.is_none() {
+                                        // An unsupported source, not decoder evidence: the open
+                                        // recovery converts on the server, as for the converter.
+                                        SHARED.native_audio_header_refused.store(true, Ordering::Release);
+                                    } else {
+                                        SHARED.demux_io_failed.store(true, Ordering::Release);
+                                    }
+                                    SHARED.demux_failed.store(true, Ordering::Release);
+                                    av_packet_unref(pkt);
+                                    break;
+                                };
+                                Some(burst)
+                            }
+                            _ => None,
+                        };
                         let single: Option<&[u8]> = if converter.is_some() {
                             None
                         } else if let Some(framed) = framed.as_deref() {
                             Some(framed)
+                        } else if let Some(burst) = dts_burst.as_deref() {
+                            Some(burst)
                         } else if let Some(core) = dts_core.as_deref() {
                             Some(core)
                         } else {

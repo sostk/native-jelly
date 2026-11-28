@@ -59,6 +59,12 @@ pub(super) fn execute(command: PreferenceCmd) {
                 nj_machine::idle::invalidate();
             });
         }
+        PreferenceCmd::DtsPassthrough { value, reply } => {
+            let _ = nj_base::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_dts_passthrough(value));
+                nj_machine::idle::invalidate();
+            });
+        }
         PreferenceCmd::EpisodeNavigation { value, reply } => {
             let _ = nj_base::storage_worker::submit_retained(move || {
                 let _ = reply.send(crate::route::set_episode_navigation(value));

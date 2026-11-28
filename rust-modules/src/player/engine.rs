@@ -806,7 +806,7 @@ fn bf_split(data: &[u8], aud5: u8) -> Vec<usize> {
 }
 
 /// Build the streamed BUFFERSTREAM Load payload from PAYLOAD_AV, substituting the item's real
-/// video/audio codecs + a sink envelope. video = "H264"|"H265", audio = "AC3"|"AC3 PLUS"|"AAC"|"DTS".
+/// video/audio codecs + a sink envelope. video = "H264"|"H265", audio = "AC3"|"AC3 PLUS"|"AAC"|"DTS"|"PCM" (DTS passthrough).
 /// What the Load's `adaptiveStreaming` block declares: the sink the pipeline ALLOCATES for, on the
 /// firmwares that allocate against the declaration rather than the bitstream (webOS 10.3.1,
 /// measured — `docs/webos10-resource-allocation.md`).
@@ -1123,7 +1123,46 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
         ));
     }
     let p = with_dolby_hdr_info(&p, video, crate::route::stream_dv_presentation(ps));
-    with_immersive(&p, audio, crate::route::stream_immersive(ps))
+    with_iec_pcm_info(&with_immersive(&p, audio, crate::route::stream_immersive(ps)), audio)
+}
+
+/// Does this attempt hand its DTS to a receiver as IEC 61937 bursts ([`with_iec_pcm_info`])? The
+/// owner's setting, captured in the attempt's caps, and the TV's sound output read at play start:
+/// the bursts are noise to anything but a DTS decoder, so TV speakers, headphones and Bluetooth
+/// keep the ordinary DTS declaration. Logged once per start, with the reason when it is not used.
+fn dts_iec_ready(caps: &nj_platform::devcaps::Caps) -> bool {
+    if !caps.dts_passthrough {
+        return false;
+    }
+    // A fresh reading for this start, not the one the attempt's caps saw: the owner may have
+    // moved the sound to the set's speakers since, and there the bursts are full-scale noise. One
+    // bus round trip; an output that does not answer in time is unknown, which keeps DTS declared.
+    let asked = nj_platform::devcaps::sound_output::seq();
+    nj_platform::devcaps::sound_output::refresh();
+    let output = nj_platform::devcaps::sound_output::fresh_since(asked, std::time::Duration::from_millis(1200));
+    let ready = output.is_receiver();
+    log(&format!(
+        "start_bufferfeed: DTS passthrough {} (sound output {})",
+        if ready { "on: core as IEC 61937 bursts in S16LE stereo PCM" } else { "off" },
+        output.label()
+    ));
+    ready
+}
+
+/// The `PCM` declaration DTS passthrough uses: LG's 2-channel 48 kHz S16 input, the one PCM shape
+/// libpf's tables name (`LUT_ChannelModeType` stops at stereo, `LUT_SampleRateType` at 48 kHz) and
+/// the IEC 61937 carrier of a DTS core. Declared as `DTS`, the C1 (webOS 6) refuses the Load with
+/// `601 Resource Allocation Error`. `sampleRate` is in kilohertz, the unit libpf matches it in.
+/// Spliced at the `provider` anchor like [`with_opus_info`]; any other declaration is unchanged.
+fn with_iec_pcm_info(p: &str, audio: &str) -> String {
+    if audio != "PCM" {
+        return p.to_string();
+    }
+    p.replacen(
+        r#""provider":"nativejelly""#,
+        r#""provider":"nativejelly","pcmInfo":{"format":"S16LE","channelMode":"stereo","layout":"interleaved","sampleRate":48,"bitsPerSample":16}"#,
+        1,
+    )
 }
 
 /// The `contents.immersive` node — **the Dolby Atmos half of the same envelope**, and the reason
@@ -1614,6 +1653,7 @@ fn start_bufferfeed_inner(
     // The LG-side audio name the payload ended up carrying, hoisted so the `load:` line below can
     // report it. "-" is the video-only case, where there is no audio ES to name.
     let mut audio_declared: &str = "-";
+    let mut dts_iec = false;
     // ...and the video name beside it, for the same reason and to keep the codec->name mapping
     // written ONCE (`LoadVideo`): the `load:` line below would otherwise re-read the route and
     // re-derive it.
@@ -1664,6 +1704,8 @@ fn start_bufferfeed_inner(
             if converted {
                 log(&format!("start_bufferfeed: {codec} audio is converted to AC3 on the television"));
             }
+            dts_iec = ac == "DTS" && dts_iec_ready(&crate::route::attempt_caps(ps));
+            let ac = if dts_iec { "PCM" } else { ac };
             SHARED.dg_load_a.store(diagnostic, Ordering::Relaxed);
             audio_declared = ac;
             // The sink envelope — `adaptiveStreaming`'s maxWidth/maxHeight/maxFrameRate — used
@@ -1815,7 +1857,7 @@ fn start_bufferfeed_inner(
             let abr = crate::route::hls_abr_control(ps);
             let auto_original = crate::route::auto_original_watch(ps);
             stream_th = nj_base::task::spawn("demux", move || {
-                crate::ff::demux(origin, path, acodec, achannels, expected_p7, runtime_ns, abr, auto_original, aqp, aqap, hsp)
+                crate::ff::demux(origin, path, acodec, achannels, dts_iec, expected_p7, runtime_ns, abr, auto_original, aqp, aqap, hsp)
             });
             if stream_th.is_none() {
                 // Nothing will ever fill the AU queues, so there is no session to start. `hs` is
@@ -5974,6 +6016,23 @@ mod sink_envelope_tests {
         let ps = crate::route::PlaybackSession::IDLE;
         let payload = build_av_payload(&ps, "H264", "DTS", ENVELOPE_FHD60);
         assert!(payload.contains(r#""audio":"DTS""#));
+    }
+
+    #[test]
+    fn dts_passthrough_is_declared_as_lgs_stereo_48k_pcm_input() {
+        let ps = crate::route::PlaybackSession::IDLE;
+        let payload = build_av_payload(&ps, "H264", "PCM", ENVELOPE_FHD60);
+        let v: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        let contents = &v["args"][0]["option"]["externalStreamingInfo"]["contents"];
+        assert_eq!(contents["codec"]["audio"], "PCM");
+        assert_eq!(contents["pcmInfo"], serde_json::json!({
+            "format": "S16LE", "channelMode": "stereo", "layout": "interleaved", "sampleRate": 48, "bitsPerSample": 16
+        }));
+        for audio in ["DTS", "AC3", "AAC"] {
+            assert!(!build_av_payload(&ps, "H264", audio, ENVELOPE_FHD60).contains("pcmInfo"), "{audio}");
+        }
+        let off = nj_platform::devcaps::Caps::assumed();
+        assert!(!dts_iec_ready(&off), "never without the setting in the attempt's caps");
     }
 
     #[test]

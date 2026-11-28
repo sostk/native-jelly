@@ -40,6 +40,8 @@ pub struct Port {
     pub frame_probe_fields: fn() -> String,
     /// Ask the set for its volume and mute without waiting; the answer lands in `devcaps::volume`.
     pub refresh_volume: fn(),
+    /// Ask the set where its sound goes without waiting; the answer lands in `devcaps::sound_output`.
+    pub refresh_sound_output: fn(),
     /// The Starfish-shaped verb sink (see `sink::VideoSink`); the OS-neutral sink is step L15b.
     /// Read only by [`sink::installed`], the one way out of `tv` for it.
     pub sink: &'static dyn sink::VideoSink,
@@ -74,6 +76,7 @@ static ABSENT: Port = Port {
     frame_probe_acquired: nothing,
     frame_probe_fields: String::new,
     refresh_volume: nothing,
+    refresh_sound_output: nothing,
     sink: &sink::NoSink,
 };
 
@@ -101,3 +104,4 @@ pub fn probe_device() { (port().probe_device)() }
 pub fn start_capability_probe() { (port().start_capability_probe)() }
 pub fn system_locale() -> LocaleReply { (port().system_locale)() }
 pub fn refresh_volume() { (port().refresh_volume)() }
+pub fn refresh_sound_output() { (port().refresh_sound_output)() }

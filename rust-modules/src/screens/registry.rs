@@ -136,6 +136,7 @@ pub(crate) enum PreferenceCmd {
     DirectPlay { mode: crate::catalog::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
     NextEpisode { mode: crate::catalog::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
     InstantDpadSeeking { value: crate::catalog::session::InstantDpadSeeking, reply: std::sync::mpsc::Sender<bool> },
+    DtsPassthrough { value: crate::catalog::session::DtsPassthrough, reply: std::sync::mpsc::Sender<bool> },
     EpisodeNavigation { value: crate::catalog::session::EpisodeNavigation, reply: std::sync::mpsc::Sender<bool> },
     SkipInterval { interval: crate::catalog::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
     RootBack { choice: crate::catalog::session::RootBack, reply: std::sync::mpsc::Sender<bool> },

@@ -45,6 +45,7 @@ use std::sync::OnceLock;
 pub mod dv;
 pub mod hdr;
 pub mod volume;
+pub mod sound_output;
 
 /// The AUDIO codec set the buffer-feed PIPELINE decodes. This is the software half of a
 /// two-sided test — what our demuxer/payload path can feed, before asking whether this
@@ -100,6 +101,28 @@ static AUDIO_CONVERTER: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 pub fn set_audio_converter(available: bool) {
     AUDIO_CONVERTER.store(available, std::sync::atomic::Ordering::Relaxed);
 }
+
+/// The owner's DTS passthrough setting, restored at boot and written when it changes. Folded into
+/// an attempt's snapshot by [`effective_caps`] only while the set reports a receiver output
+/// ([`sound_output`]).
+static DTS_PASSTHROUGH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The DTS passthrough setting as last recorded.
+pub fn dts_passthrough() -> bool {
+    DTS_PASSTHROUGH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Record the DTS passthrough setting, and when it is on, ask where the sound goes.
+pub fn set_dts_passthrough(on: bool) {
+    DTS_PASSTHROUGH.store(on, std::sync::atomic::Ordering::Relaxed);
+    if on {
+        sound_output::refresh();
+    }
+}
+
+/// The widest DTS track passthrough admits: a DTS-HD MA or DTS:X 7.1 track, whose 5.1 core is what
+/// reaches the receiver (`ff::dts_core_packet`).
+pub const DTS_PASSTHROUGH_MAX_CHANNELS: u32 = 8;
 
 const CAPS_TABLE: &str = "/etc/umediaserver/device_codec_capability_config.json";
 
@@ -220,6 +243,10 @@ pub struct Caps {
     /// `dvfirstpicture` dev trigger asks. Carried by the attempt's caps; it never reaches the
     /// server profile.
     pub dv_first_picture: DvFirstPicture,
+    /// DTS goes to an external receiver as IEC 61937 bursts, not to the set's decoder
+    /// ([`Caps::with_dts_passthrough`]). False in `assumed()` and in the table read;
+    /// [`effective_caps`] sets it for a play attempt.
+    pub dts_passthrough: bool,
 }
 
 /// The value [`caps`] answers before [`probe`] has run: [`Caps::assumed`].
@@ -250,6 +277,7 @@ impl Caps {
             native_audio_limits: Default::default(),
             audio_converter: false,
             dv_first_picture: DvFirstPicture::AnyIrap,
+            dts_passthrough: false,
         }
     }
 
@@ -596,6 +624,7 @@ fn parse(s: &str) -> Option<Caps> {
         native_audio_limits: Default::default(),
         audio_converter: false,
         dv_first_picture: DvFirstPicture::AnyIrap,
+        dts_passthrough: false,
     })
 }
 
@@ -712,6 +741,20 @@ impl Caps {
 
     /// This value less the stored `rows` watched on `build`. Pure, monotone and
     /// idempotent: it only ever removes.
+    /// DTS for a receiver: its core is sent as IEC 61937 bursts in stereo PCM and decoded by the
+    /// receiver, so the set's DTS decoder row, its channel ceiling, a decoder ranked off and a
+    /// stored refusal of the `DTS` declaration no longer apply. Any width is admitted up to
+    /// [`DTS_PASSTHROUGH_MAX_CHANNELS`].
+    pub fn with_dts_passthrough(mut self) -> Caps {
+        self.dts_passthrough = true;
+        self.native_audio_limits.remove("dts");
+        self.audio_channels.insert("dts".into(), DTS_PASSTHROUGH_MAX_CHANNELS);
+        if !self.audio_has("dts") {
+            self.audio = if self.audio.is_empty() { "dts".into() } else { format!("{},dts", self.audio) };
+        }
+        self
+    }
+
     pub fn minus(&self, rows: &[Refusal], build: &str) -> Caps {
         let mut next = self.clone();
         for row in rows.iter().filter(|row| row.watched_on(build)) {
@@ -744,6 +787,13 @@ pub fn effective_caps(rows: &[Refusal]) -> std::sync::Arc<Caps> {
         _ => boot.clone(),
     };
     next.audio_converter |= AUDIO_CONVERTER.load(std::sync::atomic::Ordering::Relaxed);
+    if DTS_PASSTHROUGH.load(std::sync::atomic::Ordering::Relaxed) {
+        // The reading this attempt uses is the one already in; the nudge keeps the next fresh.
+        sound_output::refresh();
+        if sound_output::latest().is_receiver() {
+            next = next.with_dts_passthrough();
+        }
+    }
     std::sync::Arc::new(next)
 }
 
@@ -1349,6 +1399,28 @@ mod tests {
             assert!(!apply_dv_first_picture(&mut c, codename), "{codename:?}");
             assert_eq!(c.dv_first_picture, DvFirstPicture::AnyIrap, "{codename:?}");
         }
+    }
+
+    #[test]
+        fn dts_passthrough_admits_any_width_past_the_table_ranks_and_refusals() {
+        let mut caps = parse(REAL).unwrap();
+        apply_audio_restrictions(&mut caps, "unmeasured", "[rank]\navdec_dca=0");
+        caps.native_audio_limits.insert("dts".into(), 0);
+        assert!(!caps.audio_supports("dts", 6) && !caps.forced_feeds_audio("dca"));
+        let on = caps.clone().with_dts_passthrough();
+        assert!(on.dts_passthrough);
+        assert!(on.audio_has("dca"));
+        for channels in [2, 6, 8] {
+            assert!(on.audio_supports("dts", channels), "{channels}");
+            assert!(on.forced_supports_audio("dts", channels), "{channels}");
+        }
+        // Only the core is fed, so the declared width is clamped to it (`fed_audio_channels`).
+        assert!(on.audio_supports("dts", 9));
+        assert_eq!(on.clone().with_dts_passthrough(), on, "idempotent");
+        let mut no_dts = Caps::assumed();
+        no_dts.audio.clear();
+        assert_eq!(no_dts.with_dts_passthrough().audio, "dts");
+        assert!(!Caps::assumed().dts_passthrough, "off unless an attempt turns it on");
     }
 
     #[test]
