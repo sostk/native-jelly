@@ -1,4 +1,18 @@
 {
   "settings.playback.dts_passthrough": "Audio sin pérdidas al receptor",
-  "settings.playback.dts_passthrough.copy": "Envía las pistas DTS y Dolby TrueHD sin cambios a un receptor AV o barra de sonido, que las decodifica. Por HDMI ARC/eARC, DTS-HD MA viaja dentro del paso directo Dolby Digital Plus del televisor; TrueHD, DTS:X y DTS-HD MA de alta tasa necesitan además compatibilidad HBR, que un paquete aparte puede añadir en un televisor con root. Si no, y por óptico, DTS se reproduce con su núcleo 5.1 y TrueHD como Dolby Digital. Solo se usa mientras el sonido del televisor sale por esa conexión; ajusta la Salida de sonido digital en Paso directo."
+  "settings.playback.dts_passthrough.copy": "Envía las pistas DTS y Dolby TrueHD sin cambios a un receptor AV o barra de sonido, que las decodifica. Por HDMI ARC/eARC, DTS-HD MA viaja dentro del paso directo Dolby Digital Plus del televisor; TrueHD, DTS:X y DTS-HD MA de alta tasa necesitan además compatibilidad HBR, que el ajuste Atmos, TrueHD y DTS:X de abajo puede añadir en un televisor con root. Si no, y por óptico, DTS se reproduce con su núcleo 5.1 y TrueHD como Dolby Digital. Solo se usa mientras el sonido del televisor sale por esa conexión; ajusta la Salida de sonido digital en Paso directo.",
+  "settings.playback.hbr_support": "Atmos, TrueHD y DTS:X (root)",
+  "settings.playback.hbr_support.copy": "Requiere un televisor con root y Homebrew Channel. TrueHD y Atmos, DTS:X y DTS-HD MA a tasa completa necesitan el enlace HDMI eARC del televisor en su modo de 8 canales y alta tasa de bits (HBR), que LG no abre a las aplicaciones. Native Jelly no incluye el módulo del kernel que lo abre: Descargar e instalar lo obtiene del repositorio de Native Jelly en GitHub, lo comprueba y lo carga en el kernel del televisor ahora y en cada arranque. Quitar lo deshace.",
+  "settings.playback.hbr_support.installed": "Instalado",
+  "settings.playback.hbr_support.not_installed": "No instalado",
+  "settings.playback.hbr_support.install": "Descargar e instalar",
+  "settings.playback.hbr_support.remove": "Quitar",
+  "settings.playback.hbr_support.question": "¿Instalar el módulo del kernel HBR?",
+  "settings.playback.hbr_support.body": "Native Jelly descargará el módulo earc_route (GPL-2.0, unos 30 KB) de github.com/sostk/native-jelly, lo comprobará con la copia con la que se compiló esta versión y lo instalará como root a través de Homebrew Channel. Se ejecuta en el kernel del televisor y se vuelve a cargar en cada arranque. Se probó en un LG C1; en un televisor para el que no se compiló, se niega a cargarse y nada cambia. Úsalo bajo tu propia responsabilidad.",
+  "settings.playback.hbr_support.confirm": "Instalar",
+  "settings.playback.hbr_support.installing": "Descargando e instalando…",
+  "settings.playback.hbr_support.removing": "Quitando…",
+  "settings.playback.hbr_support.no_root": "Esto requiere un televisor con root y Homebrew Channel.",
+  "settings.playback.hbr_support.download_failed": "No se pudo descargar el módulo. Comprueba la conexión e inténtalo de nuevo.",
+  "settings.playback.hbr_support.refused": "El televisor lo rechazó: {why}"
 }

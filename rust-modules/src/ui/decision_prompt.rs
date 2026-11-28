@@ -26,6 +26,11 @@ impl DecisionPrompt {
         self.alert.set_tone(Tone::Neutral);
         self.alert.open_with_body(question, body);
     }
+    /// [`Self::open`] with this question's own affirmative label (it stays until the next call).
+    pub(crate) fn open_affirming(&mut self, question: &'static CStr, body: &'static str, affirm_label: &'static CStr) {
+        self.affirm_label = affirm_label;
+        self.open(question, body);
+    }
     pub(crate) fn is_open(&self) -> bool { self.alert.is_open() }
     pub(crate) fn visible(&self) -> bool { self.alert.visible() }
     pub(crate) fn owns(&self, elem: u32) -> bool { elem == self.cancel || elem == self.affirm }

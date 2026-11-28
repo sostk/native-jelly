@@ -1,4 +1,18 @@
 {
   "settings.playback.dts_passthrough": "Гук без страт на рэсівер",
-  "settings.playback.dts_passthrough.copy": "Перадае дарожкі DTS і Dolby TrueHD без змен на AV-рэсівер або саўндбар; ён іх і дэкадуе. Праз HDMI ARC/eARC DTS-HD MA ідзе ўнутры скразной перадачы Dolby Digital Plus тэлевізара; для TrueHD, DTS:X і DTS-HD MA з высокім бітрэйтам патрэбна яшчэ падтрымка HBR, якую на тэлевізары з root можа дадаць асобны пакет. Інакш, а таксама праз оптыку, DTS прайграецца як ядро 5.1, а TrueHD — як Dolby Digital. Працуе, толькі пакуль гук тэлевізара ідзе на гэты выхад; выберыце для лічбавага выхаду гуку рэжым «Скразны канал»."
+  "settings.playback.dts_passthrough.copy": "Перадае дарожкі DTS і Dolby TrueHD без змен на AV-рэсівер або саўндбар; ён іх і дэкадуе. Праз HDMI ARC/eARC DTS-HD MA ідзе ўнутры скразной перадачы Dolby Digital Plus тэлевізара; для TrueHD, DTS:X і DTS-HD MA з высокім бітрэйтам патрэбна яшчэ падтрымка HBR, якую на тэлевізары з root можа дадаць налада «Atmos, TrueHD і DTS:X» ніжэй. Інакш, а таксама праз оптыку, DTS прайграецца як ядро 5.1, а TrueHD — як Dolby Digital. Працуе, толькі пакуль гук тэлевізара ідзе на гэты выхад; выберыце для лічбавага выхаду гуку рэжым «Скразны канал».",
+  "settings.playback.hbr_support": "Atmos, TrueHD і DTS:X (root)",
+  "settings.playback.hbr_support.copy": "Патрэбны тэлевізар з root і Homebrew Channel. Для TrueHD і Atmos, DTS:X і DTS-HD MA з поўным бітрэйтам канал HDMI eARC тэлевізара павінен працаваць у 8-канальным рэжыме з высокім бітрэйтам (HBR), які LG не адкрывае праграмам. Native Jelly не ўтрымлівае модуль ядра, які яго адкрывае: «Спампаваць і ўсталяваць» бярэ яго з рэпазіторыя Native Jelly на GitHub, правярае і загружае ў ядро тэлевізара зараз і пры кожным запуску. «Выдаліць» адмяняе гэта.",
+  "settings.playback.hbr_support.installed": "Усталявана",
+  "settings.playback.hbr_support.not_installed": "Не ўсталявана",
+  "settings.playback.hbr_support.install": "Спампаваць і ўсталяваць",
+  "settings.playback.hbr_support.remove": "Выдаліць",
+  "settings.playback.hbr_support.question": "Усталяваць модуль ядра HBR?",
+  "settings.playback.hbr_support.body": "Native Jelly спампуе модуль earc_route (GPL-2.0, каля 30 КБ) з github.com/sostk/native-jelly, зверыць яго з копіяй, з якой сабрана гэтая версія, і ўсталюе ад root праз Homebrew Channel. Ён працуе ў ядры тэлевізара і загружаецца зноў пры кожным запуску. Правераны на LG C1; на тэлевізары, для якога ён не сабраны, ён не загрузіцца і нічога не зменіцца. Выкарыстоўвайце на сваю рызыку.",
+  "settings.playback.hbr_support.confirm": "Усталяваць",
+  "settings.playback.hbr_support.installing": "Спампоўка і ўсталяванне…",
+  "settings.playback.hbr_support.removing": "Выдаленне…",
+  "settings.playback.hbr_support.no_root": "Патрэбны тэлевізар з root і Homebrew Channel.",
+  "settings.playback.hbr_support.download_failed": "Не ўдалося спампаваць модуль. Праверце злучэнне і паспрабуйце зноў.",
+  "settings.playback.hbr_support.refused": "Тэлевізар адмовіў: {why}"
 }

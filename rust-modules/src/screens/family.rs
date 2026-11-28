@@ -111,6 +111,7 @@ pub(crate) enum PickerKind {
     InstantDpadSeeking,
     EpisodeNavigation,
     DtsPassthrough,
+    HbrSupport,
 }
 
 impl SettingsPage {
@@ -129,7 +130,7 @@ impl PickerKind {
     /// The page that lists this field (its picker is pushed from there and returns there).
     pub(crate) fn parent(self) -> SettingsPage {
         match self {
-            PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::SkipInterval | PickerKind::InstantDpadSeeking | PickerKind::EpisodeNavigation | PickerKind::DtsPassthrough => SettingsPage::Playback,
+            PickerKind::Quality | PickerKind::DirectPlay | PickerKind::SubtitleSize | PickerKind::SubtitlePosition | PickerKind::NextEpisode | PickerKind::SkipInterval | PickerKind::InstantDpadSeeking | PickerKind::EpisodeNavigation | PickerKind::DtsPassthrough | PickerKind::HbrSupport => SettingsPage::Playback,
             PickerKind::AudioLanguage | PickerKind::SubtitleMode | PickerKind::SubtitleLanguage | PickerKind::DefaultAudioTrack => SettingsPage::AudioSubtitles,
         }
     }

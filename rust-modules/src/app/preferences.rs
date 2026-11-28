@@ -65,6 +65,15 @@ pub(super) fn execute(command: PreferenceCmd) {
                 nj_machine::idle::invalidate();
             });
         }
+        // A download and a root command (seconds): its own thread, never the storage worker.
+        PreferenceCmd::HbrSupport { install, reply } => {
+            let started = nj_base::task::spawn_small("hbr support", move || {
+                let result = if install { crate::player::hbr_support::install() } else { crate::player::hbr_support::remove() };
+                let _ = reply.send(result);
+                nj_machine::idle::invalidate();
+            });
+            if !started { nj_base::eventlog::log("hbr: worker not started"); }
+        }
         PreferenceCmd::EpisodeNavigation { value, reply } => {
             let _ = nj_base::storage_worker::submit_retained(move || {
                 let _ = reply.send(crate::route::set_episode_navigation(value));

@@ -42,6 +42,9 @@ pub struct Port {
     pub refresh_volume: fn(),
     /// Ask the set where its sound goes without waiting; the answer lands in `devcaps::sound_output`.
     pub refresh_sound_output: fn(),
+    /// Run a shell command as root through Homebrew Channel (rooted TVs only) and answer its
+    /// output, or why it could not run. Blocking, up to a minute: call it from a worker thread.
+    pub root_exec: fn(&str) -> Result<String, String>,
     /// The Starfish-shaped verb sink (see `sink::VideoSink`); the OS-neutral sink is step L15b.
     /// Read only by [`sink::installed`], the one way out of `tv` for it.
     pub sink: &'static dyn sink::VideoSink,
@@ -77,6 +80,7 @@ static ABSENT: Port = Port {
     frame_probe_fields: String::new,
     refresh_volume: nothing,
     refresh_sound_output: nothing,
+    root_exec: |_| Err("no television".into()),
     sink: &sink::NoSink,
 };
 
@@ -105,3 +109,4 @@ pub fn start_capability_probe() { (port().start_capability_probe)() }
 pub fn system_locale() -> LocaleReply { (port().system_locale)() }
 pub fn refresh_volume() { (port().refresh_volume)() }
 pub fn refresh_sound_output() { (port().refresh_sound_output)() }
+pub fn root_exec(command: &str) -> Result<String, String> { (port().root_exec)(command) }

@@ -27,6 +27,7 @@ pub(crate) mod ass_source; // bounded embedded scripts and subtitle presentation
 pub(crate) mod dv_start; // the Dolby Vision landing guard: withdraw the node when the splitter would skip the landing
 pub(crate) mod engine;
 pub(crate) mod es_carrier; // lossless audio to a receiver: DTS-HD/TrueHD bursts swapped into LG's DD+ pass-through route
+pub(crate) mod hbr_support; // HBR on rooted webOS 6 TVs: download, verify and install earc_route on request
 pub(crate) mod lifecycle;
 pub(crate) mod machine;
 pub(crate) mod native_stall; // the pre-picture watchdog for a swallowed native surround Opus feed

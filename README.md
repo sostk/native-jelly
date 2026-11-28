@@ -129,10 +129,15 @@ Jelly does not install kernel modules itself: it uses HBR automatically whenever
 provides the module's `/dev/earc_route` lease node in Native Jelly's sandbox, and behaves exactly as
 without HBR when none does.
 
-That package is **Native Jelly HBR**, a small companion app in [`companion/hbr/`](companion/hbr/)
-(webOS 6, kernel 4.4, rooted with the Homebrew Channel). Install it, open Native Jelly once, then open
-Native Jelly HBR and follow its five steps; *Turn on HBR* loads the module now and at every start of
-the TV, and *Turn off and remove* undoes it. The module runs in the TV's kernel, so use it at your
+On a rooted webOS 6 TV (kernel 4.4, Homebrew Channel) there are two ways to install it, both opt-in:
+
+- **From Native Jelly.** With *Lossless audio to receiver* on, *Settings → Video & playback* shows
+  *Atmos, TrueHD and DTS:X (root)*. Choose **Download and install** and confirm: Native Jelly
+  downloads the module from this repository at a pinned commit, refuses it unless its SHA-256 matches
+  the one built into the app, and installs it as root through the Homebrew Channel, loaded now and at
+  every start of the TV. **Remove** undoes it.
+- **With Native Jelly HBR**, a small companion app in [`companion/hbr/`](companion/hbr/) that does
+  the same in five guided steps. The module runs in the TV's kernel, so use it at your
 own risk. Support for webOS 6 in dts_restore_plus's **DTS Enabler** app is being proposed upstream;
 once it is there, that app replaces this one. Tested on an LG C1 (webOS 6) with a Sony STR-DN1080 and with
 an LG soundbar on eARC.

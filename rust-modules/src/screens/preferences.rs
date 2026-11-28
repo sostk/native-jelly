@@ -19,6 +19,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::sync::mpsc::{self, Receiver};
 use crate::jf::preferences::{AudioPreferences, PreferenceError, PreferenceRequest, PreferenceSnapshot, PreferenceUpdate, SubtitleMode};
+use crate::player::hbr_support::HbrError;
 use crate::route::{DirectPlayMode, NextEpisodeMode, Quality, SkipInterval, InstantDpadSeeking, DtsPassthrough, EpisodeNavigation, SubtitlePosition, SubtitleSize};
 use crate::ui::form::{Form, FormId, FormSection, FormTable, RowKey, RowKind};
 use crate::ui::frame::Budget;
@@ -47,6 +48,7 @@ impl PickerKind {
         Self::NextEpisode => nj_platform::i18n::msg::settings_playback_next_episode(),
         Self::InstantDpadSeeking => nj_platform::i18n::msg::settings_playback_instant_dpad_seeking(),
         Self::DtsPassthrough => nj_platform::i18n::msg::settings_playback_dts_passthrough(),
+        Self::HbrSupport => nj_platform::i18n::msg::settings_playback_hbr_support(),
         Self::EpisodeNavigation => nj_platform::i18n::msg::settings_playback_episode_navigation(),
         Self::SkipInterval => nj_platform::i18n::msg::settings_playback_skip_interval(),
         Self::AudioLanguage => nj_platform::i18n::msg::settings_audio_language(), Self::SubtitleMode => nj_platform::i18n::msg::settings_audio_subtitles(),
@@ -62,6 +64,7 @@ impl PickerKind {
         Self::NextEpisode => nj_platform::i18n::msg::settings_playback_next_episode_copy(),
         Self::InstantDpadSeeking => nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_copy(),
         Self::DtsPassthrough => nj_platform::i18n::msg::settings_playback_dts_passthrough_copy(),
+        Self::HbrSupport => nj_platform::i18n::msg::settings_playback_hbr_support_copy(),
         Self::EpisodeNavigation => nj_platform::i18n::msg::settings_playback_episode_navigation_copy(),
         Self::SkipInterval => nj_platform::i18n::msg::settings_playback_skip_interval_copy(),
         Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::DefaultAudioTrack => nj_platform::i18n::msg::settings_audio_account_note(),
@@ -69,7 +72,7 @@ impl PickerKind {
     /// The field-list page this field belongs to.
     fn kind(self) -> Kind {
         match self {
-            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::SkipInterval | Self::InstantDpadSeeking | Self::EpisodeNavigation | Self::DtsPassthrough => Kind::Playback,
+            Self::Quality | Self::DirectPlay | Self::SubtitleSize | Self::SubtitlePosition | Self::NextEpisode | Self::SkipInterval | Self::InstantDpadSeeking | Self::EpisodeNavigation | Self::DtsPassthrough | Self::HbrSupport => Kind::Playback,
             Self::AudioLanguage | Self::SubtitleMode | Self::SubtitleLanguage | Self::DefaultAudioTrack => Kind::AudioSubtitles,
         }
     }
@@ -85,7 +88,7 @@ impl Kind {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), SkipInterval(SkipInterval), EpisodeNavigation(EpisodeNavigation), InstantDpadSeeking(InstantDpadSeeking), DtsPassthrough(DtsPassthrough), Language(String), Mode(SubtitleMode), DefaultTrack(bool) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), SubtitleSize(SubtitleSize), SubtitlePosition(SubtitlePosition), NextEpisode(NextEpisodeMode), SkipInterval(SkipInterval), EpisodeNavigation(EpisodeNavigation), InstantDpadSeeking(InstantDpadSeeking), DtsPassthrough(DtsPassthrough), HbrSupport(bool), Language(String), Mode(SubtitleMode), DefaultTrack(bool) }
 
 /// The hashed half of a transaction: what the page shows while a load or save is in flight.
 struct Io { busy: bool, status: String }
@@ -123,6 +126,8 @@ fn copy_text<'a>(subject: Subject, status: &'a str, direct_play: DirectPlayMode)
 enum Pending {
     Account(Receiver<AccountPreferenceReply>),
     Local(Receiver<bool>),
+    /// HBR support being installed or removed (`player::hbr_support`): seconds, with a reason.
+    Hbr(Receiver<Result<(), HbrError>>),
 }
 
 thread_local! {
@@ -216,6 +221,14 @@ impl Txn {
             Value::DtsPassthrough(value) => PreferenceCmd::DtsPassthrough { value, reply },
             Value::EpisodeNavigation(value) => PreferenceCmd::EpisodeNavigation { value, reply },
             Value::SkipInterval(interval) => PreferenceCmd::SkipInterval { interval, reply },
+            Value::HbrSupport(install) => {
+                let (reply, rx) = mpsc::channel();
+                self.pending = Some(Pending::Hbr(rx)); io.busy = true; self.saving = true;
+                io.status = if install { nj_platform::i18n::msg::settings_playback_hbr_support_installing() }
+                    else { nj_platform::i18n::msg::settings_playback_hbr_support_removing() }.into();
+                fx.push(Fx::App(AppFx::Preferences(PreferenceCmd::HbrSupport { install, reply })));
+                return;
+            }
             _ => return,
         };
         self.pending = Some(Pending::Local(rx)); io.busy = true; self.saving = true;
@@ -229,7 +242,7 @@ impl Txn {
         self.load(io, fx);
     }
     fn poll(&mut self, io: &mut Io, fx: &mut Effects<'_, InnerHost>) -> Landed {
-        enum Receipt { Account(AccountPreferenceReply), Local(bool), Failed }
+        enum Receipt { Account(AccountPreferenceReply), Local(bool), Hbr(Result<(), HbrError>), Failed }
         let receipt = match &self.pending {
             Some(Pending::Account(rx)) => match rx.try_recv() {
                 Ok(result) => Some(Receipt::Account(result)),
@@ -237,6 +250,10 @@ impl Txn {
             },
             Some(Pending::Local(ticket)) => match ticket.try_recv() {
                 Ok(result) => Some(Receipt::Local(result)),
+                Err(mpsc::TryRecvError::Disconnected) => Some(Receipt::Failed), _ => None,
+            },
+            Some(Pending::Hbr(ticket)) => match ticket.try_recv() {
+                Ok(result) => Some(Receipt::Hbr(result)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(Receipt::Failed), _ => None,
             },
             None => None,
@@ -269,6 +286,8 @@ impl Txn {
             }
             Receipt::Local(true) => { io.status.clear(); if was_write { landed = Landed::Saved; } }
             Receipt::Local(false) | Receipt::Failed => io.status = nj_platform::i18n::msg::settings_playback_save_failed().into(),
+            Receipt::Hbr(Ok(())) => { io.status.clear(); if was_write { landed = Landed::Saved; } }
+            Receipt::Hbr(Err(error)) => io.status = hbr_failure(&error),
         }
         landed
     }
@@ -291,6 +310,7 @@ impl FormId for RowId {
             Self::Field(PickerKind::InstantDpadSeeking) => 7,
             Self::Field(PickerKind::EpisodeNavigation) => 8,
             Self::Field(PickerKind::DtsPassthrough) => 9,
+            Self::Field(PickerKind::HbrSupport) => 10,
             Self::Retry => 6,
         })
     }
@@ -330,6 +350,8 @@ pub(crate) struct PreferencesPage {
     episode_navigation: EpisodeNavigation,
     instant_dpad_seeking: InstantDpadSeeking,
     dts_passthrough: DtsPassthrough,
+    /// Whether HBR support was present when the rows were last built (`es_carrier::hbr_available`).
+    hbr: bool,
 }
 impl PreferencesPage {
     pub(crate) fn new(entry: EntryId, kind: Kind) -> Self {
@@ -338,7 +360,7 @@ impl PreferencesPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(), values: Vec::new() },
             copy: String::new(), txn: Txn::new(false),
             look: (crate::route::subtitle_size(), crate::route::subtitle_position()),
-            next_episode: crate::route::next_episode_mode(), skip_interval: crate::route::skip_interval(), instant_dpad_seeking: crate::route::instant_dpad_seeking(), dts_passthrough: crate::route::dts_passthrough(), episode_navigation: crate::route::episode_navigation() };
+            next_episode: crate::route::next_episode_mode(), skip_interval: crate::route::skip_interval(), instant_dpad_seeking: crate::route::instant_dpad_seeking(), dts_passthrough: crate::route::dts_passthrough(), hbr: crate::player::es_carrier::hbr_available(), episode_navigation: crate::route::episode_navigation() };
         s.rebuild(None);
         s
     }
@@ -366,12 +388,14 @@ impl PreferencesPage {
         self.next_episode = crate::route::next_episode_mode();
         self.instant_dpad_seeking = crate::route::instant_dpad_seeking();
         self.dts_passthrough = crate::route::dts_passthrough();
+        self.hbr = crate::player::es_carrier::hbr_available();
         self.episode_navigation = crate::route::episode_navigation();
         self.skip_interval = crate::route::skip_interval();
         self.copy = copy_text(Subject::Page(self.state.kind), &self.state.io.status, self.state.direct_play).into_owned();
         let inputs = FieldListInputs {
             kind: self.state.kind, quality: self.state.quality, direct_play: self.state.direct_play,
             prefs: self.txn.prefs(), busy: self.state.io.busy, show_retry: !self.state.io.status.is_empty(),
+            hbr_row: self.dts_passthrough.is_on() && crate::player::hbr_support::offered(),
         };
         self.state.values = fields_of(&inputs).iter()
             .map(|&f| field_readout(f, inputs.quality, inputs.direct_play, inputs.prefs)).collect();
@@ -400,6 +424,7 @@ impl PreferencesPage {
 /// Which fields `kind`'s list shows: Audio & Subtitles has none until a snapshot has loaded.
 fn fields_of(inputs: &FieldListInputs<'_>) -> &'static [PickerKind] {
     match inputs.kind {
+        Kind::Playback if inputs.hbr_row => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::SkipInterval, PickerKind::InstantDpadSeeking, PickerKind::EpisodeNavigation, PickerKind::DtsPassthrough, PickerKind::HbrSupport],
         Kind::Playback => &[PickerKind::Quality, PickerKind::DirectPlay, PickerKind::SubtitleSize, PickerKind::SubtitlePosition, PickerKind::NextEpisode, PickerKind::SkipInterval, PickerKind::InstantDpadSeeking, PickerKind::EpisodeNavigation, PickerKind::DtsPassthrough],
         Kind::AudioSubtitles if inputs.prefs.is_some() => &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::DefaultAudioTrack],
         _ => &[],
@@ -416,6 +441,7 @@ fn resolve_value(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
         PickerKind::NextEpisode => Value::NextEpisode(crate::route::next_episode_mode()),
         PickerKind::InstantDpadSeeking => Value::InstantDpadSeeking(crate::route::instant_dpad_seeking()),
         PickerKind::DtsPassthrough => Value::DtsPassthrough(crate::route::dts_passthrough()),
+        PickerKind::HbrSupport => Value::HbrSupport(crate::player::es_carrier::hbr_available()),
         PickerKind::EpisodeNavigation => Value::EpisodeNavigation(crate::route::episode_navigation()),
         PickerKind::SkipInterval => Value::SkipInterval(crate::route::skip_interval()),
         PickerKind::AudioLanguage => Value::Language(prefs.and_then(|p| p.audio_language.clone()).unwrap_or_default()),
@@ -449,6 +475,7 @@ fn field_options(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
                 else { nj_platform::i18n::msg::settings_playback_instant_dpad_seeking_off() }).into(), Value::DtsPassthrough(v))).collect(),
         PickerKind::SkipInterval => SkipInterval::LADDER.into_iter()
             .map(|i| (skip_interval_label(i), Value::SkipInterval(i))).collect(),
+        PickerKind::HbrSupport => hbr_options(crate::player::es_carrier::hbr_available()),
         PickerKind::SubtitleMode => SubtitleMode::ALL.into_iter()
             .map(|mode| (subtitle_mode_label(mode).into(), Value::Mode(mode))).collect(),
         PickerKind::DefaultAudioTrack => [true, false].into_iter()
@@ -485,6 +512,30 @@ fn field_readout(field: PickerKind, quality: Quality, direct_play: DirectPlayMod
     }
 }
 
+/// The HBR row's two options. Installed: *Installed* (checked) and *Remove*. Not installed: *Not
+/// installed* (checked) and *Download and install*, which the picker confirms before anything is
+/// downloaded (`PickerPage::pick`).
+fn hbr_options(installed: bool) -> Vec<(String, Value)> {
+    use nj_platform::i18n::msg;
+    if installed {
+        vec![(msg::settings_playback_hbr_support_installed().into(), Value::HbrSupport(true)),
+             (msg::settings_playback_hbr_support_remove().into(), Value::HbrSupport(false))]
+    } else {
+        vec![(msg::settings_playback_hbr_support_not_installed().into(), Value::HbrSupport(false)),
+             (msg::settings_playback_hbr_support_install().into(), Value::HbrSupport(true))]
+    }
+}
+
+/// What a failed HBR install or removal says under the picker's title.
+fn hbr_failure(error: &HbrError) -> String {
+    use nj_platform::i18n::msg;
+    match error {
+        HbrError::NoRoot => msg::settings_playback_hbr_support_no_root().into(),
+        HbrError::Download => msg::settings_playback_hbr_support_download_failed().into(),
+        HbrError::Refused(why) => msg::settings_playback_hbr_support_refused(why),
+    }
+}
+
 /// The inputs [`field_form`] builds a `Kind`'s field list from, so the builder reads no global.
 struct FieldListInputs<'a> {
     kind: Kind,
@@ -495,6 +546,8 @@ struct FieldListInputs<'a> {
     busy: bool,
     /// Show the Retry row: the account kind has a non-empty status message and nothing is in flight.
     show_retry: bool,
+    /// Show the HBR row: lossless audio to a receiver is on, on the firmware the module is built for.
+    hbr_row: bool,
 }
 /// The page's field list as a [`Form`]: each field a `Nav` item onto its picker page, plus the
 /// Audio & Subtitles Retry button, built from [`FieldListInputs`] alone.
@@ -591,6 +644,7 @@ impl Machine<InnerHost> for PreferencesPage {
                     || self.next_episode != crate::route::next_episode_mode()
                     || self.instant_dpad_seeking != crate::route::instant_dpad_seeking()
                     || self.dts_passthrough != crate::route::dts_passthrough()
+                    || self.hbr != crate::player::es_carrier::hbr_available()
                     || self.episode_navigation != crate::route::episode_navigation()
                     || self.skip_interval != crate::route::skip_interval() {
                     self.rebuild_keeping();
@@ -653,7 +707,7 @@ impl Screen<InnerHost> for PreferencesPage {
 pub(super) fn nav_items_for_test(kind: Kind, prefs: Option<&AudioPreferences>) -> Vec<(u32, SettingsPage)> {
     let mut form: FormTable<RowId, Action, SettingsPage> = FormTable::new(BAND);
     form.set(field_form(&FieldListInputs { kind, quality: Quality::Original, direct_play: DirectPlayMode::Auto,
-        prefs, busy: false, show_retry: false }), None);
+        prefs, busy: false, show_retry: false, hbr_row: false }), None);
     (0..form.table.n_rows() as usize).filter_map(|i| match form.binding_at(i)?.kind.clone() {
         RowKind::Nav(dest) => Some((form.key_at(i)?.0, dest)),
         _ => None,

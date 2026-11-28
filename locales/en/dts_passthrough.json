@@ -4,7 +4,66 @@
     "description": "Playback preference title: send DTS audio unchanged to an external receiver."
   },
   "settings.playback.dts_passthrough.copy": {
-    "value": "Send DTS and Dolby TrueHD soundtracks unchanged to an AV receiver or soundbar, which decodes them. On HDMI eARC/ARC, DTS-HD MA travels inside the TV's Dolby Digital Plus pass-through; TrueHD, DTS:X and high-bitrate DTS-HD MA also need HBR support, which a separate package can add on a rooted TV. Otherwise, and on optical, DTS plays as its 5.1 core and TrueHD as Dolby Digital. Used only while the TV's sound goes to that output; set Digital Sound Output to Pass Through.",
+    "value": "Send DTS and Dolby TrueHD soundtracks unchanged to an AV receiver or soundbar, which decodes them. On HDMI eARC/ARC, DTS-HD MA travels inside the TV's Dolby Digital Plus pass-through; TrueHD, DTS:X and high-bitrate DTS-HD MA also need HBR support, which the Atmos, TrueHD and DTS:X setting below can add on a rooted TV. Otherwise, and on optical, DTS plays as its 5.1 core and TrueHD as Dolby Digital. Used only while the TV's sound goes to that output; set Digital Sound Output to Pass Through.",
     "description": "Playback preference explanation."
+  },
+  "settings.playback.hbr_support": {
+    "value": "Atmos, TrueHD and DTS:X (root)",
+    "description": "Playback preference title: HBR (8-channel high-bitrate) audio support on a rooted TV."
+  },
+  "settings.playback.hbr_support.copy": {
+    "value": "Needs a rooted TV with the Homebrew Channel. TrueHD and Atmos, DTS:X and full-rate DTS-HD MA need the TV's HDMI eARC link in its 8-channel high-bitrate (HBR) mode, which LG does not open to apps. Native Jelly does not include the kernel module that opens it: Download and install fetches it from Native Jelly's GitHub repository, checks it, and loads it into the TV's kernel now and at every start. Remove undoes it.",
+    "description": "HBR support explanation: what installing it does."
+  },
+  "settings.playback.hbr_support.installed": {
+    "value": "Installed",
+    "description": "HBR support value: installed and visible to the app."
+  },
+  "settings.playback.hbr_support.not_installed": {
+    "value": "Not installed",
+    "description": "HBR support value: not installed."
+  },
+  "settings.playback.hbr_support.install": {
+    "value": "Download and install",
+    "description": "HBR support choice: download the kernel module and install it (asks first)."
+  },
+  "settings.playback.hbr_support.remove": {
+    "value": "Remove",
+    "description": "HBR support choice: remove the kernel module and everything installed with it."
+  },
+  "settings.playback.hbr_support.question": {
+    "value": "Install the HBR kernel module?",
+    "description": "Confirmation question before downloading and installing the HBR kernel module."
+  },
+  "settings.playback.hbr_support.body": {
+    "value": "Native Jelly will download the earc_route module (GPL-2.0, about 30 KB) from github.com/sostk/native-jelly, check it against the copy this version was built with, and install it as root through the Homebrew Channel. It runs in the TV's kernel and loads again at every start. It was tested on an LG C1; on a TV it was not built for, it refuses to load and nothing changes. Use it at your own risk.",
+    "description": "Confirmation body: what will be downloaded and installed, and the risk."
+  },
+  "settings.playback.hbr_support.confirm": {
+    "value": "Install",
+    "description": "Confirmation answer: go ahead and download and install the HBR module."
+  },
+  "settings.playback.hbr_support.installing": {
+    "value": "Downloading and installing…",
+    "description": "Status while the HBR module is downloaded and installed."
+  },
+  "settings.playback.hbr_support.removing": {
+    "value": "Removing…",
+    "description": "Status while the HBR module is removed."
+  },
+  "settings.playback.hbr_support.no_root": {
+    "value": "This needs a rooted TV with the Homebrew Channel.",
+    "description": "HBR install failed: the Homebrew Channel did not run the installer."
+  },
+  "settings.playback.hbr_support.download_failed": {
+    "value": "Could not download the module. Check the connection and try again.",
+    "description": "HBR install failed: download failed or the file did not match."
+  },
+  "settings.playback.hbr_support.refused": {
+    "value": "The TV refused: {why}",
+    "args": {
+      "why": "str"
+    },
+    "description": "HBR install failed: the installer's own reason (English, from the TV)."
   }
 }

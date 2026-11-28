@@ -84,6 +84,11 @@ pub(crate) fn available() -> bool {
     firmware_measured(nj_platform::tv::device::info().major) && !UNAVAILABLE.load(Ordering::Acquire)
 }
 
+/// Is this the firmware the carrier (and the HBR module, built for its kernel) was measured on?
+pub(crate) fn carrier_firmware() -> bool {
+    firmware_measured(nj_platform::tv::device::info().major)
+}
+
 fn firmware_measured(major: u32) -> bool {
     major == MEASURED_MAJOR
 }
@@ -93,8 +98,8 @@ pub(crate) fn on() -> bool {
     ON.load(Ordering::Acquire)
 }
 
-/// HBR is possible when the HBR support Native Jelly installs on rooted TVs has put a valid
-/// `earc_route` lease node in this app's sandbox.
+/// HBR is possible when the HBR support (`hbr_support`, or the companion app in `companion/hbr`)
+/// has put a valid `earc_route` lease node in this app's sandbox.
 pub(crate) fn hbr_available() -> bool {
     lease_node_matches().is_ok()
 }

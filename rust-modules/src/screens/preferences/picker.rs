@@ -8,7 +8,8 @@
 //! Retry row of a failed account write takes [`RETRY_KEY`], a number no option list reaches.
 //!
 //! **The transaction.** The page owns it end to end: it adopts the parent's confirmed snapshot (or
-//! loads one when there is none), asks the Direct Play *Forced* question before persisting it,
+//! loads one when there is none), asks the Direct Play *Forced* question before persisting it, and
+//! asks for permission before *Download and install* fetches and loads the HBR kernel module,
 //! submits through the same `AppFx::Preferences` paths, and pops on a DURABLE receipt. Choosing the
 //! checked option pops without a write — except Size and Position,
 //! which publish their live value before the write lands: there the checked row must also match the
@@ -54,6 +55,8 @@ pub(crate) struct PickerPage {
     copy: String,
     txn: Txn,
     alert: DecisionPrompt,
+    /// The pick the open alert is asking about; committed only on its affirmative answer.
+    awaiting: Option<Value>,
 }
 
 /// The picker's rows as a [`Form`], from plain inputs: one `Choice` per option (checked when it is
@@ -78,7 +81,7 @@ impl PickerPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(),
                 checked: u32::MAX, confirming: false, affirmative: false, alert_scroll: 0 },
             copy: String::new(), txn: Txn::new(true),
-            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, nj_platform::i18n::msg::settings_cancel_c(), nj_platform::i18n::msg::settings_playback_enable_force_c()) };
+            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, nj_platform::i18n::msg::settings_cancel_c(), nj_platform::i18n::msg::settings_playback_enable_force_c()), awaiting: None };
         s.rebuild(true);
         s
     }
@@ -159,7 +162,19 @@ impl PickerPage {
         // OK on the checked row is not a change, and writes nothing to the server.
         if self.current() == value && self.durable(&value) { self.pop(fx); return; }
         if value == Value::DirectPlay(DirectPlayMode::Forced) && self.state.direct_play != DirectPlayMode::Forced {
-            self.alert.open(nj_platform::i18n::msg::settings_playback_force_question_c(), nj_platform::i18n::msg::settings_playback_force_body());
+            self.alert.open_affirming(nj_platform::i18n::msg::settings_playback_force_question_c(), nj_platform::i18n::msg::settings_playback_force_body(),
+                nj_platform::i18n::msg::settings_playback_enable_force_c());
+            self.awaiting = Some(value);
+            self.state.confirming = true; self.state.affirmative = false;
+            self.state.alert_scroll = self.alert.scroll_target_bits(); self.focus(fx, ALERT_GROUP);
+            fx.invalidate(nj_machine::present::Provenance::Input);
+            return;
+        }
+        // Installing HBR downloads a kernel module and loads it as root: never without a yes.
+        if value == Value::HbrSupport(true) {
+            self.alert.open_affirming(nj_platform::i18n::msg::settings_playback_hbr_support_question_c(),
+                nj_platform::i18n::msg::settings_playback_hbr_support_body(), nj_platform::i18n::msg::settings_playback_hbr_support_confirm_c());
+            self.awaiting = Some(value);
             self.state.confirming = true; self.state.affirmative = false;
             self.state.alert_scroll = self.alert.scroll_target_bits(); self.focus(fx, ALERT_GROUP);
             fx.invalidate(nj_machine::present::Provenance::Input);
@@ -171,7 +186,7 @@ impl PickerPage {
     }
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
-            Value::Quality(_) | Value::DirectPlay(_) | Value::NextEpisode(_) | Value::SkipInterval(_) | Value::InstantDpadSeeking(_) | Value::EpisodeNavigation(_) | Value::DtsPassthrough(_) | Value::SubtitleSize(_) | Value::SubtitlePosition(_) => self.txn.save_local(&mut self.state.io, value, fx),
+            Value::Quality(_) | Value::DirectPlay(_) | Value::NextEpisode(_) | Value::SkipInterval(_) | Value::InstantDpadSeeking(_) | Value::EpisodeNavigation(_) | Value::DtsPassthrough(_) | Value::HbrSupport(_) | Value::SubtitleSize(_) | Value::SubtitlePosition(_) => self.txn.save_local(&mut self.state.io, value, fx),
             value => {
                 let mut update = PreferenceUpdate::default();
                 match (self.state.field, value) {
@@ -185,9 +200,10 @@ impl PickerPage {
             }
         }
     }
-    /// An account write is in flight: leaving now would orphan its receipt.
+    /// An account write, or an HBR install/removal, is in flight: leaving now would orphan its
+    /// receipt (and, for HBR, the reason a failure gives).
     fn writing_account(&self) -> bool {
-        self.txn.saving && matches!(self.txn.pending, Some(Pending::Account(_)))
+        self.txn.saving && matches!(self.txn.pending, Some(Pending::Account(_) | Pending::Hbr(_)))
     }
 }
 
@@ -203,8 +219,9 @@ impl Machine<InnerHost> for PickerPage {
             }
             PromptStep::Answer(yes) => {
                 self.state.confirming = false;
-                if yes {
-                    self.txn.save_local(&mut self.state.io, Value::DirectPlay(DirectPlayMode::Forced), fx);
+                let awaiting = self.awaiting.take();
+                if let (true, Some(value)) = (yes, awaiting) {
+                    self.txn.save_local(&mut self.state.io, value, fx);
                     self.rebuild(false);
                 }
                 self.focus(fx, GroupId(0));

@@ -77,8 +77,14 @@ never opens it for an app. On rooted TVs the `earc_route` kernel module of
 [dts_restore_plus](https://github.com/josippapez/dts_restore_plus) can: while a process holds its
 lease, it makes LG configure the eARC link as 8 channels at 192 kHz. Native Jelly does not ship or
 install the module; it only uses a lease node something else has put in its sandbox. Until
-dts_restore_plus offers its webOS 6 build, that something is the separate companion app in
-`companion/hbr/` (Native Jelly HBR), which installs the module, its boot hook and the node
+dts_restore_plus offers its webOS 6 build, that something is the same installer
+(`companion/hbr/nativejelly-hbr.sh`), run as root through Homebrew Channel's `exec` either by the
+companion app in `companion/hbr/` (Native Jelly HBR) or, on explicit request, by Native Jelly itself:
+with lossless audio on, on webOS 6, the Playback page shows *Atmos, TrueHD and DTS:X (root)*, and
+*Download and install* (after a confirmation) downloads the module and loader from this repository
+at a pinned commit, refuses them unless their SHA-256 values match the ones compiled in, and runs
+the installer, which checks its root-owned copies against the same values before loading anything
+(`player/hbr_support.rs`). It installs the module, its boot hook and the node
 (`/dev/earc_route`), opened only when `/sys/dev/char/<major>:<minor>/uevent` names `earc_route`,
 because its number changes per load. During a playback the app writes `2` to the node and writes
 4x larger bursts, and closes it when playback ends. Without the node nothing changes. Tested on an

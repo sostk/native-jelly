@@ -38,6 +38,7 @@ static PORT: nj_platform::tv::Port = nj_platform::tv::Port {
     frame_probe_fields: crate::system::frame_probe_fields,
     refresh_volume: nj_platform::webos::volume::refresh,
     refresh_sound_output: nj_platform::webos::sound_output::refresh,
+    root_exec: nj_platform::webos::hbr::exec,
     sink: SINK,
 };
 

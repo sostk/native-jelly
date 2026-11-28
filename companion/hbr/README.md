@@ -10,6 +10,11 @@ kernel module, which can. While Native Jelly plays a lossless track it holds the
 sound works exactly as before. Without this app, Native Jelly still sends DTS and most DTS-HD MA, and
 plays TrueHD as Dolby Digital.
 
+Native Jelly can also do this itself, on request: with *Lossless audio to receiver* on, choose
+*Settings → Video & playback → Atmos, TrueHD and DTS:X (root) → Download and install*. It downloads
+the same files from this repository at a pinned commit, checks their SHA-256 values and runs the same
+installer. Either way installs the same thing, and either can remove it.
+
 This is a stopgap. Support for webOS 6 is being proposed upstream to
 [dts_restore_plus](https://github.com/josippapez/dts_restore_plus)'s DTS Enabler app, where the module
 comes from. Once it is there, use that instead.
@@ -53,7 +58,7 @@ The app is a plain web app with no root of its own. Every action runs
 
 | Action | What it does |
 |---|---|
-| `install APPDIR` | copies the module, its loader and the script to `/var/lib/webosbrew/nativejelly-hbr`, adds `/var/lib/webosbrew/init.d/nativejelly-hbr`, then runs `boot` |
+| `install APPDIR [KO_SHA256 LOADER_SHA256]` | copies the module, its loader and the script to `/var/lib/webosbrew/nativejelly-hbr`, adds `/var/lib/webosbrew/init.d/nativejelly-hbr`, then runs `boot`; with the hashes (Native Jelly passes them), refuses unless the root-owned copies match |
 | `boot` | loads the module (the loader checks the kernel first), sets its HBR parameters, and creates `/dev/earc_route` in the sandboxes of `com.sostk.nativejelly` and `com.sostk.nativejelly.debug` |
 | `refresh` | creates the sandbox nodes again |
 | `remove` | deletes the hook, the files and the nodes, and switches the module off |

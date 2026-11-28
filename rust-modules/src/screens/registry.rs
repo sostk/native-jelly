@@ -137,6 +137,9 @@ pub(crate) enum PreferenceCmd {
     NextEpisode { mode: crate::catalog::session::NextEpisodeMode, reply: std::sync::mpsc::Sender<bool> },
     InstantDpadSeeking { value: crate::catalog::session::InstantDpadSeeking, reply: std::sync::mpsc::Sender<bool> },
     DtsPassthrough { value: crate::catalog::session::DtsPassthrough, reply: std::sync::mpsc::Sender<bool> },
+    /// Download, verify and install (`true`) or remove the HBR support on a rooted webOS 6 TV
+    /// (`player::hbr_support`). Seconds, not milliseconds; the error says why it did not finish.
+    HbrSupport { install: bool, reply: std::sync::mpsc::Sender<Result<(), crate::player::hbr_support::HbrError>> },
     EpisodeNavigation { value: crate::catalog::session::EpisodeNavigation, reply: std::sync::mpsc::Sender<bool> },
     SkipInterval { interval: crate::catalog::session::SkipInterval, reply: std::sync::mpsc::Sender<bool> },
     RootBack { choice: crate::catalog::session::RootBack, reply: std::sync::mpsc::Sender<bool> },

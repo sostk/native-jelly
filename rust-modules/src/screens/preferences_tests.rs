@@ -207,12 +207,45 @@ fn every_field_reports_the_page_whose_list_shows_it() {
     let prefs = AudioPreferences::default();
     for kind in [Kind::Playback, Kind::AudioSubtitles] {
         let inputs = FieldListInputs { kind, quality: Quality::Original, direct_play: DirectPlayMode::Auto,
-            prefs: Some(&prefs), busy: false, show_retry: false };
+            prefs: Some(&prefs), busy: false, show_retry: false, hbr_row: true };
         for &field in fields_of(&inputs) {
             assert_eq!(field.kind(), kind, "{field:?} is listed by {kind:?}");
         }
     }
     let audio = FieldListInputs { kind: Kind::AudioSubtitles, quality: Quality::Original, direct_play: DirectPlayMode::Auto,
-        prefs: Some(&prefs), busy: false, show_retry: false };
+        prefs: Some(&prefs), busy: false, show_retry: false, hbr_row: true };
     assert_eq!(fields_of(&audio), &[PickerKind::AudioLanguage, PickerKind::SubtitleMode, PickerKind::SubtitleLanguage, PickerKind::DefaultAudioTrack]);
+}
+
+/// The HBR row is offered only while lossless audio is on, on the firmware its module is built for
+/// (`hbr_row`); without it the Playback list is exactly what it was.
+#[test]
+fn the_hbr_row_shows_only_when_offered() {
+    let playback = |hbr_row| FieldListInputs { kind: Kind::Playback, quality: Quality::Original, direct_play: DirectPlayMode::Auto,
+        prefs: None, busy: false, show_retry: false, hbr_row };
+    assert_eq!(fields_of(&playback(true)).last(), Some(&PickerKind::HbrSupport));
+    assert!(!fields_of(&playback(false)).contains(&PickerKind::HbrSupport));
+    assert_eq!(fields_of(&playback(true)).len(), fields_of(&playback(false)).len() + 1);
+}
+
+/// Not installed: the checked option is *Not installed*, and installing is a separate, explicit
+/// choice. Installed: *Installed* is checked and *Remove* is the other choice.
+#[test]
+fn hbr_options_put_the_current_state_first() {
+    use nj_platform::i18n::msg;
+    let off = hbr_options(false);
+    assert_eq!(off, vec![(msg::settings_playback_hbr_support_not_installed().to_string(), Value::HbrSupport(false)),
+                         (msg::settings_playback_hbr_support_install().to_string(), Value::HbrSupport(true))]);
+    let on = hbr_options(true);
+    assert_eq!(on, vec![(msg::settings_playback_hbr_support_installed().to_string(), Value::HbrSupport(true)),
+                        (msg::settings_playback_hbr_support_remove().to_string(), Value::HbrSupport(false))]);
+}
+
+#[test]
+fn an_hbr_failure_says_why() {
+    use crate::player::hbr_support::HbrError;
+    use nj_platform::i18n::msg;
+    assert_eq!(hbr_failure(&HbrError::NoRoot), msg::settings_playback_hbr_support_no_root());
+    assert_eq!(hbr_failure(&HbrError::Download), msg::settings_playback_hbr_support_download_failed());
+    assert!(hbr_failure(&HbrError::Refused("kernel 5.4".into())).contains("kernel 5.4"));
 }

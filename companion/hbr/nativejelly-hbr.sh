@@ -1,8 +1,11 @@
 #!/bin/sh
 # nativejelly-hbr.sh: HBR audio support for Native Jelly on a rooted LG TV (earc_route/).
 #
-#   install APPDIR   copy the module, its loader and this script to /var/lib/webosbrew/nativejelly-hbr,
-#                    hook this script into Homebrew Channel's boot scripts, then run `boot`
+#   install APPDIR [KO_SHA256 LOADER_SHA256]
+#                    copy the module, its loader and this script to /var/lib/webosbrew/nativejelly-hbr,
+#                    hook this script into Homebrew Channel's boot scripts, then run `boot`. With the
+#                    two hashes (Native Jelly's download passes them), the root-owned copies must match
+#                    them, or nothing is installed
 #   boot             load the module (dts_restore_plus's loader checks the kernel first), set its
 #                    HBR parameters, and put its lease node in each Native Jelly sandbox
 #   refresh          put the lease node in each Native Jelly sandbox again (after installing or
@@ -35,6 +38,12 @@ install)
     [ -f "$2/hbr/earc_route-4.4.ko" ] || { echo "hbr: REFUSED: no module in $2/hbr"; exit 1; }
     mkdir -p "$D" /var/lib/webosbrew/init.d || exit 1
     cp "$2/hbr/earc_route-4.4.ko" "$2/hbr/earc-route-load.sh" "$2/hbr/nativejelly-hbr.sh" "$D/" || exit 1
+    if [ -n "$3" ]; then
+        if [ "$(sha256sum "$D/earc_route-4.4.ko" | cut -d' ' -f1)" != "$3" ] ||
+           [ "$(sha256sum "$D/earc-route-load.sh" | cut -d' ' -f1)" != "$4" ]; then
+            rm -rf "$D"; echo "hbr: REFUSED: the downloaded module does not match its checksum"; exit 1
+        fi
+    fi
     printf '#!/bin/sh\nexec sh %s/nativejelly-hbr.sh boot\n' "$D" > "$HOOK" && chmod 755 "$HOOK" || exit 1
     exec sh "$D/nativejelly-hbr.sh" boot
     ;;
@@ -76,6 +85,6 @@ status)
     done
     ;;
 *)
-    echo "usage: $0 install APPDIR | boot | refresh | remove | status"; exit 2
+    echo "usage: $0 install APPDIR [KO_SHA256 LOADER_SHA256] | boot | refresh | remove | status"; exit 2
     ;;
 esac
