@@ -1,4 +1,4 @@
 {
-  "settings.playback.dts_passthrough": "Paso directo de DTS",
-  "settings.playback.dts_passthrough.copy": "Envía las pistas DTS sin cambios a un receptor AV o barra de sonido conectados por HDMI ARC/eARC u óptico, que las decodifica. DTS-HD MA y DTS:X se reproducen con su núcleo DTS 5.1. Solo se usa mientras el sonido del televisor sale por esa conexión; ajusta la Salida de sonido digital en Paso directo."
+  "settings.playback.dts_passthrough": "Audio sin pérdidas al receptor",
+  "settings.playback.dts_passthrough.copy": "Envía las pistas DTS sin cambios a un receptor AV o barra de sonido, que las decodifica. Por HDMI ARC/eARC, DTS-HD MA viaja dentro del paso directo Dolby Digital Plus del televisor; si no, y por óptico, DTS se reproduce con su núcleo 5.1. Solo se usa mientras el sonido del televisor sale por esa conexión; ajusta la Salida de sonido digital en Paso directo."
 }

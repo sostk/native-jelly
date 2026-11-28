@@ -65,6 +65,17 @@ if grep -q "$SMP_LOAD_CTX" <<<"$RELOCS"; then
 fi
 ok "exact hook exported GLOBAL/DEFAULT; Load-with-context has no loader dependency"
 
+echo "== ES-renderer ioctl hook =="
+# src/es_swap.c defines ioctl so libkadaptor's ES-renderer writes reach player/es_carrier.rs. Like the
+# Starfish hook, an executable-private definition cannot preempt the library's PLT slot: the link
+# must export it (Makefile: --export-dynamic-symbol=ioctl), or lossless audio silently never engages.
+IOCTL_ROWS=$(awk '$NF == "ioctl" && $7 != "UND" { print }' <<<"$DYN_SYMS")
+[ "$(wc -l <<<"$IOCTL_ROWS" | tr -d ' ')" -eq 1 ] && [ -n "$IOCTL_ROWS" ] \
+  || fail "ioctl hook is not defined exactly once in .dynsym"
+awk '$4 == "FUNC" && $5 == "GLOBAL" && $6 == "DEFAULT" { ok=1 } END { exit !ok }' <<<"$IOCTL_ROWS" \
+  || fail "ioctl hook is not a GLOBAL/DEFAULT .dynsym function"
+ok "ioctl hook exported GLOBAL/DEFAULT"
+
 echo "== crash-report identity =="
 # Two facts a Sentry crash report is built out of, and BOTH fail silently when wrong: a frame comes
 # back `symbolicatorStatus: "missing_symbol"` with no error attached, which is indistinguishable

@@ -42,7 +42,8 @@ def defaults():
     return {key: {"output": value} for key, value in {
         "readelf:-h": "Class: ELF32\nMachine: ARM\nFlags: soft-float\nType: EXEC\n",
         "readelf:-A": "Tag_CPU_arch: v7\n",
-        "readelf:--dyn-syms": f"1: 00000000 16 FUNC GLOBAL DEFAULT 1 {HOOK}\n",
+        "readelf:--dyn-syms": f"1: 00000000 16 FUNC GLOBAL DEFAULT 1 {HOOK}\n"
+                              "2: 00000010 64 FUNC GLOBAL DEFAULT 1 ioctl\n",
         "readelf:-rW": "No relocations\n",
         "readelf:-l": "  LOAD 0x000000 0x00010000 0x00010000\n",
         "readelf:-n": "Build ID: " + "a" * 40 + "\n",
@@ -171,6 +172,17 @@ class ElfGateTests(unittest.TestCase):
         spec = defaults()
         spec["strings"]["output"] += "9.11.12.13\n11.11.12.13\n172.15.255.255\n172.32.0.1\n192.167.0.1\n192.169.0.1\n"
         self.assert_pass(spec)
+
+    def test_the_es_renderer_ioctl_hook_must_be_exported_and_defined(self):
+        for rows, why in [(f"1: 00000000 16 FUNC GLOBAL DEFAULT 1 {HOOK}\n", "missing"),
+                          (f"1: 00000000 16 FUNC GLOBAL DEFAULT 1 {HOOK}\n2: 00000000 0 FUNC GLOBAL DEFAULT UND ioctl\n",
+                           "only imported")]:
+            with self.subTest(why):
+                spec = defaults()
+                spec["readelf:--dyn-syms"]["output"] = rows
+                result = self.run_gate(spec)
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("ioctl hook", result.stdout)
 
     def test_early_forbidden_relocation_with_large_tail(self):
         spec = defaults()

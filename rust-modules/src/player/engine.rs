@@ -1126,24 +1126,23 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     with_iec_pcm_info(&with_immersive(&p, audio, crate::route::stream_immersive(ps)), audio)
 }
 
-/// Does this attempt hand its DTS to a receiver as IEC 61937 bursts ([`with_iec_pcm_info`])? The
-/// owner's setting, captured in the attempt's caps, and the TV's sound output read at play start:
-/// the bursts are noise to anything but a DTS decoder, so TV speakers, headphones and Bluetooth
-/// keep the ordinary DTS declaration. Logged once per start, with the reason when it is not used.
-fn dts_iec_ready(caps: &nj_platform::devcaps::Caps) -> bool {
+/// Is the sound going to a receiver for this start, so `what` (DTS or TrueHD) may go out as a
+/// bitstream? Only with the owner's setting in the attempt's caps, and on a fresh reading of the
+/// TV's sound output rather than the one the attempt's caps saw: the owner may have moved the sound
+/// to the set's speakers since, and there the bursts are full-scale noise. One bus round trip; an
+/// output that does not answer in time is unknown, which keeps the ordinary declaration. Logged
+/// once per start, with the output the decision read.
+fn receiver_ready(caps: &nj_platform::devcaps::Caps, what: &str) -> bool {
     if !caps.dts_passthrough {
         return false;
     }
-    // A fresh reading for this start, not the one the attempt's caps saw: the owner may have
-    // moved the sound to the set's speakers since, and there the bursts are full-scale noise. One
-    // bus round trip; an output that does not answer in time is unknown, which keeps DTS declared.
     let asked = nj_platform::devcaps::sound_output::seq();
     nj_platform::devcaps::sound_output::refresh();
     let output = nj_platform::devcaps::sound_output::fresh_since(asked, std::time::Duration::from_millis(1200));
     let ready = output.is_receiver();
     log(&format!(
-        "start_bufferfeed: DTS passthrough {} (sound output {})",
-        if ready { "on: core as IEC 61937 bursts in S16LE stereo PCM" } else { "off" },
+        "start_bufferfeed: {what} to a receiver {} (sound output {})",
+        if ready { "on" } else { "off" },
         output.label()
     ));
     ready
@@ -1701,11 +1700,19 @@ fn start_bufferfeed_inner(
                 SHARED.demux_failed.store(true, Ordering::Release);
                 return Err(crate::route::RouteStartResult::StartFailed);
             };
+            let caps = crate::route::attempt_caps(ps);
             if converted {
                 log(&format!("start_bufferfeed: {codec} audio is converted to AC3 on the television"));
             }
-            dts_iec = ac == "DTS" && dts_iec_ready(&crate::route::attempt_caps(ps));
-            let ac = if dts_iec { "PCM" } else { ac };
+            dts_iec = ac == "DTS" && receiver_ready(&caps, "DTS");
+            // Lossless audio: DTS-HD over the DD+ carrier (es_carrier) replaces the PCM core carrier;
+            // `pump` falls back to the core if LG's DD+ route turns out not to be in pass-through.
+            let carrier = dts_iec && crate::player::es_carrier::available();
+            crate::player::es_carrier::set_on(carrier);
+            if carrier {
+                log("start_bufferfeed: DTS-HD over the DD+ pass-through carrier (192 kHz)");
+            }
+            let ac = if carrier { "AC3 PLUS" } else if dts_iec { "PCM" } else { ac };
             SHARED.dg_load_a.store(diagnostic, Ordering::Relaxed);
             audio_declared = ac;
             // The sink envelope — `adaptiveStreaming`'s maxWidth/maxHeight/maxFrameRate — used
@@ -2286,6 +2293,9 @@ pub(crate) fn suspend_bufferfeed_if_attempt(
 /// stop: preserve the playback session so start_bufferfeed can restart the SAME item — skip
 /// the "stopped" timeline scrobble, the server transcode stop, and the URL clear.
 fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, for_reload: bool) {
+    // Lossless audio: stop swapping LG's ES writes as soon as playback ends, so the ioctl hook is a
+    // plain forward again (a reload re-arms it in start_bufferfeed).
+    crate::player::es_carrier::set_on(false);
     // A start still queued behind the previous object's `Unload` is the playback this stop ends.
     // Always sent: the machine owns whether anything is queued (a no-op otherwise), and no copy of
     // that fact in the session can go stale across a landing that replaced the session.
@@ -6032,7 +6042,7 @@ mod sink_envelope_tests {
             assert!(!build_av_payload(&ps, "H264", audio, ENVELOPE_FHD60).contains("pcmInfo"), "{audio}");
         }
         let off = nj_platform::devcaps::Caps::assumed();
-        assert!(!dts_iec_ready(&off), "never without the setting in the attempt's caps");
+        assert!(!receiver_ready(&off, "DTS"), "never without the setting in the attempt's caps");
     }
 
     #[test]

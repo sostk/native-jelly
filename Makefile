@@ -892,6 +892,9 @@ pkg/nativejelly-storage: LICENSE $(STORAGE_INPUTS) rust-modules/Cargo.toml rust-
 # this to -E/--export-dynamic: no other executable-private symbol is part of the native ABI.
 SMP_CALLBACK_HOOK = _ZN17StarfishMediaAPIs20callbackFunctionHookEixPKc
 SMP_INTERPOSER_LDFLAG = -Wl,--export-dynamic-symbol=$(SMP_CALLBACK_HOOK)
+# src/es_swap.c exports ioctl so libkadaptor's ES-renderer writes reach
+# rust-modules/src/player/es_carrier.rs (lossless audio to a receiver).
+SMP_INTERPOSER_LDFLAG += -Wl,--export-dynamic-symbol=ioctl
 # --gc-sections: this link is gcc's, not rustc's. rustc passes --gc-sections itself when IT links an
 # executable (which is why pkg/nativejelly-storage above never needed the flag), but here the Rust
 # code arrives as a finished staticlib, so without the flag every section of every archive member

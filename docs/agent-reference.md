@@ -1474,7 +1474,7 @@ sharing — so it is the only tier a stranger can run, and it is what separates 
 broken" from "the library layer is broken" when a server case fails. **What it covers, precisely:**
 the player feeds `{h264,hevc}` (plus `av1` / `vp9` on a set whose codec table lists that decoder's row) × `{aac,ac3,eac3,dts}` in mkv/webm/mp4/m4v. Auto intersects this
 software set with the device table and per-codec channel ceilings; DTS requires a measured
-DTS row and feeds only the DTS core when an HD extension is present. With **DTS passthrough** on and a receiver as the sound output, that core goes out as IEC 61937 bursts declared `PCM` (`docs/playback-settings.md`). The implemented Load
+DTS row and feeds only the DTS core when an HD extension is present. With **Lossless audio to receiver** on and a receiver as the sound output, DTS and TrueHD go out unconverted: inside LG's own Dolby Digital Plus pass-through (`player/es_carrier.rs`, an exported `ioctl` in `src/es_swap.c` swaps LG's IEC 61937 bursts), on webOS 6, else the DTS core as IEC 61937 bursts declared `PCM` (`docs/playback-settings.md`). The implemented Load
 strings are `H264`/`H265`/`AV1`/`VP9` (AV1 and VP9 only on a set whose table lists that decoder; elsewhere the Load is refused) and `AC3`/`AC3 PLUS`/`AAC`/`DTS`, plus a staged `OPUS` declaration (normal mono/stereo, wider layouts only through an explicit debug fixture); these are not the firmware's whole
 vocabulary. Firmware restrictions are implemented; Opus remains excluded from Auto/Force routing and Jellyfin profiles; the per-play capability
 snapshot, refusal records and audio-conversion recovery are in place, and enabling waits on

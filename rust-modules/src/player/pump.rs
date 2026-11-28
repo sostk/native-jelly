@@ -1069,6 +1069,15 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
         SHARED.load_failed.store(true, Release);
         return;
     }
+    if crate::player::es_carrier::silent_route(SHARED.frames.load(Relaxed)) {
+        // LG played our silent E-AC-3 itself: its DD+ route is not in pass-through on this output.
+        super::log("es_carrier: no ES write after the first pictures; reloading without the DD+ carrier");
+        settle_reload(
+            super::engine::reload_at(ps, pa, SHARED.playpos_ns.load(Relaxed).max(0)),
+            "reload without the DD+ carrier",
+        );
+        return;
+    }
     // wait for the media-thread ctor
     if unsafe { super::sink().ready(mt) } == 0 {
         // Same `!eng.preview_abandon` reasoning as the loadCompleted arms below: an abandoned
