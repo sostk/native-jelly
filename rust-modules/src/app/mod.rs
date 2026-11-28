@@ -126,6 +126,7 @@ pub(crate) mod input;
 pub(crate) mod bridge;
 pub(crate) mod chrome;
 pub(crate) mod content;
+pub(crate) mod deep_link;
 pub(crate) mod run;
 use self::boot::*;
 use self::events::*;
@@ -155,6 +156,7 @@ extern "C" {
     fn SDL_PollEvent(event: *mut c_void) -> c_int;
     fn SDL_PushEvent(event: *const c_void) -> c_int;
     fn SDL_GL_SwapWindow(win: *mut c_void);
+    fn SDL_RaiseWindow(win: *mut c_void);
     fn SDL_Quit();
     // The system on-screen keyboard. A PLAIN link, not `dynlib!`, and the rule in `dynlib.rs` is
     // why: that module is for libraries whose SONAME moves, and this is stock public SDL2 API —
@@ -287,6 +289,8 @@ pub(crate) struct App {
     /// already finished by then). See `input::menu_play_tick`, driven every frame beside
     /// `pump_detail()` (`app/run.rs`).
     pub(crate) menu_play_await: Option<MenuPlayAwait>,
+    /// The item a launcher asked to open (`deep_link`), until Home is up to open it.
+    pub(crate) deep_link: Option<deep_link::Pending>,
     pub(crate) prev: u32,
     pub(crate) refresh_hubs_at: u32,
     /// Noticing a library change on the server (`stores::library_poll`), stepped every frame.

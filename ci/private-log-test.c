@@ -10,6 +10,9 @@ int nj_run(const char *host, int port) { (void)host; (void)port; return 0; }
 int nj_sentry_spool_external(const char *path) { (void)path; return 0; }
 void nj_crash_write_image_marker(int fd) { (void)fd; }
 void nj_crash_install(int event_fd, int crash_fd) { (void)event_fd; (void)crash_fd; }
+void nj_launch_params(const char *params) { (void)params; }
+int nj_lifecycle(const char *payload) { (void)payload; return 0; }
+int SDL_PushEvent(void *event) { (void)event; return 0; }
 int plx_runtime_path(const char *name, char *out, size_t cap) {
     return snprintf(out, cap, "/tmp/%s", name) > 0;
 }

@@ -17,6 +17,9 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>   /* fchmod — the log sinks are created 0600, see open_log_0600 */
+#include <dlfcn.h>
+#include <pthread.h>
+#include <stdbool.h>
 
 FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by the
                        * crash handler here and by the starfish.c seam. Opened "w" each
@@ -27,7 +30,60 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
 
 extern int nj_run(const char *pms_host, int pms_port);  /* Rust app core (no creds — session or /tmp/nativejelly-token) */
 extern int nj_sentry_spool_external(const char *path); /* Sentry daemon's spool-only re-entry */
+extern void nj_launch_params(const char *params);      /* webOS launch params (argv[1]) -> deep link */
 extern void nj_crash_write_image_marker(int fd); /* identify this binary in the append-only log */
+extern int nj_lifecycle(const char *payload);    /* SAM lifecycle message -> 2 on close */
+extern int SDL_PushEvent(void *event);
+
+/* `HContext` from the NDK's webos-helpers/libhelpers.h. */
+typedef struct {
+    bool (*callback)(void *sh, void *reply, void *ctx);
+    void *userdata;
+    void *unknown;
+    int multiple;
+    int pub;
+    unsigned long ret_token;
+} HContext;
+static const char *(*h_message)(void *msg);
+
+static void *force_exit(void *arg) {
+    (void)arg;
+    sleep(1);
+    _exit(0);
+}
+
+/* What LG's SDL does on `close`: post SDL_QUIT and exit a second later regardless. */
+static bool on_lifecycle(void *sh, void *msg, void *ctx) {
+    (void)sh; (void)ctx;
+    const char *payload = h_message(msg);
+    if (payload && nj_lifecycle(payload) == 2) {
+        union { unsigned type; char pad[64]; } quit = { .type = 0x100 };
+        SDL_PushEvent(&quit);
+        pthread_t t;
+        if (pthread_create(&t, NULL, force_exit, NULL) == 0) pthread_detach(t);
+    }
+    return true;
+}
+
+/* LG's SDL subscribes to SAM's registerApp itself, but on `relaunch` it only raises the window
+ * and drops the `parameters`, so a launcher link sent to the running app was lost. Subscribe
+ * through the same libhelpers SDL uses, with SDL's payload, and tell SDL to skip its own; if
+ * anything here fails SDL registers as before. */
+static void register_lifecycle(void) {
+    static HContext ctx = { .callback = on_lifecycle, .multiple = 1 };
+    void *h = dlopen("libhelpers.so.2", RTLD_NOW);
+    if (!h) return;
+    int (*call)(const char *, const char *, HContext *) =
+        (int (*)(const char *, const char *, HContext *))dlsym(h, "HLunaServiceCall");
+    h_message = (const char *(*)(void *))dlsym(h, "HLunaServiceMessage");
+    const char *id = getenv("APPID");
+    if (!call || !h_message || !id || strspn(id, "abcdefghijklmnopqrstuvwxyz0123456789.-_") != strlen(id))
+        return;
+    char payload[256];
+    snprintf(payload, sizeof payload, "{\"id\" : \"%s\"}", id);
+    if (call("luna://com.webos.applicationManager/registerApp", payload, &ctx) == 0)
+        setenv("SDL_HINT_WEBOS_REGISTER_APP", "1", 1);
+}
 
 /* Where this INSTALL's runtime files live — `/tmp/nativejelly-events.log` for the app users get,
  * `/tmp/com.sostk.nativejelly.debug/nativejelly-events.log` for a developer build installed beside it.
@@ -111,6 +167,7 @@ int main(int argc, char **argv) {
      * ordinary app log, starting SDL, or arming another handler. A lookalike argument returns 0 and
      * proceeds as a normal launch; Rust validates the exact SDK directory, UUID and file type. */
     if (argc == 2 && nj_sentry_spool_external(argv[1])) return 0;
+    if (argc == 2) nj_launch_params(argv[1]); /* ignores anything that is not a deep link */
     elogf = open_event_log();
     /* The crash handler's own descriptors, both opened BEFORE `install_crash_tracer` arms the
      * handler — so a signal can never reach code that has to open something first, which is the
@@ -139,5 +196,6 @@ int main(int argc, char **argv) {
     nj_crash_install(event_fd, crash_fd);
     /* request BACK key delivery from the webOS access policy (before SDL init) */
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
+    register_lifecycle();
     return nj_run(PMS_HOST, PMS_PORT);
 }

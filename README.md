@@ -70,6 +70,7 @@ The player provides a TV-focused playback experience with playback controls and 
 * Audio track selection
 * Subtitle selection
 * Resume playback
+* Open an item, as a chosen user, from a launcher ([deep link](docs/deep-link.md))
 * Remote-friendly navigation
 * Designed for LG webOS televisions
 * Native video playback where supported by the television

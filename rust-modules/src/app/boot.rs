@@ -1441,6 +1441,7 @@ pub(crate) unsafe fn construct(
         last_route_reported,
         ptr,
         menu_play_await: None,
+        deep_link: super::deep_link::take_launch(),
         prev,
         refresh_hubs_at,
         library_poll: Default::default(),
